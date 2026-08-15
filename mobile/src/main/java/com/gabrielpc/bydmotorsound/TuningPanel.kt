@@ -287,6 +287,8 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 points = engine.frontWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
                 yLabel = { "${newtonMetersToKgfm(it * engine.frontPeakWheelTorqueNm).roundToInt()} kgfm" },
+                xAxisTitle = "ROAD SPEED (km/h)",
+                yAxisTitle = "WHEEL TORQUE (kgfm)",
                 currentX = currentSpeed,
                 accent = TuneAmber,
                 lockEndpointX = true,
@@ -299,6 +301,8 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 points = engine.rearWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
                 yLabel = { "${newtonMetersToKgfm(it * engine.rearPeakWheelTorqueNm).roundToInt()} kgfm" },
+                xAxisTitle = "ROAD SPEED (km/h)",
+                yAxisTitle = "WHEEL TORQUE (kgfm)",
                 currentX = currentSpeed,
                 accent = TuneRed,
                 lockEndpointX = true,
@@ -321,6 +325,8 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 points = engine.throttleCurve,
                 xLabel = { "${(it * 100).roundToInt()}%" },
                 yLabel = { "${(it * 100).roundToInt()}%" },
+                xAxisTitle = "PEDAL INPUT (%)",
+                yAxisTitle = "TORQUE REQUEST (%)",
                 currentX = state.throttle,
                 accent = TuneGreen,
                 lockEndpointX = true,
@@ -481,6 +487,8 @@ private fun EditableCurveGraph(
     points: List<CurvePoint>,
     xLabel: (Double) -> String,
     yLabel: (Double) -> String,
+    xAxisTitle: String,
+    yAxisTitle: String,
     currentX: Double,
     accent: Color,
     lockEndpointX: Boolean,
@@ -495,8 +503,8 @@ private fun EditableCurveGraph(
     // the neighboring panel or beyond the display edge.
     val graphPaddingLeft = 124f
     val graphPaddingRight = 28f
-    val graphPaddingTop = 32f
-    val graphPaddingBottom = 54f
+    val graphPaddingTop = 40f
+    val graphPaddingBottom = 72f
 
     Canvas(
         modifier = modifier.pointerInput(Unit) {
@@ -574,19 +582,24 @@ private fun EditableCurveGraph(
         drawIntoCanvas { canvas ->
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = android.graphics.Color.rgb(140, 167, 181)
-                textSize = 22f
+                textSize = 19f
                 textAlign = Paint.Align.CENTER
                 typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
             }
+            paint.textAlign = Paint.Align.LEFT
+            canvas.nativeCanvas.drawText(yAxisTitle, left, 21f, paint)
+            paint.textAlign = Paint.Align.CENTER
             repeat(5) { index ->
                 val fraction = index / 4.0
-                canvas.nativeCanvas.drawText(xLabel(fraction), left + width * fraction.toFloat(), bottom + 35f, paint)
+                canvas.nativeCanvas.drawText(xLabel(fraction), left + width * fraction.toFloat(), bottom + 30f, paint)
             }
             paint.textAlign = Paint.Align.RIGHT
             repeat(4) { index ->
                 val fraction = index / 3.0 * 1.15
                 canvas.nativeCanvas.drawText(yLabel(fraction), left - 10f, bottom - height * (fraction / 1.15).toFloat() + 7f, paint)
             }
+            paint.textAlign = Paint.Align.CENTER
+            canvas.nativeCanvas.drawText(xAxisTitle, left + width / 2f, bottom + 58f, paint)
         }
     }
 }
@@ -594,10 +607,10 @@ private fun EditableCurveGraph(
 @Composable
 private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val left = 54f
-        val right = size.width - 24f
-        val top = 30f
-        val bottom = size.height - 50f
+        val left = 88f
+        val right = size.width - 80f
+        val top = 48f
+        val bottom = size.height - 82f
         val width = right - left
         val height = bottom - top
         repeat(6) { index ->
@@ -646,21 +659,45 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
         drawLine(TuneWhite.copy(alpha = 0.45f), Offset(left + width * liveX, top), Offset(left + width * liveX, bottom), 2f)
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
+            paint.textSize = 16f
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(53, 232, 242)
-            canvas.nativeCanvas.drawText(
-                "WHEEL TORQUE  ${newtonMetersToKgfm(peakWheelTorque).roundToInt()} kgfm",
-                left,
-                bottom + 34f,
-                paint,
-            )
+            canvas.nativeCanvas.drawText("WHEEL TORQUE (kgfm)", left, 20f, paint)
+            paint.textAlign = Paint.Align.RIGHT
             paint.color = android.graphics.Color.rgb(255, 196, 86)
-            canvas.nativeCanvas.drawText(
-                "POWER  ${kilowattsToHorsepower(maxPowerKw).roundToInt()} HP",
-                left + width * 0.50f,
-                bottom + 34f,
-                paint,
-            )
+            canvas.nativeCanvas.drawText("POWER (HP)", right, 20f, paint)
+            repeat(5) { index ->
+                val fraction = index / 4f
+                val y = bottom - height * fraction
+                paint.textAlign = Paint.Align.RIGHT
+                paint.color = android.graphics.Color.rgb(53, 232, 242)
+                canvas.nativeCanvas.drawText(
+                    newtonMetersToKgfm(peakWheelTorque * 1.15 * fraction).roundToInt().toString(),
+                    left - 10f,
+                    y + 6f,
+                    paint,
+                )
+                paint.textAlign = Paint.Align.LEFT
+                paint.color = android.graphics.Color.rgb(255, 196, 86)
+                canvas.nativeCanvas.drawText(
+                    kilowattsToHorsepower(maxPowerKw * 1.10 * fraction).roundToInt().toString(),
+                    right + 10f,
+                    y + 6f,
+                    paint,
+                )
+            }
+            paint.textAlign = Paint.Align.CENTER
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            repeat(6) { index ->
+                val fraction = index / 5f
+                canvas.nativeCanvas.drawText(
+                    (engine.topSpeedKmh * fraction).roundToInt().toString(),
+                    left + width * fraction,
+                    bottom + 27f,
+                    paint,
+                )
+            }
+            canvas.nativeCanvas.drawText("ROAD SPEED (km/h)", left + width / 2f, bottom + 55f, paint)
         }
     }
 }
@@ -672,10 +709,10 @@ private fun totalWheelTorque(engine: EngineTuning, normalizedSpeed: Double): Dou
 @Composable
 private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Double, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val left = 58f
+        val left = 68f
         val right = size.width - 24f
-        val top = 32f
-        val bottom = size.height - 58f
+        val top = 48f
+        val bottom = size.height - 82f
         val width = right - left
         val height = bottom - top
         repeat(6) { index ->
@@ -715,11 +752,36 @@ private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Doubl
         val liveRearShare = liveRear / (liveFront + liveRear).coerceAtLeast(1.0)
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
+            paint.textSize = 16f
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            canvas.nativeCanvas.drawText("TORQUE SHARE (%)", left, 20f, paint)
+            repeat(5) { index ->
+                val fraction = index / 4f
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.nativeCanvas.drawText(
+                    "${(fraction * 100).roundToInt()}%",
+                    left - 10f,
+                    bottom - height * fraction + 6f,
+                    paint,
+                )
+            }
+            paint.textAlign = Paint.Align.CENTER
+            repeat(6) { index ->
+                val fraction = index / 5f
+                canvas.nativeCanvas.drawText(
+                    (engine.topSpeedKmh * fraction).roundToInt().toString(),
+                    left + width * fraction,
+                    bottom + 27f,
+                    paint,
+                )
+            }
+            canvas.nativeCanvas.drawText("ROAD SPEED (km/h)", left + width / 2f, bottom + 55f, paint)
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(255, 196, 86)
-            canvas.nativeCanvas.drawText("FRONT  ${((1.0 - liveRearShare) * 100).roundToInt()}%", left, bottom + 36f, paint)
+            canvas.nativeCanvas.drawText("FRONT  ${((1.0 - liveRearShare) * 100).roundToInt()}%", left, top + 20f, paint)
             paint.color = android.graphics.Color.rgb(255, 70, 92)
-            canvas.nativeCanvas.drawText("REAR  ${(liveRearShare * 100).roundToInt()}%", left + width * 0.56f, bottom + 36f, paint)
+            canvas.nativeCanvas.drawText("REAR  ${(liveRearShare * 100).roundToInt()}%", left + width * 0.62f, top + 20f, paint)
         }
     }
 }
@@ -727,10 +789,10 @@ private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Doubl
 @Composable
 private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val left = 58f
+        val left = 72f
         val right = size.width - 25f
-        val top = 38f
-        val bottom = size.height - 58f
+        val top = 48f
+        val bottom = size.height - 86f
         val width = right - left
         val height = bottom - top
         val count = engine.gearRatios.lastIndex.coerceAtLeast(1)
@@ -761,6 +823,29 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
         }
         val downshiftY = bottom - height * (engine.downshiftRpm / engine.maxRpm).toFloat()
         drawLine(TuneAmber, Offset(left, downshiftY), Offset(right, downshiftY), 2f, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 8f)))
+        drawIntoCanvas { canvas ->
+            val paint = graphPaint()
+            paint.textSize = 16f
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            canvas.nativeCanvas.drawText("LANDING RPM", left, 20f, paint)
+            repeat(5) { index ->
+                val fraction = index / 4f
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.nativeCanvas.drawText(
+                    (engine.maxRpm * fraction).roundToInt().toString(),
+                    left - 10f,
+                    bottom - height * fraction + 6f,
+                    paint,
+                )
+            }
+            paint.textAlign = Paint.Align.RIGHT
+            paint.color = android.graphics.Color.rgb(255, 196, 86)
+            canvas.nativeCanvas.drawText("DOWNSHIFT ${engine.downshiftRpm.roundToInt()} RPM", right, downshiftY - 8f, paint)
+            paint.textAlign = Paint.Align.CENTER
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            canvas.nativeCanvas.drawText("SHIFT EVENT", left + width / 2f, bottom + 62f, paint)
+        }
     }
 }
 
@@ -768,10 +853,10 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier) {
     val values = listOf(1.0, audio.harmonic2, audio.harmonic3, audio.harmonic4, audio.harmonic5)
     Canvas(modifier) {
-        val left = 50f
+        val left = 62f
         val right = size.width - 30f
-        val top = 38f
-        val bottom = size.height - 62f
+        val top = 48f
+        val bottom = size.height - 86f
         val width = right - left
         val height = bottom - top
         repeat(4) { index ->
@@ -798,16 +883,35 @@ private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier
                 canvas.nativeCanvas.drawText("${(value * 100).roundToInt()}%", x, y - 12f, paint)
             }
         }
+        drawIntoCanvas { canvas ->
+            val paint = graphPaint()
+            paint.textSize = 16f
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            canvas.nativeCanvas.drawText("GAIN (%)", left, 20f, paint)
+            repeat(4) { index ->
+                val fraction = index / 3f
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.nativeCanvas.drawText(
+                    "${(fraction * 150).roundToInt()}%",
+                    left - 10f,
+                    bottom - height * fraction + 6f,
+                    paint,
+                )
+            }
+            paint.textAlign = Paint.Align.CENTER
+            canvas.nativeCanvas.drawText("HARMONIC", left + width / 2f, bottom + 62f, paint)
+        }
     }
 }
 
 @Composable
 private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val left = 32f
+        val left = 62f
         val right = size.width - 18f
-        val top = 18f
-        val bottom = size.height - 28f
+        val top = 48f
+        val bottom = size.height - 68f
         val width = right - left
         val height = bottom - top
         repeat(5) { index ->
@@ -843,6 +947,45 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
         drawPath(responsePath(engine.throttleReleaseMs), TuneCyan, style = Stroke(3f))
         drawPath(responsePath(engine.brakeResponseMs), TuneRed, style = Stroke(3f))
         drawPath(liftOffRpmPath(), TuneAmber, style = Stroke(3f))
+        drawIntoCanvas { canvas ->
+            val paint = graphPaint()
+            paint.textSize = 14f
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            canvas.nativeCanvas.drawText("RESPONSE / RPM RETENTION (%)", left, 16f, paint)
+            val legend = listOf(
+                "ATTACK" to android.graphics.Color.rgb(54, 227, 145),
+                "RELEASE" to android.graphics.Color.rgb(53, 232, 242),
+                "BRAKE" to android.graphics.Color.rgb(255, 70, 92),
+                "LIFT" to android.graphics.Color.rgb(255, 196, 86),
+            )
+            legend.forEachIndexed { index, (label, color) ->
+                paint.color = color
+                canvas.nativeCanvas.drawText(label, left + index * (width / 4f), 36f, paint)
+            }
+            repeat(3) { index ->
+                val fraction = index / 2f
+                paint.textAlign = Paint.Align.RIGHT
+                paint.color = android.graphics.Color.rgb(140, 167, 181)
+                canvas.nativeCanvas.drawText(
+                    "${(fraction * 100).roundToInt()}%",
+                    left - 10f,
+                    bottom - height * fraction + 5f,
+                    paint,
+                )
+            }
+            paint.textAlign = Paint.Align.CENTER
+            repeat(5) { index ->
+                val fraction = index / 4f
+                canvas.nativeCanvas.drawText(
+                    "${(fraction * 1_000).roundToInt()} ms",
+                    left + width * fraction,
+                    bottom + 24f,
+                    paint,
+                )
+            }
+            canvas.nativeCanvas.drawText("TIME AFTER PEDAL CHANGE", left + width / 2f, bottom + 48f, paint)
+        }
     }
 }
 

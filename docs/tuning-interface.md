@@ -12,7 +12,7 @@ The interface presents torque in kgfm and power in HP. Every visible readout use
 - Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
 - Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
 - Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
-- Live combined wheel-torque/power graph with a road-speed cursor
+- Live combined wheel-torque/power graph with a road-speed cursor, road-speed X axis, and separately labelled kgfm/HP Y axes
 
 The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and presentation-shift logic all use the same live synthetic configuration. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is computed from the electric settings and is independent of the synthetic gears.
 
@@ -22,14 +22,14 @@ The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, an
 - Twelve-point rear wheel-torque curve digitized from the A2MAC1 trace
 - Derived front/rear distribution graph, rising from approximately 56% to 71% rear by default
 
-Curve points are edited directly by dragging them. Their horizontal order is constrained and every edit passes through the same sanitizer used when a saved profile is loaded. Both axle graphs use normalized road speed horizontally and wheel torque vertically. The configured motor-power/efficiency ceiling remains active as a sanity bound.
+Curve points are edited directly by dragging them. Their horizontal order is constrained and every edit passes through the same sanitizer used when a saved profile is loaded. Both axle graphs label road speed in km/h horizontally and wheel torque in kgfm vertically; the distribution graph labels both road speed and front/rear share percentage. The configured motor-power/efficiency ceiling remains active as a sanity bound.
 
 ### Response
 
 - Six-point Sport-like pedal-to-requested-motor-torque curve
 - Throttle attack/release and brake response time constants
 - Lift-off RPM retention and decay response
-- Live response preview for all pedal filters and the lift-off RPM fall
+- Live response preview for all pedal filters and the lift-off RPM fall, with time in milliseconds, response/retention percentage, and a colored curve legend
 
 Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is informed by the full-request torque rise visible in A2MAC1's acceleration chart, but the pedal map itself remains an approximation because BYD does not publish it.
 
@@ -38,7 +38,7 @@ Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is
 - Synthetic final-drive ratio
 - Upshift/downshift duration and post-shift dwell
 - Every ratio in the seven-speed presentation gearbox
-- Computed shift-landing graph; every landing RPM is also that higher gear's automatic downshift point
+- Computed shift-landing graph with shift-event X axis, landing-RPM Y axis, and labelled downshift threshold; every landing RPM is also that higher gear's automatic downshift point
 
 Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change. These controls affect sound RPM and shift events only; a ratio edit cannot change electric acceleration.
 
@@ -47,7 +47,7 @@ Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates 
 - Master gain
 - Exhaust, intake, mechanical, overrun, and shift-impact layers
 - Second through fifth firing-order harmonics
-- Live spectral contribution graph
+- Live spectral contribution graph with harmonic X axis and gain-percentage Y axis
 
 Values are smoothed inside the real-time renderer, so dragging a slider does not introduce an abrupt block-level volume discontinuity.
 
