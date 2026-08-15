@@ -205,7 +205,7 @@ The following command passes:
 Tests verify that:
 
 - sustained throttle increases RPM progressively rather than jumping directly to a pedal-derived target;
-- a full-throttle first-gear launch does not lose RPM while the clutch progressively couples the engine and wheels;
+- a first-gear launch does not lose RPM while the clutch progressively couples the engine and wheels at any positive throttle input;
 - automatic shifts begin near the shift point, drop RPM, and honor completed-gear dwell;
 - joining live speed selects a safe ratio, and projected over-rev forces a throttle-independent emergency upshift;
 - virtual/live acceleration has the correct sign and bounds, including zero acceleration when braking at rest;

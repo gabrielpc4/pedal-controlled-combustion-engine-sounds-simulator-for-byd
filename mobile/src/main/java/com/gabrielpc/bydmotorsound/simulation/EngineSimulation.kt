@@ -207,7 +207,7 @@ class EngineSimulation(
             frictionTorque - pumpingTorque
         val rawClutchTorque = CLUTCH_STIFFNESS * (engineOmega - gearboxOmega)
         val managingLaunchSlip = externalMps == null && currentGearIndex == 0 && shift == null &&
-            filteredThrottle > 0.05 && engineRpm > gearboxRpm + LAUNCH_SLIP_MARGIN_RPM
+            requestedThrottle > 0.0 && engineRpm > gearboxRpm + LAUNCH_SLIP_MARGIN_RPM
         val positiveClutchCapacity = if (managingLaunchSlip) {
             val minimumRiseRpmPerSecond = LAUNCH_MIN_RISE_RPM_PER_SECOND +
                 LAUNCH_THROTTLE_RISE_RPM_PER_SECOND * filteredThrottle

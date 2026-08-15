@@ -44,20 +44,6 @@ The Android audio diagnostics confirmed:
 
 The host audio backend is now enabled and the Android track is actively routed. Android diagnostics cannot prove the Windows speaker volume or perceived sound quality, but the previous `-no-audio` limitation is removed.
 
-Final accelerated build evidence:
-
-- APK size `13,258,042` bytes and SHA-256 `D62B4994C565AE77ECFEF5BE7FFFDA1ECA6C1FCD0B6AB020CAAD0FD21366C6C2`;
-- 27 unit tests, debug assembly, and Android lint passed with zero failures or lint issues;
-- the dashboard displays a 0-10 tachometer with its 8,600 RPM red zone;
-- the separately modeled fuel cutoff is 8,850 RPM and the performance upshift point is 8,250 RPM;
-- the torque curve peaks at 6,500 RPM and uses nine absolute-RPM points;
-- the live-tuning menu exposes tachometer maximum, redline, and fuel cutoff as separate persisted controls;
-- the installed app reported a 1920 x 990 viewport, logical stereo at 48 kHz, and zero underruns at idle;
-- a sustained 95% touchscreen launch remained in first gear and climbed smoothly through 2,730 RPM without the previous clutch-engagement reversal;
-- no application fatal exception or ANR was logged.
-
-The accelerated emulator was left open with the application running for interactive testing.
-
 ## Historical pre-reboot limitation
 
 The host is an AMD Ryzen 7 5800X3D system, but hardware virtualization/SVM was disabled in firmware. The current x86_64 Android Emulator therefore could not obtain WHPX/hardware acceleration. Enabling SVM in BIOS/UEFI is the correct long-term fix; it was not changed automatically because that requires a host reboot and firmware interaction.

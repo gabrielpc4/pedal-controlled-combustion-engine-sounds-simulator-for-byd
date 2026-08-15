@@ -34,24 +34,27 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun fullThrottleLaunchDoesNotBogAsClutchEngages() {
-        val simulation = EngineSimulation()
-        var peakRpm = simulation.state.rpm
-        var largestDrop = 0.0
-        var state = simulation.state
+    fun launchDoesNotBogAtAnyPositiveThrottle() {
+        listOf(0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1.0).forEach { throttle ->
+            val simulation = EngineSimulation()
+            var peakRpm = simulation.state.rpm
+            var largestDrop = 0.0
+            var state = simulation.state
 
-        repeat((3.0 / STEP).toInt()) {
-            state = simulation.update(DriverInput(throttle = 1.0), STEP)
-            if (state.gear == 1 && !state.isShifting) {
-                peakRpm = maxOf(peakRpm, state.rpm)
-                largestDrop = maxOf(largestDrop, peakRpm - state.rpm)
+            repeat((3.0 / STEP).toInt()) {
+                state = simulation.update(DriverInput(throttle = throttle), STEP)
+                if (state.gear == 1 && !state.isShifting) {
+                    peakRpm = maxOf(peakRpm, state.rpm)
+                    largestDrop = maxOf(largestDrop, peakRpm - state.rpm)
+                }
             }
-        }
 
-        assertTrue(
-            "first-gear full-throttle launch lost $largestDrop RPM after reaching $peakRpm: $state",
-            largestDrop < 30.0,
-        )
+            assertTrue(
+                "first-gear launch at ${(throttle * 100).toInt()}% throttle lost " +
+                    "$largestDrop RPM after reaching $peakRpm: $state",
+                largestDrop < 30.0,
+            )
+        }
     }
 
     @Test
