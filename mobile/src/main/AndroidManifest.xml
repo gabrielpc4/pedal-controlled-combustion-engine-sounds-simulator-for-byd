@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.BYDAUTO_SPEED_GET" />
 
     <application
+        android:name=".BydMotorSoundApplication"
         android:allowBackup="false"
         android:appCategory="audio"
         android:dataExtractionRules="@xml/data_extraction_rules"

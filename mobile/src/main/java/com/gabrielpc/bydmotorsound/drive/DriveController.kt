@@ -7,10 +7,12 @@ import com.gabrielpc.bydmotorsound.audio.AudioChannelMode
 import com.gabrielpc.bydmotorsound.audio.AudioOutputState
 import com.gabrielpc.bydmotorsound.audio.EngineAudioEngine
 import com.gabrielpc.bydmotorsound.audio.EngineAudioFrame
+import com.gabrielpc.bydmotorsound.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.bydmotorsound.simulation.DriverInput
 import com.gabrielpc.bydmotorsound.simulation.DrivetrainState
 import com.gabrielpc.bydmotorsound.simulation.EngineProfile
 import com.gabrielpc.bydmotorsound.simulation.EngineSimulation
+import com.gabrielpc.bydmotorsound.simulation.ShiftDirection
 import com.gabrielpc.bydmotorsound.telemetry.BydSpeedReader
 import com.gabrielpc.bydmotorsound.telemetry.ReaderState
 import com.gabrielpc.bydmotorsound.telemetry.TelemetrySnapshot
@@ -20,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
+import kotlin.math.roundToInt
 
 enum class InputMode(val displayName: String) {
     AUTO("AUTO"),
@@ -54,6 +57,10 @@ class DriveController(context: Context) {
     private val manualInput = AtomicReference(ManualInput())
     private val selectedInputMode = AtomicReference(InputMode.AUTO)
     private val soundEnabled = AtomicBoolean(true)
+    private var lastLoggedShiftSerial = simulation.state.shiftSerial
+    private var lastShiftWasActive = false
+    private var lastInputSignature = ""
+    private var nextHeartbeatAtElapsedMs = 0L
 
     @Volatile
     private var loopThread: Thread? = null
@@ -71,6 +78,14 @@ class DriveController(context: Context) {
         tuning = appliedTuning,
     )
 
+    init {
+        PersistentDiagnosticLog.event(
+            "drive_controller_created",
+            "profile=${profile.name} redline_rpm=${profile.redlineRpm.roundToInt()} " +
+                "upshift_rpm=${profile.upshiftRpm.roundToInt()} gears=${profile.gearRatios.size}",
+        )
+    }
+
     fun snapshot(): DriveSnapshot = latest.copy(audio = audioEngine.state())
 
     fun start() {
@@ -82,6 +97,10 @@ class DriveController(context: Context) {
                 if (!joinLoop(previous)) return
             }
 
+            // Start each visible/controller session with a fresh source line and heartbeat.
+            lastInputSignature = ""
+            lastShiftWasActive = false
+            nextHeartbeatAtElapsedMs = 0L
             val runId = generation.incrementAndGet()
             running.set(true)
             val thread = Thread({ runLoop(runId) }, "drivetrain-simulation").apply { isDaemon = true }
@@ -90,12 +109,17 @@ class DriveController(context: Context) {
                 vehicleReader.start()
                 if (soundEnabled.get()) audioEngine.start()
                 thread.start()
+                PersistentDiagnosticLog.event(
+                    "drive_controller_started",
+                    "mode=${selectedInputMode.get().name} sound_enabled=${soundEnabled.get()}",
+                )
             } catch (throwable: Throwable) {
                 running.set(false)
                 generation.incrementAndGet()
                 loopThread = null
                 vehicleReader.stop()
                 audioEngine.stop()
+                PersistentDiagnosticLog.recordThrowable("drive_controller_start_failed", throwable)
                 throw throwable
             }
         }
@@ -103,6 +127,7 @@ class DriveController(context: Context) {
 
     fun stop() {
         synchronized(lifecycleLock) {
+            PersistentDiagnosticLog.event("drive_controller_stopping")
             running.set(false)
             generation.incrementAndGet()
             val thread = loopThread
@@ -111,6 +136,7 @@ class DriveController(context: Context) {
             vehicleReader.stop()
             audioEngine.stop()
             manualInput.set(ManualInput())
+            PersistentDiagnosticLog.event("drive_controller_stopped")
         }
     }
 
@@ -123,7 +149,10 @@ class DriveController(context: Context) {
     }
 
     fun setInputMode(mode: InputMode) {
-        selectedInputMode.set(mode)
+        val previous = selectedInputMode.getAndSet(mode)
+        if (previous != mode) {
+            PersistentDiagnosticLog.event("input_mode_changed", "from=${previous.name} to=${mode.name}")
+        }
     }
 
     fun setTuning(config: TuningConfig) {
@@ -134,12 +163,13 @@ class DriveController(context: Context) {
 
     fun resetTuning() {
         tuningConfig.set(tuningRepository.reset())
+        PersistentDiagnosticLog.event("tuning_reset")
     }
 
     fun cycleInputMode() {
         val modes = InputMode.entries
         val current = selectedInputMode.get()
-        selectedInputMode.set(modes[(current.ordinal + 1) % modes.size])
+        setInputMode(modes[(current.ordinal + 1) % modes.size])
     }
 
     fun toggleSound() {
@@ -147,6 +177,7 @@ class DriveController(context: Context) {
             val enable = !soundEnabled.get()
             soundEnabled.set(enable)
             if (enable && running.get()) audioEngine.start() else audioEngine.stop()
+            PersistentDiagnosticLog.event("sound_toggled", "enabled=$enable")
         }
     }
 
@@ -159,27 +190,37 @@ class DriveController(context: Context) {
             AudioChannelMode.STEREO,
         )
         val current = audioEngine.state().requestedMode
-        audioEngine.setChannelMode(order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size])
+        val selected = order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size]
+        audioEngine.setChannelMode(selected)
+        PersistentDiagnosticLog.event("audio_channel_mode_changed", "from=${current.name} to=${selected.name}")
     }
 
     private fun runLoop(runId: Long) {
-        Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
-        var previousNanos = SystemClock.elapsedRealtimeNanos()
-        var accumulatorSeconds = 0.0
+        try {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
+            PersistentDiagnosticLog.event("drive_loop_started", "generation=$runId")
+            var previousNanos = SystemClock.elapsedRealtimeNanos()
+            var accumulatorSeconds = 0.0
 
-        while (isCurrent(runId)) {
-            val nowNanos = SystemClock.elapsedRealtimeNanos()
-            val elapsedSeconds = ((nowNanos - previousNanos) / 1_000_000_000.0).coerceIn(0.0, 0.050)
-            previousNanos = nowNanos
-            accumulatorSeconds += elapsedSeconds
+            while (isCurrent(runId)) {
+                val nowNanos = SystemClock.elapsedRealtimeNanos()
+                val elapsedSeconds = ((nowNanos - previousNanos) / 1_000_000_000.0).coerceIn(0.0, 0.050)
+                previousNanos = nowNanos
+                accumulatorSeconds += elapsedSeconds
 
-            while (accumulatorSeconds >= FIXED_STEP_SECONDS && isCurrent(runId)) {
-                step(FIXED_STEP_SECONDS)
-                accumulatorSeconds -= FIXED_STEP_SECONDS
+                while (accumulatorSeconds >= FIXED_STEP_SECONDS && isCurrent(runId)) {
+                    step(FIXED_STEP_SECONDS)
+                    accumulatorSeconds -= FIXED_STEP_SECONDS
+                }
+
+                val remaining = FIXED_STEP_NANOS - (SystemClock.elapsedRealtimeNanos() - nowNanos)
+                if (remaining > 0L) LockSupport.parkNanos(remaining)
             }
-
-            val remaining = FIXED_STEP_NANOS - (SystemClock.elapsedRealtimeNanos() - nowNanos)
-            if (remaining > 0L) LockSupport.parkNanos(remaining)
+        } catch (throwable: Throwable) {
+            PersistentDiagnosticLog.recordThrowable("drive_loop_failed", throwable, "generation=$runId")
+            throw throwable
+        } finally {
+            PersistentDiagnosticLog.event("drive_loop_stopped", "generation=$runId")
         }
     }
 
@@ -215,6 +256,7 @@ class DriveController(context: Context) {
             ),
             dt,
         )
+        recordDriveDiagnostics(drivetrain, input, mode, telemetry)
         val enabled = soundEnabled.get()
         audioEngine.update(
             EngineAudioFrame(
@@ -243,12 +285,73 @@ class DriveController(context: Context) {
         )
     }
 
+    /**
+     * Persists only state transitions plus a one-second heartbeat. The logger fsyncs entries, so
+     * keeping this out of the 200 Hz hot path prevents diagnostic I/O from affecting audio or
+     * simulation timing.
+     */
+    private fun recordDriveDiagnostics(
+        drivetrain: DrivetrainState,
+        input: ResolvedDriveInput,
+        mode: InputMode,
+        telemetry: TelemetrySnapshot,
+    ) {
+        val inputSignature = "${mode.name}|${input.label}|${telemetry.readerState.name}|" +
+            "accelerator_valid=${telemetry.accelerator.isValid}|brake_valid=${telemetry.brake.isValid}|" +
+            "speed_valid=${telemetry.speed.isValid}"
+        if (inputSignature != lastInputSignature) {
+            lastInputSignature = inputSignature
+            PersistentDiagnosticLog.event("input_source_changed", inputSignature)
+        }
+
+        if (drivetrain.shiftSerial != lastLoggedShiftSerial) {
+            val targetGear = when (drivetrain.shiftDirection) {
+                ShiftDirection.UP -> drivetrain.gear + 1
+                ShiftDirection.DOWN -> drivetrain.gear - 1
+                ShiftDirection.NONE -> drivetrain.gear
+            }
+            PersistentDiagnosticLog.event(
+                "shift_started",
+                "serial=${drivetrain.shiftSerial} direction=${drivetrain.shiftDirection.name} " +
+                    "from_gear=${drivetrain.gear} target_gear=$targetGear " +
+                    "rpm=${drivetrain.rpm.roundToInt()} speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
+                    "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
+                    "brake_pct=${(input.brake * 100.0).roundToInt()} source=${input.label}",
+            )
+            lastLoggedShiftSerial = drivetrain.shiftSerial
+        }
+
+        if (lastShiftWasActive && !drivetrain.isShifting) {
+            PersistentDiagnosticLog.event(
+                "shift_completed",
+                "serial=${drivetrain.shiftSerial} gear=${drivetrain.gear} " +
+                    "rpm=${drivetrain.rpm.roundToInt()} speed_kmh=${drivetrain.speedKmh.roundToInt()}",
+            )
+        }
+        lastShiftWasActive = drivetrain.isShifting
+
+        val nowElapsedMs = SystemClock.elapsedRealtime()
+        if (nowElapsedMs >= nextHeartbeatAtElapsedMs) {
+            nextHeartbeatAtElapsedMs = nowElapsedMs + DIAGNOSTIC_HEARTBEAT_INTERVAL_MS
+            PersistentDiagnosticLog.event(
+                "drive_heartbeat",
+                "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
+                    "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
+                    "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
+                    "brake_pct=${(input.brake * 100.0).roundToInt()} " +
+                    "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
+                    "source=${input.label} reader=${telemetry.readerState.name}",
+            )
+        }
+    }
+
     private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
     private companion object {
         const val FIXED_STEP_SECONDS = 1.0 / 200.0
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
+        const val DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 1_000L
     }
 }
 

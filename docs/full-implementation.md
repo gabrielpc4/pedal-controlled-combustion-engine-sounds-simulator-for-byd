@@ -29,6 +29,8 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
 | `telemetry/BydSpeedReader.kt` | Existing read-only reflective DiLink capability probe and getter polling |
+| `diagnostics/PersistentDiagnosticLog.kt` | Bounded, synced app-private transition/crash event trail |
+| `BydMotorSoundApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
 | `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
 | `audio/EngineSynthesizerTest.kt` | PCM signal/RMS behavior and exact channel mirroring tests |
 
@@ -111,9 +113,9 @@ Braking therefore slows the real or virtual vehicle first. Pedal lift also unloa
 
 ### Synthetic automatic shifts
 
-Upshifts begin above the configured sound shift point with meaningful throttle and a higher presentation gear available. A projected synthetic over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, protecting live mode after a large road-speed change. Every higher gear derives its downshift point from the exact RPM landing of the preceding upshift; the editable global value is retained only as a minimum floor. Synthetic-RPM and road-speed projections reject an over-rev before any downshift.
+Upshifts begin above the configured sound shift point with meaningful throttle and a higher presentation gear available. A projected synthetic over-rev near 97% of redline forces a safe sequential upshift, including the first externally supplied live-speed sample or an unsafe live-speed change. Every higher gear derives its downshift point from the exact RPM landing of the preceding upshift; the editable global value is retained only as a minimum floor. Synthetic-RPM and road-speed projections reject an over-rev before any downshift.
 
-The ratio changes at 38% of the configured shift animation. An upshift lasts 270 ms and a downshift 340 ms by default; a 450 ms completed-shift dwell prevents ordinary hunting. An explicit zero-pedal return to the gear's landing threshold can downshift immediately, matching the requested behavior. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event.
+The ratio changes at 38% of the configured shift animation. An upshift lasts 270 ms and a downshift 340 ms by default; a 450 ms completed-shift dwell prevents ordinary hunting. An explicit zero-pedal return to the gear's landing threshold can downshift immediately, matching the requested behavior. During a closed-throttle live-speed downshift, a scoped emergency-upshift hold remains until the road projection is 150 RPM below the trigger; that prevents an immediate reversal caused by the intentionally lower lift-off display RPM, while throttle demand or a new unsafe live-speed join resumes the safety check. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event.
 
 ## Procedural sound model
 

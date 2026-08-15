@@ -286,6 +286,96 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun liftOffDownshiftFromThirdDoesNotHuntBackToThird() {
+        val simulation = EngineSimulation()
+        var previous = simulation.state
+        var reachedThird = false
+        var elapsed = 0.0
+        while (elapsed < 20.0 && !reachedThird) {
+            val state = simulation.update(DriverInput(throttle = 1.0), STEP)
+            if (previous.isShifting && !state.isShifting && state.gear == 3) {
+                reachedThird = true
+            }
+            previous = state
+            elapsed += STEP
+        }
+        assertTrue("full-throttle run did not reach third gear", reachedThird)
+
+        var downshiftToSecond = false
+        var upshiftStartsAfterLift = 0
+        var gearChangesAfterLift = 0
+        var lastGear = simulation.state.gear
+        var lastShiftSerial = simulation.state.shiftSerial
+        elapsed = 0.0
+        while (elapsed < 6.0) {
+            val state = simulation.update(DriverInput(), STEP)
+            if (state.shiftSerial != lastShiftSerial) {
+                if (state.shiftDirection == ShiftDirection.UP) upshiftStartsAfterLift += 1
+                lastShiftSerial = state.shiftSerial
+            }
+            if (state.gear != lastGear) {
+                gearChangesAfterLift += 1
+                if (lastGear == 3 && state.gear == 2) downshiftToSecond = true
+                lastGear = state.gear
+            }
+            elapsed += STEP
+        }
+
+        assertTrue("lift-off run did not produce the expected 3->2 downshift", downshiftToSecond)
+        assertEquals(
+            "a lift-off downshift must not be immediately undone by an upshift",
+            0,
+            upshiftStartsAfterLift,
+        )
+        assertEquals("third/second hunting caused unexpected repeated shifts", 1, gearChangesAfterLift)
+        assertEquals(2, simulation.state.gear)
+    }
+
+    @Test
+    fun liftOffDownshiftWithLiveSpeedDoesNotUndoItUntilDriveIsRequested() {
+        val profile = EngineProfile.APEX_V10.copy(
+            redlineRpm = 2_800.0,
+            limiterRpm = 3_000.0,
+            upshiftRpm = 2_600.0,
+            downshiftRpm = 1_100.0,
+            gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 0.10),
+        )
+        val simulation = EngineSimulation(profile)
+        val joined = simulation.update(DriverInput(externalSpeedKmh = 30.0), STEP)
+        assertEquals("calibrated live-speed setup should join in third", 3, joined.gear)
+        simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 30.0), STEP)
+
+        var downshiftToSecond = false
+        var upshiftStartsWhileLifted = 0
+        var lastGear = simulation.state.gear
+        var lastShiftSerial = simulation.state.shiftSerial
+        repeat((2.0 / STEP).toInt()) {
+            val state = simulation.update(DriverInput(externalSpeedKmh = 35.0), STEP)
+            if (state.shiftSerial != lastShiftSerial) {
+                if (state.shiftDirection == ShiftDirection.UP) upshiftStartsWhileLifted += 1
+                lastShiftSerial = state.shiftSerial
+            }
+            if (lastGear == 3 && state.gear == 2) downshiftToSecond = true
+            lastGear = state.gear
+        }
+
+        assertTrue("live lift-off run did not produce the expected 3->2 downshift", downshiftToSecond)
+        assertEquals("live lift-off downshift immediately hunted upward", 0, upshiftStartsWhileLifted)
+        assertEquals(2, simulation.state.gear)
+
+        var upshiftAfterThrottle = false
+        lastShiftSerial = simulation.state.shiftSerial
+        repeat((1.0 / STEP).toInt()) {
+            val state = simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 35.0), STEP)
+            if (state.shiftSerial != lastShiftSerial) {
+                if (state.shiftDirection == ShiftDirection.UP) upshiftAfterThrottle = true
+                lastShiftSerial = state.shiftSerial
+            }
+        }
+        assertTrue("live road-speed safety did not resume after throttle application", upshiftAfterThrottle)
+    }
+
+    @Test
     fun liftOffRpmFallsQuicklyEvenWhenRoadSpeedIsHeldConstant() {
         val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
