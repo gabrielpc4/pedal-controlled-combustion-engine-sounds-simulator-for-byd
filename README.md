@@ -1,4 +1,4 @@
-# BYD Motor Sound
+# Pedal-Controlled Combustion Engine Sounds Simulator for BYD
 
 An experimental Android engine-sound dashboard for a BYD Seal running DiLink firmware `13.1.33.2503250.1` (`2503`). It keeps the vehicle integration read-only and combines live pedal/speed telemetry with a simulator fallback. This is a bench and controlled-test prototype, not a road-certified vehicle feature.
 
