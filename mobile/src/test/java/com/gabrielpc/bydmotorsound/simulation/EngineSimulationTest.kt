@@ -9,7 +9,7 @@ import org.junit.Test
 
 class EngineSimulationTest {
     @Test
-    fun apexV10UsesOriginalTenThousandRpmGaugeCalibration() {
+    fun apexV10DefaultCalibrationIsInternallyOrdered() {
         val profile = EngineProfile.APEX_V10
 
         assertEquals(8_600.0, profile.redlineRpm, 0.0)

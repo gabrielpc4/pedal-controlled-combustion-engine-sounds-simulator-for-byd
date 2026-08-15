@@ -113,7 +113,7 @@ Braking does not subtract a cosmetic amount from RPM. It slows the virtual wheel
 
 ### Automatic shifts
 
-Upshifts begin above 8,250 RPM with meaningful throttle and a higher gear available. The torque curve peaks at 6,500 RPM and tapers toward the original 8,600 RPM redline and 8,850 RPM fuel cutoff. Independently, a projected over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, which protects live mode when it receives a large road-speed change. A 1-gear downshift is permitted for low RPM, braking, or kickdown only when the projected lower-gear RPM remains below 94% of redline.
+Upshifts begin above 8,250 RPM with meaningful throttle and a higher gear available. The torque curve peaks at 6,500 RPM and tapers toward the 8,600 RPM redline and 8,850 RPM fuel cutoff. Independently, a projected over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, which protects live mode when it receives a large road-speed change. A 1-gear downshift is permitted for low RPM, braking, or kickdown only when the projected lower-gear RPM remains below 94% of redline.
 
 The implemented shift phases overlap smoothly:
 

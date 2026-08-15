@@ -8,7 +8,6 @@ data class CurvePoint(val x: Double, val y: Double)
 
 data class EngineTuning(
     val idleRpm: Double = 950.0,
-    /** Tachometer scale; the original dashboard is a 0-10,000 RPM gauge. */
     val maxRpm: Double = 10_000.0,
     val redlineRpm: Double = 8_600.0,
     val limiterRpm: Double = 8_850.0,
@@ -209,8 +208,7 @@ class TuningRepository(context: Context) {
         preferences.getString(key, null)?.toDoubleOrNull() ?: fallback
 
     private companion object {
-        // v2 stores the independently configurable tachometer, redline and limiter values.
-        const val PREFERENCES_NAME = "engine_tuning_v2"
+        const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"

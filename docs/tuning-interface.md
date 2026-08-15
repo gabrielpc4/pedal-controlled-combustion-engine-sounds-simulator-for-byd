@@ -1,6 +1,6 @@
 # Live tuning interface
 
-The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the original 10,000 RPM-tach Apex V10 baseline (8,600 RPM redline, 8,850 RPM fuel cutoff); **CLOSE** returns to driving without discarding edits.
+The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the Apex V10 defaults; **CLOSE** returns to driving without discarding edits.
 
 ## Editable controls
 
@@ -10,7 +10,7 @@ The dashboard's **TUNE** button opens a full-screen workstation designed for the
 - Peak torque, engine rotational inertia, vehicle mass, and wheel radius
 - Live torque/power graph with a current-RPM cursor
 
-The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and shift logic all use the same live configuration. Tachometer maximum, redline, and limiter remain separate values, matching the original profile.
+The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and shift logic all use the same live configuration. Tachometer maximum, redline, and limiter remain separate values.
 
 ### Curves
 
@@ -47,4 +47,4 @@ The controls affect the virtual drivetrain used by the emulator and the synthesi
 
 ## Emulator validation
 
-The interface was installed and exercised on the accelerated 1920 x 1080 emulator with a 1920 x 990 application viewport. All four panels fit without clipping. Curve dragging was tested, the process was force-stopped and relaunched, and the edited curve reloaded from persistent storage. The profile was reset to the original 10,000 RPM-tach calibration afterward, and the emulator was left running the app.
+The interface was installed and exercised on the accelerated 1920 x 1080 emulator with a 1920 x 990 application viewport. All four panels fit without clipping. Curve dragging was tested, the process was force-stopped and relaunched, and the edited curve reloaded from persistent storage. The profile was reset to its defaults afterward, and the emulator was left running the app.
