@@ -10,7 +10,7 @@
          consumers through MediaBrowserService and MediaSession. Consumers connect to it through
          MediaBrowser (for browsing) and MediaController (for playback control) -->
         <service
-            android:name="com.gabrielpc.bydmotorsound.shared.MyMusicService"
+            android:name="com.gabrielpc.enginesoundsimulator.shared.MyMusicService"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />

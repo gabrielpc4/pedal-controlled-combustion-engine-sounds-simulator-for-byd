@@ -30,7 +30,7 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
 | `telemetry/BydSpeedReader.kt` | Existing read-only reflective DiLink capability probe and getter polling |
 | `diagnostics/PersistentDiagnosticLog.kt` | Bounded, synced app-private transition/crash event trail |
-| `BydMotorSoundApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
+| `EngineSoundsSimulatorApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
 | `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
 | `audio/EngineSynthesizerTest.kt` | PCM signal/RMS behavior and exact channel mirroring tests |
 

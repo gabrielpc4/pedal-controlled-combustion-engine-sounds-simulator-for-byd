@@ -60,7 +60,7 @@ Sideload the debug APK on the BYD tablet or a matching emulator. On Android vers
 
 ```powershell
 adb install -r mobile\build\outputs\apk\debug\mobile-debug.apk
-adb shell am start -n com.gabrielpc.bydmotorsound/.MainActivity
+adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
 ```
 
 Use only while parked or in a controlled environment. Synthetic engine audio can mask turn signals, ADAS alerts, navigation, and other safety cues.

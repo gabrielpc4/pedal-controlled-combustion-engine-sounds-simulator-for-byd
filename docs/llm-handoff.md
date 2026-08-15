@@ -64,14 +64,14 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 
 | Area | Key files | Responsibility |
 | --- | --- | --- |
-| UI | `mobile/src/main/java/com/gabrielpc/bydmotorsound/MainActivity.kt`, `TuningPanel.kt` | Compose dashboard, pedals, target viewport, tuning UI |
+| UI | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt`, `TuningPanel.kt` | Compose dashboard, pedals, target viewport, tuning UI |
 | Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, simulation/audio coordination, transition/heartbeat logging |
 | Simulation | `simulation/EngineSimulation.kt` | EV road force, synthetic RPM/gears, shifts, live-speed handling |
 | Audio | `audio/EngineAudioEngine.kt`, `EngineSynthesizer.kt` | AudioTrack lifecycle, focus, routing diagnostics, PCM synthesis/mirroring |
 | Telemetry | `telemetry/BydSpeedReader.kt` | reflective BYD capability probe and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
 | UI display | `VehicleDisplayUnits.kt`, `TuningPanel.kt` | cosmetic kgfm/HP conversions and graph annotation; does not alter physics |
-| Diagnostics | `BydMotorSoundApplication.kt`, `diagnostics/PersistentDiagnosticLog.kt` | process/lifecycle/crash and bounded persistent event storage |
+| Diagnostics | `EngineSoundsSimulatorApplication.kt`, `diagnostics/PersistentDiagnosticLog.kt` | process/lifecycle/crash and bounded persistent event storage |
 
 The manifest deliberately targets SDK 25 for the DiLink compatibility experiment while compiling
 against SDK 37. It requests only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`.
@@ -97,7 +97,7 @@ asserts that the persistent log contains no upward shift after the lift marker.
 The app writes low-rate, fsynced events to:
 
 ```text
-/data/user/0/com.gabrielpc.bydmotorsound/files/diagnostics/drive-events.log
+/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log
 ```
 
 It rotates to `drive-events.previous.log` at 256 KiB (about 512 KiB retained total). It logs
@@ -109,12 +109,12 @@ For a debug APK:
 
 ```powershell
 $adb = 'D:\Users\sgabr\AppData\Local\Android\Sdk\platform-tools\adb.exe'
-& $adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log
-& $adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log |
+& $adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log
+& $adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log |
     Select-String 'shift_started|shift_completed|drive_heartbeat'
 ```
 
-The log remains readable after `adb shell am force-stop com.gabrielpc.bydmotorsound`. See
+The log remains readable after `adb shell am force-stop com.gabrielpc.enginesoundsimulator`. See
 [persistent-diagnostics.md](persistent-diagnostics.md) for details and privacy restrictions.
 
 ## Build, install, run, and test
@@ -131,8 +131,8 @@ Set-Location $project
 
 & $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\mobile-debug.apk
 & $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\androidTest\debug\mobile-debug-androidTest.apk
-& $adb shell am instrument -w -r com.gabrielpc.bydmotorsound.test/androidx.test.runner.AndroidJUnitRunner
-& $adb shell am start -n com.gabrielpc.bydmotorsound/.MainActivity
+& $adb shell am instrument -w -r com.gabrielpc.enginesoundsimulator.test/androidx.test.runner.AndroidJUnitRunner
+& $adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
 ```
 
 The connected emulator has been `emulator-5554`, using AVD `BYD_Seal_1920x1080` (Android 16/API 36,

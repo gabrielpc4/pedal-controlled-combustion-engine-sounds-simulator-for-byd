@@ -207,9 +207,9 @@ Default `peakPowerKw = 390`, `drivetrainEfficiency = 0.92`. This bounds the **ph
 | --- | --- |
 | GitHub repository | `pedal-controlled-combustion-engine-sounds-simulator-for-byd` |
 | Launcher / display name | **Engine Sounds Simulator** |
-| `applicationId` | unchanged (`com.gabrielpc.bydmotorsound`) |
+| `applicationId` / Java package | `com.gabrielpc.enginesoundsimulator` |
 
-Renaming the package id would break installed upgrades and diagnostics paths; only user-visible strings and remote repo name changed.
+The package id was renamed from `com.gabrielpc.bydmotorsound` to match the product name. **Installing over the old APK is not an upgrade path** — uninstall the previous build or sideload fresh. Diagnostics and `run-as` paths use the new id.
 
 ---
 
@@ -227,13 +227,13 @@ Renaming the package id would break installed upgrades and diagnostics paths; on
 
 | Concern | File |
 | --- | --- |
-| Display conversions and peak wheel-power scan | `mobile/src/main/java/com/gabrielpc/bydmotorsound/VehicleDisplayUnits.kt` |
-| Graph drawing, landmarks, markers | `mobile/src/main/java/com/gabrielpc/bydmotorsound/TuningPanel.kt` |
-| Physical EV integration | `mobile/src/main/java/com/gabrielpc/bydmotorsound/simulation/EngineSimulation.kt` |
-| SIM coast regen flag | `mobile/src/main/java/com/gabrielpc/bydmotorsound/drive/DriveController.kt` |
-| Persisted defaults and sanitization | `mobile/src/main/java/com/gabrielpc/bydmotorsound/tuning/TuningConfig.kt` |
-| Conversion regressions | `mobile/src/test/java/com/gabrielpc/bydmotorsound/DisplayUnitsTest.kt` |
-| Drivetrain regressions | `mobile/src/test/java/com/gabrielpc/bydmotorsound/simulation/EngineSimulationTest.kt` |
+| Display conversions and peak wheel-power scan | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/VehicleDisplayUnits.kt` |
+| Graph drawing, landmarks, markers | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/TuningPanel.kt` |
+| Physical EV integration | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/simulation/EngineSimulation.kt` |
+| SIM coast regen flag | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/drive/DriveController.kt` |
+| Persisted defaults and sanitization | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/tuning/TuningConfig.kt` |
+| Conversion regressions | `mobile/src/test/java/com/gabrielpc/enginesoundsimulator/DisplayUnitsTest.kt` |
+| Drivetrain regressions | `mobile/src/test/java/com/gabrielpc/enginesoundsimulator/simulation/EngineSimulationTest.kt` |
 
 ---
 

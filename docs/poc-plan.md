@@ -284,10 +284,10 @@ adb shell getprop ro.build.display.id
 adb shell getprop ro.product.model
 adb shell pm list features
 adb shell dumpsys package android | Select-String -Pattern "BYDAUTO_SPEED_GET" -Context 2,5
-adb shell dumpsys package com.gabrielpc.bydmotorsound | Select-String -Pattern "BYDAUTO_SPEED_GET" -Context 2,5
+adb shell dumpsys package com.gabrielpc.enginesoundsimulator | Select-String -Pattern "BYDAUTO_SPEED_GET" -Context 2,5
 adb shell service list | Select-String -Pattern "byd|auto|car"
 adb logcat -c
-adb logcat | Select-String -Pattern "BYDMotorSound|BYDAuto|DiCar|SecurityException"
+adb logcat | Select-String -Pattern "EngineSoundsSimulator|BYDAuto|DiCar|SecurityException"
 ```
 
 Some production head units may not expose ADB. If unavailable, make the same diagnostics visible/copyable inside the application.

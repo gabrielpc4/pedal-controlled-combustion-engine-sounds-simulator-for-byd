@@ -8,9 +8,9 @@ The `mobile` module is the BYD DiLink diagnostic APK. The template `automotive` 
 
 Core files:
 
-- `mobile/src/main/java/com/gabrielpc/bydmotorsound/MainActivity.kt` — adaptive Compose dashboard and Activity lifecycle.
-- `mobile/src/main/java/com/gabrielpc/bydmotorsound/telemetry/BydSpeedReader.kt` — capability probe, reflection bindings, polling, validation, and cadence metrics.
-- `mobile/src/test/java/com/gabrielpc/bydmotorsound/telemetry/TelemetryValidationTest.kt` — value/sentinel and timing-statistics unit tests.
+- `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt` — adaptive Compose dashboard and Activity lifecycle.
+- `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/telemetry/BydSpeedReader.kt` — capability probe, reflection bindings, polling, validation, and cadence metrics.
+- `mobile/src/test/java/com/gabrielpc/enginesoundsimulator/telemetry/TelemetryValidationTest.kt` — value/sentinel and timing-statistics unit tests.
 - `mobile/src/main/AndroidManifest.xml` — read-only BYD permissions and launcher configuration.
 
 The reader performs only these vehicle calls:
@@ -93,7 +93,7 @@ With the car safely parked and its authorized ADB connection available:
 ```powershell
 adb devices
 adb install -r mobile\build\outputs\apk\debug\mobile-debug.apk
-adb shell am start -n com.gabrielpc.bydmotorsound/.MainActivity
+adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
 ```
 
 The same APK can be copied to the head unit and installed through its package installer if preferred.

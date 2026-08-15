@@ -98,7 +98,7 @@ Validated APK:
 - path: `mobile/build/outputs/apk/debug/mobile-debug.apk`
 - size: `13,257,983` bytes
 - SHA-256: `89F354B976AAB083537F5E6A201D6AEF748D0F3FD218E9926EF34DD129060CF1`
-- package: `com.gabrielpc.bydmotorsound`
+- package: `com.gabrielpc.enginesoundsimulator`
 - version: `1.0` (`versionCode=1`), min/target SDK 25
 
 Build verification completed with 21 unit tests, zero failures/errors/skips, debug APK assembly, and Android lint. The final APK was installed at `2026-08-15 06:02:52` local time and launched as the resumed Activity.

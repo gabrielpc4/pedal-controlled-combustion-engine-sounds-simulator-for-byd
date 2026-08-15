@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "com.gabrielpc.bydmotorsound"
+    namespace = "com.gabrielpc.enginesoundsimulator"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.gabrielpc.bydmotorsound"
+        applicationId = "com.gabrielpc.enginesoundsimulator"
         minSdk = 28
         targetSdk = 37
         versionCode = 1

@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "com.gabrielpc.bydmotorsound"
+    namespace = "com.gabrielpc.enginesoundsimulator"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.gabrielpc.bydmotorsound"
+        applicationId = "com.gabrielpc.enginesoundsimulator"
         // The BYD DiLink head unit is a vendor Android build rather than standard AAOS.
         // Target 25 matches known working BYD apps and avoids modern hidden-API blocking
         // while this read-only compatibility probe uses the vendor boot-classpath API.

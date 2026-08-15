@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.BYDMotorSound" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.EngineSoundsSimulator" parent="android:Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">#081018</item>

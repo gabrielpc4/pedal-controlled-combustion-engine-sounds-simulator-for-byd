@@ -22,7 +22,7 @@ other vehicle identifiers into those details.
 The active file is app-private and flushed/synced per event:
 
 ```text
-/data/user/0/com.gabrielpc.bydmotorsound/files/diagnostics/drive-events.log
+/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log
 ```
 
 It rolls into `drive-events.previous.log` before the active file exceeds 256 KiB. The two-file
@@ -31,20 +31,20 @@ window bounds storage to roughly 512 KiB while preserving the immediately preced
 With the debuggable APK installed, retrieve both files after reproducing a problem:
 
 ```powershell
-adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log
-adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.previous.log
+adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log
+adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.previous.log
 ```
 
 To save the active log on the host, use `adb exec-out` rather than relying on an open Logcat window:
 
 ```powershell
-adb exec-out run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log > drive-events.log
+adb exec-out run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log > drive-events.log
 ```
 
 To isolate the shift sequence after a reproduction in PowerShell:
 
 ```powershell
-adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log |
+adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log |
     Select-String 'shift_started|shift_completed|drive_heartbeat'
 ```
 
