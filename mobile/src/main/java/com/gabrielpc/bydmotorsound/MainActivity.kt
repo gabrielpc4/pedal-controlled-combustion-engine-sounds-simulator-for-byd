@@ -1,453 +1,790 @@
 package com.gabrielpc.bydmotorsound
 
+import android.graphics.Paint
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.text.selection.SelectionContainer
-import com.gabrielpc.bydmotorsound.telemetry.BydSpeedReader
-import com.gabrielpc.bydmotorsound.telemetry.ReaderState
-import com.gabrielpc.bydmotorsound.telemetry.SignalValue
-import com.gabrielpc.bydmotorsound.telemetry.TelemetrySnapshot
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import com.gabrielpc.bydmotorsound.drive.DriveController
+import com.gabrielpc.bydmotorsound.drive.DriveSnapshot
+import com.gabrielpc.bydmotorsound.simulation.DrivetrainState
+import com.gabrielpc.bydmotorsound.simulation.EngineProfile
 import com.gabrielpc.bydmotorsound.ui.theme.BYDMotorSoundTheme
 import java.util.Locale
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
-private val DashboardBackground = Color(0xFF071018)
-private val PanelBackground = Color(0xFF101D27)
-private val PanelBorder = Color(0xFF243541)
-private val PrimaryText = Color(0xFFF3F7FA)
-private val SecondaryText = Color(0xFF9FB0BC)
-private val AcceleratorColor = Color(0xFF2DDB89)
-private val BrakeColor = Color(0xFFFF6269)
-private val SpeedColor = Color(0xFF52C7FF)
-private val WarningColor = Color(0xFFFFC857)
+private val Night = Color(0xFF03070D)
+private val Navy = Color(0xFF071321)
+private val Panel = Color(0xFF0B1925)
+private val PanelBright = Color(0xFF112837)
+private val Line = Color(0xFF1A3C4A)
+private val Cyan = Color(0xFF35E8F2)
+private val CyanSoft = Color(0xFF5FBAC7)
+private val Green = Color(0xFF38E58C)
+private val Red = Color(0xFFFF394F)
+private val Amber = Color(0xFFFFC456)
+private val White = Color(0xFFF5FAFD)
+private val Muted = Color(0xFF88A2B2)
 
 class MainActivity : ComponentActivity() {
-    private lateinit var reader: BydSpeedReader
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var telemetry by mutableStateOf(TelemetrySnapshot())
-    private var nowNanos by mutableLongStateOf(0L)
+    private lateinit var controller: DriveController
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var driveState by mutableStateOf<DriveSnapshot?>(null)
 
     private val refreshUi = object : Runnable {
         override fun run() {
-            telemetry = reader.snapshot()
-            nowNanos = SystemClock.elapsedRealtimeNanos()
-            mainHandler.postDelayed(this, 50L)
+            driveState = controller.snapshot()
+            // The simulation and audio control loop remain at 200 Hz. Thirty visual
+            // updates per second are smooth on the head unit without competing with audio.
+            uiHandler.postDelayed(this, 33L)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        reader = BydSpeedReader(applicationContext)
+        controller = DriveController(applicationContext)
+        driveState = controller.snapshot()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        enableEdgeToEdge()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC
+
         setContent {
             BYDMotorSoundTheme(darkTheme = true, dynamicColor = false) {
-                TelemetryDashboard(
-                    snapshot = telemetry,
-                    nowNanos = nowNanos,
-                    onRetry = reader::restart,
-                )
+                driveState?.let { state ->
+                    MotorSoundDashboard(
+                        state = state,
+                        onThrottle = controller::setManualThrottle,
+                        onBrake = controller::setManualBrake,
+                        onCycleInput = controller::cycleInputMode,
+                        onToggleSound = controller::toggleSound,
+                        onCycleChannels = controller::cycleChannelMode,
+                    )
+                }
             }
         }
     }
 
     override fun onStart() {
         super.onStart()
-        reader.start()
-        mainHandler.removeCallbacks(refreshUi)
-        mainHandler.post(refreshUi)
+        controller.start()
+        uiHandler.removeCallbacks(refreshUi)
+        uiHandler.post(refreshUi)
     }
 
     override fun onStop() {
-        mainHandler.removeCallbacks(refreshUi)
-        reader.stop()
+        releaseManualControls()
+        uiHandler.removeCallbacks(refreshUi)
+        controller.stop()
         super.onStop()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) releaseManualControls()
+    }
+
+    private fun releaseManualControls() {
+        controller.setManualThrottle(0.0)
+        controller.setManualBrake(0.0)
+    }
+
+}
+
+@Composable
+private fun MotorSoundDashboard(
+    state: DriveSnapshot,
+    onThrottle: (Double) -> Unit,
+    onBrake: (Double) -> Unit,
+    onCycleInput: () -> Unit,
+    onToggleSound: () -> Unit,
+    onCycleChannels: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                val pressed = event.type == KeyEventType.KeyDown
+                when (event.nativeKeyEvent.keyCode) {
+                    android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                        onThrottle(if (pressed) 1.0 else 0.0)
+                        true
+                    }
+                    android.view.KeyEvent.KEYCODE_S,
+                    android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+                    android.view.KeyEvent.KEYCODE_SPACE,
+                    -> {
+                        onBrake(if (pressed) 1.0 else 0.0)
+                        true
+                    }
+                    else -> false
+                }
+            },
+        color = Night,
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            val heightForFullWidth = maxWidth * (990f / 1920f)
+            val (dashboardWidth, dashboardHeight) = if (heightForFullWidth <= maxHeight) {
+                maxWidth to heightForFullWidth
+            } else {
+                (maxHeight * (1920f / 990f)) to maxHeight
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(dashboardWidth)
+                    .height(dashboardHeight),
+            ) {
+                val density = LocalDensity.current
+                val viewportWidthPx = with(density) { dashboardWidth.roundToPx() }
+                val viewportHeightPx = with(density) { dashboardHeight.roundToPx() }
+
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(Color(0xFF17243D), Navy, Night),
+                            center = androidx.compose.ui.geometry.Offset(size.width * 0.43f, size.height * 0.58f),
+                            radius = size.width * 0.58f,
+                        ),
+                    )
+                    drawRect(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.40f), Color.Transparent, Color.Black.copy(alpha = 0.56f)),
+                        ),
+                    )
+                }
+
+                Column(modifier = Modifier.fillMaxSize()) {
+                    DashboardHeader(
+                        state = state,
+                        onCycleInput = onCycleInput,
+                        onToggleSound = onToggleSound,
+                        onCycleChannels = onCycleChannels,
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 34.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CarStage(
+                            state = state,
+                            onThrottle = onThrottle,
+                            onBrake = onBrake,
+                            modifier = Modifier
+                                .weight(1.12f)
+                                .fillMaxHeight(),
+                        )
+                        Tachometer(
+                            drivetrain = state.drivetrain,
+                            modifier = Modifier
+                                .weight(0.88f)
+                                .fillMaxHeight()
+                                .padding(start = 16.dp, bottom = 6.dp),
+                        )
+                    }
+
+                    DashboardFooter(
+                        state = state,
+                        viewport = "${viewportWidthPx}x${viewportHeightPx}",
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun TelemetryDashboard(
-    snapshot: TelemetrySnapshot,
-    nowNanos: Long,
-    onRetry: () -> Unit,
+private fun DashboardHeader(
+    state: DriveSnapshot,
+    onCycleInput: () -> Unit,
+    onToggleSound: () -> Unit,
+    onCycleChannels: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = DashboardBackground,
-        contentColor = PrimaryText,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(76.dp)
+            .background(Color.Black.copy(alpha = 0.38f))
+            .border(width = 1.dp, color = Line.copy(alpha = 0.55f))
+            .padding(horizontal = 34.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(11.dp)
+                    .clip(CircleShape)
+                    .background(if (state.engineSoundEnabled) Green else Red),
+            )
+            Text(
+                text = "MOTOR",
+                color = White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.0.sp,
+            )
+            Text(
+                text = "// SYNTH",
+                color = Cyan,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 2.0.sp,
+            )
+            StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
+        }
+
+        HeaderButton(
+            primary = state.inputMode.displayName,
+            secondary = "INPUT",
+            onClick = onCycleInput,
+        )
+        HeaderButton(
+            primary = if (state.engineSoundEnabled) "ON" else "MUTED",
+            secondary = "ENGINE AUDIO",
+            accent = if (state.engineSoundEnabled) Green else Red,
+            onClick = onToggleSound,
+        )
+        HeaderButton(
+            primary = state.audio.requestedMode.displayName,
+            secondary = "${state.audio.activeChannels.coerceAtLeast(0)} CH OUTPUT",
+            accent = Cyan,
+            onClick = onCycleChannels,
+        )
+    }
+}
+
+@Composable
+private fun HeaderButton(
+    primary: String,
+    secondary: String,
+    accent: Color = Cyan,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = White),
+        modifier = Modifier.height(52.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.Start) {
+            Text(primary, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(secondary, color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun StatusTag(text: String, color: Color) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.8.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.42f), RoundedCornerShape(50))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun CarStage(
+    state: DriveSnapshot,
+    onThrottle: (Double) -> Unit,
+    onBrake: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        Canvas(Modifier.fillMaxSize()) {
+            val throttleGlow = (0.18f + state.throttle.toFloat() * 0.32f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(Cyan.copy(alpha = throttleGlow), Cyan.copy(alpha = 0.03f), Color.Transparent),
+                    center = androidx.compose.ui.geometry.Offset(size.width * 0.48f, size.height * 0.64f),
+                    radius = size.width * 0.40f,
+                ),
+                radius = size.width * 0.40f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.48f, size.height * 0.64f),
+            )
+            if (state.throttle > 0.60) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(Amber.copy(alpha = state.throttle.toFloat() * 0.42f), Red.copy(alpha = 0.12f), Color.Transparent),
+                    ),
+                    radius = size.width * 0.10f,
+                    center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.69f),
+                )
+            }
+            drawLine(
+                color = Cyan.copy(alpha = 0.28f),
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.06f, size.height * 0.77f),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.90f, size.height * 0.77f),
+                strokeWidth = 2.dp.toPx(),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 28.dp, top = 26.dp),
+        ) {
+            Text("APEX V10", color = White, fontSize = 34.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+            Text("5.2 L  •  10 CYL  •  8,600 REDLINE", color = CyanSoft, fontSize = 12.sp, letterSpacing = 1.1.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusTag("${formatOneDecimal(state.drivetrain.speedKmh)} KM/H", Cyan)
+                StatusTag("${formatOneDecimal(state.drivetrain.accelerationMps2 / 9.81)} G", Amber)
+            }
+        }
+
+        Image(
+            painter = painterResource(R.drawable.apex_v10_car),
+            contentDescription = "Original red Apex V10 sports car",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.69f)
+                .align(Alignment.Center)
+                .offset(y = 22.dp)
+                .graphicsLayer {
+                    val response = state.drivetrain.smoothedThrottle.toFloat()
+                    scaleX = 1.0f + response * 0.008f
+                    scaleY = 1.0f + response * 0.008f
+                    translationX = response * 4.0f
+                },
+        )
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            PedalControl(
+                label = "BRAKE",
+                value = state.brake,
+                accent = Red,
+                width = 92.dp,
+                height = 154.dp,
+                onValue = onBrake,
+            )
+            PedalControl(
+                label = "THROTTLE",
+                value = state.throttle,
+                accent = Green,
+                width = 84.dp,
+                height = 202.dp,
+                onValue = onThrottle,
+            )
+        }
+
+        Text(
+            text = "TOUCH / DRAG PEDALS   •   W or ↑ THROTTLE   •   S, ↓ or SPACE BRAKE",
+            color = Muted,
+            fontSize = 10.sp,
+            letterSpacing = 0.6.sp,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 22.dp, bottom = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun PedalControl(
+    label: String,
+    value: Double,
+    accent: Color,
+    width: Dp,
+    height: Dp,
+    onValue: (Double) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF5B6670), Color(0xFF232D35), Color(0xFF11181E)),
+                ),
+            )
+            .border(2.dp, if (value > 0.01) accent else Color(0xFF60717D), RoundedCornerShape(16.dp))
+            .pointerInput(onValue) {
+                awaitEachGesture {
+                    try {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        fun updateAt(y: Float) {
+                            onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
+                        }
+                        updateAt(down.position.y)
+                        var pointer = down
+                        do {
+                            val event = awaitPointerEvent()
+                            pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                            updateAt(pointer.position.y)
+                            pointer.consume()
+                        } while (pointer.pressed)
+                    } finally {
+                        // Pointer coroutines are cancelled when the window loses focus or
+                        // this node leaves composition. Never leave a simulated pedal held.
+                        onValue(0.0)
+                    }
+                }
+            },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(value.toFloat().coerceIn(0f, 1f))
+                .align(Alignment.BottomCenter)
+                .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.10f), accent.copy(alpha = 0.45f)))),
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            DashboardHeader(snapshot, onRetry)
+            repeat(5) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                )
+            }
+            Text(
+                text = "${(value * 100).roundToInt()}%",
+                color = if (value > 0.01) accent else White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text(label, color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
+        }
+    }
+}
 
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                if (maxWidth >= 780.dp) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(18.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1.15f),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            PedalCard("ACCELERATOR", snapshot.accelerator, AcceleratorColor, nowNanos)
-                            PedalCard("BRAKE", snapshot.brake, BrakeColor, nowNanos)
-                            SpeedCard(snapshot.speed, nowNanos)
-                            TimingPanel(snapshot, nowNanos)
-                        }
-                        DiagnosticsPanel(
-                            snapshot = snapshot,
-                            modifier = Modifier.weight(0.85f),
-                        )
+@Composable
+private fun Tachometer(drivetrain: DrivetrainState, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        val gaugeSize = if (maxWidth < maxHeight) maxWidth else maxHeight
+        Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                val radius = size.minDimension * 0.455f
+                val stroke = radius * 0.012f
+                val startAngle = 135f
+                val sweepAngle = 270f
+                val rpmFraction = (drivetrain.rpm / 10_000.0).toFloat().coerceIn(0f, 1f)
+
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(Color(0xFF0B2535), Color(0xFF06111A), Color.Black),
+                        center = center,
+                        radius = radius,
+                    ),
+                    radius = radius,
+                    center = center,
+                )
+                drawCircle(Cyan.copy(alpha = 0.16f), radius = radius * 1.015f, center = center, style = Stroke(radius * 0.035f))
+                drawArc(
+                    color = Color(0xFF123F4E),
+                    startAngle = startAngle,
+                    sweepAngle = sweepAngle,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                    style = Stroke(stroke * 1.35f, cap = StrokeCap.Round),
+                )
+                drawArc(
+                    brush = Brush.sweepGradient(listOf(Cyan, Cyan, Green, Amber, Red, Red), center),
+                    startAngle = startAngle,
+                    sweepAngle = sweepAngle * rpmFraction,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                    style = Stroke(stroke * 1.8f, cap = StrokeCap.Round),
+                )
+
+                // Perfect full-throttle shift band and red zone.
+                drawArc(
+                    color = Green,
+                    startAngle = startAngle + sweepAngle * 0.795f,
+                    sweepAngle = sweepAngle * 0.045f,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.96f, center.y - radius * 0.96f),
+                    size = androidx.compose.ui.geometry.Size(radius * 1.92f, radius * 1.92f),
+                    style = Stroke(radius * 0.022f, cap = StrokeCap.Round),
+                )
+                drawArc(
+                    color = Red,
+                    startAngle = startAngle + sweepAngle * 0.86f,
+                    sweepAngle = sweepAngle * 0.14f,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.96f, center.y - radius * 0.96f),
+                    size = androidx.compose.ui.geometry.Size(radius * 1.92f, radius * 1.92f),
+                    style = Stroke(radius * 0.026f, cap = StrokeCap.Round),
+                )
+
+                for (tick in 0..50) {
+                    val fraction = tick / 50f
+                    val angle = startAngle + sweepAngle * fraction
+                    val major = tick % 5 == 0
+                    val outer = polar(center, radius * 0.91f, angle)
+                    val inner = polar(center, radius * if (major) 0.80f else 0.85f, angle)
+                    val inRed = fraction >= 0.86f
+                    drawLine(
+                        color = if (inRed) Red else if (major) Cyan else CyanSoft.copy(alpha = 0.60f),
+                        start = inner,
+                        end = outer,
+                        strokeWidth = if (major) radius * 0.012f else radius * 0.005f,
+                        cap = StrokeCap.Round,
+                    )
+                }
+
+                drawIntoCanvas { canvas ->
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textAlign = Paint.Align.CENTER
+                        typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD_ITALIC)
+                        textSize = radius * 0.105f
                     }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        PedalCard("ACCELERATOR", snapshot.accelerator, AcceleratorColor, nowNanos)
-                        PedalCard("BRAKE", snapshot.brake, BrakeColor, nowNanos)
-                        SpeedCard(snapshot.speed, nowNanos)
-                        TimingPanel(snapshot, nowNanos)
-                        DiagnosticsPanel(snapshot)
+                    for (number in 0..10) {
+                        val point = polar(center, radius * 0.69f, startAngle + sweepAngle * (number / 10f))
+                        paint.color = if (number >= 9) android.graphics.Color.rgb(255, 57, 79) else android.graphics.Color.WHITE
+                        canvas.nativeCanvas.drawText(number.toString(), point.x, point.y + paint.textSize * 0.34f, paint)
                     }
+                }
+
+                val needleAngle = startAngle + sweepAngle * rpmFraction
+                val needleTip = polar(center, radius * 0.77f, needleAngle)
+                val angleRadians = Math.toRadians(needleAngle.toDouble())
+                val perpendicular = angleRadians + PI / 2.0
+                val baseHalfWidth = radius * 0.027f
+                val baseA = androidx.compose.ui.geometry.Offset(
+                    center.x + (cos(perpendicular) * baseHalfWidth).toFloat(),
+                    center.y + (sin(perpendicular) * baseHalfWidth).toFloat(),
+                )
+                val baseB = androidx.compose.ui.geometry.Offset(
+                    center.x - (cos(perpendicular) * baseHalfWidth).toFloat(),
+                    center.y - (sin(perpendicular) * baseHalfWidth).toFloat(),
+                )
+                drawPath(
+                    Path().apply {
+                        moveTo(baseA.x, baseA.y)
+                        lineTo(needleTip.x, needleTip.y)
+                        lineTo(baseB.x, baseB.y)
+                        close()
+                    },
+                    brush = Brush.linearGradient(listOf(Amber, Red), start = center, end = needleTip),
+                )
+                drawCircle(Color(0xFF07141F), radius * 0.14f, center)
+                drawCircle(Cyan, radius * 0.14f, center, style = Stroke(radius * 0.008f))
+                if (drivetrain.isShifting) {
+                    drawCircle(Green.copy(alpha = 0.55f), radius * 0.985f, center, style = Stroke(radius * 0.018f))
                 }
             }
 
-            Text(
-                text = "READ-ONLY DIAGNOSTIC • Test only while safely parked",
-                color = SecondaryText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.8.sp,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.offset(y = (-2).dp),
+            ) {
+                Text(
+                    text = drivetrain.gear.toString(),
+                    color = Cyan,
+                    fontSize = 48.sp,
+                    lineHeight = 48.sp,
+                    fontWeight = FontWeight.Black,
+                )
+                Text("GEAR", color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = gaugeSize * 0.12f),
+            ) {
+                Text(
+                    text = formatRpm(drivetrain.rpm),
+                    color = if (drivetrain.limiterActive) Red else Cyan,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 46.sp,
+                    lineHeight = 48.sp,
+                    fontWeight = FontWeight.Light,
+                    letterSpacing = 2.sp,
+                )
+                Text("RPM", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+            }
+            if (drivetrain.isShifting) {
+                Text(
+                    text = if (drivetrain.shiftDirection.name == "UP") "PERFECT SHIFT" else "REV MATCH",
+                    color = Green,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.4.sp,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = gaugeSize * 0.08f),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun DashboardHeader(snapshot: TelemetrySnapshot, onRetry: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "BYD PEDAL PROBE",
-                color = PrimaryText,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 0.6.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "Seal 2503 • direct DiLink capability test",
-                color = SecondaryText,
-                fontSize = 14.sp,
-            )
-        }
-        StatusPill(snapshot.readerState, snapshot.lastError)
-        Button(
-            onClick = onRetry,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = PanelBorder,
-                contentColor = PrimaryText,
-            ),
-        ) {
-            Text("RETRY", fontWeight = FontWeight.Bold)
-        }
+private fun DashboardFooter(state: DriveSnapshot, viewport: String) {
+    val audio = state.audio
+    val audioStatus = when {
+        !state.engineSoundEnabled -> "OFF"
+        audio.running -> audio.activeLayout
+        audio.error != null -> audio.error
+        else -> "NEGOTIATING"
     }
-}
-
-@Composable
-private fun StatusPill(state: ReaderState, error: String?) {
-    val color = when (state) {
-        ReaderState.ACTIVE -> if (error == null) AcceleratorColor else WarningColor
-        ReaderState.PROBING -> WarningColor
-        ReaderState.UNAVAILABLE -> BrakeColor
-        ReaderState.IDLE, ReaderState.STOPPED -> SecondaryText
+    val audioStatusColor = when {
+        !state.engineSoundEnabled -> Muted
+        audio.running -> Green
+        audio.error != null -> Red
+        else -> Amber
     }
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .fillMaxWidth()
+            .height(46.dp)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.dp, Line.copy(alpha = 0.45f))
+            .padding(horizontal = 34.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Spacer(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(color),
-        )
-        Text(
-            text = state.name,
-            color = color,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp,
-        )
+        FooterMetric("AUDIO", audioStatus, audioStatusColor)
+        FooterMetric("ROUTE", audio.routedDevice, CyanSoft, Modifier.weight(1f))
+        FooterMetric("FORMAT", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.underruns} underruns" else "NEGOTIATING", CyanSoft)
+        FooterMetric("SESSION", if (audio.sessionId > 0) audio.sessionId.toString() else "—", CyanSoft)
+        FooterMetric("VIEWPORT", "$viewport px", Muted)
     }
 }
 
 @Composable
-private fun PedalCard(
-    label: String,
-    signal: SignalValue,
-    accent: Color,
-    nowNanos: Long,
-) {
-    DiagnosticCard {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    color = SecondaryText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.1.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = signal.value?.roundToInt()?.let { "$it%" } ?: "—",
-                    color = if (signal.isValid) PrimaryText else SecondaryText,
-                    fontSize = 42.sp,
-                    lineHeight = 44.sp,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            SignalDetail(signal, nowNanos)
-        }
-        Spacer(Modifier.height(14.dp))
-        LinearProgressIndicator(
-            progress = { ((signal.value ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(14.dp)
-                .clip(RoundedCornerShape(50)),
-            color = accent,
-            trackColor = PanelBorder,
-        )
-        signal.issue?.let {
-            Spacer(Modifier.height(10.dp))
-            Text(it, color = WarningColor, fontSize = 13.sp)
-        }
-    }
-}
-
-@Composable
-private fun SpeedCard(signal: SignalValue, nowNanos: Long) {
-    DiagnosticCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "VEHICLE SPEED",
-                    color = SecondaryText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.1.sp,
-                )
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = signal.value?.let { formatNumber(it, 1) } ?: "—",
-                        color = if (signal.isValid) SpeedColor else SecondaryText,
-                        fontSize = 38.sp,
-                        lineHeight = 42.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("km/h", color = SecondaryText, fontSize = 15.sp, modifier = Modifier.padding(bottom = 6.dp))
-                }
-            }
-            SignalDetail(signal, nowNanos)
-        }
-        signal.issue?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(it, color = WarningColor, fontSize = 13.sp)
-        }
-    }
-}
-
-@Composable
-private fun SignalDetail(signal: SignalValue, nowNanos: Long) {
-    Column(horizontalAlignment = Alignment.End) {
-        Text(
-            text = "RAW ${signal.raw?.let { formatRawForUi(it) } ?: "—"}",
-            color = SecondaryText,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-        )
-        Text(
-            text = "unchanged ${formatAge(nowNanos, signal.changedAtNanos)}",
-            color = SecondaryText,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-        )
-    }
-}
-
-@Composable
-private fun TimingPanel(snapshot: TelemetrySnapshot, nowNanos: Long) {
-    DiagnosticCard {
-        Text(
-            text = "TRANSPORT",
-            color = SecondaryText,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.1.sp,
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Metric("MODE", snapshot.deliveryMode, Modifier.weight(1f))
-            Metric("RATE", snapshot.cadence.rateHz?.let { "${formatNumber(it, 1)} Hz" } ?: "—", Modifier.weight(1f))
-            Metric("READ AGE", formatAge(nowNanos, snapshot.lastReadAtNanos), Modifier.weight(1f))
-            Metric(
-                "CALL TIME",
-                snapshot.lastReadDurationMs?.let { "${formatNumber(it, 2)} ms" } ?: "—",
-                Modifier.weight(1f),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = "samples ${snapshot.cadence.sampleCount}  •  interval last ${formatMillis(snapshot.cadence.lastIntervalMs)}  " +
-                "mean ${formatMillis(snapshot.cadence.meanIntervalMs)}  p95 ${formatMillis(snapshot.cadence.p95IntervalMs)}  " +
-                "max ${formatMillis(snapshot.cadence.maxIntervalMs)}",
-            color = SecondaryText,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-        )
-    }
-}
-
-@Composable
-private fun Metric(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        Text(label, color = SecondaryText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Text(
-            text = value,
-            color = PrimaryText,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun DiagnosticsPanel(snapshot: TelemetrySnapshot, modifier: Modifier = Modifier) {
-    DiagnosticCard(modifier) {
-        Text(
-            text = "CAPABILITY DIAGNOSTICS",
-            color = SecondaryText,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.1.sp,
-        )
-        Spacer(Modifier.height(12.dp))
-        SelectionContainer {
-            Text(
-                text = buildString {
-                    snapshot.diagnostics.forEach { append("• ").append(it).append('\n') }
-                    snapshot.lastError?.let {
-                        append('\n').append("LAST ERROR\n").append(it)
-                    }
-                }.trimEnd(),
-                color = if (snapshot.lastError == null) PrimaryText else WarningColor,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DiagnosticCard(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = PanelBackground),
-        border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+private fun FooterMetric(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.padding(18.dp), content = content)
+        Text(label, color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
+        Text(value, color = color, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-private fun formatAge(nowNanos: Long, thenNanos: Long?): String {
-    if (thenNanos == null || nowNanos <= 0L) return "—"
-    val milliseconds = ((nowNanos - thenNanos).coerceAtLeast(0L)) / 1_000_000.0
-    return when {
-        milliseconds < 1_000.0 -> "${milliseconds.roundToInt()} ms"
-        else -> "${formatNumber(milliseconds / 1_000.0, 1)} s"
-    }
+private fun polar(
+    center: androidx.compose.ui.geometry.Offset,
+    radius: Float,
+    angleDegrees: Float,
+): androidx.compose.ui.geometry.Offset {
+    val radians = Math.toRadians(angleDegrees.toDouble())
+    return androidx.compose.ui.geometry.Offset(
+        center.x + (cos(radians) * radius).toFloat(),
+        center.y + (sin(radians) * radius).toFloat(),
+    )
 }
 
-private fun formatMillis(value: Double?): String = value?.let { "${formatNumber(it, 1)} ms" } ?: "—"
+private fun formatRpm(rpm: Double): String = ((rpm / 10.0).roundToInt() * 10).toString()
 
-private fun formatRawForUi(value: Double): String =
-    if (value % 1.0 == 0.0) value.toLong().toString() else formatNumber(value, 3)
-
-private fun formatNumber(value: Double, decimals: Int): String =
-    String.format(Locale.US, "%.${decimals}f", value)
+private fun formatOneDecimal(value: Double): String = String.format(Locale.US, "%.1f", value)

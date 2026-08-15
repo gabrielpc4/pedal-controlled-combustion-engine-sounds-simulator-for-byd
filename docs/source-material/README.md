@@ -22,6 +22,19 @@ These artifacts are deliberately excluded from the public repository. They remai
 - Static analysis is recorded in `../reference-apk-analysis.md`.
 - The APK is a behavioral reference, not a redistributable SDK and not proof that an unsigned application has the same permissions.
 
+## Generated UI asset
+
+### Apex V10 car concept
+
+- Repository path: `mobile/src/main/res/drawable-nodpi/apex_v10_car.png`
+- Tool: OpenAI built-in image generation
+- Generation date: 2026-08-15
+- Prompt brief (reconstructed, not an exact invocation quote): "Original fictional low front three-quarter red V10-style supercar, isolated/transparent, dramatic studio lighting, no badge/brand/text, composed for a dark automotive dashboard."
+- SHA-256: `9F8BEE818BD07EB5F3760B78D876BF30420DC86011D183A6A857115BD9D3C049`
+- Intended use: prototype dashboard illustration on a dark background.
+
+The brief requested no intentional brand, badge, or copied model. That intent is not a guarantee that generated geometry is unique, copyrightable in every jurisdiction, or free of visual similarity to protected vehicle designs or marks. Perform a visual/trademark/design-right review before production branding or commercial distribution. The repository currently has no root code or asset license, so public visibility does not itself grant third parties permission to reuse this PNG.
+
 ## Locally retained official PDF
 
 - Path: `BYD_DiLink_API_V1.0.5.pdf`
