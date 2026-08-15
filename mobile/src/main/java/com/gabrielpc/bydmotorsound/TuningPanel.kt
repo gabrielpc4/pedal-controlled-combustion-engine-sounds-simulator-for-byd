@@ -135,7 +135,7 @@ private fun TuningHeader(config: TuningConfig, onReset: () -> Unit, onClose: () 
                 Text("// APEX V10", color = TuneCyan, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.6.sp)
             }
             Text(
-                "Changes apply immediately and are saved automatically  •  ${config.engine.maxTorqueNm.roundToInt()} Nm  •  ${config.engine.peakPowerKw.roundToInt()} kW  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
+                "Changes apply immediately and are saved automatically  •  ${newtonMetersToKgfm(config.engine.maxTorqueNm).format(1)} kgfm  •  ${kilowattsToHorsepower(config.engine.peakPowerKw).roundToInt()} HP  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
                 color = TuneMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
@@ -207,17 +207,37 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
         }
         PanelCard("SEAL PERFORMANCE", "Electric drive and road-load calibration", Modifier.weight(0.92f)) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("PEAK TORQUE", engine.maxTorqueNm, 150.0..1_200.0, "%.0f Nm") {
-                    onChange(config.copy(engine = engine.copy(maxTorqueNm = it)))
+                ParameterSlider(
+                    "PEAK TORQUE",
+                    newtonMetersToKgfm(engine.maxTorqueNm),
+                    newtonMetersToKgfm(150.0)..newtonMetersToKgfm(1_200.0),
+                    "%.1f kgfm",
+                ) {
+                    onChange(config.copy(engine = engine.copy(maxTorqueNm = kgfmToNewtonMeters(it))))
                 }
-                ParameterSlider("FRONT PEAK WHEEL TORQUE", engine.frontPeakWheelTorqueNm, 500.0..6_000.0, "%.0f Nm") {
-                    onChange(config.copy(engine = engine.copy(frontPeakWheelTorqueNm = it)))
+                ParameterSlider(
+                    "FRONT PEAK WHEEL TORQUE",
+                    newtonMetersToKgfm(engine.frontPeakWheelTorqueNm),
+                    newtonMetersToKgfm(500.0)..newtonMetersToKgfm(6_000.0),
+                    "%.1f kgfm",
+                ) {
+                    onChange(config.copy(engine = engine.copy(frontPeakWheelTorqueNm = kgfmToNewtonMeters(it))))
                 }
-                ParameterSlider("REAR PEAK WHEEL TORQUE", engine.rearPeakWheelTorqueNm, 500.0..7_000.0, "%.0f Nm") {
-                    onChange(config.copy(engine = engine.copy(rearPeakWheelTorqueNm = it)))
+                ParameterSlider(
+                    "REAR PEAK WHEEL TORQUE",
+                    newtonMetersToKgfm(engine.rearPeakWheelTorqueNm),
+                    newtonMetersToKgfm(500.0)..newtonMetersToKgfm(7_000.0),
+                    "%.1f kgfm",
+                ) {
+                    onChange(config.copy(engine = engine.copy(rearPeakWheelTorqueNm = kgfmToNewtonMeters(it))))
                 }
-                ParameterSlider("PEAK POWER", engine.peakPowerKw, 100.0..800.0, "%.0f kW") {
-                    onChange(config.copy(engine = engine.copy(peakPowerKw = it)))
+                ParameterSlider(
+                    "PEAK POWER",
+                    kilowattsToHorsepower(engine.peakPowerKw),
+                    kilowattsToHorsepower(100.0)..kilowattsToHorsepower(800.0),
+                    "%.0f HP",
+                ) {
+                    onChange(config.copy(engine = engine.copy(peakPowerKw = horsepowerToKilowatts(it))))
                 }
                 ParameterSlider("MOTOR MAX SPEED", engine.motorMaxRpm, 8_000.0..25_000.0, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(motorMaxRpm = it)))
@@ -266,7 +286,7 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             EditableCurveGraph(
                 points = engine.frontWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
-                yLabel = { "${(it * engine.frontPeakWheelTorqueNm).roundToInt()} Nm" },
+                yLabel = { "${newtonMetersToKgfm(it * engine.frontPeakWheelTorqueNm).format(1)} kgfm" },
                 currentX = currentSpeed,
                 accent = TuneAmber,
                 lockEndpointX = true,
@@ -278,7 +298,7 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             EditableCurveGraph(
                 points = engine.rearWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
-                yLabel = { "${(it * engine.rearPeakWheelTorqueNm).roundToInt()} Nm" },
+                yLabel = { "${newtonMetersToKgfm(it * engine.rearPeakWheelTorqueNm).format(1)} kgfm" },
                 currentX = currentSpeed,
                 accent = TuneRed,
                 lockEndpointX = true,
@@ -469,7 +489,9 @@ private fun EditableCurveGraph(
     var activePoint by remember { mutableIntStateOf(-1) }
     val currentPoints by rememberUpdatedState(points)
     val currentOnPointsChange by rememberUpdatedState(onPointsChange)
-    val graphPaddingLeft = 58f
+    // Leave enough room for values such as "405.3 kgfm" without drawing into
+    // the neighboring panel or beyond the display edge.
+    val graphPaddingLeft = 124f
     val graphPaddingRight = 28f
     val graphPaddingTop = 32f
     val graphPaddingBottom = 54f
@@ -624,9 +646,19 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
             val paint = graphPaint()
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(53, 232, 242)
-            canvas.nativeCanvas.drawText("WHEEL TORQUE  ${peakWheelTorque.roundToInt()} Nm", left, bottom + 34f, paint)
+            canvas.nativeCanvas.drawText(
+                "WHEEL TORQUE  ${newtonMetersToKgfm(peakWheelTorque).format(1)} kgfm",
+                left,
+                bottom + 34f,
+                paint,
+            )
             paint.color = android.graphics.Color.rgb(255, 196, 86)
-            canvas.nativeCanvas.drawText("POWER  ${maxPowerKw.roundToInt()} kW", left + width * 0.50f, bottom + 34f, paint)
+            canvas.nativeCanvas.drawText(
+                "POWER  ${kilowattsToHorsepower(maxPowerKw).roundToInt()} HP",
+                left + width * 0.50f,
+                bottom + 34f,
+                paint,
+            )
         }
     }
 }
@@ -817,4 +849,15 @@ private fun graphPaint(): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
 }
 
+internal fun newtonMetersToKgfm(newtonMeters: Double): Double = newtonMeters / NEWTON_METERS_PER_KGFM
+
+internal fun kgfmToNewtonMeters(kgfm: Double): Double = kgfm * NEWTON_METERS_PER_KGFM
+
+internal fun kilowattsToHorsepower(kilowatts: Double): Double = kilowatts / KILOWATTS_PER_HORSEPOWER
+
+internal fun horsepowerToKilowatts(horsepower: Double): Double = horsepower * KILOWATTS_PER_HORSEPOWER
+
 private fun Double.format(decimals: Int): String = String.format(Locale.US, "%.${decimals}f", this)
+
+private const val NEWTON_METERS_PER_KGFM = 9.80665
+private const val KILOWATTS_PER_HORSEPOWER = 0.7456998715822702

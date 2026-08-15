@@ -2,6 +2,8 @@
 
 The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the Seal-response and synthetic-sound defaults; **CLOSE** returns to driving without discarding edits.
 
+The interface presents torque in kgfm and power in HP. Displayed and edited values are converted at the UI boundary; saved calibration values and drivetrain calculations remain in SI units, so changing the presentation units does not alter the vehicle model.
+
 ## Editable controls
 
 ### Vehicle
