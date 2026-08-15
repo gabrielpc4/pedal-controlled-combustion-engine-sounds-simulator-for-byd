@@ -197,7 +197,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
                 }
-                ParameterSlider("DOWNSHIFT RPM", engine.downshiftRpm, 1_000.0..min(4_500.0, engine.upshiftRpm - 500.0), "%.0f") {
+                ParameterSlider("DOWNSHIFT FLOOR", engine.downshiftRpm, 1_000.0..min(4_500.0, engine.upshiftRpm - 500.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(downshiftRpm = it)))
                 }
                 ParameterSlider("RPM RESPONSE", engine.syntheticRpmResponseMs, 10.0..250.0, "%.0f ms") {
@@ -319,6 +319,12 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
             ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
+            ParameterSlider("LIFT-OFF RPM RETENTION", engine.liftOffRpmRetention, 0.45..0.90, "%.2f") {
+                onChange(config.copy(engine = engine.copy(liftOffRpmRetention = it)))
+            }
+            ParameterSlider("LIFT-OFF RPM RESPONSE", engine.liftOffRpmResponseMs, 50.0..800.0, "%.0f ms") {
+                onChange(config.copy(engine = engine.copy(liftOffRpmResponseMs = it)))
+            }
             Spacer(Modifier.height(12.dp))
             ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
         }
@@ -356,7 +362,7 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
                 }
             }
         }
-        PanelCard("RPM AFTER EACH SHIFT", "Calculated at ${engine.upshiftRpm.roundToInt()} RPM", Modifier.weight(1.25f)) {
+        PanelCard("SHIFT LANDING / DOWNSHIFT", "Each landing RPM becomes that gear's downshift point", Modifier.weight(1.25f)) {
             GearDropGraph(engine, Modifier.fillMaxSize())
         }
     }
@@ -699,7 +705,8 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
             drawLine(TuneLine.copy(alpha = 0.7f), Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
         }
         for (index in 0 until engine.gearRatios.lastIndex) {
-            val postShift = engine.upshiftRpm * engine.gearRatios[index + 1] / engine.gearRatios[index]
+            val postShift = engine.idleRpm +
+                (engine.upshiftRpm - engine.idleRpm) * engine.gearRatios[index + 1] / engine.gearRatios[index]
             val x = left + width * ((index + 0.5f) / count)
             val barWidth = width / count * 0.52f
             val y = bottom - height * (postShift / engine.maxRpm).toFloat().coerceIn(0f, 1f)
@@ -785,9 +792,23 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
             }
             return path
         }
+        fun liftOffRpmPath(): Path {
+            val path = Path()
+            repeat(101) { index ->
+                val timeSeconds = index / 100.0
+                val response = engine.liftOffRpmRetention +
+                    (1.0 - engine.liftOffRpmRetention) *
+                    kotlin.math.exp(-timeSeconds / (engine.liftOffRpmResponseMs / 1_000.0))
+                val x = left + width * index / 100f
+                val y = bottom - height * response.toFloat().coerceIn(0f, 1f)
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            return path
+        }
         drawPath(responsePath(engine.throttleAttackMs), TuneGreen, style = Stroke(3f))
         drawPath(responsePath(engine.throttleReleaseMs), TuneCyan, style = Stroke(3f))
         drawPath(responsePath(engine.brakeResponseMs), TuneRed, style = Stroke(3f))
+        drawPath(liftOffRpmPath(), TuneAmber, style = Stroke(3f))
     }
 }
 

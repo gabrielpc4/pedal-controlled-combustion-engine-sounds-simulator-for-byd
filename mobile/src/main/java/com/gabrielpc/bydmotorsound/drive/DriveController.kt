@@ -277,6 +277,8 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
+        liftOffRpmRetention = engine.liftOffRpmRetention,
+        liftOffRpmResponseSeconds = engine.liftOffRpmResponseMs / 1_000.0,
         finalDrive = engine.finalDrive,
         gearRatios = engine.gearRatios.toDoubleArray(),
         frontWheelTorqueCurve = engine.frontWheelTorqueCurve,

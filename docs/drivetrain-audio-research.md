@@ -48,7 +48,7 @@ nextWheelTorque = fullTorque(rpmNext) * nextRatio
 
 In a detailed implementation, trigger slightly before the crossover to include controller latency and use a lower, demand-dependent threshold at part throttle. A downshift must first project lower-gear RPM and reject over-rev. Kickdown should require a meaningful wheel-torque advantage and hysteresis.
 
-The present implementation uses a fixed 8,250-RPM performance upshift and ratio-safe downshifts. The crossover calculation is the recommended next tuning refinement.
+The present implementation uses a fixed 8,250-RPM performance upshift. Each higher gear derives its downshift threshold from the exact ratio-based RPM landing of the preceding upshift, with separate synthetic- and road-speed projections rejecting over-rev. The crossover calculation remains a possible future physical-efficiency refinement, but it does not control the fictional sound gears.
 
 ## Engine-sound synthesis references
 

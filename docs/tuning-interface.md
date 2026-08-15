@@ -6,7 +6,7 @@ The dashboard's **TUNE** button opens a full-screen workstation designed for the
 
 ### Vehicle
 
-- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, downshift RPM, and RPM response time
+- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, minimum downshift floor, and RPM response time
 - Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
 - Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
 - Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
@@ -26,7 +26,8 @@ Curve points are edited directly by dragging them. Their horizontal order is con
 
 - Six-point Sport-like pedal-to-requested-motor-torque curve
 - Throttle attack/release and brake response time constants
-- Live response preview for all three pedal filters
+- Lift-off RPM retention and decay response
+- Live response preview for all pedal filters and the lift-off RPM fall
 
 Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is informed by the full-request torque rise visible in A2MAC1's acceleration chart, but the pedal map itself remains an approximation because BYD does not publish it.
 
@@ -35,7 +36,7 @@ Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is
 - Synthetic final-drive ratio
 - Upshift/downshift duration and post-shift dwell
 - Every ratio in the seven-speed presentation gearbox
-- Computed RPM-after-shift graph for all adjacent gear changes
+- Computed shift-landing graph; every landing RPM is also that higher gear's automatic downshift point
 
 Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change. These controls affect sound RPM and shift events only; a ratio edit cannot change electric acceleration.
 

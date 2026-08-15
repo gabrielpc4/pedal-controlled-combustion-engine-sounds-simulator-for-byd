@@ -28,6 +28,8 @@ data class EngineTuning(
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 180.0,
     val syntheticRpmResponseMs: Double = 35.0,
+    val liftOffRpmRetention: Double = 0.70,
+    val liftOffRpmResponseMs: Double = 180.0,
     val finalDrive: Double = 3.82,
     val throttleAttackMs: Double = 120.0,
     val throttleReleaseMs: Double = 90.0,
@@ -72,6 +74,8 @@ data class EngineTuning(
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
             syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(10.0, 250.0),
+            liftOffRpmRetention = liftOffRpmRetention.coerceIn(0.45, 0.90),
+            liftOffRpmResponseMs = liftOffRpmResponseMs.coerceIn(50.0, 800.0),
             finalDrive = finalDrive.coerceIn(2.0, 6.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
@@ -200,6 +204,8 @@ class TuningRepository(context: Context) {
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
+            liftOffRpmRetention = number(KEY_LIFT_OFF_RPM_RETENTION, defaults.engine.liftOffRpmRetention),
+            liftOffRpmResponseMs = number(KEY_LIFT_OFF_RPM_RESPONSE, defaults.engine.liftOffRpmResponseMs),
             finalDrive = number(KEY_FINAL_DRIVE, defaults.engine.finalDrive),
             throttleAttackMs = number(KEY_THROTTLE_ATTACK, defaults.engine.throttleAttackMs),
             throttleReleaseMs = number(KEY_THROTTLE_RELEASE, defaults.engine.throttleReleaseMs),
@@ -262,6 +268,8 @@ class TuningRepository(context: Context) {
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
+            .putString(KEY_LIFT_OFF_RPM_RETENTION, clean.engine.liftOffRpmRetention.toString())
+            .putString(KEY_LIFT_OFF_RPM_RESPONSE, clean.engine.liftOffRpmResponseMs.toString())
             .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
             .putString(KEY_THROTTLE_RELEASE, clean.engine.throttleReleaseMs.toString())
@@ -319,6 +327,8 @@ class TuningRepository(context: Context) {
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
         const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
+        const val KEY_LIFT_OFF_RPM_RETENTION = "lift_off_rpm_retention"
+        const val KEY_LIFT_OFF_RPM_RESPONSE = "lift_off_rpm_response"
         const val KEY_FINAL_DRIVE = "final_drive"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"
         const val KEY_THROTTLE_RELEASE = "throttle_release"

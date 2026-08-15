@@ -5,7 +5,7 @@ An experimental Android engine-sound dashboard for a BYD Seal running DiLink fir
 The current application provides:
 
 - a 200 Hz Seal Performance EV road model using BYD's published anchors plus A2MAC1's measured 3,170/3,975 Nm front/rear wheel-torque traces;
-- seven presentation-only sound gears whose shifts and RPM drops never interrupt electric wheel torque;
+- seven presentation-only sound gears whose shifts and RPM drops never interrupt electric wheel torque, with per-gear downshifts at the preceding upshift's landing RPM and configurable lift-off decay;
 - touch and keyboard accelerator/brake controls for emulator and bench testing;
 - automatic use of valid live BYD accelerator, brake, and road-speed signals when exposed by the read-only DiLink API;
 - an original procedural V10 sound source driven by RPM, load, throttle, shifts, overrun, and limiter state;

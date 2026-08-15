@@ -238,6 +238,70 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun eachDownshiftPointIsItsPrecedingUpshiftLandingRpm() {
+        val profile = EngineProfile.APEX_V10
+        for (gearIndex in 1..profile.gearRatios.lastIndex) {
+            val expected = profile.idleRpm +
+                (profile.upshiftRpm - profile.idleRpm) *
+                profile.gearRatios[gearIndex] / profile.gearRatios[gearIndex - 1]
+            assertEquals(expected, postUpshiftLandingRpm(profile, gearIndex), 0.001)
+        }
+    }
+
+    @Test
+    fun releasingPedalAtFirstUpshiftLandingPromptsImmediateDownshift() {
+        val simulation = EngineSimulation()
+        var previous = simulation.state
+        var firstUpshiftCompletion: DrivetrainState? = null
+        var elapsed = 0.0
+        while (elapsed < 10.0 && firstUpshiftCompletion == null) {
+            val state = simulation.update(DriverInput(throttle = 1.0), STEP)
+            if (previous.isShifting && !state.isShifting && state.gear == 2) {
+                firstUpshiftCompletion = state
+            }
+            previous = state
+            elapsed += STEP
+        }
+
+        val landing = requireNotNull(firstUpshiftCompletion)
+        val expectedLandingRpm = postUpshiftLandingRpm(simulation.profile, 1)
+        assertEquals(expectedLandingRpm, landing.rpm, 80.0)
+
+        var downshiftStart: DrivetrainState? = null
+        var liftElapsed = 0.0
+        while (liftElapsed < 0.5 && downshiftStart == null) {
+            val state = simulation.update(DriverInput(), STEP)
+            liftElapsed += STEP
+            if (state.isShifting && state.shiftDirection == ShiftDirection.DOWN) {
+                downshiftStart = state
+            }
+        }
+
+        val downshift = requireNotNull(downshiftStart)
+        assertTrue("lift-off downshift waited $liftElapsed seconds", liftElapsed <= 0.10)
+        assertTrue(
+            "downshift started above the landing threshold: $downshift vs $expectedLandingRpm",
+            downshift.rpm <= expectedLandingRpm + 30.0,
+        )
+    }
+
+    @Test
+    fun liftOffRpmFallsQuicklyEvenWhenRoadSpeedIsHeldConstant() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val simulation = EngineSimulation(profile)
+        simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 40.0), STEP)
+        simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
+        val beforeLift = simulation.state
+        val afterLift = simulation.runForExternal(0.35, speedKmh = 40.0, throttle = 0.0)
+
+        assertEquals(40.0, afterLift.speedKmh, 0.001)
+        assertTrue(
+            "lift-off RPM only fell from ${beforeLift.rpm} to ${afterLift.rpm}",
+            beforeLift.rpm - afterLift.rpm > 750.0,
+        )
+    }
+
+    @Test
     fun joiningLiveSpeedSelectsSafeGearAndEmergencyUpshiftsWithoutThrottle() {
         val simulation = EngineSimulation()
         val joined = simulation.update(DriverInput(externalSpeedKmh = 100.0), STEP)
@@ -331,7 +395,8 @@ class EngineSimulationTest {
         val brakeState = braking.runFor(1.8, throttle = 0.0, brake = 1.0)
 
         assertTrue(brakeState.speedKmh < coastState.speedKmh)
-        assertTrue(brakeState.rpm <= coastState.rpm)
+        assertTrue("braking should select the same or a lower gear", brakeState.gear <= coastState.gear)
+        assertTrue(brakeState.rpm <= braking.profile.limiterRpm)
     }
 
     @Test
@@ -361,10 +426,14 @@ class EngineSimulationTest {
         return result
     }
 
-    private fun EngineSimulation.runForExternal(seconds: Double, speedKmh: Double): DrivetrainState {
+    private fun EngineSimulation.runForExternal(
+        seconds: Double,
+        speedKmh: Double,
+        throttle: Double = 0.0,
+    ): DrivetrainState {
         var result = state
         repeat((seconds / STEP).toInt()) {
-            result = update(DriverInput(externalSpeedKmh = speedKmh), STEP)
+            result = update(DriverInput(throttle = throttle, externalSpeedKmh = speedKmh), STEP)
         }
         return result
     }
