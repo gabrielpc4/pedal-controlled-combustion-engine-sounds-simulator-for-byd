@@ -9,9 +9,13 @@ import org.junit.Test
 
 class EngineSimulationTest {
     @Test
-    fun apexV10DefaultCalibrationIsInternallyOrdered() {
+    fun defaultCalibrationUsesPublishedSealPerformanceAnchors() {
         val profile = EngineProfile.APEX_V10
 
+        assertEquals(670.0, profile.maxTorqueNm, 0.0)
+        assertEquals(390.0, profile.peakPowerKw, 0.0)
+        assertEquals(2_185.0, profile.vehicleMassKg, 0.0)
+        assertEquals(180.0, profile.topSpeedKmh, 0.0)
         assertEquals(8_600.0, profile.redlineRpm, 0.0)
         assertEquals(8_850.0, profile.limiterRpm, 0.0)
         assertEquals(8_250.0, profile.upshiftRpm, 0.0)
@@ -20,21 +24,21 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun fullThrottleSpinsEngineProgressivelyInsteadOfJumpingToPedalMappedRpm() {
+    fun fullThrottleBuildsSyntheticRpmProgressivelyWithRoadSpeed() {
         val simulation = EngineSimulation()
         val initial = simulation.state
         val afterHalfSecond = simulation.runFor(0.5, throttle = 1.0)
 
         assertTrue(
-            "rpm should rise through engine inertia: $afterHalfSecond",
-            afterHalfSecond.rpm > initial.rpm + 250.0,
+            "rpm should rise progressively with electric road speed: $afterHalfSecond",
+            afterHalfSecond.rpm > initial.rpm + 200.0,
         )
         assertTrue(afterHalfSecond.rpm < simulation.profile.redlineRpm)
         assertTrue(afterHalfSecond.speedKmh > 0.0)
     }
 
     @Test
-    fun launchDoesNotBogAtAnyPositiveThrottle() {
+    fun electricLaunchDoesNotBogAtAnyPositiveThrottle() {
         listOf(0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1.0).forEach { throttle ->
             val simulation = EngineSimulation()
             var peakRpm = simulation.state.rpm
@@ -55,6 +59,81 @@ class EngineSimulationTest {
                 largestDrop < 30.0,
             )
         }
+    }
+
+    @Test
+    fun motorEnvelopeIsConstantTorqueThenConstantPower() {
+        val profile = EngineProfile.APEX_V10
+        val baseRpm = profile.peakPowerKw * 9_549.0 / profile.maxTorqueNm
+
+        assertEquals(670.0, motorTorqueAtRpm(profile, 2_000.0), 0.5)
+        assertEquals(670.0, motorTorqueAtRpm(profile, baseRpm), 1.0)
+
+        val highRpm = 12_000.0
+        val highTorque = motorTorqueAtRpm(profile, highRpm)
+        assertEquals(390.0, highTorque * highRpm / 9_549.0, 0.5)
+        assertTrue(highTorque < profile.maxTorqueNm * 0.50)
+    }
+
+    @Test
+    fun accelerationIsStrongestLowDownAndTapersAtHighMotorSpeed() {
+        fun accelerationAt(speedKmh: Double): Double {
+            val simulation = EngineSimulation()
+            repeat((1.0 / STEP).toInt()) {
+                simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = speedKmh), STEP)
+            }
+            return simulation.update(DriverInput(throttle = 1.0), STEP).accelerationMps2
+        }
+
+        val lowSpeedAcceleration = accelerationAt(25.0)
+        val highSpeedAcceleration = accelerationAt(120.0)
+        assertTrue("expected immediate low-speed EV thrust", lowSpeedAcceleration > 7.5)
+        assertTrue(
+            "constant-power taper should reduce acceleration with speed: low=$lowSpeedAcceleration high=$highSpeedAcceleration",
+            highSpeedAcceleration < lowSpeedAcceleration * 0.65,
+        )
+    }
+
+    @Test
+    fun fullThrottleZeroToHundredMatchesPublishedPerformance() {
+        val simulation = EngineSimulation()
+        var elapsed = 0.0
+        while (simulation.state.speedKmh < 100.0 && elapsed < 8.0) {
+            simulation.update(DriverInput(throttle = 1.0), STEP)
+            elapsed += STEP
+        }
+
+        assertTrue("0-100 km/h took $elapsed seconds", elapsed in 3.70..3.90)
+    }
+
+    @Test
+    fun syntheticUpshiftNeverCutsElectricWheelTorque() {
+        val simulation = EngineSimulation()
+        var beforeShiftAcceleration: Double? = null
+        var largestSingleStepDrop = 0.0
+        var previous = simulation.state
+        var elapsed = 0.0
+        while (elapsed < 20.0) {
+            val state = simulation.update(DriverInput(throttle = 1.0), STEP)
+            if (!previous.isShifting && state.isShifting) {
+                beforeShiftAcceleration = previous.accelerationMps2
+            }
+            if (state.isShifting && state.shiftSerial == 1L) {
+                largestSingleStepDrop = maxOf(
+                    largestSingleStepDrop,
+                    previous.accelerationMps2 - state.accelerationMps2,
+                )
+            }
+            if (beforeShiftAcceleration != null && previous.isShifting && !state.isShifting) break
+            previous = state
+            elapsed += STEP
+        }
+
+        val before = requireNotNull(beforeShiftAcceleration)
+        assertTrue(
+            "presentation shift caused a wheel-torque discontinuity: before=$before stepDrop=$largestSingleStepDrop",
+            largestSingleStepDrop < 0.03,
+        )
     }
 
     @Test

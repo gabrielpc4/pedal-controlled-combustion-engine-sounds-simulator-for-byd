@@ -4,13 +4,14 @@ An experimental Android engine-sound dashboard for a BYD Seal running DiLink fir
 
 The current application provides:
 
-- stateful 200 Hz engine/vehicle simulation with inertia, torque curve, seven gears, automatic shifts, rev matching, coast and braking behavior;
+- a 200 Hz Seal Performance EV road model using the published 670 Nm, 390 kW, 2,185 kg, 3.8-second, and 180 km/h anchors;
+- seven presentation-only sound gears whose shifts and RPM drops never interrupt electric wheel torque;
 - touch and keyboard accelerator/brake controls for emulator and bench testing;
 - automatic use of valid live BYD accelerator, brake, and road-speed signals when exposed by the read-only DiLink API;
 - an original procedural V10 sound source driven by RPM, load, throttle, shifts, overrun, and limiter state;
 - negotiated stereo/quad/5.1/7.1 logical PCM output with routing and underrun diagnostics;
 - a car-and-tachometer dashboard targeting the 1920 x 990 safe area measured on the emulator, pending actual-car `WindowInsets` measurement;
-- a persistent live-tuning workstation with draggable torque/throttle curves, engine and shift calibration, all seven gear ratios, audio-layer mixing, and responsive graphs;
+- a persistent live-tuning workstation with draggable motor-torque/Sport-pedal curves, complete road-load and sound-engine calibration, all seven presentation ratios, audio-layer mixing, and responsive graphs;
 - the original telemetry capability/permission diagnostics retained behind the controller.
 
 It invokes the documented BYD speed getters through reflection and does not package BYD framework classes. The manifest requests only the read-oriented `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET` permissions. No vehicle setter is implemented.
@@ -59,6 +60,7 @@ Wireless ADB is a privileged maintenance channel. Enable it only in a trusted en
 
 - [Engineering context](docs/README.md)
 - [Full implementation](docs/full-implementation.md)
+- [BYD Seal Performance calibration](docs/byd-seal-performance-calibration.md)
 - [Live tuning interface](docs/tuning-interface.md)
 - [Emulator validation record](docs/emulator-validation.md)
 - [Drivetrain, game-audio, and sound-asset research](docs/drivetrain-audio-research.md)

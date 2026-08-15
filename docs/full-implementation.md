@@ -10,26 +10,26 @@ The `mobile` module is now a complete, landscape dashboard application:
 
 - reads accelerator, brake, and road speed from the existing read-only BYD DiLink probe when the corresponding signals are valid;
 - falls back automatically to touch/keyboard simulator pedals when the vendor API is unavailable;
-- advances a stateful engine, transmission, clutch/converter, and virtual vehicle at a fixed 200 Hz;
-- performs automatic upshifts, braking downshifts, safe kickdowns, torque cuts, clutch interruption, ratio swaps, and rev matching;
+- advances a Seal Performance-calibrated electric road model and an independent synthetic engine layer at a fixed 200 Hz;
+- performs presentation-only automatic upshifts, braking downshifts, safe kickdowns, and ratio swaps without interrupting electric wheel torque;
 - synthesizes a responsive fictional V10 continuously from RPM, load, throttle, shift, overrun, and limiter state;
 - experimentally requests stereo, quad, 5.1, or 7.1 logical PCM output and mirrors the same engine program to every initialized logical channel;
 - exposes live audio route, channel, buffer, sample-rate, session, and underrun diagnostics;
 - renders the requested car-and-tachometer composition against the 1920 x 990 safe-area target measured on the emulator; the actual car dimensions and insets remain unmeasured.
 
-The result is not a pedal-to-needle animation. Throttle produces torque; torque and coupling change angular speed; vehicle inertia, gearing, engine losses, braking, and shifts determine what the needle does.
+The road model is not a pedal-to-needle animation: throttle requests motor torque, and motor speed, the 390 kW ceiling, mass, traction, drag, rolling resistance, and braking determine vehicle acceleration. Fictional gears then turn road speed into the sound RPM shown on the gauge. Those gears never feed back into wheel torque.
 
 ## Source map
 
 | File | Responsibility |
 | --- | --- |
-| `simulation/EngineSimulation.kt` | Engine/vehicle state, 200 Hz integration, torque curve, gearing, shift controller |
+| `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, and independent sound-RPM shift controller |
 | `audio/EngineSynthesizer.kt` | Allocation-free procedural V10 source |
 | `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
 | `telemetry/BydSpeedReader.kt` | Existing read-only reflective DiLink capability probe and getter polling |
-| `simulation/EngineSimulationTest.kt` | Inertia/acceleration, shift, braking, and idle behavior tests |
+| `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
 | `audio/EngineSynthesizerTest.kt` | PCM signal/RMS behavior and exact channel mirroring tests |
 
 ## Runtime architecture
@@ -75,53 +75,43 @@ When a valid BYD road-speed value is present in live-pedal mode, it replaces sim
 
 The vendor interaction remains read-only. Reflection invokes the vendor `getInstance(Context)` factory and the documented accelerator, brake, and current-speed getters; no vehicle setter permission or setter call was added.
 
-## Engine and drivetrain model
+## Electric vehicle and synthetic engine model
 
-Current fictional profile, deliberately not branded as a real vehicle:
+The physical longitudinal defaults use published Seal Performance AWD anchors. The complete evidence/assumption split and source links are recorded in [BYD Seal Performance calibration](byd-seal-performance-calibration.md).
 
-| Parameter | Value |
+| Physical parameter | Default |
 | --- | ---: |
-| Name / layout | Apex V10 / four stroke |
-| Tachometer / idle / redline / limiter | 10,000 / 950 / 8,600 / 8,850 RPM |
-| Automatic upshift / base downshift | 8,250 / 2,250 RPM |
-| Maximum torque | 585 Nm |
-| Engine inertia | 0.42 kg m2 |
-| Vehicle mass | 1,640 kg |
-| Wheel radius | 0.337 m |
-| Final drive | 3.82 |
-| Gears | 3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69 |
+| Front / rear / combined maximum output | 160 / 230 / 390 kW |
+| Front / rear / combined maximum torque | 310 / 360 / 670 Nm |
+| Published 0–100 km/h / top speed | 3.8 s / 180 km/h |
+| Vehicle mass | 2,185 kg |
+| Motor-speed envelope | 0–16,000 RPM |
+| Constant-torque base speed | approximately 5,559 RPM |
+| Effective fixed reduction | 10.81:1 |
+| Wheel radius | 0.347 m |
+| Drivetrain efficiency / traction ceiling | 0.92 / 8.0 m/s² |
+| Drag area / rolling coefficient | 0.504 m² / 0.010 |
 
-The normalized torque curve is interpolated smoothly through:
-
-```text
-RPM:    850  1500  2500  3800  5200  6500  7500  8300  8850
-Torque: .34   .48   .68   .84   .96  1.00   .97   .89   .69
-```
+The 670 Nm curve is flat from zero motor speed through the base-speed point. Above that point, torque tapers inversely with RPM while power remains at approximately 390 kW. The curve is editable, but the simulator also applies the configured peak-power ceiling. This creates normal EV progression: the strongest acceleration is available immediately, then acceleration gradually decreases as motor speed and aerodynamic drag rise.
 
 At every 5 ms fixed step:
 
-1. Raw throttle and brake are clamped and passed through exact exponential response filters.
-2. A valid external road-speed sample is applied before drivetrain math; the first live sample selects a safe cruise gear and synchronizes RPM without reporting a fake acceleration spike.
-3. Combustion torque is `maxTorque * torqueCurve(rpm) * throttle`, then modified by shift cut, limiter, and brake override.
-4. Idle feed-forward/control, mechanical friction, and closed-throttle pumping losses contribute to net engine torque.
-5. Clutch-slip torque is bounded by clutch capacity and applied equal-and-opposite: it is subtracted from the engine equation and passed through the gear/final-drive ratio to the wheels. During a powered first-gear launch, transfer is additionally limited to the torque available after reserving positive engine acceleration; this prevents clutch engagement from pulling RPM backward before the shafts synchronize.
-6. Net engine torque divided by engine inertia advances RPM; the launch clutch engagement rises progressively as the engine spins above idle.
-7. In simulator mode, transmitted wheel force, aero drag, rolling resistance, engine braking, and service braking integrate vehicle speed. Reported acceleration comes from the actual clamped speed delta.
-8. During downshifts, bounded positive rev-match torque spins the engine toward the new coupled speed; no RPM value is directly forced.
+1. Raw accelerator position is evaluated through the editable Sport-like pedal curve, then accelerator and brake requests pass through exponential response filters.
+2. A valid external road-speed sample replaces virtual speed. The first live sample selects a safe synthetic sound gear without reporting a fake acceleration spike.
+3. In simulator mode, motor RPM comes from road speed, wheel radius, and the fixed electric-drive reduction.
+4. Available motor torque comes from the editable torque curve and is capped by `peakPower * 9549 / motorRpm`.
+5. Requested drive force comes from motor torque, fixed reduction, efficiency, and wheel radius, with a configurable traction/current-delivery acceleration ceiling.
+6. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by mass advances vehicle speed. Reported acceleration is the actual clamped speed delta.
+7. The independent sound RPM target comes from road speed and the current fictional gear. A short response filter prevents needle and pitch discontinuities.
+8. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
 
-Braking does not subtract a cosmetic amount from RPM. It slows the virtual wheels and, through the engaged driveline, pulls the engine down. This is why brake response and downshifts feel different from simply releasing throttle.
+Braking therefore slows the real or virtual vehicle first. Lower road speed naturally lowers sound RPM and can request a lower presentation gear; there is no cosmetic RPM subtraction and no simulated clutch.
 
-### Automatic shifts
+### Synthetic automatic shifts
 
-Upshifts begin above 8,250 RPM with meaningful throttle and a higher gear available. The torque curve peaks at 6,500 RPM and tapers toward the 8,600 RPM redline and 8,850 RPM fuel cutoff. Independently, a projected over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, which protects live mode when it receives a large road-speed change. A 1-gear downshift is permitted for low RPM, braking, or kickdown only when the projected lower-gear RPM remains below 94% of redline.
+Upshifts begin above the configured sound shift point with meaningful throttle and a higher presentation gear available. A projected synthetic over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, protecting live mode after a large road-speed change. A one-gear downshift is permitted for low sound RPM, braking, or kickdown only when the projected lower-gear RPM remains below 94% of redline.
 
-The implemented shift phases overlap smoothly:
-
-```text
-torque cut -> clutch open -> ratio swap at 38% -> RPM synchronization -> clutch/torque restore
-```
-
-An upshift takes 270 ms; a downshift takes 340 ms and adds bounded rev-match torque. New shifts are inhibited for 450 ms after completed clutch re-engagement to prevent hunting. The gauge labels an active upshift as `PERFECT SHIFT` and a downshift as `REV MATCH`.
+The ratio changes at 38% of the configured shift animation. An upshift lasts 270 ms and a downshift 340 ms by default; a 450 ms completed-shift dwell prevents hunting. The gauge and synthesizer still create the desired shift event and RPM drop, but the EV road force remains continuous throughout it.
 
 ## Procedural sound model
 
@@ -178,7 +168,7 @@ The header/footer show the requested mode, active logical channel count/layout, 
 
 The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
 
-The **TUNE** control opens a persistent live-editing workstation for engine parameters, torque and throttle curves, pedal dynamics, all seven gear ratios, shift timing, audio layers, and firing harmonics. Graphs visualize torque/power, response timing, RPM drop, and spectrum; torque and throttle curves are edited by dragging their control points. See [Live tuning interface](tuning-interface.md).
+The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response peak torque and power, motor speed and reduction, efficiency, traction ceiling, mass, tire radius, drag, rolling resistance, top speed, motor curve, Sport-like pedal curve, pedal timing, synthetic RPM response, all seven presentation ratios, shift timing, audio layers, and firing harmonics. Graphs visualize motor torque/power, response timing, RPM drop, and spectrum; the motor and pedal curves are edited by dragging their control points. See [Live tuning interface](tuning-interface.md).
 
 The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
 
@@ -204,12 +194,16 @@ The following command passes:
 
 Tests verify that:
 
-- sustained throttle increases RPM progressively rather than jumping directly to a pedal-derived target;
-- a first-gear launch does not lose RPM while the clutch progressively couples the engine and wheels at any positive throttle input;
+- the default physical profile contains the published 670 Nm, 390 kW, 2,185 kg, and 180 km/h anchors;
+- the motor envelope supplies constant low-speed torque and then tapers torque at the 390 kW power ceiling;
+- sustained throttle increases sound RPM progressively with road speed rather than jumping directly to a pedal-derived target;
+- first-gear sound RPM does not reverse at any tested positive throttle input;
+- full-throttle virtual acceleration reaches 100 km/h inside the 3.70–3.90 second calibration band;
+- low-speed acceleration is stronger than high-speed acceleration, and a synthetic upshift causes no wheel-torque discontinuity;
 - automatic shifts begin near the shift point, drop RPM, and honor completed-gear dwell;
 - joining live speed selects a safe ratio, and projected over-rev forces a throttle-independent emergency upshift;
 - virtual/live acceleration has the correct sign and bounds, including zero acceleration when braking at rest;
-- the fuel cut uses limiter hysteresis instead of buffer-rate chatter;
+- the sound limiter uses hysteresis instead of buffer-rate chatter;
 - braking decelerates more strongly than coasting;
 - the stopped engine returns to the configured 950 RPM idle;
 - the synthesizer produces nonzero, varying PCM with greater RMS under load, keeps limiter phase continuous across arbitrary buffer sizes, and ramps state gains; the tests do not establish perceived sound quality or audibility on the car;
@@ -258,5 +252,5 @@ adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 - Playback is Activity-owned and intentionally stops when the dashboard is no longer visible. Background/foreground-service operation is not included in this release.
 - The `mobile` APK deliberately targets SDK 25 for DiLink compatibility. It is a sideload prototype, not a Google Play-ready application, and modern devices may block installation without a low-target-SDK test override.
 - There is no enforced drive lockout or production volume policy. Do not use the current build on public roads.
-- The current simplified coupling is game-oriented rather than an engineering-grade vehicle model. It intentionally prioritizes stable, tunable feel.
+- BYD does not publish the complete motor dyno curves, Sport pedal transfer table, front/rear torque allocation, or current/traction limits. The implementation is constrained by published maxima and 0–100 performance, but its intermediate curve and transient response remain an editable engineering reconstruction pending instrumented on-car measurements.
 - Add named profile import/export, a speaker-walk diagnostic, and in-app telemetry/audio recording after first-car validation.

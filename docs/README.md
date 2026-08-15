@@ -36,6 +36,7 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 ## Documentation map
 
 - [Full engine-sound implementation](full-implementation.md) - architecture, drivetrain, input policy, procedural audio, logical multichannel routing, UI, controls, verification, and on-car acceptance.
+- [BYD Seal Performance calibration](byd-seal-performance-calibration.md) - published vehicle anchors, derived EV motor curve, Sport-pedal uncertainty, road-load assumptions, and synthetic-gear separation.
 - [Emulator validation](emulator-validation.md) - exact software-ARM fallback, final APK identity, viewport, and pedal-test evidence.
 - [Drivetrain and audio research](drivetrain-audio-research.md) - professional simulation evidence, sound-synthesis references, commercial asset options, and licensing exclusions.
 - [Research findings](research-findings.md) - platform identification, official versus community evidence, Android Automotive comparison, permissions, known failure modes, and source links.
@@ -51,7 +52,7 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 - `automotive` remains an Android Automotive media-template shell. It requires `android.hardware.type.automotive`, has no launcher Activity, targets API 37, and depends on the template `shared` media service.
 - `shared/MyMusicService.kt` is template boilerplate with empty media callbacks.
 - The DiLink telemetry probe and the full engine-sound dashboard are implemented together in `mobile`, which produces a regular full-screen APK for the rotating BYD tablet. It uses reflection and packages no BYD framework stubs.
-- The reader polls the documented accelerator, brake, and speed getters every 20 ms. `DriveController` then feeds a separate 200 Hz drivetrain simulation and continuous audio renderer; simulator pedals take over when live values are unavailable.
+- The reader polls the documented accelerator, brake, and speed getters every 20 ms. `DriveController` then feeds a 200 Hz Seal-calibrated EV road model, independent synthetic sound gears, and a continuous audio renderer; simulator pedals take over when live values are unavailable.
 - The project is a public Git repository. APKs, local reference artifacts, raw licensed audio, and build/emulator downloads must remain ignored.
 
 ## Decisions that should survive future sessions

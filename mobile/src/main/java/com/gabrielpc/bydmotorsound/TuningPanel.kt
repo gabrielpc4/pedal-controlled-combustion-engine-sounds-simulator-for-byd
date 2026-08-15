@@ -75,7 +75,7 @@ private val TuneWhite = Color(0xFFF5FAFD)
 private val TuneMuted = Color(0xFF8CA7B5)
 
 private enum class TuningTab(val title: String, val subtitle: String) {
-    ENGINE("ENGINE", "CORE PARAMETERS"),
+    ENGINE("VEHICLE", "SEAL RESPONSE MODEL"),
     CURVES("CURVES", "DRAG CONTROL POINTS"),
     TRANSMISSION("GEARING", "RATIOS & SHIFT LOGIC"),
     AUDIO("AUDIO", "LAYERS & HARMONICS"),
@@ -134,7 +134,7 @@ private fun TuningHeader(config: TuningConfig, onReset: () -> Unit, onClose: () 
                 Text("// APEX V10", color = TuneCyan, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.6.sp)
             }
             Text(
-                "Changes apply immediately and are saved automatically  •  ${config.engine.maxRpm.roundToInt()} RPM TACH  •  ${config.engine.redlineRpm.roundToInt()} REDLINE  •  ${config.engine.maxTorqueNm.roundToInt()} Nm",
+                "Changes apply immediately and are saved automatically  •  ${config.engine.maxTorqueNm.roundToInt()} Nm  •  ${config.engine.peakPowerKw.roundToInt()} kW  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
                 color = TuneMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
@@ -171,50 +171,78 @@ private fun TabButton(tab: TuningTab, selected: Boolean, onClick: () -> Unit) {
 private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("ENGINE SPEED", "RPM envelope and automatic strategy", Modifier.weight(0.78f)) {
-            ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..12_000.0, "%.0f RPM") {
-                onChange(config.copy(engine = engine.copy(
-                    maxRpm = it,
-                    redlineRpm = min(engine.redlineRpm, it - 300.0),
-                    limiterRpm = min(engine.limiterRpm, it - 100.0),
-                )))
-            }
-            ParameterSlider("REDLINE", engine.redlineRpm, 4_000.0..(engine.maxRpm - 300.0), "%.0f RPM") {
-                onChange(config.copy(engine = engine.copy(
-                    redlineRpm = it,
-                    limiterRpm = max(engine.limiterRpm, it),
-                    upshiftRpm = min(engine.upshiftRpm, it - 100.0),
-                )))
-            }
-            ParameterSlider("FUEL CUTOFF", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
-                onChange(config.copy(engine = engine.copy(limiterRpm = it)))
-            }
-            ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
-                onChange(config.copy(engine = engine.copy(idleRpm = it)))
-            }
-            ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
-                onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
-            }
-            ParameterSlider("DOWNSHIFT RPM", engine.downshiftRpm, 1_000.0..min(4_500.0, engine.upshiftRpm - 500.0), "%.0f") {
-                onChange(config.copy(engine = engine.copy(downshiftRpm = it)))
-            }
-        }
-        PanelCard("PHYSICAL MODEL", "Torque, inertia, mass and rolling geometry", Modifier.weight(0.88f)) {
-            ParameterSlider("PEAK TORQUE", engine.maxTorqueNm, 150.0..1_200.0, "%.0f Nm") {
-                onChange(config.copy(engine = engine.copy(maxTorqueNm = it)))
-            }
-            ParameterSlider("ENGINE INERTIA", engine.engineInertiaKgM2, 0.15..1.50, "%.2f kg·m²") {
-                onChange(config.copy(engine = engine.copy(engineInertiaKgM2 = it)))
-            }
-            ParameterSlider("VEHICLE MASS", engine.vehicleMassKg, 700.0..3_500.0, "%.0f kg") {
-                onChange(config.copy(engine = engine.copy(vehicleMassKg = it)))
-            }
-            ParameterSlider("WHEEL RADIUS", engine.wheelRadiusMeters, 0.22..0.50, "%.3f m") {
-                onChange(config.copy(engine = engine.copy(wheelRadiusMeters = it)))
+        PanelCard("SYNTHETIC ENGINE", "Sound RPM envelope and automatic strategy", Modifier.weight(0.78f)) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..12_000.0, "%.0f RPM") {
+                    onChange(config.copy(engine = engine.copy(
+                        maxRpm = it,
+                        redlineRpm = min(engine.redlineRpm, it - 300.0),
+                        limiterRpm = min(engine.limiterRpm, it - 100.0),
+                    )))
+                }
+                ParameterSlider("REDLINE", engine.redlineRpm, 4_000.0..(engine.maxRpm - 300.0), "%.0f RPM") {
+                    onChange(config.copy(engine = engine.copy(
+                        redlineRpm = it,
+                        limiterRpm = max(engine.limiterRpm, it),
+                        upshiftRpm = min(engine.upshiftRpm, it - 100.0),
+                    )))
+                }
+                ParameterSlider("SOUND LIMITER", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
+                    onChange(config.copy(engine = engine.copy(limiterRpm = it)))
+                }
+                ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
+                    onChange(config.copy(engine = engine.copy(idleRpm = it)))
+                }
+                ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
+                    onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
+                }
+                ParameterSlider("DOWNSHIFT RPM", engine.downshiftRpm, 1_000.0..min(4_500.0, engine.upshiftRpm - 500.0), "%.0f") {
+                    onChange(config.copy(engine = engine.copy(downshiftRpm = it)))
+                }
+                ParameterSlider("RPM RESPONSE", engine.syntheticRpmResponseMs, 10.0..250.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
+                }
             }
         }
-        PanelCard("TORQUE + POWER", "Computed from the editable torque curve", Modifier.weight(1.34f)) {
-            TorquePowerGraph(engine, state.drivetrain.rpm, Modifier.fillMaxSize())
+        PanelCard("SEAL PERFORMANCE", "Electric drive and road-load calibration", Modifier.weight(0.92f)) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                ParameterSlider("PEAK TORQUE", engine.maxTorqueNm, 150.0..1_200.0, "%.0f Nm") {
+                    onChange(config.copy(engine = engine.copy(maxTorqueNm = it)))
+                }
+                ParameterSlider("PEAK POWER", engine.peakPowerKw, 100.0..800.0, "%.0f kW") {
+                    onChange(config.copy(engine = engine.copy(peakPowerKw = it)))
+                }
+                ParameterSlider("MOTOR MAX SPEED", engine.motorMaxRpm, 8_000.0..25_000.0, "%.0f RPM") {
+                    onChange(config.copy(engine = engine.copy(motorMaxRpm = it)))
+                }
+                ParameterSlider("MOTOR REDUCTION", engine.motorReductionRatio, 5.0..18.0, "%.2f:1") {
+                    onChange(config.copy(engine = engine.copy(motorReductionRatio = it)))
+                }
+                ParameterSlider("DRIVE EFFICIENCY", engine.drivetrainEfficiency, 0.70..0.99, "%.2f") {
+                    onChange(config.copy(engine = engine.copy(drivetrainEfficiency = it)))
+                }
+                ParameterSlider("TRACTION LIMIT", engine.tractionLimitMps2, 3.0..12.0, "%.2f m/s²") {
+                    onChange(config.copy(engine = engine.copy(tractionLimitMps2 = it)))
+                }
+                ParameterSlider("VEHICLE MASS", engine.vehicleMassKg, 700.0..3_500.0, "%.0f kg") {
+                    onChange(config.copy(engine = engine.copy(vehicleMassKg = it)))
+                }
+                ParameterSlider("WHEEL RADIUS", engine.wheelRadiusMeters, 0.22..0.50, "%.3f m") {
+                    onChange(config.copy(engine = engine.copy(wheelRadiusMeters = it)))
+                }
+                ParameterSlider("DRAG AREA", engine.dragAreaM2, 0.30..1.20, "%.3f m²") {
+                    onChange(config.copy(engine = engine.copy(dragAreaM2 = it)))
+                }
+                ParameterSlider("ROLLING RESISTANCE", engine.rollingResistanceCoefficient, 0.005..0.030, "%.3f") {
+                    onChange(config.copy(engine = engine.copy(rollingResistanceCoefficient = it)))
+                }
+                ParameterSlider("TOP SPEED", engine.topSpeedKmh, 100.0..350.0, "%.0f km/h") {
+                    onChange(config.copy(engine = engine.copy(topSpeedKmh = it)))
+                }
+            }
+        }
+        PanelCard("MOTOR TORQUE + POWER", "Editable curve with configured power ceiling", Modifier.weight(1.30f)) {
+            TorquePowerGraph(engine, state.drivetrain.speedKmh, Modifier.fillMaxSize())
         }
     }
 }
@@ -223,19 +251,20 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
 private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("TORQUE CURVE", "Drag any point • horizontal = RPM • vertical = torque", Modifier.weight(1.18f)) {
+        PanelCard("EV MOTOR CURVE", "Drag points • motor speed vs available torque", Modifier.weight(1.18f)) {
             EditableCurveGraph(
                 points = engine.torqueCurve,
-                xLabel = { "${(it * engine.limiterRpm / 1_000.0).format(1)}k" },
+                xLabel = { "${(it * engine.motorMaxRpm / 1_000.0).format(1)}k" },
                 yLabel = { "${(it * engine.maxTorqueNm).roundToInt()} Nm" },
-                currentX = (state.drivetrain.rpm / engine.limiterRpm).coerceIn(0.0, 1.0),
+                currentX = (motorRpmAtSpeed(engine, state.drivetrain.speedKmh) / engine.motorMaxRpm)
+                    .coerceIn(0.0, 1.0),
                 accent = TuneCyan,
                 lockEndpointX = true,
                 onPointsChange = { onChange(config.copy(engine = engine.copy(torqueCurve = it))) },
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("THROTTLE RESPONSE", "Drag the three middle points • pedal vs requested torque", Modifier.weight(1f)) {
+        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1f)) {
             EditableCurveGraph(
                 points = engine.throttleCurve,
                 xLabel = { "${(it * 100).roundToInt()}%" },
@@ -268,8 +297,8 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
 private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SHIFT CONTROL", "Timing, dwell and final drive", Modifier.weight(0.76f)) {
-            ParameterSlider("FINAL DRIVE", engine.finalDrive, 2.0..6.0, "%.2f") {
+        PanelCard("SOUND SHIFT CONTROL", "Presentation only • wheel torque stays continuous", Modifier.weight(0.76f)) {
+            ParameterSlider("SYNTHETIC FINAL DRIVE", engine.finalDrive, 2.0..6.0, "%.2f") {
                 onChange(config.copy(engine = engine.copy(finalDrive = it)))
             }
             ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
@@ -282,7 +311,7 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
                 onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
             }
         }
-        PanelCard("GEAR RATIOS", "Each ratio is live • lower gears remain ordered", Modifier.weight(0.96f)) {
+        PanelCard("SYNTHETIC GEAR RATIOS", "Changes RPM and sound, never physical acceleration", Modifier.weight(0.96f)) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 engine.gearRatios.forEachIndexed { index, ratio ->
                     val maximum = if (index == 0) 5.0 else engine.gearRatios[index - 1] - 0.05
@@ -501,7 +530,7 @@ private fun EditableCurveGraph(
 }
 
 @Composable
-private fun TorquePowerGraph(engine: EngineTuning, currentRpm: Double, modifier: Modifier = Modifier) {
+private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val left = 54f
         val right = size.width - 24f
@@ -520,16 +549,22 @@ private fun TorquePowerGraph(engine: EngineTuning, currentRpm: Double, modifier:
         repeat(101) { index ->
             val x = index / 100.0
             val torque = interpolateCurve(engine.torqueCurve, x) * engine.maxTorqueNm
-            val rpm = x * engine.limiterRpm
-            maxPowerKw = max(maxPowerKw, torque * rpm / 9_549.0)
+            val rpm = x * engine.motorMaxRpm
+            maxPowerKw = max(maxPowerKw, min(engine.peakPowerKw, torque * rpm / 9_549.0))
         }
         repeat(101) { index ->
             val x = index / 100.0
             val torque = interpolateCurve(engine.torqueCurve, x) * engine.maxTorqueNm
-            val rpm = x * engine.limiterRpm
-            val power = torque * rpm / 9_549.0
+            val rpm = x * engine.motorMaxRpm
+            val power = min(engine.peakPowerKw, torque * rpm / 9_549.0)
+            val powerLimitedTorque = if (rpm < 1.0) {
+                engine.maxTorqueNm
+            } else {
+                engine.peakPowerKw * 9_549.0 / rpm
+            }
+            val displayedTorque = min(torque, powerLimitedTorque)
             val px = left + width * x.toFloat()
-            val torqueY = bottom - height * (torque / (engine.maxTorqueNm * 1.15)).toFloat()
+            val torqueY = bottom - height * (displayedTorque / (engine.maxTorqueNm * 1.15)).toFloat()
             val powerY = bottom - height * (power / (maxPowerKw * 1.10)).toFloat()
             if (index == 0) {
                 torquePath.moveTo(px, torqueY)
@@ -541,7 +576,8 @@ private fun TorquePowerGraph(engine: EngineTuning, currentRpm: Double, modifier:
         }
         drawPath(torquePath, TuneCyan, style = Stroke(4f, cap = StrokeCap.Round))
         drawPath(powerPath, TuneAmber, style = Stroke(4f, cap = StrokeCap.Round))
-        val liveX = (currentRpm / engine.limiterRpm).coerceIn(0.0, 1.0).toFloat()
+        val liveX = (motorRpmAtSpeed(engine, currentSpeedKmh) / engine.motorMaxRpm)
+            .coerceIn(0.0, 1.0).toFloat()
         drawLine(TuneWhite.copy(alpha = 0.45f), Offset(left + width * liveX, top), Offset(left + width * liveX, bottom), 2f)
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
@@ -552,6 +588,11 @@ private fun TorquePowerGraph(engine: EngineTuning, currentRpm: Double, modifier:
             canvas.nativeCanvas.drawText("POWER  ${maxPowerKw.roundToInt()} kW", left + width * 0.50f, bottom + 34f, paint)
         }
     }
+}
+
+private fun motorRpmAtSpeed(engine: EngineTuning, speedKmh: Double): Double {
+    val wheelRpm = (speedKmh / 3.6) / (2.0 * PI * engine.wheelRadiusMeters) * 60.0
+    return wheelRpm * engine.motorReductionRatio
 }
 
 @Composable

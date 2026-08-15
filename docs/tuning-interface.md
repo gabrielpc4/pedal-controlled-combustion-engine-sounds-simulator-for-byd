@@ -1,34 +1,35 @@
 # Live tuning interface
 
-The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the Apex V10 defaults; **CLOSE** returns to driving without discarding edits.
+The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the Seal-response and synthetic-sound defaults; **CLOSE** returns to driving without discarding edits.
 
 ## Editable controls
 
-### Engine
+### Vehicle
 
-- Tachometer maximum, idle, redline, fuel cutoff, automatic upshift, and downshift RPM
-- Peak torque, engine rotational inertia, vehicle mass, and wheel radius
-- Live torque/power graph with a current-RPM cursor
+- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, downshift RPM, and RPM response time
+- Peak motor torque and power, motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
+- Vehicle mass, wheel radius, drag area, rolling resistance, and top speed
+- Live motor torque/power graph with a cursor derived from road speed and actual motor reduction
 
-The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and shift logic all use the same live configuration. Tachometer maximum, redline, and limiter remain separate values.
+The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and presentation-shift logic all use the same live synthetic configuration. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is computed from the electric settings and is independent of the synthetic gears.
 
 ### Curves
 
-- Nine-point normalized torque curve
-- Five-point pedal-to-requested-torque curve
+- Nine-point normalized EV motor torque curve
+- Six-point Sport-like pedal-to-requested-motor-torque curve
 - Throttle attack/release and brake response time constants
 - Live response preview for all three pedal filters
 
-Curve points are edited directly by dragging them. Their horizontal order is constrained, throttle endpoints remain fixed at 0/0 and 100/100, and every edit passes through the same sanitizer used when a saved profile is loaded. The live vertical cursor shows current engine RPM or pedal input.
+Curve points are edited directly by dragging them. Their horizontal order is constrained, throttle endpoints remain fixed at 0/0 and 100/100, and every edit passes through the same sanitizer used when a saved profile is loaded. The motor graph's live cursor is based on road speed; the pedal graph shows current pedal input. The configured peak-power ceiling remains active even if a torque point is dragged above the physical constant-power envelope.
 
 ### Gearing
 
-- Final-drive ratio
+- Synthetic final-drive ratio
 - Upshift/downshift duration and post-shift dwell
-- Every ratio in the seven-speed gearbox
+- Every ratio in the seven-speed presentation gearbox
 - Computed RPM-after-shift graph for all adjacent gear changes
 
-Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change.
+Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change. These controls affect sound RPM and shift events only; a ratio edit cannot change electric acceleration.
 
 ### Audio
 
@@ -43,7 +44,7 @@ Values are smoothed inside the real-time renderer, so dragging a slider does not
 
 `TuningRepository` serializes every scalar, gear ratio, and curve point. Loaded and incoming values are bounded before reaching the simulation or audio thread. The explicit BYD vehicle-input safety behavior is unchanged: unavailable vehicle telemetry resolves to zero pedals rather than a stale touchscreen value.
 
-The controls affect the virtual drivetrain used by the emulator and the synthesized engine response. They do not write to any BYD vehicle ECU or alter the real car's throttle, braking, or transmission.
+The controls affect the virtual EV road model and the synthesized engine response. They do not write to any BYD vehicle ECU or alter the real car's throttle, braking, or fixed-ratio drive units.
 
 ## Emulator validation
 

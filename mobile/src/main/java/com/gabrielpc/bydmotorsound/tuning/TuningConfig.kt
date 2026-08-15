@@ -13,21 +13,29 @@ data class EngineTuning(
     val limiterRpm: Double = 8_850.0,
     val upshiftRpm: Double = 8_250.0,
     val downshiftRpm: Double = 2_250.0,
-    val maxTorqueNm: Double = 585.0,
-    val engineInertiaKgM2: Double = 0.42,
-    val vehicleMassKg: Double = 1_640.0,
-    val wheelRadiusMeters: Double = 0.337,
+    val maxTorqueNm: Double = 670.0,
+    val peakPowerKw: Double = 390.0,
+    val motorMaxRpm: Double = 16_000.0,
+    val motorReductionRatio: Double = 10.81,
+    val drivetrainEfficiency: Double = 0.92,
+    val tractionLimitMps2: Double = 8.0,
+    val vehicleMassKg: Double = 2_185.0,
+    val wheelRadiusMeters: Double = 0.347,
+    val dragAreaM2: Double = 0.504,
+    val rollingResistanceCoefficient: Double = 0.010,
+    val topSpeedKmh: Double = 180.0,
+    val syntheticRpmResponseMs: Double = 35.0,
     val finalDrive: Double = 3.82,
-    val throttleAttackMs: Double = 75.0,
-    val throttleReleaseMs: Double = 140.0,
+    val throttleAttackMs: Double = 60.0,
+    val throttleReleaseMs: Double = 90.0,
     val brakeResponseMs: Double = 55.0,
     val upshiftDurationMs: Double = 270.0,
     val downshiftDurationMs: Double = 340.0,
     val shiftDwellMs: Double = 450.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
-    /** X is normalized RPM (0..1 of max RPM), Y is normalized torque. */
+    /** X is normalized electric-motor speed, Y is normalized motor torque. */
     val torqueCurve: List<CurvePoint> = DEFAULT_TORQUE_CURVE,
-    /** X is physical pedal position, Y is requested engine torque. */
+    /** X is physical pedal position, Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
 ) {
     fun sanitized(): EngineTuning {
@@ -45,9 +53,17 @@ data class EngineTuning(
             upshiftRpm = cleanUpshift,
             downshiftRpm = cleanDownshift,
             maxTorqueNm = maxTorqueNm.coerceIn(150.0, 1_200.0),
-            engineInertiaKgM2 = engineInertiaKgM2.coerceIn(0.15, 1.50),
+            peakPowerKw = peakPowerKw.coerceIn(100.0, 800.0),
+            motorMaxRpm = motorMaxRpm.coerceIn(8_000.0, 25_000.0),
+            motorReductionRatio = motorReductionRatio.coerceIn(5.0, 18.0),
+            drivetrainEfficiency = drivetrainEfficiency.coerceIn(0.70, 0.99),
+            tractionLimitMps2 = tractionLimitMps2.coerceIn(3.0, 12.0),
             vehicleMassKg = vehicleMassKg.coerceIn(700.0, 3_500.0),
             wheelRadiusMeters = wheelRadiusMeters.coerceIn(0.22, 0.50),
+            dragAreaM2 = dragAreaM2.coerceIn(0.30, 1.20),
+            rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
+            topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
+            syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(10.0, 250.0),
             finalDrive = finalDrive.coerceIn(2.0, 6.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
@@ -64,21 +80,22 @@ data class EngineTuning(
     companion object {
         val DEFAULT_GEARS = listOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69)
         val DEFAULT_TORQUE_CURVE = listOf(
-            CurvePoint(850.0 / 8_850.0, 0.34),
-            CurvePoint(1_500.0 / 8_850.0, 0.48),
-            CurvePoint(2_500.0 / 8_850.0, 0.68),
-            CurvePoint(3_800.0 / 8_850.0, 0.84),
-            CurvePoint(5_200.0 / 8_850.0, 0.96),
-            CurvePoint(6_500.0 / 8_850.0, 1.00),
-            CurvePoint(7_500.0 / 8_850.0, 0.97),
-            CurvePoint(8_300.0 / 8_850.0, 0.89),
-            CurvePoint(1.0, 0.69),
+            CurvePoint(0.000, 1.000),
+            CurvePoint(0.100, 1.000),
+            CurvePoint(0.200, 1.000),
+            CurvePoint(0.300, 1.000),
+            CurvePoint(0.347, 1.000),
+            CurvePoint(0.450, 0.771),
+            CurvePoint(0.600, 0.578),
+            CurvePoint(0.800, 0.434),
+            CurvePoint(1.000, 0.347),
         )
         val DEFAULT_THROTTLE_CURVE = listOf(
             CurvePoint(0.0, 0.0),
-            CurvePoint(0.25, 0.18),
-            CurvePoint(0.50, 0.46),
-            CurvePoint(0.75, 0.76),
+            CurvePoint(0.10, 0.13),
+            CurvePoint(0.25, 0.31),
+            CurvePoint(0.50, 0.60),
+            CurvePoint(0.75, 0.84),
             CurvePoint(1.0, 1.0),
         )
     }
@@ -126,7 +143,8 @@ class TuningRepository(context: Context) {
 
     fun load(): TuningConfig {
         val defaults = TuningConfig.DEFAULT
-        val engine = defaults.engine.copy(
+        val currentCalibration = preferences.getInt(KEY_CALIBRATION_REVISION, 0) == CALIBRATION_REVISION
+        val storedEngine = defaults.engine.copy(
             idleRpm = number(KEY_IDLE, defaults.engine.idleRpm),
             maxRpm = number(KEY_MAX_RPM, defaults.engine.maxRpm),
             redlineRpm = number(KEY_REDLINE_RPM, defaults.engine.redlineRpm),
@@ -134,9 +152,17 @@ class TuningRepository(context: Context) {
             upshiftRpm = number(KEY_UPSHIFT, defaults.engine.upshiftRpm),
             downshiftRpm = number(KEY_DOWNSHIFT, defaults.engine.downshiftRpm),
             maxTorqueNm = number(KEY_TORQUE, defaults.engine.maxTorqueNm),
-            engineInertiaKgM2 = number(KEY_INERTIA, defaults.engine.engineInertiaKgM2),
+            peakPowerKw = number(KEY_PEAK_POWER, defaults.engine.peakPowerKw),
+            motorMaxRpm = number(KEY_MOTOR_MAX_RPM, defaults.engine.motorMaxRpm),
+            motorReductionRatio = number(KEY_MOTOR_REDUCTION, defaults.engine.motorReductionRatio),
+            drivetrainEfficiency = number(KEY_DRIVETRAIN_EFFICIENCY, defaults.engine.drivetrainEfficiency),
+            tractionLimitMps2 = number(KEY_TRACTION_LIMIT, defaults.engine.tractionLimitMps2),
             vehicleMassKg = number(KEY_MASS, defaults.engine.vehicleMassKg),
             wheelRadiusMeters = number(KEY_WHEEL_RADIUS, defaults.engine.wheelRadiusMeters),
+            dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
+            rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
+            topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
+            syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
             finalDrive = number(KEY_FINAL_DRIVE, defaults.engine.finalDrive),
             throttleAttackMs = number(KEY_THROTTLE_ATTACK, defaults.engine.throttleAttackMs),
             throttleReleaseMs = number(KEY_THROTTLE_RELEASE, defaults.engine.throttleReleaseMs),
@@ -148,6 +174,7 @@ class TuningRepository(context: Context) {
             torqueCurve = decodeCurve(preferences.getString(KEY_TORQUE_CURVE, null), defaults.engine.torqueCurve),
             throttleCurve = decodeCurve(preferences.getString(KEY_THROTTLE_CURVE, null), defaults.engine.throttleCurve),
         )
+        val engine = if (currentCalibration) storedEngine else defaults.engine
         val audio = defaults.audio.copy(
             masterGain = number(KEY_MASTER_GAIN, defaults.audio.masterGain),
             exhaustLevel = number(KEY_EXHAUST, defaults.audio.exhaustLevel),
@@ -160,12 +187,16 @@ class TuningRepository(context: Context) {
             harmonic4 = number(KEY_H4, defaults.audio.harmonic4),
             harmonic5 = number(KEY_H5, defaults.audio.harmonic5),
         )
+        if (!currentCalibration) {
+            preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).apply()
+        }
         return TuningConfig(engine, audio).sanitized()
     }
 
     fun save(config: TuningConfig) {
         val clean = config.sanitized()
         preferences.edit()
+            .putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION)
             .putString(KEY_IDLE, clean.engine.idleRpm.toString())
             .putString(KEY_MAX_RPM, clean.engine.maxRpm.toString())
             .putString(KEY_REDLINE_RPM, clean.engine.redlineRpm.toString())
@@ -173,9 +204,17 @@ class TuningRepository(context: Context) {
             .putString(KEY_UPSHIFT, clean.engine.upshiftRpm.toString())
             .putString(KEY_DOWNSHIFT, clean.engine.downshiftRpm.toString())
             .putString(KEY_TORQUE, clean.engine.maxTorqueNm.toString())
-            .putString(KEY_INERTIA, clean.engine.engineInertiaKgM2.toString())
+            .putString(KEY_PEAK_POWER, clean.engine.peakPowerKw.toString())
+            .putString(KEY_MOTOR_MAX_RPM, clean.engine.motorMaxRpm.toString())
+            .putString(KEY_MOTOR_REDUCTION, clean.engine.motorReductionRatio.toString())
+            .putString(KEY_DRIVETRAIN_EFFICIENCY, clean.engine.drivetrainEfficiency.toString())
+            .putString(KEY_TRACTION_LIMIT, clean.engine.tractionLimitMps2.toString())
             .putString(KEY_MASS, clean.engine.vehicleMassKg.toString())
             .putString(KEY_WHEEL_RADIUS, clean.engine.wheelRadiusMeters.toString())
+            .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
+            .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
+            .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
+            .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
             .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
             .putString(KEY_THROTTLE_RELEASE, clean.engine.throttleReleaseMs.toString())
@@ -209,6 +248,8 @@ class TuningRepository(context: Context) {
 
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
+        const val KEY_CALIBRATION_REVISION = "calibration_revision"
+        const val CALIBRATION_REVISION = 1
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
@@ -216,9 +257,17 @@ class TuningRepository(context: Context) {
         const val KEY_UPSHIFT = "upshift_rpm"
         const val KEY_DOWNSHIFT = "downshift_rpm"
         const val KEY_TORQUE = "max_torque"
-        const val KEY_INERTIA = "engine_inertia"
+        const val KEY_PEAK_POWER = "peak_power"
+        const val KEY_MOTOR_MAX_RPM = "motor_max_rpm"
+        const val KEY_MOTOR_REDUCTION = "motor_reduction"
+        const val KEY_DRIVETRAIN_EFFICIENCY = "drivetrain_efficiency"
+        const val KEY_TRACTION_LIMIT = "traction_limit"
         const val KEY_MASS = "vehicle_mass"
         const val KEY_WHEEL_RADIUS = "wheel_radius"
+        const val KEY_DRAG_AREA = "drag_area"
+        const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
+        const val KEY_TOP_SPEED = "top_speed"
+        const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
         const val KEY_FINAL_DRIVE = "final_drive"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"
         const val KEY_THROTTLE_RELEASE = "throttle_release"

@@ -17,15 +17,26 @@ data class EngineProfile(
     val upshiftRpm: Double,
     val downshiftRpm: Double,
     val maxTorqueNm: Double,
-    val engineInertiaKgM2: Double,
+    val peakPowerKw: Double,
+    val motorMaxRpm: Double,
+    val motorReductionRatio: Double,
+    val drivetrainEfficiency: Double,
+    val tractionLimitMps2: Double,
     val vehicleMassKg: Double,
     val wheelRadiusMeters: Double,
+    val dragAreaM2: Double,
+    val rollingResistanceCoefficient: Double,
+    val topSpeedKmh: Double,
+    val syntheticRpmResponseSeconds: Double,
+    /** These ratios shape only the synthetic sound and tachometer. */
     val finalDrive: Double,
     val gearRatios: DoubleArray,
+    /** X is normalized electric-motor speed; Y is normalized motor torque. */
     val torqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_TORQUE_CURVE,
+    /** X is pedal position; Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = EngineTuning.DEFAULT_THROTTLE_CURVE,
-    val throttleAttackSeconds: Double = 0.075,
-    val throttleReleaseSeconds: Double = 0.140,
+    val throttleAttackSeconds: Double = 0.060,
+    val throttleReleaseSeconds: Double = 0.090,
     val brakeResponseSeconds: Double = 0.055,
     val upshiftDurationSeconds: Double = 0.270,
     val downshiftDurationSeconds: Double = 0.340,
@@ -40,10 +51,18 @@ data class EngineProfile(
             limiterRpm = 8_850.0,
             upshiftRpm = 8_250.0,
             downshiftRpm = 2_250.0,
-            maxTorqueNm = 585.0,
-            engineInertiaKgM2 = 0.42,
-            vehicleMassKg = 1_640.0,
-            wheelRadiusMeters = 0.337,
+            maxTorqueNm = 670.0,
+            peakPowerKw = 390.0,
+            motorMaxRpm = 16_000.0,
+            motorReductionRatio = 10.81,
+            drivetrainEfficiency = 0.92,
+            tractionLimitMps2 = 8.0,
+            vehicleMassKg = 2_185.0,
+            wheelRadiusMeters = 0.347,
+            dragAreaM2 = 0.504,
+            rollingResistanceCoefficient = 0.010,
+            topSpeedKmh = 180.0,
+            syntheticRpmResponseSeconds = 0.035,
             finalDrive = 3.82,
             gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69),
         )
@@ -75,12 +94,11 @@ data class DrivetrainState(
 )
 
 /**
- * Fixed-step, game-oriented longitudinal powertrain simulation.
+ * Fixed-step Seal Performance longitudinal model with a synthetic multi-gear sound layer.
  *
- * It deliberately models state (engine inertia, wheel speed, converter/clutch coupling, torque
- * interruption and gear synchronization) rather than mapping pedal percentage directly to RPM.
- * The model is compact enough for Android but follows the same separation used by driving games:
- * driver controls -> engine torque -> transmission -> tyre force -> vehicle speed -> coupled RPM.
+ * Road acceleration comes from the electric motors' torque/power envelope, fixed reduction,
+ * vehicle mass, rolling resistance and aerodynamic drag. The displayed RPM and gears never feed
+ * back into wheel torque, so a sound shift cannot add combustion-engine lag or interrupt drive.
  */
 class EngineSimulation(
     initialProfile: EngineProfile = EngineProfile.APEX_V10,
@@ -95,7 +113,6 @@ class EngineSimulation(
     private var shift: ActiveShift? = null
     private var shiftSerial = 0L
     private var secondsSinceShift = 10.0
-    private var launchClutchEngagement = 0.0
     private var limiterLatched = false
     private var externalSpeedActive = false
     private var lastAcceleration = 0.0
@@ -106,7 +123,8 @@ class EngineSimulation(
     fun updateProfile(updated: EngineProfile) {
         profile = updated
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
-        engineRpm = engineRpm.coerceIn(profile.idleRpm * 0.72, profile.limiterRpm)
+        engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
+        vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(profile.topSpeedKmh / 3.6)
     }
 
     fun reset() {
@@ -118,7 +136,6 @@ class EngineSimulation(
         shift = null
         shiftSerial = 0L
         secondsSinceShift = 10.0
-        launchClutchEngagement = 0.0
         limiterLatched = false
         externalSpeedActive = false
         lastAcceleration = 0.0
@@ -126,113 +143,40 @@ class EngineSimulation(
 
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
         val dt = deltaSeconds.coerceIn(1.0 / 1_000.0, 1.0 / 20.0)
-        val requestedThrottle = input.throttle.coerceIn(0.0, 1.0)
-        val requestedEngineTorque = interpolateCurve(profile.throttleCurve, requestedThrottle)
-        val requestedBrake = input.brake.coerceIn(0.0, 1.0)
-
-        // A fast attack makes tip-in feel immediate; slower release preserves drivetrain inertia.
+        val requestedThrottle = interpolateCurve(
+            profile.throttleCurve,
+            input.throttle.coerceIn(0.0, 1.0),
+        )
         filteredThrottle = approachExp(
             filteredThrottle,
-            requestedEngineTorque,
-            if (requestedEngineTorque > filteredThrottle) {
+            requestedThrottle,
+            if (requestedThrottle > filteredThrottle) {
                 profile.throttleAttackSeconds
             } else {
                 profile.throttleReleaseSeconds
             },
             dt,
         )
-        filteredBrake = approachExp(filteredBrake, requestedBrake, profile.brakeResponseSeconds, dt)
+        filteredBrake = approachExp(
+            filteredBrake,
+            input.brake.coerceIn(0.0, 1.0),
+            profile.brakeResponseSeconds,
+            dt,
+        )
 
         val externalMps = input.externalSpeedKmh?.coerceAtLeast(0.0)?.div(3.6)
         if (externalMps != null) {
             applyExternalSpeed(externalMps, dt)
         } else {
             externalSpeedActive = false
+            integrateElectricVehicle(dt)
         }
 
+        shift?.let { updateShift(it, dt) }
         if (shift == null) secondsSinceShift += dt
 
-        val currentShift = shift
-        val shiftControl = if (currentShift == null) {
-            ShiftControl()
-        } else {
-            updateShift(currentShift, dt)
-        }
-
-        val gearRatio = profile.gearRatios[currentGearIndex]
-        val totalRatio = gearRatio * profile.finalDrive
-        val wheelRpm = vehicleSpeedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
-        val gearboxRpm = wheelRpm * totalRatio
-
-        val launchClutchTarget = when {
-            vehicleSpeedMps > 2.5 || gearboxRpm >= profile.idleRpm -> 1.0
-            else -> ((engineRpm - profile.idleRpm) / LAUNCH_RPM_SPAN).coerceIn(0.0, 1.0)
-        }
-        launchClutchEngagement = approachLinear(
-            current = launchClutchEngagement,
-            target = launchClutchTarget,
-            maxDelta = (if (launchClutchTarget > launchClutchEngagement) 4.0 else 12.0) * dt,
-        )
-        val clutchEngagement = launchClutchEngagement * shiftControl.clutchFactor
-
-        val torqueCurve = torqueCurve(engineRpm)
+        updateSyntheticRpm(dt)
         updateLimiterLatch()
-        val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
-        val effectiveThrottle = filteredThrottle * shiftControl.torqueFactor * brakeOverride
-        val combustionTorque = if (limiterLatched) {
-            0.0
-        } else {
-            profile.maxTorqueNm * torqueCurve * effectiveThrottle
-        }
-        val frictionTorque = 24.0 + 0.0058 * engineRpm
-        val pumpingTorque = (1.0 - effectiveThrottle) * 82.0 *
-            ((engineRpm - profile.idleRpm) / (profile.redlineRpm - profile.idleRpm)).coerceIn(0.0, 1.0)
-        val idleAssist = (1.0 - effectiveThrottle / 0.16).coerceIn(0.0, 1.0)
-        val frictionAtIdle = 24.0 + 0.0058 * profile.idleRpm
-        val idleTorque = if (engineRpm < profile.idleRpm * 1.12) {
-            idleAssist * (frictionAtIdle + (profile.idleRpm - engineRpm) * 0.55)
-                .coerceIn(0.0, 150.0)
-        } else {
-            0.0
-        }
-
-        val engineOmega = rpmToRadiansPerSecond(engineRpm)
-        val gearboxOmega = rpmToRadiansPerSecond(gearboxRpm)
-        val clutchCapacity = profile.maxTorqueNm * 1.45 * clutchEngagement
-        val revMatchTorque = shiftControl.revMatchTargetRpm?.let { targetRpm ->
-            (REV_MATCH_STIFFNESS * rpmToRadiansPerSecond(targetRpm - engineRpm))
-                .coerceIn(0.0, profile.maxTorqueNm * 0.65)
-        } ?: 0.0
-        val engineTorqueBeforeClutch = combustionTorque + idleTorque + revMatchTorque -
-            frictionTorque - pumpingTorque
-        val rawClutchTorque = CLUTCH_STIFFNESS * (engineOmega - gearboxOmega)
-        val managingLaunchSlip = externalMps == null && currentGearIndex == 0 && shift == null &&
-            requestedThrottle > 0.0 && engineRpm > gearboxRpm + LAUNCH_SLIP_MARGIN_RPM
-        val positiveClutchCapacity = if (managingLaunchSlip) {
-            val minimumRiseRpmPerSecond = LAUNCH_MIN_RISE_RPM_PER_SECOND +
-                LAUNCH_THROTTLE_RISE_RPM_PER_SECOND * filteredThrottle
-            val accelerationReserveTorque = profile.engineInertiaKgM2 *
-                rpmToRadiansPerSecond(minimumRiseRpmPerSecond)
-            min(clutchCapacity, (engineTorqueBeforeClutch - accelerationReserveTorque).coerceAtLeast(0.0))
-        } else {
-            clutchCapacity
-        }
-        val clutchTorque = rawClutchTorque.coerceIn(-clutchCapacity, positiveClutchCapacity)
-        val netEngineTorque = engineTorqueBeforeClutch - clutchTorque
-        val rpmDerivative = (netEngineTorque / profile.engineInertiaKgM2 * 60.0 / (2.0 * PI))
-            .coerceIn(-7_500.0, 8_000.0)
-        engineRpm = (engineRpm + rpmDerivative * dt)
-            .coerceIn(profile.idleRpm * 0.72, profile.limiterRpm)
-        updateLimiterLatch()
-
-        if (externalMps == null) {
-            integrateVirtualVehicle(
-                clutchTorque = clutchTorque,
-                totalRatio = totalRatio,
-                brake = filteredBrake,
-                dt = dt,
-            )
-        }
 
         if (shift == null) {
             val emergencyUpshift = needsEmergencyUpshift()
@@ -244,22 +188,30 @@ class EngineSimulation(
         return snapshot()
     }
 
-    private fun integrateVirtualVehicle(
-        clutchTorque: Double,
-        totalRatio: Double,
-        brake: Double,
-        dt: Double,
-    ) {
+    private fun integrateElectricVehicle(dt: Double) {
         val previousSpeedMps = vehicleSpeedMps
-        val transmittedTorque = clutchTorque * totalRatio * 0.90
-        val driveForce = transmittedTorque / profile.wheelRadiusMeters
-        val serviceBrakeForce = brake * profile.vehicleMassKg * 11.2
-        val aerodynamicDrag = 0.5 * 1.225 * 0.67 * vehicleSpeedMps.pow(2)
-        val rollingResistance = if (vehicleSpeedMps > 0.05) profile.vehicleMassKg * 9.81 * 0.014 else 0.0
-        val netForce = driveForce - serviceBrakeForce - aerodynamicDrag - rollingResistance
-        val acceleration = netForce / profile.vehicleMassKg
-        vehicleSpeedMps = (vehicleSpeedMps + acceleration * dt).coerceAtLeast(0.0)
-        if (vehicleSpeedMps < 0.04 && driveForce < rollingResistance + serviceBrakeForce) {
+        val motorRpm = motorRpmForSpeed(vehicleSpeedMps)
+        val availableTorque = motorTorqueAtRpm(profile, motorRpm)
+        val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
+        val driveTorque = availableTorque * filteredThrottle * brakeOverride
+        val uncappedDriveForce = driveTorque * profile.motorReductionRatio *
+            profile.drivetrainEfficiency / profile.wheelRadiusMeters
+        val driveForce = min(
+            uncappedDriveForce,
+            profile.vehicleMassKg * profile.tractionLimitMps2 * filteredThrottle,
+        )
+        val serviceBrakeForce = filteredBrake * profile.vehicleMassKg * MAX_SERVICE_BRAKE_MPS2
+        val aerodynamicDrag = 0.5 * AIR_DENSITY_KG_M3 * profile.dragAreaM2 * vehicleSpeedMps.pow(2)
+        val rollingResistance = if (vehicleSpeedMps > 0.05 || driveForce > 0.0) {
+            profile.vehicleMassKg * GRAVITY_MPS2 * profile.rollingResistanceCoefficient
+        } else {
+            0.0
+        }
+        val acceleration = (driveForce - serviceBrakeForce - aerodynamicDrag - rollingResistance) /
+            profile.vehicleMassKg
+        vehicleSpeedMps = (vehicleSpeedMps + acceleration * dt)
+            .coerceIn(0.0, profile.topSpeedKmh / 3.6)
+        if (vehicleSpeedMps < 0.04 && driveForce <= rollingResistance + serviceBrakeForce) {
             vehicleSpeedMps = 0.0
         }
         lastAcceleration = ((vehicleSpeedMps - previousSpeedMps) / max(dt, 0.001))
@@ -286,37 +238,46 @@ class EngineSimulation(
         externalSpeedActive = true
     }
 
-    /**
-     * A live vehicle can connect while already travelling at motorway speed. Starting that sample in
-     * first gear would momentarily command an impossible engine speed, so choose the tallest gear
-     * that still leaves useful engine speed without over-revving.
-     */
+    /** A live vehicle can connect while already travelling, so start in a safe synthetic gear. */
     private fun synchronizeToExternalSpeed() {
         val wheelRpm = wheelRpmForSpeed(vehicleSpeedMps)
         val maximumSynchronizationRpm = profile.redlineRpm * 0.92
         val minimumCruiseRpm = max(profile.idleRpm * 1.15, profile.downshiftRpm * 0.90)
         val safeGears = profile.gearRatios.indices.filter { gearIndex ->
-            wheelRpm * profile.gearRatios[gearIndex] * profile.finalDrive <= maximumSynchronizationRpm
+            profile.idleRpm + wheelRpm * profile.gearRatios[gearIndex] * profile.finalDrive <=
+                maximumSynchronizationRpm
         }
         val cruiseGears = safeGears.filter { gearIndex ->
-            wheelRpm * profile.gearRatios[gearIndex] * profile.finalDrive >= minimumCruiseRpm
+            profile.idleRpm + wheelRpm * profile.gearRatios[gearIndex] * profile.finalDrive >=
+                minimumCruiseRpm
         }
         currentGearIndex = cruiseGears.lastOrNull()
             ?: safeGears.firstOrNull()
             ?: profile.gearRatios.lastIndex
-
-        val synchronizedRpm = wheelRpm * profile.gearRatios[currentGearIndex] * profile.finalDrive
-        engineRpm = max(profile.idleRpm, synchronizedRpm)
-            .coerceAtMost(profile.limiterRpm - LIMITER_TRIGGER_MARGIN_RPM)
-        launchClutchEngagement = if (vehicleSpeedMps > 0.25) 1.0 else 0.0
+        engineRpm = syntheticRpmTarget()
         limiterLatched = false
         shift = null
         secondsSinceShift = 0.0
     }
 
+    private fun updateSyntheticRpm(dt: Double) {
+        engineRpm = approachExp(
+            current = engineRpm,
+            target = syntheticRpmTarget(),
+            timeConstant = profile.syntheticRpmResponseSeconds,
+            dt = dt,
+        ).coerceIn(profile.idleRpm, profile.limiterRpm)
+    }
+
+    private fun syntheticRpmTarget(): Double {
+        val coupled = wheelRpmForSpeed(vehicleSpeedMps) *
+            profile.gearRatios[currentGearIndex] * profile.finalDrive
+        return (profile.idleRpm + coupled).coerceAtMost(profile.limiterRpm)
+    }
+
     private fun needsEmergencyUpshift(): Boolean {
         if (currentGearIndex >= profile.gearRatios.lastIndex) return false
-        val projectedRpm = wheelRpmForSpeed(vehicleSpeedMps) *
+        val projectedRpm = profile.idleRpm + wheelRpmForSpeed(vehicleSpeedMps) *
             profile.gearRatios[currentGearIndex] * profile.finalDrive
         return projectedRpm >= profile.redlineRpm * EMERGENCY_UPSHIFT_REDLINE_FRACTION ||
             engineRpm >= profile.redlineRpm * EMERGENCY_UPSHIFT_REDLINE_FRACTION
@@ -333,7 +294,7 @@ class EngineSimulation(
         if (currentGearIndex == 0) return
         val lowerRatio = profile.gearRatios[currentGearIndex - 1]
         val wheelRpm = wheelRpmForSpeed(vehicleSpeedMps)
-        val projectedLowerRpm = max(profile.idleRpm, wheelRpm * lowerRatio * profile.finalDrive)
+        val projectedLowerRpm = profile.idleRpm + wheelRpm * lowerRatio * profile.finalDrive
         val safeDownshift = projectedLowerRpm < profile.redlineRpm * 0.94
         val lowRpm = engineRpm < profile.downshiftRpm
         val brakingDownshift = filteredBrake > 0.20 && engineRpm < 3_650.0
@@ -345,7 +306,6 @@ class EngineSimulation(
 
     private fun beginShift(targetGearIndex: Int, direction: ShiftDirection) {
         shift = ActiveShift(
-            fromGearIndex = currentGearIndex,
             targetGearIndex = targetGearIndex,
             direction = direction,
             elapsed = 0.0,
@@ -360,44 +320,17 @@ class EngineSimulation(
         shiftSerial += 1
     }
 
-    private fun updateShift(active: ActiveShift, dt: Double): ShiftControl {
+    private fun updateShift(active: ActiveShift, dt: Double) {
         active.elapsed += dt
         val progress = (active.elapsed / active.duration).coerceIn(0.0, 1.0)
         if (!active.gearChanged && progress >= 0.38) {
             currentGearIndex = active.targetGearIndex
             active.gearChanged = true
         }
-
-        val torqueFactor = when {
-            progress < 0.20 -> lerp(1.0, 0.06, progress / 0.20)
-            progress < 0.64 -> 0.06
-            else -> lerp(0.06, 1.0, (progress - 0.64) / 0.36)
-        }
-        val clutchFactor = when {
-            progress < 0.18 -> lerp(1.0, 0.04, progress / 0.18)
-            progress < 0.62 -> 0.04
-            else -> lerp(0.04, 1.0, (progress - 0.62) / 0.38)
-        }
-
-        val wheelRpm = wheelRpmForSpeed(vehicleSpeedMps)
-        val newCoupledRpm = max(
-            profile.idleRpm,
-            wheelRpm * profile.gearRatios[active.targetGearIndex] * profile.finalDrive,
-        )
-        val revMatchTargetRpm = if (
-            active.direction == ShiftDirection.DOWN && progress in 0.24..0.70
-        ) {
-            newCoupledRpm.coerceAtMost(profile.redlineRpm * 0.98)
-        } else {
-            null
-        }
-
         if (progress >= 1.0) {
             shift = null
-            // Dwell is measured from completed clutch re-engagement, not from shift initiation.
             secondsSinceShift = 0.0
         }
-        return ShiftControl(torqueFactor, clutchFactor, revMatchTargetRpm)
     }
 
     private fun updateLimiterLatch() {
@@ -411,31 +344,22 @@ class EngineSimulation(
     private fun wheelRpmForSpeed(speedMps: Double): Double =
         speedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
 
-    private fun torqueCurve(rpm: Double): Double {
-        val normalizedRpm = (rpm / profile.limiterRpm).coerceIn(0.0, 1.0)
-        val points = profile.torqueCurve
-        if (points.isEmpty()) return 0.0
-        if (normalizedRpm <= points.first().x) return points.first().y
-        for (index in 0 until points.lastIndex) {
-            val left = points[index]
-            val right = points[index + 1]
-            if (normalizedRpm <= right.x) {
-                val fraction = (normalizedRpm - left.x) / (right.x - left.x).coerceAtLeast(0.0001)
-                return lerp(left.y, right.y, smoothStep(fraction))
-            }
-        }
-        return points.last().y
-    }
+    private fun motorRpmForSpeed(speedMps: Double): Double =
+        wheelRpmForSpeed(speedMps) * profile.motorReductionRatio
 
     private fun snapshot(): DrivetrainState {
         val currentShift = shift
+        val motorTorqueFraction = interpolateCurve(
+            profile.torqueCurve,
+            (motorRpmForSpeed(vehicleSpeedMps) / profile.motorMaxRpm).coerceIn(0.0, 1.0),
+        )
         return DrivetrainState(
             rpm = engineRpm,
             gear = currentGearIndex + 1,
             speedKmh = vehicleSpeedMps * 3.6,
             smoothedThrottle = filteredThrottle,
             smoothedBrake = filteredBrake,
-            engineLoad = (filteredThrottle * (0.35 + 0.65 * torqueCurve(engineRpm))).coerceIn(0.0, 1.0),
+            engineLoad = (filteredThrottle * (0.35 + 0.65 * motorTorqueFraction)).coerceIn(0.0, 1.0),
             isShifting = currentShift != null,
             shiftDirection = currentShift?.direction ?: ShiftDirection.NONE,
             shiftProgress = currentShift?.let { (it.elapsed / it.duration).coerceIn(0.0, 1.0) } ?: 0.0,
@@ -446,7 +370,6 @@ class EngineSimulation(
     }
 
     private data class ActiveShift(
-        val fromGearIndex: Int,
         val targetGearIndex: Int,
         val direction: ShiftDirection,
         var elapsed: Double,
@@ -454,19 +377,10 @@ class EngineSimulation(
         var gearChanged: Boolean,
     )
 
-    private data class ShiftControl(
-        val torqueFactor: Double = 1.0,
-        val clutchFactor: Double = 1.0,
-        val revMatchTargetRpm: Double? = null,
-    )
-
     companion object {
-        private const val LAUNCH_RPM_SPAN = 2_500.0
-        private const val LAUNCH_SLIP_MARGIN_RPM = 80.0
-        private const val LAUNCH_MIN_RISE_RPM_PER_SECOND = 150.0
-        private const val LAUNCH_THROTTLE_RISE_RPM_PER_SECOND = 600.0
-        private const val CLUTCH_STIFFNESS = 10.0
-        private const val REV_MATCH_STIFFNESS = 1.5
+        private const val AIR_DENSITY_KG_M3 = 1.225
+        private const val GRAVITY_MPS2 = 9.81
+        private const val MAX_SERVICE_BRAKE_MPS2 = 11.2
         private const val EMERGENCY_UPSHIFT_REDLINE_FRACTION = 0.97
         private const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0
@@ -475,24 +389,23 @@ class EngineSimulation(
     }
 }
 
+/** Torque available from the editable motor curve, bounded by the configured peak-power envelope. */
+internal fun motorTorqueAtRpm(profile: EngineProfile, motorRpm: Double): Double {
+    val rpm = motorRpm.coerceAtLeast(0.0)
+    val curveTorque = profile.maxTorqueNm * interpolateCurve(
+        profile.torqueCurve,
+        (rpm / profile.motorMaxRpm).coerceIn(0.0, 1.0),
+    )
+    val powerLimitedTorque = if (rpm < 1.0) {
+        profile.maxTorqueNm
+    } else {
+        profile.peakPowerKw * 9_549.0 / rpm
+    }
+    return min(curveTorque, powerLimitedTorque).coerceAtLeast(0.0)
+}
+
 private fun approachExp(current: Double, target: Double, timeConstant: Double, dt: Double): Double {
     if (timeConstant <= 0.0) return target
     val blend = 1.0 - kotlin.math.exp(-dt / timeConstant)
     return current + (target - current) * blend
-}
-
-private fun approachLinear(current: Double, target: Double, maxDelta: Double): Double = when {
-    target > current -> min(target, current + maxDelta)
-    target < current -> max(target, current - maxDelta)
-    else -> current
-}
-
-private fun rpmToRadiansPerSecond(rpm: Double): Double = rpm * 2.0 * PI / 60.0
-
-private fun lerp(start: Double, end: Double, fraction: Double): Double =
-    start + (end - start) * fraction.coerceIn(0.0, 1.0)
-
-private fun smoothStep(value: Double): Double {
-    val x = value.coerceIn(0.0, 1.0)
-    return x * x * (3.0 - 2.0 * x)
 }

@@ -450,7 +450,7 @@ private fun CarStage(
         ) {
             Text("APEX V10", color = White, fontSize = 34.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
             Text(
-                "5.2 L  •  10 CYL  •  ${state.tuning.engine.redlineRpm.roundToInt()} REDLINE",
+                "SEAL AWD RESPONSE  •  10 CYL SOUND  •  ${state.tuning.engine.redlineRpm.roundToInt()} REDLINE",
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
