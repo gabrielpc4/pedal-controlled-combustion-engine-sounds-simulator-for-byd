@@ -64,6 +64,7 @@ Wireless ADB is a privileged maintenance channel. Enable it only in a trusted en
 - [Live tuning interface](docs/tuning-interface.md)
 - [Emulator validation record](docs/emulator-validation.md)
 - [Persistent diagnostics](docs/persistent-diagnostics.md)
+- [Fresh-chat LLM handoff](docs/llm-handoff.md)
 - [Drivetrain, game-audio, and sound-asset research](docs/drivetrain-audio-research.md)
 - [Implemented POC](docs/poc-implementation.md)
 - [POC and on-car test plan](docs/poc-plan.md)

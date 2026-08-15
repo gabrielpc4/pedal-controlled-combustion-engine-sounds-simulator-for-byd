@@ -1,0 +1,179 @@
+# Fresh-chat LLM handoff
+
+This document is the practical starting point for a new coding agent. Read it, then read the
+linked engineering documents before changing vehicle, audio, or simulator behavior.
+
+## Source of truth and Git
+
+- The real project checkout is `D:\Users\sgabr\AndroidStudioProjects\BYDMotorSound`.
+- A separate `C:\Users\Gabriel\Documents\ChatGPT\BYDMotorSound` directory may exist as an empty,
+  unborn Git repository containing only local `docs/` and `tmp/`. Do **not** implement or commit
+  there.
+- Active branch: `full-engine-simulator`.
+- Remote: `origin` -> `git@github.com:gabrielpc4/BYDMotorSound.git`.
+- Handoff commit: `978ad23 fix: persist diagnostics and stop lift-off gear hunting`.
+- Confirm the current state yourself with `git status -sb` and `git log -1 --oneline`; another
+  agent may have moved the branch after this handoff was written.
+
+The user requires this workflow after **every** change, including documentation-only changes:
+
+1. Build and verify the relevant tests.
+2. Install the updated debug APK and launch it in the emulator foreground so the user can test.
+3. Commit and push the change.
+
+Never commit APKs, AABs, build output, reference APKs, PDFs, or other supplied artifacts. They are
+ignored intentionally. Keep commits on `full-engine-simulator` unless the user explicitly directs
+otherwise.
+
+## Product and safety boundary
+
+This is an experimental, read-only Android engine-sound dashboard for a BYD Seal on DiLink firmware
+`13.1.33.2503250.1` (family `2503`). It is not road-certified.
+
+- Never add BYD vehicle setters, CAN injection, rooting, firmware changes, or packaged replacement
+  classes under `android.hardware.bydauto.*`.
+- Never expose or log IMEI, ICCID, VIN, location, ADB credentials, or other vehicle identifiers.
+- Test on the actual car only while parked or in a controlled setting with appropriate attention to
+  warning/navigation/ADAS audio. Synthetic audio can mask important sounds.
+- The current app stops its simulator/audio when its Activity stops. Background playback needs a
+  separately reviewed service design; do not silently change this behavior.
+
+## What is implemented
+
+The production APK is the `mobile` module. The `automotive` and `shared` modules are an untouched
+AAOS media-template shell and are not the BYD application.
+
+`mobile` provides:
+
+- a 200 Hz EV longitudinal model calibrated from public Seal Performance anchors and digitized
+  A2MAC1 wheel-torque measurements;
+- independent presentation-only sound gears: shifts affect sound/RPM only and never interrupt EV
+  wheel torque;
+- a full-screen 1920 x 990 dashboard with simulator touch/keyboard pedals and a tuning workstation
+  whose curves and parameters are editable in the UI;
+- UI torque in kgf·m, power in HP, and whole-number presentation values;
+- procedural synthesized engine audio, audio focus handling, and experimental logical
+  stereo/quad/5.1/7.1 output;
+- read-only reflective probing/polling of BYD pedal and speed getters, with simulator fallback;
+- durable app-private diagnostics, including crash retention and shift transitions.
+
+The current design intentionally behaves like an EV with simulated sound gears. Do not reintroduce
+combustion-engine clutch bog, torque interruption, or launch lag into the vehicle model.
+
+## Architecture map
+
+| Area | Key files | Responsibility |
+| --- | --- | --- |
+| UI | `mobile/src/main/java/com/gabrielpc/bydmotorsound/MainActivity.kt`, `TuningPanel.kt` | Compose dashboard, pedals, target viewport, tuning UI |
+| Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, simulation/audio coordination, transition/heartbeat logging |
+| Simulation | `simulation/EngineSimulation.kt` | EV road force, synthetic RPM/gears, shifts, live-speed handling |
+| Audio | `audio/EngineAudioEngine.kt`, `EngineSynthesizer.kt` | AudioTrack lifecycle, focus, routing diagnostics, PCM synthesis/mirroring |
+| Telemetry | `telemetry/BydSpeedReader.kt` | reflective BYD capability probe and 20 ms getter polling |
+| Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
+| Diagnostics | `BydMotorSoundApplication.kt`, `diagnostics/PersistentDiagnosticLog.kt` | process/lifecycle/crash and bounded persistent event storage |
+
+The manifest deliberately targets SDK 25 for the DiLink compatibility experiment while compiling
+against SDK 37. It requests only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`.
+
+## Current gear behavior and regression history
+
+Lift-off from third gear previously hunted `3 -> 2 -> 3`. The cause was an intentional lift-off RPM
+retention model: displayed RPM falls below raw road-coupled RPM, so a valid synthetic downshift was
+immediately undone by the raw-road emergency-upshift check.
+
+Current behavior:
+
+- virtual/simulator pedal lift suppresses that incompatible raw-road emergency correction;
+- live-speed lift-off downshifts use a scoped hold until road projection is 150 RPM below the
+  emergency trigger;
+- a throttle request or a new unsafe live-speed join resumes the over-rev protection;
+- direct deterministic regressions cover both virtual and live-speed behavior in
+  `EngineSimulationTest.kt`.
+
+Do not replace this with an arbitrary cooldown without preserving the above live-speed safety path.
+
+`DriveControllerScriptedIntegrationTest` is the preferred no-UI regression test: it drives the
+real controller directly to third gear, releases throttle, verifies it settles in second, then
+asserts that the persistent log contains no upward shift after the lift marker.
+
+## Persistent diagnostics
+
+The app writes low-rate, fsynced events to:
+
+```text
+/data/user/0/com.gabrielpc.bydmotorsound/files/diagnostics/drive-events.log
+```
+
+It rotates to `drive-events.previous.log` at 256 KiB (about 512 KiB retained total). It logs
+session/activity lifecycle, controller start/stop/failures, input-source changes, every shift
+start/completion, 1 Hz drivetrain heartbeats, audio focus/start/track/error state, and uncaught
+exceptions. Never call it for every 200 Hz simulation tick or audio render buffer.
+
+For a debug APK:
+
+```powershell
+$adb = 'D:\Users\sgabr\AppData\Local\Android\Sdk\platform-tools\adb.exe'
+& $adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log
+& $adb shell run-as com.gabrielpc.bydmotorsound cat files/diagnostics/drive-events.log |
+    Select-String 'shift_started|shift_completed|drive_heartbeat'
+```
+
+The log remains readable after `adb shell am force-stop com.gabrielpc.bydmotorsound`. See
+[persistent-diagnostics.md](persistent-diagnostics.md) for details and privacy restrictions.
+
+## Build, install, run, and test
+
+Host-specific paths currently known to work:
+
+```powershell
+$project = 'D:\Users\sgabr\AndroidStudioProjects\BYDMotorSound'
+$env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
+$adb = 'D:\Users\sgabr\AppData\Local\Android\Sdk\platform-tools\adb.exe'
+Set-Location $project
+
+.\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:assembleDebugAndroidTest :mobile:lintDebug --no-daemon
+
+& $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\mobile-debug.apk
+& $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\androidTest\debug\mobile-debug-androidTest.apk
+& $adb shell am instrument -w -r com.gabrielpc.bydmotorsound.test/androidx.test.runner.AndroidJUnitRunner
+& $adb shell am start -n com.gabrielpc.bydmotorsound/.MainActivity
+```
+
+The connected emulator has been `emulator-5554`, using AVD `BYD_Seal_1920x1080` (Android 16/API 36,
+x86_64, 1920 x 1080 at 160 dpi). The app's intended safe dashboard viewport is 1920 x 990.
+Android 16 needs `--bypass-low-target-sdk-block` because the app intentionally targets SDK 25.
+
+At this handoff, 43 JVM tests and 2 instrumentation tests pass. Lint has no errors; its warnings
+are pre-existing compatibility/dependency/resource warnings, not blockers.
+
+## Open vehicle-validation work
+
+The biggest unresolved question is the exact target head unit, not the simulator:
+
+1. Are `android.hardware.bydauto.speed.BYDAutoSpeedDevice` and its getter methods present on
+   firmware `2503`?
+2. Is the signature-level BYD permission granted to a sideloaded third-party app, and are returned
+   accelerator/brake/speed values plausible?
+3. Can the abstract BYD listener be integrated safely using a compile-only vendor SDK, or is 20 ms
+   polling the safe fallback?
+4. Does the car media route expose multichannel logical output, or does its DSP distribute a
+   low-latency stereo route to the whole cabin? A logical 7.1 track does not prove discrete
+   physical speaker access.
+5. What are the actual pedal-to-acoustic latency and audio-focus interactions with vehicle alerts?
+
+Follow the on-car checklists rather than guessing. The emulator cannot validate vendor API access,
+the BYD amplifier/DSP channel mapping, or acoustic delay.
+
+## Essential reading order
+
+1. [Engineering context](README.md)
+2. [Full implementation](full-implementation.md)
+3. [BYD Seal calibration](byd-seal-performance-calibration.md)
+4. [Persistent diagnostics](persistent-diagnostics.md)
+5. [POC implementation and test plan](poc-implementation.md) and
+   [POC plan](poc-plan.md)
+6. [BYD API manual notes](byd-dilink-api-v1.0.5.md) and
+   [research findings](research-findings.md)
+
+Use the source-material index for provenance. Prefer documented evidence over assumptions and keep
+any new estimates explicitly labeled as estimates.

@@ -45,6 +45,7 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 - [POC implementation and test plan](poc-plan.md) - recommended project changes, runtime capability probe, callback implementation, diagnostics, latency measurement, success criteria, and fallbacks.
 - [Implemented diagnostic POC](poc-implementation.md) - current source layout, build artifact, behavior, limitations, and exact install/test commands.
 - [Persistent diagnostics](persistent-diagnostics.md) - bounded on-device event trail, crash retention, and safe ADB retrieval commands.
+- [Fresh-chat LLM handoff](llm-handoff.md) - source checkout, current state, architecture, validation workflow, constraints, and open vehicle work for a new agent.
 - [Source-material index](source-material/README.md) - provenance, local artifacts, URLs, hashes, and evidence-quality rules.
 
 ## Current project state
