@@ -14,6 +14,8 @@ class EngineSimulationTest {
 
         assertEquals(670.0, profile.maxTorqueNm, 0.0)
         assertEquals(390.0, profile.peakPowerKw, 0.0)
+        assertEquals(3_170.0, profile.frontPeakWheelTorqueNm, 0.0)
+        assertEquals(3_975.0, profile.rearPeakWheelTorqueNm, 0.0)
         assertEquals(2_185.0, profile.vehicleMassKg, 0.0)
         assertEquals(180.0, profile.topSpeedKmh, 0.0)
         assertEquals(8_600.0, profile.redlineRpm, 0.0)
@@ -62,17 +64,20 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun motorEnvelopeIsConstantTorqueThenConstantPower() {
+    fun digitizedAxleEnvelopeMatchesMeasuredPeaksAndTorqueDistribution() {
         val profile = EngineProfile.APEX_V10
-        val baseRpm = profile.peakPowerKw * 9_549.0 / profile.maxTorqueNm
+        val launch = axleWheelTorqueAtSpeed(profile, 0.0)
+        val midSpeed = axleWheelTorqueAtSpeed(profile, 100.0)
+        val highSpeed = axleWheelTorqueAtSpeed(profile, 180.0)
 
-        assertEquals(670.0, motorTorqueAtRpm(profile, 2_000.0), 0.5)
-        assertEquals(670.0, motorTorqueAtRpm(profile, baseRpm), 1.0)
-
-        val highRpm = 12_000.0
-        val highTorque = motorTorqueAtRpm(profile, highRpm)
-        assertEquals(390.0, highTorque * highRpm / 9_549.0, 0.5)
-        assertTrue(highTorque < profile.maxTorqueNm * 0.50)
+        assertEquals(3_170.0, launch.frontNm, 0.5)
+        assertEquals(3_975.0, launch.rearNm, 0.5)
+        assertEquals(7_145.0, launch.totalNm, 0.5)
+        assertEquals(0.556, launch.rearShare, 0.002)
+        assertEquals(0.63, midSpeed.rearShare, 0.02)
+        assertEquals(0.71, highSpeed.rearShare, 0.02)
+        assertTrue(midSpeed.totalNm < launch.totalNm * 0.60)
+        assertTrue(highSpeed.totalNm < midSpeed.totalNm * 0.50)
     }
 
     @Test
@@ -87,10 +92,10 @@ class EngineSimulationTest {
 
         val lowSpeedAcceleration = accelerationAt(25.0)
         val highSpeedAcceleration = accelerationAt(120.0)
-        assertTrue("expected immediate low-speed EV thrust", lowSpeedAcceleration > 7.5)
+        assertTrue("expected immediate low-speed EV thrust: $lowSpeedAcceleration", lowSpeedAcceleration > 8.3)
         assertTrue(
-            "constant-power taper should reduce acceleration with speed: low=$lowSpeedAcceleration high=$highSpeedAcceleration",
-            highSpeedAcceleration < lowSpeedAcceleration * 0.65,
+            "measured wheel-torque taper should reduce acceleration with speed: low=$lowSpeedAcceleration high=$highSpeedAcceleration",
+            highSpeedAcceleration < lowSpeedAcceleration * 0.55,
         )
     }
 
@@ -103,7 +108,7 @@ class EngineSimulationTest {
             elapsed += STEP
         }
 
-        assertTrue("0-100 km/h took $elapsed seconds", elapsed in 3.70..3.90)
+        assertTrue("0-100 km/h took $elapsed seconds", elapsed in 3.90..4.02)
     }
 
     @Test

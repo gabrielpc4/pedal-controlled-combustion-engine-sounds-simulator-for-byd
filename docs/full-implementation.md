@@ -86,22 +86,24 @@ The physical longitudinal defaults use published Seal Performance AWD anchors. T
 | Published 0–100 km/h / top speed | 3.8 s / 180 km/h |
 | Vehicle mass | 2,185 kg |
 | Motor-speed envelope | 0–16,000 RPM |
-| Constant-torque base speed | approximately 5,559 RPM |
+| A2MAC1 front / rear peak wheel torque | 3,170 / 3,975 Nm |
+| A2MAC1 measured acceleration | 3.97 s to 100 km/h |
 | Effective fixed reduction | 10.81:1 |
 | Wheel radius | 0.347 m |
-| Drivetrain efficiency / traction ceiling | 0.92 / 8.0 m/s² |
+| Drivetrain efficiency / traction ceiling | 0.92 / 10.0 m/s² |
+| Rotating-mass factor | 1.10 |
 | Drag area / rolling coefficient | 0.504 m² / 0.010 |
 
-The 670 Nm curve is flat from zero motor speed through the base-speed point. Above that point, torque tapers inversely with RPM while power remains at approximately 390 kW. The curve is editable, but the simulator also applies the configured peak-power ceiling. This creates normal EV progression: the strongest acceleration is available immediately, then acceleration gradually decreases as motor speed and aerodynamic drag rise.
+BYD's official motor ratings remain the authority for 390 kW and 670 Nm. Vehicle acceleration now uses separately editable front/rear wheel-torque curves digitized from A2MAC1's measured acceleration chart. They total 7,145 Nm at peak; the rear share rises from approximately 56% at launch to 71% near the official top speed. The wheel-torque curves taper continuously with road speed and remain bounded by the configured motor-power/efficiency sanity ceiling. See [the calibration record](byd-seal-performance-calibration.md) for the digitized points and evidence policy.
 
 At every 5 ms fixed step:
 
 1. Raw accelerator position is evaluated through the editable Sport-like pedal curve, then accelerator and brake requests pass through exponential response filters.
 2. A valid external road-speed sample replaces virtual speed. The first live sample selects a safe synthetic sound gear without reporting a fake acceleration spike.
-3. In simulator mode, motor RPM comes from road speed, wheel radius, and the fixed electric-drive reduction.
-4. Available motor torque comes from the editable torque curve and is capped by `peakPower * 9549 / motorRpm`.
-5. Requested drive force comes from motor torque, fixed reduction, efficiency, and wheel radius, with a configurable traction/current-delivery acceleration ceiling.
-6. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by mass advances vehicle speed. Reported acceleration is the actual clamped speed delta.
+3. In simulator mode, normalized road speed selects independent front and rear wheel torque from the digitized editable curves.
+4. Requested wheel torque is scaled by the filtered Sport-like pedal request and bounded by the configured motor-power/efficiency sanity ceiling.
+5. Wheel torque divided by tire radius produces drive force; the non-binding configurable traction ceiling remains available for tuning.
+6. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
 7. The independent sound RPM target comes from road speed and the current fictional gear. A short response filter prevents needle and pitch discontinuities.
 8. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
 
@@ -168,7 +170,7 @@ The header/footer show the requested mode, active logical channel count/layout, 
 
 The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
 
-The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response peak torque and power, motor speed and reduction, efficiency, traction ceiling, mass, tire radius, drag, rolling resistance, top speed, motor curve, Sport-like pedal curve, pedal timing, synthetic RPM response, all seven presentation ratios, shift timing, audio layers, and firing harmonics. Graphs visualize motor torque/power, response timing, RPM drop, and spectrum; the motor and pedal curves are edited by dragging their control points. See [Live tuning interface](tuning-interface.md).
+The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, synthetic RPM response, all seven presentation ratios, shift timing, audio layers, and firing harmonics. Graphs visualize wheel torque/power, torque distribution, response timing, RPM drop, and spectrum. See [Live tuning interface](tuning-interface.md).
 
 The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
 
@@ -195,10 +197,10 @@ The following command passes:
 Tests verify that:
 
 - the default physical profile contains the published 670 Nm, 390 kW, 2,185 kg, and 180 km/h anchors;
-- the motor envelope supplies constant low-speed torque and then tapers torque at the 390 kW power ceiling;
+- the digitized axle curves reproduce the 3,170/3,975 Nm peaks and approximately 56% to 71% rear-share progression;
 - sustained throttle increases sound RPM progressively with road speed rather than jumping directly to a pedal-derived target;
 - first-gear sound RPM does not reverse at any tested positive throttle input;
-- full-throttle virtual acceleration reaches 100 km/h inside the 3.70–3.90 second calibration band;
+- full-throttle virtual acceleration reaches 100 km/h inside the 3.90–4.02 second A2MAC1 calibration band;
 - low-speed acceleration is stronger than high-speed acceleration, and a synthetic upshift causes no wheel-torque discontinuity;
 - automatic shifts begin near the shift point, drop RPM, and honor completed-gear dwell;
 - joining live speed selects a safe ratio, and projected over-rev forces a throttle-independent emergency upshift;
@@ -252,5 +254,5 @@ adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 - Playback is Activity-owned and intentionally stops when the dashboard is no longer visible. Background/foreground-service operation is not included in this release.
 - The `mobile` APK deliberately targets SDK 25 for DiLink compatibility. It is a sideload prototype, not a Google Play-ready application, and modern devices may block installation without a low-target-SDK test override.
 - There is no enforced drive lockout or production volume policy. Do not use the current build on public roads.
-- BYD does not publish the complete motor dyno curves, Sport pedal transfer table, front/rear torque allocation, or current/traction limits. The implementation is constrained by published maxima and 0–100 performance, but its intermediate curve and transient response remain an editable engineering reconstruction pending instrumented on-car measurements.
+- BYD does not publish the complete motor dyno curves or Sport pedal transfer table. The A2MAC1 axle curves materially improve the longitudinal reconstruction, but they were digitized from a raster chart and may describe a modified or differently configured vehicle. Raw test data and instrumented validation on this exact Brazilian car remain necessary.
 - Add named profile import/export, a speaker-walk diagnostic, and in-app telemetry/audio recording after first-car validation.

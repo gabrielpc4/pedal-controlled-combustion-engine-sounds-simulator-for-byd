@@ -57,7 +57,6 @@ import com.gabrielpc.bydmotorsound.tuning.EngineTuning
 import com.gabrielpc.bydmotorsound.tuning.TuningConfig
 import com.gabrielpc.bydmotorsound.tuning.interpolateCurve
 import java.util.Locale
-import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -76,7 +75,8 @@ private val TuneMuted = Color(0xFF8CA7B5)
 
 private enum class TuningTab(val title: String, val subtitle: String) {
     ENGINE("VEHICLE", "SEAL RESPONSE MODEL"),
-    CURVES("CURVES", "DRAG CONTROL POINTS"),
+    CURVES("AWD CURVES", "FRONT / REAR WHEEL TORQUE"),
+    RESPONSE("RESPONSE", "SPORT PEDAL DYNAMICS"),
     TRANSMISSION("GEARING", "RATIOS & SHIFT LOGIC"),
     AUDIO("AUDIO", "LAYERS & HARMONICS"),
 }
@@ -117,6 +117,7 @@ internal fun TuningPanel(
             when (TuningTab.entries[tabIndex]) {
                 TuningTab.ENGINE -> EngineTab(state, config, onConfigChange)
                 TuningTab.CURVES -> CurvesTab(state, config, onConfigChange)
+                TuningTab.RESPONSE -> ResponseTab(state, config, onConfigChange)
                 TuningTab.TRANSMISSION -> TransmissionTab(config, onConfigChange)
                 TuningTab.AUDIO -> AudioTab(config, onConfigChange)
             }
@@ -209,6 +210,12 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("PEAK TORQUE", engine.maxTorqueNm, 150.0..1_200.0, "%.0f Nm") {
                     onChange(config.copy(engine = engine.copy(maxTorqueNm = it)))
                 }
+                ParameterSlider("FRONT PEAK WHEEL TORQUE", engine.frontPeakWheelTorqueNm, 500.0..6_000.0, "%.0f Nm") {
+                    onChange(config.copy(engine = engine.copy(frontPeakWheelTorqueNm = it)))
+                }
+                ParameterSlider("REAR PEAK WHEEL TORQUE", engine.rearPeakWheelTorqueNm, 500.0..7_000.0, "%.0f Nm") {
+                    onChange(config.copy(engine = engine.copy(rearPeakWheelTorqueNm = it)))
+                }
                 ParameterSlider("PEAK POWER", engine.peakPowerKw, 100.0..800.0, "%.0f kW") {
                     onChange(config.copy(engine = engine.copy(peakPowerKw = it)))
                 }
@@ -227,6 +234,9 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("VEHICLE MASS", engine.vehicleMassKg, 700.0..3_500.0, "%.0f kg") {
                     onChange(config.copy(engine = engine.copy(vehicleMassKg = it)))
                 }
+                ParameterSlider("ROTATING MASS FACTOR", engine.rotationalMassFactor, 1.0..1.30, "%.2f×") {
+                    onChange(config.copy(engine = engine.copy(rotationalMassFactor = it)))
+                }
                 ParameterSlider("WHEEL RADIUS", engine.wheelRadiusMeters, 0.22..0.50, "%.3f m") {
                     onChange(config.copy(engine = engine.copy(wheelRadiusMeters = it)))
                 }
@@ -241,7 +251,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 }
             }
         }
-        PanelCard("MOTOR TORQUE + POWER", "Editable curve with configured power ceiling", Modifier.weight(1.30f)) {
+        PanelCard("MEASURED WHEEL TORQUE + POWER", "Axle curves with configured motor-power ceiling", Modifier.weight(1.30f)) {
             TorquePowerGraph(engine, state.drivetrain.speedKmh, Modifier.fillMaxSize())
         }
     }
@@ -250,21 +260,43 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
 @Composable
 private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
+    val currentSpeed = (state.drivetrain.speedKmh / engine.topSpeedKmh).coerceIn(0.0, 1.0)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("EV MOTOR CURVE", "Drag points • motor speed vs available torque", Modifier.weight(1.18f)) {
+        PanelCard("FRONT WHEEL TORQUE", "A2MAC1 trace • drag points to tune", Modifier.weight(1f)) {
             EditableCurveGraph(
-                points = engine.torqueCurve,
-                xLabel = { "${(it * engine.motorMaxRpm / 1_000.0).format(1)}k" },
-                yLabel = { "${(it * engine.maxTorqueNm).roundToInt()} Nm" },
-                currentX = (motorRpmAtSpeed(engine, state.drivetrain.speedKmh) / engine.motorMaxRpm)
-                    .coerceIn(0.0, 1.0),
-                accent = TuneCyan,
+                points = engine.frontWheelTorqueCurve,
+                xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
+                yLabel = { "${(it * engine.frontPeakWheelTorqueNm).roundToInt()} Nm" },
+                currentX = currentSpeed,
+                accent = TuneAmber,
                 lockEndpointX = true,
-                onPointsChange = { onChange(config.copy(engine = engine.copy(torqueCurve = it))) },
+                onPointsChange = { onChange(config.copy(engine = engine.copy(frontWheelTorqueCurve = it))) },
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1f)) {
+        PanelCard("REAR WHEEL TORQUE", "A2MAC1 trace • drag points to tune", Modifier.weight(1f)) {
+            EditableCurveGraph(
+                points = engine.rearWheelTorqueCurve,
+                xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
+                yLabel = { "${(it * engine.rearPeakWheelTorqueNm).roundToInt()} Nm" },
+                currentX = currentSpeed,
+                accent = TuneRed,
+                lockEndpointX = true,
+                onPointsChange = { onChange(config.copy(engine = engine.copy(rearWheelTorqueCurve = it))) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        PanelCard("TORQUE DISTRIBUTION", "Derived front/rear share across road speed", Modifier.weight(1f)) {
+            TorqueDistributionGraph(engine, state.drivetrain.speedKmh, Modifier.fillMaxSize())
+        }
+    }
+}
+
+@Composable
+private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
+    val engine = config.engine
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1.35f)) {
             EditableCurveGraph(
                 points = engine.throttleCurve,
                 xLabel = { "${(it * 100).roundToInt()}%" },
@@ -277,7 +309,7 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("PEDAL DYNAMICS", "Filter timing shapes transient response", Modifier.weight(0.72f)) {
+        PanelCard("PEDAL DYNAMICS", "Measured launch rise plus editable release/brake timing", Modifier.weight(1f)) {
             ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
             }
@@ -288,7 +320,7 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
             Spacer(Modifier.height(12.dp))
-            ResponsePreview(engine, Modifier.fillMaxWidth().height(190.dp))
+            ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
         }
     }
 }
@@ -545,26 +577,30 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
         }
         val torquePath = Path()
         val powerPath = Path()
+        val peakWheelTorque = engine.frontPeakWheelTorqueNm + engine.rearPeakWheelTorqueNm
         var maxPowerKw = 1.0
         repeat(101) { index ->
             val x = index / 100.0
-            val torque = interpolateCurve(engine.torqueCurve, x) * engine.maxTorqueNm
-            val rpm = x * engine.motorMaxRpm
-            maxPowerKw = max(maxPowerKw, min(engine.peakPowerKw, torque * rpm / 9_549.0))
+            val torque = totalWheelTorque(engine, x)
+            val wheelOmega = (x * engine.topSpeedKmh / 3.6) / engine.wheelRadiusMeters
+            maxPowerKw = max(
+                maxPowerKw,
+                min(engine.peakPowerKw * engine.drivetrainEfficiency, torque * wheelOmega / 1_000.0),
+            )
         }
         repeat(101) { index ->
             val x = index / 100.0
-            val torque = interpolateCurve(engine.torqueCurve, x) * engine.maxTorqueNm
-            val rpm = x * engine.motorMaxRpm
-            val power = min(engine.peakPowerKw, torque * rpm / 9_549.0)
-            val powerLimitedTorque = if (rpm < 1.0) {
-                engine.maxTorqueNm
+            val rawTorque = totalWheelTorque(engine, x)
+            val wheelOmega = (x * engine.topSpeedKmh / 3.6) / engine.wheelRadiusMeters
+            val powerLimitedTorque = if (wheelOmega < 1.0) {
+                rawTorque
             } else {
-                engine.peakPowerKw * 9_549.0 / rpm
+                engine.peakPowerKw * 1_000.0 * engine.drivetrainEfficiency / wheelOmega
             }
-            val displayedTorque = min(torque, powerLimitedTorque)
+            val displayedTorque = min(rawTorque, powerLimitedTorque)
+            val power = displayedTorque * wheelOmega / 1_000.0
             val px = left + width * x.toFloat()
-            val torqueY = bottom - height * (displayedTorque / (engine.maxTorqueNm * 1.15)).toFloat()
+            val torqueY = bottom - height * (displayedTorque / (peakWheelTorque * 1.15)).toFloat()
             val powerY = bottom - height * (power / (maxPowerKw * 1.10)).toFloat()
             if (index == 0) {
                 torquePath.moveTo(px, torqueY)
@@ -576,23 +612,76 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
         }
         drawPath(torquePath, TuneCyan, style = Stroke(4f, cap = StrokeCap.Round))
         drawPath(powerPath, TuneAmber, style = Stroke(4f, cap = StrokeCap.Round))
-        val liveX = (motorRpmAtSpeed(engine, currentSpeedKmh) / engine.motorMaxRpm)
-            .coerceIn(0.0, 1.0).toFloat()
+        val liveX = (currentSpeedKmh / engine.topSpeedKmh).coerceIn(0.0, 1.0).toFloat()
         drawLine(TuneWhite.copy(alpha = 0.45f), Offset(left + width * liveX, top), Offset(left + width * liveX, bottom), 2f)
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(53, 232, 242)
-            canvas.nativeCanvas.drawText("TORQUE  ${engine.maxTorqueNm.roundToInt()} Nm", left, bottom + 34f, paint)
+            canvas.nativeCanvas.drawText("WHEEL TORQUE  ${peakWheelTorque.roundToInt()} Nm", left, bottom + 34f, paint)
             paint.color = android.graphics.Color.rgb(255, 196, 86)
             canvas.nativeCanvas.drawText("POWER  ${maxPowerKw.roundToInt()} kW", left + width * 0.50f, bottom + 34f, paint)
         }
     }
 }
 
-private fun motorRpmAtSpeed(engine: EngineTuning, speedKmh: Double): Double {
-    val wheelRpm = (speedKmh / 3.6) / (2.0 * PI * engine.wheelRadiusMeters) * 60.0
-    return wheelRpm * engine.motorReductionRatio
+private fun totalWheelTorque(engine: EngineTuning, normalizedSpeed: Double): Double =
+    interpolateCurve(engine.frontWheelTorqueCurve, normalizedSpeed) * engine.frontPeakWheelTorqueNm +
+        interpolateCurve(engine.rearWheelTorqueCurve, normalizedSpeed) * engine.rearPeakWheelTorqueNm
+
+@Composable
+private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Double, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val left = 58f
+        val right = size.width - 24f
+        val top = 32f
+        val bottom = size.height - 58f
+        val width = right - left
+        val height = bottom - top
+        repeat(6) { index ->
+            val f = index / 5f
+            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left + width * f, top), Offset(left + width * f, bottom), 1f)
+            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
+        }
+        val frontPath = Path()
+        val rearPath = Path()
+        repeat(101) { index ->
+            val x = index / 100.0
+            val front = interpolateCurve(engine.frontWheelTorqueCurve, x) * engine.frontPeakWheelTorqueNm
+            val rear = interpolateCurve(engine.rearWheelTorqueCurve, x) * engine.rearPeakWheelTorqueNm
+            val rearShare = if (front + rear > 0.0) rear / (front + rear) else 0.0
+            val px = left + width * x.toFloat()
+            val frontY = bottom - height * (1.0 - rearShare).toFloat()
+            val rearY = bottom - height * rearShare.toFloat()
+            if (index == 0) {
+                frontPath.moveTo(px, frontY)
+                rearPath.moveTo(px, rearY)
+            } else {
+                frontPath.lineTo(px, frontY)
+                rearPath.lineTo(px, rearY)
+            }
+        }
+        drawPath(frontPath, TuneAmber, style = Stroke(4f, cap = StrokeCap.Round))
+        drawPath(rearPath, TuneRed, style = Stroke(4f, cap = StrokeCap.Round))
+        val liveX = (currentSpeedKmh / engine.topSpeedKmh).coerceIn(0.0, 1.0)
+        drawLine(
+            TuneWhite.copy(alpha = 0.45f),
+            Offset(left + width * liveX.toFloat(), top),
+            Offset(left + width * liveX.toFloat(), bottom),
+            2f,
+        )
+        val liveFront = interpolateCurve(engine.frontWheelTorqueCurve, liveX) * engine.frontPeakWheelTorqueNm
+        val liveRear = interpolateCurve(engine.rearWheelTorqueCurve, liveX) * engine.rearPeakWheelTorqueNm
+        val liveRearShare = liveRear / (liveFront + liveRear).coerceAtLeast(1.0)
+        drawIntoCanvas { canvas ->
+            val paint = graphPaint()
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = android.graphics.Color.rgb(255, 196, 86)
+            canvas.nativeCanvas.drawText("FRONT  ${((1.0 - liveRearShare) * 100).roundToInt()}%", left, bottom + 36f, paint)
+            paint.color = android.graphics.Color.rgb(255, 70, 92)
+            canvas.nativeCanvas.drawText("REAR  ${(liveRearShare * 100).roundToInt()}%", left + width * 0.56f, bottom + 36f, paint)
+        }
+    }
 }
 
 @Composable

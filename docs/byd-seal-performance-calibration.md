@@ -39,27 +39,35 @@ Independent driving evidence is directionally consistent but not quantitative en
 
 These are secondary observations with different vehicles, software, battery conditions, tires, and measurement methods. They support a prompt but smoothed default; they do not justify copying any exact point from the prose.
 
-## Electric motor envelope
+## A2MAC1 acceleration measurement
 
-The published peak torque and peak power determine a physically consistent base-speed anchor:
+A2MAC1 published a chassis/road-test chart for a Seal AWD in its Energy Management Strategy material. The accompanying post reports 3.97 s to 100 km/h, 190 km/h maximum speed, 408 kW peak high-voltage battery power, 3,170 Nm peak front wheel torque, 3,975 Nm peak rear wheel torque, and a rear share that rises from about 55% to 71% before power reduction. [A2MAC1 source post](https://www.linkedin.com/posts/a2mac1_how-far-can-we-push-an-ev-to-uncover-its-activity-7335191005635260416-tG-Z)
 
-```text
-base motor speed = power / torque
-                 = 390,000 W / 670 Nm
-                 = 582.1 rad/s
-                 = approximately 5,559 RPM
-```
+Evidence policy:
 
-The default editable motor curve therefore holds 670 Nm from zero through normalized motor speed 0.347, then follows an approximately constant-power hyperbola to 16,000 RPM. `EngineSimulation.motorTorqueAtRpm` also applies an explicit 390 kW ceiling, so dragging a curve point upward cannot accidentally exceed the configured power limit.
+- retain BYD's official 390 kW motor-output rating; A2MAC1's 408 kW is high-voltage battery input power and includes conversion/drivetrain losses;
+- retain BYD's official 180 km/h limiter; the measured 190 km/h may reflect tolerance, test state, software, or a modified vehicle;
+- use the separately measured front/rear wheel-torque traces because BYD does not publish those curves;
+- target the observed approximately four-second acceleration without claiming every stock vehicle reproduces that exact run.
 
-```text
-Motor RPM:       0   1600   3200   4800   5550   7200   9600  12800  16000
-Torque factor: 1.0    1.0    1.0    1.0    1.0   .771   .578   .434    .347
-Torque (Nm):    670    670    670    670    670    517    387    291     232
-Power (kW):       0    112    225    337    389    390    389    390     389
-```
+The graph was digitized against its printed axes. The default editable points are the following approximate values; small line thickness/noise and chart rasterization make them measurements of the chart, not raw A2MAC1 data:
 
-This is an engineering reconstruction constrained by BYD's published maxima, not a leaked factory dyno table. It captures the defining EV behavior the app needs: maximum torque immediately at low motor speed, then decreasing torque as constant power takes over. Acceleration consequently starts strongest and tapers with road speed; it can no longer become artificially stronger merely because the sound tachometer passes a certain RPM.
+| Road speed | Front wheel torque | Rear wheel torque | Rear share |
+| ---: | ---: | ---: | ---: |
+| 0–28 km/h | 3,170 Nm | 3,975 Nm | 55.6% |
+| 58 km/h | 2,878 Nm | 3,953 Nm | 57.9% |
+| 71 km/h | 2,418 Nm | 3,521 Nm | 59.3% |
+| 83 km/h | 1,977 Nm | 3,070 Nm | 60.8% |
+| 101 km/h | 1,458 Nm | 2,504 Nm | 63.2% |
+| 115 km/h | 1,161 Nm | 2,197 Nm | 65.4% |
+| 137 km/h | 844 Nm | 1,833 Nm | 68.5% |
+| 155 km/h | 700 Nm | 1,583 Nm | 69.3% |
+| 168 km/h | 604 Nm | 1,439 Nm | 70.4% |
+| 180 km/h | 537 Nm | 1,324 Nm | 71.1% |
+
+The simulator evaluates these as two independent normalized wheel-torque curves versus road speed. The resulting combined peak is 7,145 Nm. Because they are wheel torques, they are not multiplied again by the guessed reduction or drivetrain efficiency. A separate 390 kW motor-output/efficiency ceiling remains as a sanity bound.
+
+This measured shape supersedes the earlier generic constant-torque/constant-power approximation for vehicle acceleration. It still preserves the correct EV behavior: immediate strong torque, a smooth decline with speed, and no dependency on fictional sound RPM or gears.
 
 ## Road-load and acceleration assumptions
 
@@ -70,15 +78,17 @@ These values are derived or calibrated and are clearly exposed in the tuning UI:
 | Motor maximum speed | 16,000 RPM | Seal rear-drive-unit teardown reporting the rotor maximum; not needed to claim top-speed operation at exactly this RPM |
 | Fixed motor reduction | 10.81:1 | Published teardown measurement of the rear three-shaft, two-stage drive unit; used as a combined-model approximation |
 | Nominal wheel radius | 0.347 m | Calculated from the published 235/45 R19 tire size; loaded radius will be slightly smaller |
-| Drivetrain efficiency | 0.92 | Engineering assumption for motor-shaft torque to tire force |
-| Maximum launch acceleration | 8.0 m/s² | Effective traction/current-delivery ceiling calibrated with the published 3.8 s result |
+| Front/rear peak wheel torque | 3,170 / 3,975 Nm | A2MAC1 measurement |
+| Drivetrain efficiency | 0.92 | Engineering assumption used only for the motor-power sanity ceiling because axle torque is already measured at the wheels |
+| Maximum launch acceleration | 10.0 m/s² | Non-binding safety/tuning ceiling above the acceleration produced by the measured 7,145 Nm peak |
+| Rotating-mass factor | 1.10 | Derived effective inertia needed to reconcile measured wheel torque with the chart's speed/time trace |
 | Drag area, CdA | 0.504 m² | Published Cd 0.219 multiplied by an inferred 2.30 m² frontal area |
 | Rolling resistance coefficient | 0.010 | Road-tire engineering assumption |
-| Throttle attack/release | 60/90 ms | Responsive Sport-like default; not a published BYD transfer function |
+| Throttle attack/release | 120/90 ms | Full-request buildup informed by the measured torque rise; not a factory pedal map |
 
-The fixed-step test reaches 100 km/h within 3.70–3.90 seconds under the configured full-throttle reference conditions. That is a calibration check, not a claim that the compact model reproduces every real run: state of charge, battery and motor temperature, tire grip, road slope, air density, payload, and BYD's front/rear torque allocation all affect an actual vehicle.
+The fixed-step test reaches 100 km/h within 3.90–4.02 seconds under the configured full-throttle reference conditions, closely surrounding A2MAC1's measured 3.97 s. BYD's 3.8 s remains the official claim rather than something this one measured trace can invalidate. State of charge, battery and motor temperature, tire grip, road slope, air density, payload, software, and measurement method affect an actual vehicle.
 
-The AWD system has two different motor types and can actively redistribute torque. Combining both motors into one 670 Nm source and one reduction is intentionally a longitudinal approximation. A later instrumented on-car capture can replace the inferred curve and response filter without changing the architecture.
+The drivetrain still remains a compact longitudinal model. It now preserves the measured front/rear split and its speed-dependent change, but it does not model individual tires, axle slip, iTAC transients, suspension load transfer, battery voltage, temperatures, or lateral torque control. A later raw-data export from A2MAC1 or an instrumented stock car could replace the digitized points without changing the architecture.
 
 ## Sport pedal default
 
@@ -108,9 +118,9 @@ This preserves the enjoyable rise, shift, RPM drop, and sound progression of a g
 `EngineSimulationTest` checks:
 
 - the published 670 Nm, 390 kW, 2,185 kg, and 180 km/h anchors;
-- constant low-speed torque followed by a 390 kW high-speed envelope;
+- the 3,170/3,975 Nm axle peaks, 7,145 Nm total, and approximately 56% to 71% rearward distribution change;
 - stronger low-speed acceleration and a progressive high-speed taper;
-- 0–100 km/h inside the 3.70–3.90 second calibration band;
+- 0–100 km/h inside the 3.90–4.02 second calibration band;
 - no single-step wheel-torque interruption during a synthetic upshift;
 - no first-gear RPM reversal at any tested positive pedal position;
 - expected shift RPM drop, braking, live-speed synchronization, and limiter display hysteresis.

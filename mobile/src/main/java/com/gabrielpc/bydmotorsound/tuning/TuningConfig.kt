@@ -18,23 +18,28 @@ data class EngineTuning(
     val motorMaxRpm: Double = 16_000.0,
     val motorReductionRatio: Double = 10.81,
     val drivetrainEfficiency: Double = 0.92,
-    val tractionLimitMps2: Double = 8.0,
+    val frontPeakWheelTorqueNm: Double = 3_170.0,
+    val rearPeakWheelTorqueNm: Double = 3_975.0,
+    val tractionLimitMps2: Double = 10.0,
     val vehicleMassKg: Double = 2_185.0,
+    val rotationalMassFactor: Double = 1.10,
     val wheelRadiusMeters: Double = 0.347,
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 180.0,
     val syntheticRpmResponseMs: Double = 35.0,
     val finalDrive: Double = 3.82,
-    val throttleAttackMs: Double = 60.0,
+    val throttleAttackMs: Double = 120.0,
     val throttleReleaseMs: Double = 90.0,
     val brakeResponseMs: Double = 55.0,
     val upshiftDurationMs: Double = 270.0,
     val downshiftDurationMs: Double = 340.0,
     val shiftDwellMs: Double = 450.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
-    /** X is normalized electric-motor speed, Y is normalized motor torque. */
-    val torqueCurve: List<CurvePoint> = DEFAULT_TORQUE_CURVE,
+    /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
+    val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
+    /** X is normalized road speed, Y is normalized measured rear-axle wheel torque. */
+    val rearWheelTorqueCurve: List<CurvePoint> = DEFAULT_REAR_WHEEL_TORQUE_CURVE,
     /** X is physical pedal position, Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
 ) {
@@ -57,8 +62,11 @@ data class EngineTuning(
             motorMaxRpm = motorMaxRpm.coerceIn(8_000.0, 25_000.0),
             motorReductionRatio = motorReductionRatio.coerceIn(5.0, 18.0),
             drivetrainEfficiency = drivetrainEfficiency.coerceIn(0.70, 0.99),
+            frontPeakWheelTorqueNm = frontPeakWheelTorqueNm.coerceIn(500.0, 6_000.0),
+            rearPeakWheelTorqueNm = rearPeakWheelTorqueNm.coerceIn(500.0, 7_000.0),
             tractionLimitMps2 = tractionLimitMps2.coerceIn(3.0, 12.0),
             vehicleMassKg = vehicleMassKg.coerceIn(700.0, 3_500.0),
+            rotationalMassFactor = rotationalMassFactor.coerceIn(1.0, 1.30),
             wheelRadiusMeters = wheelRadiusMeters.coerceIn(0.22, 0.50),
             dragAreaM2 = dragAreaM2.coerceIn(0.30, 1.20),
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
@@ -72,23 +80,49 @@ data class EngineTuning(
             downshiftDurationMs = downshiftDurationMs.coerceIn(120.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
             gearRatios = sanitizeGears(gearRatios),
-            torqueCurve = sanitizeCurve(torqueCurve, DEFAULT_TORQUE_CURVE, lockEndpoints = false),
+            frontWheelTorqueCurve = sanitizeCurve(
+                frontWheelTorqueCurve,
+                DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
+                lockEndpoints = false,
+            ),
+            rearWheelTorqueCurve = sanitizeCurve(
+                rearWheelTorqueCurve,
+                DEFAULT_REAR_WHEEL_TORQUE_CURVE,
+                lockEndpoints = false,
+            ),
             throttleCurve = sanitizeCurve(throttleCurve, DEFAULT_THROTTLE_CURVE, lockEndpoints = true),
         )
     }
 
     companion object {
         val DEFAULT_GEARS = listOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69)
-        val DEFAULT_TORQUE_CURVE = listOf(
+        val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),
-            CurvePoint(0.100, 1.000),
-            CurvePoint(0.200, 1.000),
-            CurvePoint(0.300, 1.000),
-            CurvePoint(0.347, 1.000),
-            CurvePoint(0.450, 0.771),
-            CurvePoint(0.600, 0.578),
-            CurvePoint(0.800, 0.434),
-            CurvePoint(1.000, 0.347),
+            CurvePoint(0.156, 0.989),
+            CurvePoint(0.322, 0.906),
+            CurvePoint(0.394, 0.761),
+            CurvePoint(0.461, 0.622),
+            CurvePoint(0.561, 0.459),
+            CurvePoint(0.639, 0.366),
+            CurvePoint(0.706, 0.309),
+            CurvePoint(0.761, 0.266),
+            CurvePoint(0.861, 0.221),
+            CurvePoint(0.933, 0.190),
+            CurvePoint(1.000, 0.169),
+        )
+        val DEFAULT_REAR_WHEEL_TORQUE_CURVE = listOf(
+            CurvePoint(0.000, 1.000),
+            CurvePoint(0.156, 0.992),
+            CurvePoint(0.322, 0.994),
+            CurvePoint(0.394, 0.886),
+            CurvePoint(0.461, 0.772),
+            CurvePoint(0.561, 0.630),
+            CurvePoint(0.639, 0.553),
+            CurvePoint(0.706, 0.502),
+            CurvePoint(0.761, 0.461),
+            CurvePoint(0.861, 0.398),
+            CurvePoint(0.933, 0.362),
+            CurvePoint(1.000, 0.333),
         )
         val DEFAULT_THROTTLE_CURVE = listOf(
             CurvePoint(0.0, 0.0),
@@ -156,8 +190,11 @@ class TuningRepository(context: Context) {
             motorMaxRpm = number(KEY_MOTOR_MAX_RPM, defaults.engine.motorMaxRpm),
             motorReductionRatio = number(KEY_MOTOR_REDUCTION, defaults.engine.motorReductionRatio),
             drivetrainEfficiency = number(KEY_DRIVETRAIN_EFFICIENCY, defaults.engine.drivetrainEfficiency),
+            frontPeakWheelTorqueNm = number(KEY_FRONT_WHEEL_TORQUE, defaults.engine.frontPeakWheelTorqueNm),
+            rearPeakWheelTorqueNm = number(KEY_REAR_WHEEL_TORQUE, defaults.engine.rearPeakWheelTorqueNm),
             tractionLimitMps2 = number(KEY_TRACTION_LIMIT, defaults.engine.tractionLimitMps2),
             vehicleMassKg = number(KEY_MASS, defaults.engine.vehicleMassKg),
+            rotationalMassFactor = number(KEY_ROTATIONAL_MASS, defaults.engine.rotationalMassFactor),
             wheelRadiusMeters = number(KEY_WHEEL_RADIUS, defaults.engine.wheelRadiusMeters),
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
@@ -171,7 +208,14 @@ class TuningRepository(context: Context) {
             downshiftDurationMs = number(KEY_DOWNSHIFT_DURATION, defaults.engine.downshiftDurationMs),
             shiftDwellMs = number(KEY_SHIFT_DWELL, defaults.engine.shiftDwellMs),
             gearRatios = decodeNumbers(preferences.getString(KEY_GEARS, null), defaults.engine.gearRatios),
-            torqueCurve = decodeCurve(preferences.getString(KEY_TORQUE_CURVE, null), defaults.engine.torqueCurve),
+            frontWheelTorqueCurve = decodeCurve(
+                preferences.getString(KEY_FRONT_WHEEL_TORQUE_CURVE, null),
+                defaults.engine.frontWheelTorqueCurve,
+            ),
+            rearWheelTorqueCurve = decodeCurve(
+                preferences.getString(KEY_REAR_WHEEL_TORQUE_CURVE, null),
+                defaults.engine.rearWheelTorqueCurve,
+            ),
             throttleCurve = decodeCurve(preferences.getString(KEY_THROTTLE_CURVE, null), defaults.engine.throttleCurve),
         )
         val engine = if (currentCalibration) storedEngine else defaults.engine
@@ -208,8 +252,11 @@ class TuningRepository(context: Context) {
             .putString(KEY_MOTOR_MAX_RPM, clean.engine.motorMaxRpm.toString())
             .putString(KEY_MOTOR_REDUCTION, clean.engine.motorReductionRatio.toString())
             .putString(KEY_DRIVETRAIN_EFFICIENCY, clean.engine.drivetrainEfficiency.toString())
+            .putString(KEY_FRONT_WHEEL_TORQUE, clean.engine.frontPeakWheelTorqueNm.toString())
+            .putString(KEY_REAR_WHEEL_TORQUE, clean.engine.rearPeakWheelTorqueNm.toString())
             .putString(KEY_TRACTION_LIMIT, clean.engine.tractionLimitMps2.toString())
             .putString(KEY_MASS, clean.engine.vehicleMassKg.toString())
+            .putString(KEY_ROTATIONAL_MASS, clean.engine.rotationalMassFactor.toString())
             .putString(KEY_WHEEL_RADIUS, clean.engine.wheelRadiusMeters.toString())
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
@@ -223,7 +270,8 @@ class TuningRepository(context: Context) {
             .putString(KEY_DOWNSHIFT_DURATION, clean.engine.downshiftDurationMs.toString())
             .putString(KEY_SHIFT_DWELL, clean.engine.shiftDwellMs.toString())
             .putString(KEY_GEARS, encodeNumbers(clean.engine.gearRatios))
-            .putString(KEY_TORQUE_CURVE, encodeCurve(clean.engine.torqueCurve))
+            .putString(KEY_FRONT_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.frontWheelTorqueCurve))
+            .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
             .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
             .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
             .putString(KEY_EXHAUST, clean.audio.exhaustLevel.toString())
@@ -249,7 +297,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 1
+        const val CALIBRATION_REVISION = 2
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
@@ -261,8 +309,11 @@ class TuningRepository(context: Context) {
         const val KEY_MOTOR_MAX_RPM = "motor_max_rpm"
         const val KEY_MOTOR_REDUCTION = "motor_reduction"
         const val KEY_DRIVETRAIN_EFFICIENCY = "drivetrain_efficiency"
+        const val KEY_FRONT_WHEEL_TORQUE = "front_peak_wheel_torque"
+        const val KEY_REAR_WHEEL_TORQUE = "rear_peak_wheel_torque"
         const val KEY_TRACTION_LIMIT = "traction_limit"
         const val KEY_MASS = "vehicle_mass"
+        const val KEY_ROTATIONAL_MASS = "rotational_mass_factor"
         const val KEY_WHEEL_RADIUS = "wheel_radius"
         const val KEY_DRAG_AREA = "drag_area"
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
@@ -276,7 +327,8 @@ class TuningRepository(context: Context) {
         const val KEY_DOWNSHIFT_DURATION = "downshift_duration"
         const val KEY_SHIFT_DWELL = "shift_dwell"
         const val KEY_GEARS = "gear_ratios"
-        const val KEY_TORQUE_CURVE = "torque_curve"
+        const val KEY_FRONT_WHEEL_TORQUE_CURVE = "front_wheel_torque_curve"
+        const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
         const val KEY_THROTTLE_CURVE = "throttle_curve"
         const val KEY_MASTER_GAIN = "master_gain"
         const val KEY_EXHAUST = "exhaust_level"

@@ -21,8 +21,11 @@ data class EngineProfile(
     val motorMaxRpm: Double,
     val motorReductionRatio: Double,
     val drivetrainEfficiency: Double,
+    val frontPeakWheelTorqueNm: Double,
+    val rearPeakWheelTorqueNm: Double,
     val tractionLimitMps2: Double,
     val vehicleMassKg: Double,
+    val rotationalMassFactor: Double,
     val wheelRadiusMeters: Double,
     val dragAreaM2: Double,
     val rollingResistanceCoefficient: Double,
@@ -31,11 +34,13 @@ data class EngineProfile(
     /** These ratios shape only the synthetic sound and tachometer. */
     val finalDrive: Double,
     val gearRatios: DoubleArray,
-    /** X is normalized electric-motor speed; Y is normalized motor torque. */
-    val torqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_TORQUE_CURVE,
+    /** X is normalized road speed; Y is normalized front-axle wheel torque. */
+    val frontWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
+    /** X is normalized road speed; Y is normalized rear-axle wheel torque. */
+    val rearWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_REAR_WHEEL_TORQUE_CURVE,
     /** X is pedal position; Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = EngineTuning.DEFAULT_THROTTLE_CURVE,
-    val throttleAttackSeconds: Double = 0.060,
+    val throttleAttackSeconds: Double = 0.120,
     val throttleReleaseSeconds: Double = 0.090,
     val brakeResponseSeconds: Double = 0.055,
     val upshiftDurationSeconds: Double = 0.270,
@@ -56,8 +61,11 @@ data class EngineProfile(
             motorMaxRpm = 16_000.0,
             motorReductionRatio = 10.81,
             drivetrainEfficiency = 0.92,
-            tractionLimitMps2 = 8.0,
+            frontPeakWheelTorqueNm = 3_170.0,
+            rearPeakWheelTorqueNm = 3_975.0,
+            tractionLimitMps2 = 10.0,
             vehicleMassKg = 2_185.0,
+            rotationalMassFactor = 1.10,
             wheelRadiusMeters = 0.347,
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
@@ -124,7 +132,7 @@ class EngineSimulation(
         profile = updated
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
-        vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(profile.topSpeedKmh / 3.6)
+        vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
     }
 
     fun reset() {
@@ -190,12 +198,17 @@ class EngineSimulation(
 
     private fun integrateElectricVehicle(dt: Double) {
         val previousSpeedMps = vehicleSpeedMps
-        val motorRpm = motorRpmForSpeed(vehicleSpeedMps)
-        val availableTorque = motorTorqueAtRpm(profile, motorRpm)
+        val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
-        val driveTorque = availableTorque * filteredThrottle * brakeOverride
-        val uncappedDriveForce = driveTorque * profile.motorReductionRatio *
-            profile.drivetrainEfficiency / profile.wheelRadiusMeters
+        val requestedWheelTorque = axleTorque.totalNm * filteredThrottle * brakeOverride
+        val wheelOmega = vehicleSpeedMps / profile.wheelRadiusMeters
+        val powerLimitedWheelTorque = if (wheelOmega < 1.0) {
+            requestedWheelTorque
+        } else {
+            profile.peakPowerKw * 1_000.0 * profile.drivetrainEfficiency / wheelOmega
+        }
+        val deliveredWheelTorque = min(requestedWheelTorque, powerLimitedWheelTorque)
+        val uncappedDriveForce = deliveredWheelTorque / profile.wheelRadiusMeters
         val driveForce = min(
             uncappedDriveForce,
             profile.vehicleMassKg * profile.tractionLimitMps2 * filteredThrottle,
@@ -208,9 +221,9 @@ class EngineSimulation(
             0.0
         }
         val acceleration = (driveForce - serviceBrakeForce - aerodynamicDrag - rollingResistance) /
-            profile.vehicleMassKg
+            (profile.vehicleMassKg * profile.rotationalMassFactor)
         vehicleSpeedMps = (vehicleSpeedMps + acceleration * dt)
-            .coerceIn(0.0, profile.topSpeedKmh / 3.6)
+            .coerceIn(0.0, maximumVehicleSpeedMps())
         if (vehicleSpeedMps < 0.04 && driveForce <= rollingResistance + serviceBrakeForce) {
             vehicleSpeedMps = 0.0
         }
@@ -344,22 +357,25 @@ class EngineSimulation(
     private fun wheelRpmForSpeed(speedMps: Double): Double =
         speedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
 
-    private fun motorRpmForSpeed(speedMps: Double): Double =
-        wheelRpmForSpeed(speedMps) * profile.motorReductionRatio
+    private fun maximumVehicleSpeedMps(): Double {
+        val configuredLimit = profile.topSpeedKmh / 3.6
+        val motorSpeedLimit = profile.motorMaxRpm / profile.motorReductionRatio *
+            (2.0 * PI * profile.wheelRadiusMeters) / 60.0
+        return min(configuredLimit, motorSpeedLimit)
+    }
 
     private fun snapshot(): DrivetrainState {
         val currentShift = shift
-        val motorTorqueFraction = interpolateCurve(
-            profile.torqueCurve,
-            (motorRpmForSpeed(vehicleSpeedMps) / profile.motorMaxRpm).coerceIn(0.0, 1.0),
-        )
+        val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
+        val peakWheelTorque = profile.frontPeakWheelTorqueNm + profile.rearPeakWheelTorqueNm
+        val wheelTorqueFraction = (axleTorque.totalNm / peakWheelTorque).coerceIn(0.0, 1.0)
         return DrivetrainState(
             rpm = engineRpm,
             gear = currentGearIndex + 1,
             speedKmh = vehicleSpeedMps * 3.6,
             smoothedThrottle = filteredThrottle,
             smoothedBrake = filteredBrake,
-            engineLoad = (filteredThrottle * (0.35 + 0.65 * motorTorqueFraction)).coerceIn(0.0, 1.0),
+            engineLoad = (filteredThrottle * (0.35 + 0.65 * wheelTorqueFraction)).coerceIn(0.0, 1.0),
             isShifting = currentShift != null,
             shiftDirection = currentShift?.direction ?: ShiftDirection.NONE,
             shiftProgress = currentShift?.let { (it.elapsed / it.duration).coerceIn(0.0, 1.0) } ?: 0.0,
@@ -389,19 +405,24 @@ class EngineSimulation(
     }
 }
 
-/** Torque available from the editable motor curve, bounded by the configured peak-power envelope. */
-internal fun motorTorqueAtRpm(profile: EngineProfile, motorRpm: Double): Double {
-    val rpm = motorRpm.coerceAtLeast(0.0)
-    val curveTorque = profile.maxTorqueNm * interpolateCurve(
-        profile.torqueCurve,
-        (rpm / profile.motorMaxRpm).coerceIn(0.0, 1.0),
+internal data class AxleWheelTorque(val frontNm: Double, val rearNm: Double) {
+    val totalNm: Double get() = frontNm + rearNm
+    val rearShare: Double get() = if (totalNm > 0.0) rearNm / totalNm else 0.0
+}
+
+/** Digitized axle-output envelope, evaluated against normalized road speed. */
+internal fun axleWheelTorqueAtSpeed(profile: EngineProfile, speedKmh: Double): AxleWheelTorque {
+    val normalizedSpeed = (speedKmh / profile.topSpeedKmh).coerceIn(0.0, 1.0)
+    return AxleWheelTorque(
+        frontNm = profile.frontPeakWheelTorqueNm * interpolateCurve(
+            profile.frontWheelTorqueCurve,
+            normalizedSpeed,
+        ),
+        rearNm = profile.rearPeakWheelTorqueNm * interpolateCurve(
+            profile.rearWheelTorqueCurve,
+            normalizedSpeed,
+        ),
     )
-    val powerLimitedTorque = if (rpm < 1.0) {
-        profile.maxTorqueNm
-    } else {
-        profile.peakPowerKw * 9_549.0 / rpm
-    }
-    return min(curveTorque, powerLimitedTorque).coerceAtLeast(0.0)
 }
 
 private fun approachExp(current: Double, target: Double, timeConstant: Double, dt: Double): Double {

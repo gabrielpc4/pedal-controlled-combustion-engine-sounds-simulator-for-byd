@@ -7,20 +7,28 @@ The dashboard's **TUNE** button opens a full-screen workstation designed for the
 ### Vehicle
 
 - Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, downshift RPM, and RPM response time
-- Peak motor torque and power, motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
-- Vehicle mass, wheel radius, drag area, rolling resistance, and top speed
-- Live motor torque/power graph with a cursor derived from road speed and actual motor reduction
+- Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
+- Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
+- Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
+- Live combined wheel-torque/power graph with a road-speed cursor
 
 The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and presentation-shift logic all use the same live synthetic configuration. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is computed from the electric settings and is independent of the synthetic gears.
 
-### Curves
+### AWD curves
 
-- Nine-point normalized EV motor torque curve
+- Twelve-point front wheel-torque curve digitized from the A2MAC1 trace
+- Twelve-point rear wheel-torque curve digitized from the A2MAC1 trace
+- Derived front/rear distribution graph, rising from approximately 56% to 71% rear by default
+
+Curve points are edited directly by dragging them. Their horizontal order is constrained and every edit passes through the same sanitizer used when a saved profile is loaded. Both axle graphs use normalized road speed horizontally and wheel torque vertically. The configured motor-power/efficiency ceiling remains active as a sanity bound.
+
+### Response
+
 - Six-point Sport-like pedal-to-requested-motor-torque curve
 - Throttle attack/release and brake response time constants
 - Live response preview for all three pedal filters
 
-Curve points are edited directly by dragging them. Their horizontal order is constrained, throttle endpoints remain fixed at 0/0 and 100/100, and every edit passes through the same sanitizer used when a saved profile is loaded. The motor graph's live cursor is based on road speed; the pedal graph shows current pedal input. The configured peak-power ceiling remains active even if a torque point is dragged above the physical constant-power envelope.
+Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is informed by the full-request torque rise visible in A2MAC1's acceleration chart, but the pedal map itself remains an approximation because BYD does not publish it.
 
 ### Gearing
 
