@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator.simulation
 
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
+import com.gabrielpc.enginesoundsimulator.tuning.SyntheticRpmMode
 import com.gabrielpc.enginesoundsimulator.tuning.interpolateCurve
 import kotlin.math.PI
 import kotlin.math.max
@@ -15,7 +16,6 @@ data class EngineProfile(
     val redlineRpm: Double,
     val limiterRpm: Double,
     val upshiftRpm: Double,
-    val downshiftRpm: Double,
     val maxTorqueNm: Double,
     val peakPowerKw: Double,
     val motorMaxRpm: Double,
@@ -30,6 +30,7 @@ data class EngineProfile(
     val dragAreaM2: Double,
     val rollingResistanceCoefficient: Double,
     val topSpeedKmh: Double,
+    val syntheticRpmMode: SyntheticRpmMode,
     val syntheticRpmResponseSeconds: Double,
     /** Constant deceleration applied on lift-off while integrating virtual speed in SIM mode. */
     val simulatorCoastRegenMps2: Double,
@@ -57,7 +58,6 @@ data class EngineProfile(
             redlineRpm = 8_600.0,
             limiterRpm = 8_850.0,
             upshiftRpm = 8_250.0,
-            downshiftRpm = 2_250.0,
             maxTorqueNm = 670.0,
             peakPowerKw = 390.0,
             motorMaxRpm = 16_000.0,
@@ -72,6 +72,7 @@ data class EngineProfile(
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 180.0,
+            syntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
             syntheticRpmResponseSeconds = 0.035,
             simulatorCoastRegenMps2 = 0.50,
             finalDrive = 3.82,
@@ -274,7 +275,7 @@ class EngineSimulation(
     private fun synchronizeToExternalSpeed() {
         val wheelRpm = wheelRpmForSpeed(vehicleSpeedMps)
         val maximumSynchronizationRpm = profile.redlineRpm * 0.92
-        val minimumCruiseRpm = max(profile.idleRpm * 1.15, profile.downshiftRpm * 0.90)
+        val minimumCruiseRpm = profile.idleRpm * 1.15
         val safeGears = profile.gearRatios.indices.filter { gearIndex ->
             profile.idleRpm + wheelRpm * profile.gearRatios[gearIndex] * profile.finalDrive <=
                 maximumSynchronizationRpm
@@ -286,7 +287,10 @@ class EngineSimulation(
         currentGearIndex = cruiseGears.lastOrNull()
             ?: safeGears.firstOrNull()
             ?: profile.gearRatios.lastIndex
-        engineRpm = syntheticRpmTarget()
+        engineRpm = when (profile.syntheticRpmMode) {
+            SyntheticRpmMode.FREE_REV -> freeRevRpmTarget()
+            SyntheticRpmMode.ROAD_COUPLED -> roadCoupledRpmTarget()
+        }
         limiterLatched = false
         shift = null
         secondsSinceShift = 0.0
@@ -298,7 +302,10 @@ class EngineSimulation(
         val targetRpm = if (shiftRevTransition) {
             activeShift.rpmTarget
         } else {
-            syntheticRpmTarget()
+            when (profile.syntheticRpmMode) {
+                SyntheticRpmMode.FREE_REV -> freeRevRpmTarget()
+                SyntheticRpmMode.ROAD_COUPLED -> roadCoupledRpmTarget()
+            }
         }
         engineRpm = approachExp(
             current = engineRpm,
@@ -308,10 +315,23 @@ class EngineSimulation(
         ).coerceIn(profile.idleRpm, profile.limiterRpm)
     }
 
-    private fun syntheticRpmTarget(): Double {
+    private fun roadCoupledRpmTarget(): Double {
         val coupled = wheelRpmForSpeed(vehicleSpeedMps) *
             profile.gearRatios[currentGearIndex] * profile.finalDrive
         return (profile.idleRpm + coupled).coerceAtMost(profile.limiterRpm)
+    }
+
+    /** Throttle-driven revs independent of road speed, like a combustion engine in neutral. */
+    private fun freeRevRpmTarget(): Double {
+        val revSpan = profile.redlineRpm - profile.idleRpm
+        return profile.idleRpm + filteredThrottle.coerceIn(0.0, 1.0) * revSpan
+    }
+
+    private fun syntheticRpmTarget(): Double {
+        return when (profile.syntheticRpmMode) {
+            SyntheticRpmMode.FREE_REV -> freeRevRpmTarget()
+            SyntheticRpmMode.ROAD_COUPLED -> roadCoupledRpmTarget()
+        }
     }
 
     private fun needsEmergencyUpshift(): Boolean {
@@ -319,6 +339,10 @@ class EngineSimulation(
 
         val emergencyThreshold = profile.redlineRpm * EMERGENCY_UPSHIFT_REDLINE_FRACTION
         if (engineRpm >= emergencyThreshold) return true
+
+        if (profile.syntheticRpmMode == SyntheticRpmMode.FREE_REV) {
+            return false
+        }
 
         val projectedRpm = profile.idleRpm + wheelRpmForSpeed(vehicleSpeedMps) *
             profile.gearRatios[currentGearIndex] * profile.finalDrive
@@ -356,10 +380,8 @@ class EngineSimulation(
         }
     }
 
-    private fun downshiftThresholdRpm(gearIndex: Int): Double = max(
-        profile.downshiftRpm,
-        postUpshiftLandingRpm(profile, gearIndex),
-    )
+    private fun downshiftThresholdRpm(gearIndex: Int): Double =
+        postUpshiftLandingRpm(profile, gearIndex)
 
     private fun beginShift(
         targetGearIndex: Int,
@@ -469,7 +491,9 @@ internal data class AxleWheelTorque(val frontNm: Double, val rearNm: Double) {
 
 /** RPM reached in [gearIndex] at the same road speed that triggered the preceding upshift. */
 internal fun postUpshiftLandingRpm(profile: EngineProfile, gearIndex: Int): Double {
-    if (gearIndex <= 0 || gearIndex > profile.gearRatios.lastIndex) return profile.downshiftRpm
+    if (gearIndex <= 0 || gearIndex > profile.gearRatios.lastIndex) {
+        return profile.idleRpm
+    }
     val previousRatio = profile.gearRatios[gearIndex - 1]
     val currentRatio = profile.gearRatios[gearIndex]
     return profile.idleRpm + (profile.upshiftRpm - profile.idleRpm) * currentRatio / previousRatio

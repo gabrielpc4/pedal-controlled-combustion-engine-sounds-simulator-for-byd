@@ -1,5 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
+import com.gabrielpc.enginesoundsimulator.tuning.SyntheticRpmMode
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -250,7 +251,10 @@ class EngineSimulationTest {
 
     @Test
     fun releasingPedalKeepsRpmCoupledToRoadSpeed() {
-        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val profile = EngineProfile.APEX_V10.copy(
+            gearRatios = doubleArrayOf(3.14),
+            syntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
+        )
         val simulation = EngineSimulation(profile)
         simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 40.0), STEP)
         simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
@@ -302,13 +306,42 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun freeRevModeRaisesRpmWithThrottleAtStandstill() {
+        val profile = EngineProfile.APEX_V10.copy(
+            gearRatios = doubleArrayOf(3.14),
+            syntheticRpmMode = SyntheticRpmMode.FREE_REV,
+        )
+        val simulation = EngineSimulation(profile)
+        val idle = simulation.update(DriverInput(), STEP)
+        val revved = simulation.runFor(0.6, throttle = 1.0)
+
+        assertEquals(0.0, idle.speedKmh, 0.001)
+        assertTrue("neutral mode should rev above idle at standstill", revved.rpm > idle.rpm + 500.0)
+    }
+
+    @Test
+    fun freeRevModeLiftOffDropsRpmTowardIdleAtStandstill() {
+        val profile = EngineProfile.APEX_V10.copy(
+            gearRatios = doubleArrayOf(3.14),
+            syntheticRpmMode = SyntheticRpmMode.FREE_REV,
+        )
+        val simulation = EngineSimulation(profile)
+        simulation.runFor(0.8, throttle = 1.0)
+        val beforeLift = simulation.state
+        val afterLift = simulation.runFor(0.8, throttle = 0.0)
+
+        assertTrue(beforeLift.rpm > profile.idleRpm + 1_000.0)
+        assertTrue("lift-off in neutral mode should fall toward idle", afterLift.rpm < beforeLift.rpm - 400.0)
+    }
+
+    @Test
     fun liftOffWithLiveSpeedHeldDoesNotHuntGears() {
         val profile = EngineProfile.APEX_V10.copy(
             redlineRpm = 2_800.0,
             limiterRpm = 3_000.0,
             upshiftRpm = 2_600.0,
-            downshiftRpm = 1_100.0,
             gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 0.10),
+            syntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
         )
         val simulation = EngineSimulation(profile)
         val joined = simulation.update(DriverInput(externalSpeedKmh = 30.0), STEP)
@@ -383,7 +416,6 @@ class EngineSimulationTest {
             redlineRpm = 3_000.0,
             limiterRpm = 3_200.0,
             upshiftRpm = 2_900.0,
-            downshiftRpm = 1_100.0,
             gearRatios = doubleArrayOf(3.14),
         )
         val simulation = EngineSimulation(limiterProfile)

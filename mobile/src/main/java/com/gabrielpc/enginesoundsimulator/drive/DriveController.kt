@@ -172,6 +172,14 @@ class DriveController(context: Context) {
         setInputMode(modes[(current.ordinal + 1) % modes.size])
     }
 
+    fun cycleSyntheticRpmMode() {
+        val current = tuningConfig.get()
+        val modes = com.gabrielpc.enginesoundsimulator.tuning.SyntheticRpmMode.entries
+        val next = modes[(current.engine.syntheticRpmMode.ordinal + 1) % modes.size]
+        setTuning(current.copy(engine = current.engine.copy(syntheticRpmMode = next)))
+        PersistentDiagnosticLog.event("synthetic_rpm_mode_changed", "mode=${next.name}")
+    }
+
     fun toggleSound() {
         synchronized(lifecycleLock) {
             val enable = !soundEnabled.get()
@@ -365,7 +373,6 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         redlineRpm = engine.redlineRpm,
         limiterRpm = engine.limiterRpm,
         upshiftRpm = engine.upshiftRpm,
-        downshiftRpm = engine.downshiftRpm,
         maxTorqueNm = engine.maxTorqueNm,
         peakPowerKw = engine.peakPowerKw,
         motorMaxRpm = engine.motorMaxRpm,
@@ -380,6 +387,7 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
+        syntheticRpmMode = engine.syntheticRpmMode,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
         finalDrive = engine.finalDrive,

@@ -130,6 +130,7 @@ class MainActivity : ComponentActivity() {
                         onThrottle = controller::setManualThrottle,
                         onBrake = controller::setManualBrake,
                         onCycleInput = controller::cycleInputMode,
+                        onCycleRpmMode = controller::cycleSyntheticRpmMode,
                         onToggleSound = controller::toggleSound,
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
@@ -172,6 +173,7 @@ private fun MotorSoundDashboard(
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onCycleInput: () -> Unit,
+    onCycleRpmMode: () -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
@@ -246,6 +248,7 @@ private fun MotorSoundDashboard(
                     DashboardHeader(
                         state = state,
                         onCycleInput = onCycleInput,
+                        onCycleRpmMode = onCycleRpmMode,
                         onToggleSound = onToggleSound,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
@@ -301,6 +304,7 @@ private fun MotorSoundDashboard(
 private fun DashboardHeader(
     state: DriveSnapshot,
     onCycleInput: () -> Unit,
+    onCycleRpmMode: () -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
@@ -348,6 +352,12 @@ private fun DashboardHeader(
             secondary = "ENGINE PROFILE",
             accent = Amber,
             onClick = onOpenTuning,
+        )
+        HeaderButton(
+            primary = state.tuning.engine.syntheticRpmMode.displayName,
+            secondary = "RPM MODE",
+            accent = Amber,
+            onClick = onCycleRpmMode,
         )
         HeaderButton(
             primary = state.inputMode.displayName,

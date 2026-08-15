@@ -8,7 +8,7 @@ The interface presents torque in **≈ motor-shaft kgfm** and power in values la
 
 ### Vehicle
 
-- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, minimum downshift floor, and RPM response time
+- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, RPM response time, and dashboard **RPM MODE** toggle (**ROAD** vs **NEUTRAL**)
 - Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
 - Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
 - Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed

@@ -12,7 +12,6 @@ data class EngineTuning(
     val redlineRpm: Double = 8_600.0,
     val limiterRpm: Double = 8_850.0,
     val upshiftRpm: Double = 8_250.0,
-    val downshiftRpm: Double = 2_250.0,
     val maxTorqueNm: Double = 670.0,
     val peakPowerKw: Double = 390.0,
     val motorMaxRpm: Double = 16_000.0,
@@ -27,6 +26,7 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 180.0,
+    val syntheticRpmMode: SyntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
     val syntheticRpmResponseMs: Double = 35.0,
     val simulatorCoastRegenMps2: Double = 0.50,
     val finalDrive: Double = 3.82,
@@ -50,14 +50,12 @@ data class EngineTuning(
         val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm - 100.0)
         val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
         val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 1_000.0, cleanRedline - 100.0)
-        val cleanDownshift = downshiftRpm.coerceIn(cleanIdle + 50.0, min(4_500.0, cleanUpshift - 500.0))
         return copy(
             idleRpm = cleanIdle,
             maxRpm = cleanMaxRpm,
             redlineRpm = cleanRedline,
             limiterRpm = cleanLimiter,
             upshiftRpm = cleanUpshift,
-            downshiftRpm = cleanDownshift,
             maxTorqueNm = maxTorqueNm.coerceIn(150.0, 1_200.0),
             peakPowerKw = peakPowerKw.coerceIn(100.0, 800.0),
             motorMaxRpm = motorMaxRpm.coerceIn(8_000.0, 25_000.0),
@@ -186,7 +184,6 @@ class TuningRepository(context: Context) {
             redlineRpm = number(KEY_REDLINE_RPM, defaults.engine.redlineRpm),
             limiterRpm = number(KEY_LIMITER_RPM, defaults.engine.limiterRpm),
             upshiftRpm = number(KEY_UPSHIFT, defaults.engine.upshiftRpm),
-            downshiftRpm = number(KEY_DOWNSHIFT, defaults.engine.downshiftRpm),
             maxTorqueNm = number(KEY_TORQUE, defaults.engine.maxTorqueNm),
             peakPowerKw = number(KEY_PEAK_POWER, defaults.engine.peakPowerKw),
             motorMaxRpm = number(KEY_MOTOR_MAX_RPM, defaults.engine.motorMaxRpm),
@@ -201,6 +198,10 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
+            syntheticRpmMode = decodeSyntheticRpmMode(
+                preferences.getString(KEY_SYNTHETIC_RPM_MODE, null),
+                defaults.engine.syntheticRpmMode,
+            ),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
             simulatorCoastRegenMps2 = number(
                 KEY_SIMULATOR_COAST_REGEN,
@@ -252,7 +253,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_REDLINE_RPM, clean.engine.redlineRpm.toString())
             .putString(KEY_LIMITER_RPM, clean.engine.limiterRpm.toString())
             .putString(KEY_UPSHIFT, clean.engine.upshiftRpm.toString())
-            .putString(KEY_DOWNSHIFT, clean.engine.downshiftRpm.toString())
             .putString(KEY_TORQUE, clean.engine.maxTorqueNm.toString())
             .putString(KEY_PEAK_POWER, clean.engine.peakPowerKw.toString())
             .putString(KEY_MOTOR_MAX_RPM, clean.engine.motorMaxRpm.toString())
@@ -267,6 +267,7 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
+            .putString(KEY_SYNTHETIC_RPM_MODE, clean.engine.syntheticRpmMode.name)
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
             .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
@@ -304,13 +305,13 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 2
+        const val CALIBRATION_REVISION = 3
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
         const val KEY_LIMITER_RPM = "limiter_rpm"
         const val KEY_UPSHIFT = "upshift_rpm"
-        const val KEY_DOWNSHIFT = "downshift_rpm"
+        const val KEY_SYNTHETIC_RPM_MODE = "synthetic_rpm_mode"
         const val KEY_TORQUE = "max_torque"
         const val KEY_PEAK_POWER = "peak_power"
         const val KEY_MOTOR_MAX_RPM = "motor_max_rpm"

@@ -173,7 +173,11 @@ private fun TabButton(tab: TuningTab, selected: Boolean, onClick: () -> Unit) {
 private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SYNTHETIC ENGINE", "Sound RPM envelope and automatic strategy", Modifier.weight(0.78f)) {
+        PanelCard(
+            "SYNTHETIC ENGINE",
+            "ROAD = tach follows speed • NEUTRAL = free rev like park neutral (tap RPM MODE on dashboard)",
+            Modifier.weight(0.78f),
+        ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..12_000.0, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
@@ -197,9 +201,6 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 }
                 ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
-                }
-                ParameterSlider("DOWNSHIFT FLOOR", engine.downshiftRpm, 1_000.0..min(4_500.0, engine.upshiftRpm - 500.0), "%.0f") {
-                    onChange(config.copy(engine = engine.copy(downshiftRpm = it)))
                 }
                 ParameterSlider("RPM RESPONSE", engine.syntheticRpmResponseMs, 10.0..250.0, "%.0f ms") {
                     onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
@@ -408,7 +409,11 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
                 }
             }
         }
-        PanelCard("SHIFT LANDING / DOWNSHIFT", "Each landing RPM becomes that gear's downshift point", Modifier.weight(1.25f)) {
+        PanelCard(
+            "SHIFT LANDING / DOWNSHIFT",
+            "Landing RPM after each upshift is that gear's automatic downshift threshold",
+            Modifier.weight(1.25f),
+        ) {
             GearDropGraph(engine, Modifier.fillMaxSize())
         }
     }
@@ -1078,7 +1083,7 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
                 (engine.upshiftRpm - engine.idleRpm) * engine.gearRatios[index + 1] / engine.gearRatios[index]
         }
         val yTicks = axisTicksFromValues(
-            values = listOf(engine.idleRpm, engine.downshiftRpm, engine.upshiftRpm) + landingRpms,
+            values = listOf(engine.idleRpm, engine.upshiftRpm) + landingRpms,
             positionOf = { (it / engine.maxRpm).toFloat().coerceIn(0f, 1f) },
             labelOf = { rpm -> rpm.roundToInt().toString() },
             minSpacing = 0.09f,
@@ -1118,14 +1123,12 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
                 )
             }
         }
-        val downshiftY = bottom - height * (engine.downshiftRpm / engine.maxRpm).toFloat()
-        drawLine(TuneAmber, Offset(left, downshiftY), Offset(right, downshiftY), 2f, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 8f)))
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
             paint.textSize = 16f
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(140, 167, 181)
-            canvas.nativeCanvas.drawText("LANDING RPM", left, 20f, paint)
+            canvas.nativeCanvas.drawText("LANDING / DOWNSHIFT RPM", left, 20f, paint)
             paint.textAlign = Paint.Align.RIGHT
             yTicks.forEach { tick ->
                 canvas.nativeCanvas.drawText(
@@ -1135,9 +1138,6 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
                     paint,
                 )
             }
-            paint.textAlign = Paint.Align.RIGHT
-            paint.color = android.graphics.Color.rgb(255, 196, 86)
-            canvas.nativeCanvas.drawText("DOWNSHIFT ${engine.downshiftRpm.roundToInt()} RPM", right, downshiftY - 8f, paint)
             paint.textAlign = Paint.Align.CENTER
             paint.color = GRAPH_AXIS_LABEL_COLOR
             xTicks.forEach { tick ->

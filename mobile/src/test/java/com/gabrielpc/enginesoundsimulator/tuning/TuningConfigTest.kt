@@ -25,7 +25,6 @@ class TuningConfigTest {
             redlineRpm = 14_000.0,
             limiterRpm = 15_000.0,
             upshiftRpm = 15_000.0,
-            downshiftRpm = 9_000.0,
             throttleCurve = listOf(
                 CurvePoint(0.8, 0.4),
                 CurvePoint(0.2, 0.9),
@@ -38,7 +37,6 @@ class TuningConfigTest {
         assertTrue(result.upshiftRpm < result.redlineRpm)
         assertTrue(result.redlineRpm <= result.limiterRpm)
         assertTrue(result.limiterRpm < result.maxRpm)
-        assertTrue(result.downshiftRpm < result.upshiftRpm)
         assertEquals(CurvePoint(0.0, 0.0), result.throttleCurve.first())
         assertEquals(CurvePoint(1.0, 1.0), result.throttleCurve.last())
         assertTrue(result.throttleCurve.zipWithNext().all { (left, right) -> left.x < right.x })

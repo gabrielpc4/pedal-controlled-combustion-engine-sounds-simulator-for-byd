@@ -161,7 +161,22 @@ A synthetic upshift **must not** cut, delay, or multiply wheel torque. Regressio
 
 See [calibration doc — Synthetic gears](byd-seal-performance-calibration.md#synthetic-gears-are-not-a-transmission).
 
-### 3.2 Lift-off RPM retention removed (2026-08)
+### 3.2 Synthetic RPM modes (2026-08)
+
+Two switchable modes control how the tachometer needle moves. Tap **RPM MODE** on the dashboard header to cycle them; the choice is persisted in tuning storage.
+
+| Mode | Dashboard label | RPM behavior |
+|------|-----------------|--------------|
+| `ROAD_COUPLED` | **ROAD** | RPM follows road speed through the current presentation gear (default). Lift-off keeps the needle coupled to speed — no retention layer. |
+| `FREE_REV` | **NEUTRAL** | RPM follows throttle like a combustion engine in neutral: gas raises revs, release lets them fall toward idle, even at standstill. |
+
+**Shifting in both modes:** upshifts still occur at the configured perfect-shift RPM with meaningful throttle. Downshifts use only the **per-gear landing RPM** derived from the preceding upshift ratio swap — the old editable global **downshift floor** (often shown near 2250 RPM) was removed because it fought the landing-based model.
+
+In **NEUTRAL** mode, emergency upshifts from projected road speed are disabled so free-revving at a stop cannot force a shift; normal upshift RPM and downshift landing rules still apply while driving.
+
+**Tests:** `releasingPedalKeepsRpmCoupledToRoadSpeed`, `freeRevModeRaisesRpmWithThrottleAtStandstill`, `freeRevModeLiftOffDropsRpmTowardIdleAtStandstill`, plus the existing lift-off hunting guards in **ROAD** mode.
+
+### 3.3 Lift-off RPM retention removed (2026-08)
 
 **Previous behavior:** on pedal release, synthetic RPM could lag above road-coupled RPM via an editable retention fraction and decay time. That made the needle sound “hang” but caused **gear hunting** (`3 → 2 → 3`) because downshift logic saw low displayed RPM while road speed still justified a higher gear.
 
@@ -177,7 +192,7 @@ Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No re
 
 **Rejected return path:** reintroducing retention without a scoped live-speed safety model. The old scoped emergency-upshift hold existed only to paper over the retention/display mismatch and was removed with retention.
 
-### 3.3 Simulator coast regen (2026-08)
+### 3.4 Simulator coast regen (2026-08)
 
 **Problem:** in **SIM** mode, releasing the accelerator slowed the virtual car only through aero drag and rolling resistance — much slower than a real Seal’s mild lift-off regen.
 
@@ -189,7 +204,7 @@ Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No re
 
 **Explicit non-goal:** model BYD Standard/High regen modes from the owner manual — no published Nm or m/s² tables exist.
 
-### 3.4 Motor-power sanity ceiling (unchanged)
+### 3.5 Motor-power sanity ceiling (unchanged)
 
 Wheel torque from curves is capped by:
 
