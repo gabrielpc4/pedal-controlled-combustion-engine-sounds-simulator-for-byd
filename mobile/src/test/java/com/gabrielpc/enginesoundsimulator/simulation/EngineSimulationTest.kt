@@ -1,6 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
-import com.gabrielpc.enginesoundsimulator.tuning.SyntheticRpmMode
+import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -251,12 +251,16 @@ class EngineSimulationTest {
 
     @Test
     fun releasingPedalKeepsRpmCoupledToRoadSpeed() {
-        val profile = EngineProfile.APEX_V10.copy(
-            gearRatios = doubleArrayOf(3.14),
-            syntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
-        )
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
-        simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 40.0), STEP)
+        simulation.update(
+            DriverInput(
+                throttle = 1.0,
+                externalSpeedKmh = 40.0,
+                transmissionPosition = TransmissionPosition.DRIVE,
+            ),
+            STEP,
+        )
         simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
         val beforeLift = simulation.state
         val afterLift = simulation.runForExternal(0.35, speedKmh = 40.0, throttle = 0.0)
@@ -306,32 +310,52 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun freeRevModeRaisesRpmWithThrottleAtStandstill() {
-        val profile = EngineProfile.APEX_V10.copy(
-            gearRatios = doubleArrayOf(3.14),
-            syntheticRpmMode = SyntheticRpmMode.FREE_REV,
-        )
+    fun neutralPositionRaisesRpmWithThrottleAtStandstill() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
-        val idle = simulation.update(DriverInput(), STEP)
-        val revved = simulation.runFor(0.6, throttle = 1.0)
+        val idle = simulation.update(
+            DriverInput(transmissionPosition = TransmissionPosition.NEUTRAL),
+            STEP,
+        )
+        val revved = simulation.runFor(
+            0.6,
+            throttle = 1.0,
+            transmissionPosition = TransmissionPosition.NEUTRAL,
+        )
 
         assertEquals(0.0, idle.speedKmh, 0.001)
-        assertTrue("neutral mode should rev above idle at standstill", revved.rpm > idle.rpm + 500.0)
+        assertTrue("neutral should rev above idle at standstill", revved.rpm > idle.rpm + 500.0)
+        assertEquals(1, revved.gear)
     }
 
     @Test
-    fun freeRevModeLiftOffDropsRpmTowardIdleAtStandstill() {
-        val profile = EngineProfile.APEX_V10.copy(
-            gearRatios = doubleArrayOf(3.14),
-            syntheticRpmMode = SyntheticRpmMode.FREE_REV,
-        )
+    fun neutralPositionLiftOffDropsRpmTowardIdleAtStandstill() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
-        simulation.runFor(0.8, throttle = 1.0)
+        simulation.runFor(0.8, throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL)
         val beforeLift = simulation.state
-        val afterLift = simulation.runFor(0.8, throttle = 0.0)
+        val afterLift = simulation.runFor(0.8, throttle = 0.0, transmissionPosition = TransmissionPosition.NEUTRAL)
 
         assertTrue(beforeLift.rpm > profile.idleRpm + 1_000.0)
-        assertTrue("lift-off in neutral mode should fall toward idle", afterLift.rpm < beforeLift.rpm - 400.0)
+        assertTrue("lift-off in neutral should fall toward idle", afterLift.rpm < beforeLift.rpm - 400.0)
+    }
+
+    @Test
+    fun neutralPositionDoesNotAutoShiftWhileRevving() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14, 2.10, 1.57))
+        val simulation = EngineSimulation(profile)
+        val revved = simulation.runFor(1.2, throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL)
+
+        assertEquals("neutral must not upshift while free-revving", 1, revved.gear)
+        assertFalse(revved.isShifting)
+    }
+
+    @Test
+    fun parkPositionKeepsSimulatorSpeedAtZero() {
+        val simulation = EngineSimulation()
+        simulation.runFor(0.8, throttle = 1.0, transmissionPosition = TransmissionPosition.PARK)
+
+        assertEquals(0.0, simulation.state.speedKmh, 0.001)
     }
 
     @Test
@@ -341,7 +365,6 @@ class EngineSimulationTest {
             limiterRpm = 3_000.0,
             upshiftRpm = 2_600.0,
             gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 0.10),
-            syntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
         )
         val simulation = EngineSimulation(profile)
         val joined = simulation.update(DriverInput(externalSpeedKmh = 30.0), STEP)
@@ -497,6 +520,7 @@ class EngineSimulationTest {
         throttle: Double = 0.0,
         brake: Double = 0.0,
         simulateCoastRegen: Boolean = false,
+        transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
     ): DrivetrainState {
         var result = state
         repeat((seconds / STEP).toInt()) {
@@ -505,6 +529,7 @@ class EngineSimulationTest {
                     throttle = throttle,
                     brake = brake,
                     simulateCoastRegen = simulateCoastRegen,
+                    transmissionPosition = transmissionPosition,
                 ),
                 STEP,
             )
@@ -516,10 +541,18 @@ class EngineSimulationTest {
         seconds: Double,
         speedKmh: Double,
         throttle: Double = 0.0,
+        transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
     ): DrivetrainState {
         var result = state
         repeat((seconds / STEP).toInt()) {
-            result = update(DriverInput(throttle = throttle, externalSpeedKmh = speedKmh), STEP)
+            result = update(
+                DriverInput(
+                    throttle = throttle,
+                    externalSpeedKmh = speedKmh,
+                    transmissionPosition = transmissionPosition,
+                ),
+                STEP,
+            )
         }
         return result
     }

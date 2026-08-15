@@ -161,20 +161,19 @@ A synthetic upshift **must not** cut, delay, or multiply wheel torque. Regressio
 
 See [calibration doc — Synthetic gears](byd-seal-performance-calibration.md#synthetic-gears-are-not-a-transmission).
 
-### 3.2 Synthetic RPM modes (2026-08)
+### 3.2 P / N / D shifter (2026-08)
 
-Two switchable modes control how the tachometer needle moves. Tap **RPM MODE** on the dashboard header to cycle them; the choice is persisted in tuning storage.
+A column shifter beside the pedals selects **P**, **N**, or **D**. It is runtime-only (not stored in engine tuning).
 
-| Mode | Dashboard label | RPM behavior |
-|------|-----------------|--------------|
-| `ROAD_COUPLED` | **ROAD** | RPM follows road speed through the current presentation gear (default). Lift-off keeps the needle coupled to speed — no retention layer. |
-| `FREE_REV` | **NEUTRAL** | RPM follows throttle like a combustion engine in neutral: gas raises revs, release lets them fall toward idle, even at standstill. |
+| Position | Behavior |
+|----------|----------|
+| **D** | RPM follows road speed through the presentation gear; automatic upshifts/downshifts; throttle drives the virtual vehicle in SIM mode. |
+| **N** | Neutral: RPM free-revs with throttle and falls on lift-off; **no** automatic gear changes; throttle does **not** drive the wheels (coast/brake still affect SIM speed). |
+| **P** | Park: same free-rev RPM as **N**, but SIM speed is held at zero. |
 
-**Shifting in both modes:** upshifts still occur at the configured perfect-shift RPM with meaningful throttle. Downshifts use only the **per-gear landing RPM** derived from the preceding upshift ratio swap — the old editable global **downshift floor** (often shown near 2250 RPM) was removed because it fought the landing-based model.
+The tachometer shows the gear number in **D** and **P**/**N** on the range readout when not in drive.
 
-In **NEUTRAL** mode, emergency upshifts from projected road speed are disabled so free-revving at a stop cannot force a shift; normal upshift RPM and downshift landing rules still apply while driving.
-
-**Tests:** `releasingPedalKeepsRpmCoupledToRoadSpeed`, `freeRevModeRaisesRpmWithThrottleAtStandstill`, `freeRevModeLiftOffDropsRpmTowardIdleAtStandstill`, plus the existing lift-off hunting guards in **ROAD** mode.
+**Tests:** `neutralPositionRaisesRpmWithThrottleAtStandstill`, `neutralPositionLiftOffDropsRpmTowardIdleAtStandstill`, `neutralPositionDoesNotAutoShiftWhileRevving`, `parkPositionKeepsSimulatorSpeedAtZero`, plus existing lift-off hunting guards in **D**.
 
 ### 3.3 Lift-off RPM retention removed (2026-08)
 

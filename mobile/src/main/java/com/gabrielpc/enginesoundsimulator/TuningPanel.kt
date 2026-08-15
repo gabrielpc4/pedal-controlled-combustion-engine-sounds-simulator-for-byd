@@ -175,7 +175,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
             "SYNTHETIC ENGINE",
-            "ROAD = tach follows speed • NEUTRAL = free rev like park neutral (tap RPM MODE on dashboard)",
+            "Tach follows road speed in D; use the P N D shifter beside the pedals for neutral revs",
             Modifier.weight(0.78f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {

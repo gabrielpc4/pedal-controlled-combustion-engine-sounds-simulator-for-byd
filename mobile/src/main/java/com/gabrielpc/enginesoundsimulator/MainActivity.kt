@@ -8,6 +8,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,6 +79,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
+import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
 import com.gabrielpc.enginesoundsimulator.ui.theme.EngineSoundsSimulatorTheme
 import kotlin.math.PI
@@ -130,7 +132,7 @@ class MainActivity : ComponentActivity() {
                         onThrottle = controller::setManualThrottle,
                         onBrake = controller::setManualBrake,
                         onCycleInput = controller::cycleInputMode,
-                        onCycleRpmMode = controller::cycleSyntheticRpmMode,
+                        onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
@@ -173,7 +175,7 @@ private fun MotorSoundDashboard(
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onCycleInput: () -> Unit,
-    onCycleRpmMode: () -> Unit,
+    onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
@@ -248,7 +250,6 @@ private fun MotorSoundDashboard(
                     DashboardHeader(
                         state = state,
                         onCycleInput = onCycleInput,
-                        onCycleRpmMode = onCycleRpmMode,
                         onToggleSound = onToggleSound,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
@@ -265,12 +266,14 @@ private fun MotorSoundDashboard(
                             state = state,
                             onThrottle = onThrottle,
                             onBrake = onBrake,
+                            onTransmissionChange = onTransmissionChange,
                             modifier = Modifier
                                 .weight(1.12f)
                                 .fillMaxHeight(),
                         )
                         Tachometer(
                             drivetrain = state.drivetrain,
+                            transmissionPosition = state.transmissionPosition,
                             maxRpm = state.tuning.engine.maxRpm,
                             redlineRpm = state.tuning.engine.redlineRpm,
                             upshiftRpm = state.tuning.engine.upshiftRpm,
@@ -304,7 +307,6 @@ private fun MotorSoundDashboard(
 private fun DashboardHeader(
     state: DriveSnapshot,
     onCycleInput: () -> Unit,
-    onCycleRpmMode: () -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
@@ -352,12 +354,6 @@ private fun DashboardHeader(
             secondary = "ENGINE PROFILE",
             accent = Amber,
             onClick = onOpenTuning,
-        )
-        HeaderButton(
-            primary = state.tuning.engine.syntheticRpmMode.displayName,
-            secondary = "RPM MODE",
-            accent = Amber,
-            onClick = onCycleRpmMode,
         )
         HeaderButton(
             primary = state.inputMode.displayName,
@@ -421,6 +417,7 @@ private fun CarStage(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onTransmissionChange: (TransmissionPosition) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -511,10 +508,14 @@ private fun CarStage(
                 height = 202.dp,
                 onValue = onThrottle,
             )
+            TransmissionShifter(
+                position = state.transmissionPosition,
+                onPositionChange = onTransmissionChange,
+            )
         }
 
         Text(
-            text = "TOUCH / DRAG PEDALS   •   W or ↑ THROTTLE   •   S, ↓ or SPACE BRAKE",
+            text = "TOUCH / DRAG PEDALS   •   P N D SHIFTER   •   W or ↑ THROTTLE   •   S, ↓ or SPACE BRAKE",
             color = Muted,
             fontSize = 10.sp,
             letterSpacing = 0.6.sp,
@@ -522,6 +523,61 @@ private fun CarStage(
                 .align(Alignment.BottomStart)
                 .padding(start = 22.dp, bottom = 8.dp),
         )
+    }
+}
+
+@Composable
+private fun TransmissionShifter(
+    position: TransmissionPosition,
+    onPositionChange: (TransmissionPosition) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .width(58.dp)
+            .height(202.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF5B6670), Color(0xFF232D35), Color(0xFF11181E)),
+                ),
+            )
+            .border(2.dp, Color(0xFF60717D), RoundedCornerShape(16.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        TransmissionPosition.entries.forEach { option ->
+            val selected = option == position
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (selected) {
+                            Amber.copy(alpha = 0.22f)
+                        } else {
+                            Color.Transparent
+                        },
+                    )
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) Amber else Color(0xFF4A5A66),
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                    .clickable { onPositionChange(option) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = option.displayName,
+                    color = if (selected) Amber else Muted,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.0.sp,
+                )
+            }
+        }
     }
 }
 
@@ -605,6 +661,7 @@ private fun PedalControl(
 @Composable
 private fun Tachometer(
     drivetrain: DrivetrainState,
+    transmissionPosition: TransmissionPosition,
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
@@ -737,13 +794,23 @@ private fun Tachometer(
                 modifier = Modifier.offset(y = (-2).dp),
             ) {
                 Text(
-                    text = drivetrain.gear.toString(),
+                    text = if (transmissionPosition == TransmissionPosition.DRIVE) {
+                        drivetrain.gear.toString()
+                    } else {
+                        transmissionPosition.displayName
+                    },
                     color = Cyan,
                     fontSize = 48.sp,
                     lineHeight = 48.sp,
                     fontWeight = FontWeight.Black,
                 )
-                Text("GEAR", color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Text(
+                    if (transmissionPosition == TransmissionPosition.DRIVE) {
+                        "GEAR"
+                    } else {
+                        "RANGE"
+                    },
+                    color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
             }
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,

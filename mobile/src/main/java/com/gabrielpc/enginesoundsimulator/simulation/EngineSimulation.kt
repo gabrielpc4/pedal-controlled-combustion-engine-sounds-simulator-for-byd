@@ -2,7 +2,6 @@ package com.gabrielpc.enginesoundsimulator.simulation
 
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
-import com.gabrielpc.enginesoundsimulator.tuning.SyntheticRpmMode
 import com.gabrielpc.enginesoundsimulator.tuning.interpolateCurve
 import kotlin.math.PI
 import kotlin.math.max
@@ -30,7 +29,6 @@ data class EngineProfile(
     val dragAreaM2: Double,
     val rollingResistanceCoefficient: Double,
     val topSpeedKmh: Double,
-    val syntheticRpmMode: SyntheticRpmMode,
     val syntheticRpmResponseSeconds: Double,
     /** Constant deceleration applied on lift-off while integrating virtual speed in SIM mode. */
     val simulatorCoastRegenMps2: Double,
@@ -72,7 +70,6 @@ data class EngineProfile(
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 180.0,
-            syntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
             syntheticRpmResponseSeconds = 0.035,
             simulatorCoastRegenMps2 = 0.50,
             finalDrive = 3.82,
@@ -88,6 +85,7 @@ data class DriverInput(
     val externalSpeedKmh: Double? = null,
     /** Applies simulator-only coast regen when integrating virtual road speed. */
     val simulateCoastRegen: Boolean = false,
+    val transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
 )
 
 enum class ShiftDirection { NONE, UP, DOWN }
@@ -180,21 +178,29 @@ class EngineSimulation(
 
         val externalMps = input.externalSpeedKmh?.coerceAtLeast(0.0)?.div(3.6)
         if (externalMps != null) {
-            applyExternalSpeed(externalMps, dt)
+            applyExternalSpeed(externalMps, dt, input.transmissionPosition)
         } else {
             externalSpeedActive = false
-            integrateElectricVehicle(dt, applyCoastRegen = input.simulateCoastRegen)
+            integrateElectricVehicle(
+                dt = dt,
+                applyCoastRegen = input.simulateCoastRegen,
+                transmissionPosition = input.transmissionPosition,
+            )
+            if (input.transmissionPosition == TransmissionPosition.PARK) {
+                vehicleSpeedMps = 0.0
+                lastAcceleration = 0.0
+            }
         }
 
         shift?.let { updateShift(it, dt) }
         if (shift == null) secondsSinceShift += dt
 
         val pedalReleased = requestedThrottle <= PEDAL_RELEASE_THRESHOLD
-        updateSyntheticRpm(dt)
+        updateSyntheticRpm(dt, input.transmissionPosition)
         updateLimiterLatch()
 
-        if (shift == null) {
-            val emergencyUpshift = needsEmergencyUpshift()
+        if (shift == null && input.transmissionPosition == TransmissionPosition.DRIVE) {
+            val emergencyUpshift = needsEmergencyUpshift(input.transmissionPosition)
             val promptLiftOffDownshift = pedalReleased &&
                 currentGearIndex > 0 &&
                 engineRpm <= downshiftThresholdRpm(currentGearIndex)
@@ -206,11 +212,20 @@ class EngineSimulation(
         return snapshot()
     }
 
-    private fun integrateElectricVehicle(dt: Double, applyCoastRegen: Boolean) {
+    private fun integrateElectricVehicle(
+        dt: Double,
+        applyCoastRegen: Boolean,
+        transmissionPosition: TransmissionPosition,
+    ) {
         val previousSpeedMps = vehicleSpeedMps
         val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
-        val requestedWheelTorque = axleTorque.totalNm * filteredThrottle * brakeOverride
+        val throttleConnected = transmissionPosition == TransmissionPosition.DRIVE
+        val requestedWheelTorque = if (throttleConnected) {
+            axleTorque.totalNm * filteredThrottle * brakeOverride
+        } else {
+            0.0
+        }
         val wheelOmega = vehicleSpeedMps / profile.wheelRadiusMeters
         val powerLimitedWheelTorque = if (wheelOmega < 1.0) {
             requestedWheelTorque
@@ -251,12 +266,16 @@ class EngineSimulation(
             .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
     }
 
-    private fun applyExternalSpeed(externalSpeedMps: Double, dt: Double) {
+    private fun applyExternalSpeed(
+        externalSpeedMps: Double,
+        dt: Double,
+        transmissionPosition: TransmissionPosition,
+    ) {
         val previousSpeedMps = vehicleSpeedMps
         vehicleSpeedMps = externalSpeedMps
 
         if (!externalSpeedActive) {
-            synchronizeToExternalSpeed()
+            synchronizeToExternalSpeed(transmissionPosition)
             lastAcceleration = 0.0
         } else {
             val measuredAcceleration = ((vehicleSpeedMps - previousSpeedMps) / max(dt, 0.001))
@@ -272,7 +291,7 @@ class EngineSimulation(
     }
 
     /** A live vehicle can connect while already travelling, so start in a safe synthetic gear. */
-    private fun synchronizeToExternalSpeed() {
+    private fun synchronizeToExternalSpeed(transmissionPosition: TransmissionPosition) {
         val wheelRpm = wheelRpmForSpeed(vehicleSpeedMps)
         val maximumSynchronizationRpm = profile.redlineRpm * 0.92
         val minimumCruiseRpm = profile.idleRpm * 1.15
@@ -287,25 +306,25 @@ class EngineSimulation(
         currentGearIndex = cruiseGears.lastOrNull()
             ?: safeGears.firstOrNull()
             ?: profile.gearRatios.lastIndex
-        engineRpm = when (profile.syntheticRpmMode) {
-            SyntheticRpmMode.FREE_REV -> freeRevRpmTarget()
-            SyntheticRpmMode.ROAD_COUPLED -> roadCoupledRpmTarget()
+        engineRpm = if (transmissionPosition == TransmissionPosition.DRIVE) {
+            roadCoupledRpmTarget()
+        } else {
+            freeRevRpmTarget()
         }
         limiterLatched = false
         shift = null
         secondsSinceShift = 0.0
     }
 
-    private fun updateSyntheticRpm(dt: Double) {
+    private fun updateSyntheticRpm(dt: Double, transmissionPosition: TransmissionPosition) {
         val activeShift = shift
         val shiftRevTransition = activeShift?.gearChanged == true
         val targetRpm = if (shiftRevTransition) {
             activeShift.rpmTarget
+        } else if (transmissionPosition == TransmissionPosition.DRIVE) {
+            roadCoupledRpmTarget()
         } else {
-            when (profile.syntheticRpmMode) {
-                SyntheticRpmMode.FREE_REV -> freeRevRpmTarget()
-                SyntheticRpmMode.ROAD_COUPLED -> roadCoupledRpmTarget()
-            }
+            freeRevRpmTarget()
         }
         engineRpm = approachExp(
             current = engineRpm,
@@ -327,22 +346,14 @@ class EngineSimulation(
         return profile.idleRpm + filteredThrottle.coerceIn(0.0, 1.0) * revSpan
     }
 
-    private fun syntheticRpmTarget(): Double {
-        return when (profile.syntheticRpmMode) {
-            SyntheticRpmMode.FREE_REV -> freeRevRpmTarget()
-            SyntheticRpmMode.ROAD_COUPLED -> roadCoupledRpmTarget()
+    private fun needsEmergencyUpshift(transmissionPosition: TransmissionPosition): Boolean {
+        if (transmissionPosition != TransmissionPosition.DRIVE) {
+            return false
         }
-    }
-
-    private fun needsEmergencyUpshift(): Boolean {
         if (currentGearIndex >= profile.gearRatios.lastIndex) return false
 
         val emergencyThreshold = profile.redlineRpm * EMERGENCY_UPSHIFT_REDLINE_FRACTION
         if (engineRpm >= emergencyThreshold) return true
-
-        if (profile.syntheticRpmMode == SyntheticRpmMode.FREE_REV) {
-            return false
-        }
 
         val projectedRpm = profile.idleRpm + wheelRpmForSpeed(vehicleSpeedMps) *
             profile.gearRatios[currentGearIndex] * profile.finalDrive

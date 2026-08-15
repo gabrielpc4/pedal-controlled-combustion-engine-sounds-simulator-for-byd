@@ -13,6 +13,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
+import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.ReaderState
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
@@ -36,6 +37,7 @@ data class DriveSnapshot(
     val activeInput: String,
     val throttle: Double,
     val brake: Double,
+    val transmissionPosition: TransmissionPosition,
     val engineSoundEnabled: Boolean,
     val audio: AudioOutputState,
     val telemetry: TelemetrySnapshot,
@@ -56,6 +58,7 @@ class DriveController(context: Context) {
     private val generation = AtomicLong(0)
     private val manualInput = AtomicReference(ManualInput())
     private val selectedInputMode = AtomicReference(InputMode.AUTO)
+    private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val soundEnabled = AtomicBoolean(true)
     private var lastLoggedShiftSerial = simulation.state.shiftSerial
     private var lastShiftWasActive = false
@@ -72,6 +75,7 @@ class DriveController(context: Context) {
         activeInput = "SIM FALLBACK",
         throttle = 0.0,
         brake = 0.0,
+        transmissionPosition = TransmissionPosition.DRIVE,
         engineSoundEnabled = true,
         audio = AudioOutputState(),
         telemetry = TelemetrySnapshot(),
@@ -172,12 +176,11 @@ class DriveController(context: Context) {
         setInputMode(modes[(current.ordinal + 1) % modes.size])
     }
 
-    fun cycleSyntheticRpmMode() {
-        val current = tuningConfig.get()
-        val modes = com.gabrielpc.enginesoundsimulator.tuning.SyntheticRpmMode.entries
-        val next = modes[(current.engine.syntheticRpmMode.ordinal + 1) % modes.size]
-        setTuning(current.copy(engine = current.engine.copy(syntheticRpmMode = next)))
-        PersistentDiagnosticLog.event("synthetic_rpm_mode_changed", "mode=${next.name}")
+    fun setTransmissionPosition(position: TransmissionPosition) {
+        val previous = transmissionPosition.getAndSet(position)
+        if (previous != position) {
+            PersistentDiagnosticLog.event("transmission_position_changed", "from=${previous.name} to=${position.name}")
+        }
     }
 
     fun toggleSound() {
@@ -262,6 +265,7 @@ class DriveController(context: Context) {
                 brake = input.brake,
                 externalSpeedKmh = input.externalSpeedKmh,
                 simulateCoastRegen = mode == InputMode.SIMULATOR,
+                transmissionPosition = transmissionPosition.get(),
             ),
             dt,
         )
@@ -287,6 +291,7 @@ class DriveController(context: Context) {
             activeInput = input.label,
             throttle = input.throttle,
             brake = input.brake,
+            transmissionPosition = transmissionPosition.get(),
             engineSoundEnabled = enabled,
             audio = audioEngine.state(),
             telemetry = telemetry,
@@ -387,7 +392,6 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
-        syntheticRpmMode = engine.syntheticRpmMode,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
         finalDrive = engine.finalDrive,

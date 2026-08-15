@@ -26,7 +26,6 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 180.0,
-    val syntheticRpmMode: SyntheticRpmMode = SyntheticRpmMode.ROAD_COUPLED,
     val syntheticRpmResponseMs: Double = 35.0,
     val simulatorCoastRegenMps2: Double = 0.50,
     val finalDrive: Double = 3.82,
@@ -198,10 +197,6 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
-            syntheticRpmMode = decodeSyntheticRpmMode(
-                preferences.getString(KEY_SYNTHETIC_RPM_MODE, null),
-                defaults.engine.syntheticRpmMode,
-            ),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
             simulatorCoastRegenMps2 = number(
                 KEY_SIMULATOR_COAST_REGEN,
@@ -267,7 +262,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
-            .putString(KEY_SYNTHETIC_RPM_MODE, clean.engine.syntheticRpmMode.name)
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
             .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
@@ -305,13 +299,12 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 3
+        const val CALIBRATION_REVISION = 4
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
         const val KEY_LIMITER_RPM = "limiter_rpm"
         const val KEY_UPSHIFT = "upshift_rpm"
-        const val KEY_SYNTHETIC_RPM_MODE = "synthetic_rpm_mode"
         const val KEY_TORQUE = "max_torque"
         const val KEY_PEAK_POWER = "peak_power"
         const val KEY_MOTOR_MAX_RPM = "motor_max_rpm"
