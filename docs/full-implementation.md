@@ -82,7 +82,7 @@ Current fictional profile, deliberately not branded as a real vehicle:
 | Parameter | Value |
 | --- | ---: |
 | Name / layout | Apex V10 / four stroke |
-| Idle / redline / limiter | 950 / 8,600 / 8,850 RPM |
+| Tachometer / idle / redline / limiter | 10,000 / 950 / 8,600 / 8,850 RPM |
 | Automatic upshift / base downshift | 8,250 / 2,250 RPM |
 | Maximum torque | 585 Nm |
 | Engine inertia | 0.42 kg m2 |
@@ -113,7 +113,7 @@ Braking does not subtract a cosmetic amount from RPM. It slows the virtual wheel
 
 ### Automatic shifts
 
-Upshifts begin above 8,250 RPM with meaningful throttle and a higher gear available. Independently, a projected over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, which protects live mode when it receives a large road-speed change. A 1-gear downshift is permitted for low RPM, braking, or kickdown only when the projected lower-gear RPM remains below 94% of redline.
+Upshifts begin above 8,250 RPM with meaningful throttle and a higher gear available. The torque curve peaks at 6,500 RPM and tapers toward the original 8,600 RPM redline and 8,850 RPM fuel cutoff. Independently, a projected over-rev near 97% of redline forces a safe sequential upshift even at closed throttle, which protects live mode when it receives a large road-speed change. A 1-gear downshift is permitted for low RPM, braking, or kickdown only when the projected lower-gear RPM remains below 94% of redline.
 
 The implemented shift phases overlap smoothly:
 
@@ -178,6 +178,8 @@ The header/footer show the requested mode, active logical channel count/layout, 
 
 The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
 
+The **TUNE** control opens a persistent live-editing workstation for engine parameters, torque and throttle curves, pedal dynamics, all seven gear ratios, shift timing, audio layers, and firing harmonics. Graphs visualize torque/power, response timing, RPM drop, and spectrum; torque and throttle curves are edited by dragging their control points. See [Live tuning interface](tuning-interface.md).
+
 The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
 
 Controls:
@@ -214,7 +216,7 @@ Tests verify that:
 - explicit BYD LIVE mode fails safe to zero pedals when telemetry is unavailable, while AUTO alone may use simulator fallback;
 - rapid controller lifecycle transitions cannot revive an obsolete simulation loop.
 
-The final suite contains 21 tests with zero failures, errors, or skips. The [emulator validation record](emulator-validation.md) preserves the exact fallback emulator, APK hash, viewport measurement, and final touch-throttle/brake evidence.
+The automated suite covers drivetrain behavior, audio continuity/channel replication, input arbitration, and tuning sanitization/interpolation. The [emulator validation record](emulator-validation.md) preserves the accelerated emulator configuration, APK hash, viewport measurement, and final touch-throttle/brake evidence.
 
 APK output:
 
@@ -256,4 +258,4 @@ adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 - The `mobile` APK deliberately targets SDK 25 for DiLink compatibility. It is a sideload prototype, not a Google Play-ready application, and modern devices may block installation without a low-target-SDK test override.
 - There is no enforced drive lockout or production volume policy. Do not use the current build on public roads.
 - The current simplified coupling is game-oriented rather than an engineering-grade vehicle model. It intentionally prioritizes stable, tunable feel.
-- Add settings persistence, volume/master gain, per-profile tuning, a speaker-walk diagnostic, and in-app telemetry/audio recording after first-car validation.
+- Add named profile import/export, a speaker-walk diagnostic, and in-app telemetry/audio recording after first-car validation.

@@ -1,5 +1,6 @@
 package com.gabrielpc.bydmotorsound.audio
 
+import com.gabrielpc.bydmotorsound.tuning.AudioTuning
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -15,6 +16,7 @@ data class EngineAudioFrame(
     val shifting: Boolean = false,
     val limiterActive: Boolean = false,
     val enabled: Boolean = true,
+    val tuning: AudioTuning = AudioTuning(),
 )
 
 /**
@@ -86,7 +88,8 @@ class EngineSynthesizer(private val sampleRate: Int) {
         val enabledGainSmoothing = 1.0 - exp(-1.0 / (sampleRate * 0.008))
         val limiterGainSmoothing = 1.0 - exp(-1.0 / (sampleRate * 0.0015))
         val shiftGainSmoothing = 1.0 - exp(-1.0 / (sampleRate * 0.004))
-        val targetMasterGain = gain.coerceIn(0.0, 1.5)
+        val audioTuning = target.tuning.sanitized()
+        val targetMasterGain = (gain * audioTuning.masterGain / 0.72).coerceIn(0.0, 1.5)
         val targetEnabledGain = if (target.enabled) 1.0 else 0.0
         val targetShiftGain = if (target.shifting) 0.64 else 1.0
 
@@ -105,10 +108,10 @@ class EngineSynthesizer(private val sampleRate: Int) {
             val normalizedRpm = (smoothedRpm / target.redlineRpm).coerceIn(0.0, 1.08)
             val pulse =
                 sin(firingPhase) +
-                    sin(firingPhase * 2.0) * (0.36 + smoothedLoad * 0.13) +
-                    sin(firingPhase * 3.0) * (0.20 + normalizedRpm * 0.10) +
-                    sin(firingPhase * 4.0) * (0.10 + smoothedThrottle * 0.11) +
-                    sin(firingPhase * 5.0) * normalizedRpm * 0.07
+                    sin(firingPhase * 2.0) * (0.36 + smoothedLoad * 0.13) * audioTuning.harmonic2 +
+                    sin(firingPhase * 3.0) * (0.20 + normalizedRpm * 0.10) * audioTuning.harmonic3 +
+                    sin(firingPhase * 4.0) * (0.10 + smoothedThrottle * 0.11) * audioTuning.harmonic4 +
+                    sin(firingPhase * 5.0) * normalizedRpm * 0.07 * audioTuning.harmonic5
             val saturatedPulse = softClip(pulse * (1.12 + smoothedLoad * 1.48))
 
             val exhaustCutoff = 0.055 + normalizedRpm * 0.16 + smoothedLoad * 0.09
@@ -119,12 +122,13 @@ class EngineSynthesizer(private val sampleRate: Int) {
             val intakeNoise = whiteNoise - intakeNoiseState
             val mechanical = sin(crankPhase * 2.0) * 0.12 + sin(whinePhase) * (0.04 + normalizedRpm * 0.09)
 
-            val loadBody = exhaustBodyState * (0.32 + smoothedLoad * 0.61)
-            val intake = intakeNoise * (0.025 + smoothedThrottle * 0.18) * (0.45 + normalizedRpm)
+            val loadBody = exhaustBodyState * (0.32 + smoothedLoad * 0.61) * audioTuning.exhaustLevel
+            val intake = intakeNoise * (0.025 + smoothedThrottle * 0.18) *
+                (0.45 + normalizedRpm) * audioTuning.intakeLevel
             val idleCombustion = saturatedPulse * (1.0 - normalizedRpm).coerceIn(0.0, 1.0) * 0.12
-            val shiftThump = sin(shiftThumpPhase) * shiftEnvelope * 0.24
+            val shiftThump = sin(shiftThumpPhase) * shiftEnvelope * 0.24 * audioTuning.shiftLevel
             val overrunCrackle = if (overrunEnvelope > 0.001 && whiteNoise > 0.72) {
-                whiteNoise * overrunEnvelope * 0.24
+                whiteNoise * overrunEnvelope * 0.24 * audioTuning.overrunLevel
             } else {
                 0.0
             }
@@ -139,7 +143,10 @@ class EngineSynthesizer(private val sampleRate: Int) {
             enabledGain += (targetEnabledGain - enabledGain) * enabledGainSmoothing
             limiterGain += (targetLimiterGain - limiterGain) * limiterGainSmoothing
             shiftGain += (targetShiftGain - shiftGain) * shiftGainSmoothing
-            val mixed = (loadBody + intake + mechanical + idleCombustion + shiftThump + overrunCrackle) *
+            val mixed = (
+                loadBody + intake + mechanical * audioTuning.mechanicalLevel +
+                    idleCombustion + shiftThump + overrunCrackle
+                ) *
                 limiterGain * shiftGain
             val finalSample = softClip(mixed * masterGain * enabledGain) * 0.88
             output[index] = (finalSample.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()

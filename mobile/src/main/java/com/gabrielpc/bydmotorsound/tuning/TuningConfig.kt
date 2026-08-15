@@ -1,0 +1,309 @@
+package com.gabrielpc.bydmotorsound.tuning
+
+import android.content.Context
+import kotlin.math.max
+import kotlin.math.min
+
+data class CurvePoint(val x: Double, val y: Double)
+
+data class EngineTuning(
+    val idleRpm: Double = 950.0,
+    /** Tachometer scale; the original dashboard is a 0-10,000 RPM gauge. */
+    val maxRpm: Double = 10_000.0,
+    val redlineRpm: Double = 8_600.0,
+    val limiterRpm: Double = 8_850.0,
+    val upshiftRpm: Double = 8_250.0,
+    val downshiftRpm: Double = 2_250.0,
+    val maxTorqueNm: Double = 585.0,
+    val engineInertiaKgM2: Double = 0.42,
+    val vehicleMassKg: Double = 1_640.0,
+    val wheelRadiusMeters: Double = 0.337,
+    val finalDrive: Double = 3.82,
+    val throttleAttackMs: Double = 75.0,
+    val throttleReleaseMs: Double = 140.0,
+    val brakeResponseMs: Double = 55.0,
+    val upshiftDurationMs: Double = 270.0,
+    val downshiftDurationMs: Double = 340.0,
+    val shiftDwellMs: Double = 450.0,
+    val gearRatios: List<Double> = DEFAULT_GEARS,
+    /** X is normalized RPM (0..1 of max RPM), Y is normalized torque. */
+    val torqueCurve: List<CurvePoint> = DEFAULT_TORQUE_CURVE,
+    /** X is physical pedal position, Y is requested engine torque. */
+    val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
+) {
+    fun sanitized(): EngineTuning {
+        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, 12_000.0)
+        val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 300.0)
+        val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm - 100.0)
+        val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
+        val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 1_000.0, cleanRedline - 100.0)
+        val cleanDownshift = downshiftRpm.coerceIn(cleanIdle + 50.0, min(4_500.0, cleanUpshift - 500.0))
+        return copy(
+            idleRpm = cleanIdle,
+            maxRpm = cleanMaxRpm,
+            redlineRpm = cleanRedline,
+            limiterRpm = cleanLimiter,
+            upshiftRpm = cleanUpshift,
+            downshiftRpm = cleanDownshift,
+            maxTorqueNm = maxTorqueNm.coerceIn(150.0, 1_200.0),
+            engineInertiaKgM2 = engineInertiaKgM2.coerceIn(0.15, 1.50),
+            vehicleMassKg = vehicleMassKg.coerceIn(700.0, 3_500.0),
+            wheelRadiusMeters = wheelRadiusMeters.coerceIn(0.22, 0.50),
+            finalDrive = finalDrive.coerceIn(2.0, 6.0),
+            throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
+            throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
+            brakeResponseMs = brakeResponseMs.coerceIn(15.0, 500.0),
+            upshiftDurationMs = upshiftDurationMs.coerceIn(100.0, 900.0),
+            downshiftDurationMs = downshiftDurationMs.coerceIn(120.0, 1_000.0),
+            shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
+            gearRatios = sanitizeGears(gearRatios),
+            torqueCurve = sanitizeCurve(torqueCurve, DEFAULT_TORQUE_CURVE, lockEndpoints = false),
+            throttleCurve = sanitizeCurve(throttleCurve, DEFAULT_THROTTLE_CURVE, lockEndpoints = true),
+        )
+    }
+
+    companion object {
+        val DEFAULT_GEARS = listOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69)
+        val DEFAULT_TORQUE_CURVE = listOf(
+            CurvePoint(850.0 / 8_850.0, 0.34),
+            CurvePoint(1_500.0 / 8_850.0, 0.48),
+            CurvePoint(2_500.0 / 8_850.0, 0.68),
+            CurvePoint(3_800.0 / 8_850.0, 0.84),
+            CurvePoint(5_200.0 / 8_850.0, 0.96),
+            CurvePoint(6_500.0 / 8_850.0, 1.00),
+            CurvePoint(7_500.0 / 8_850.0, 0.97),
+            CurvePoint(8_300.0 / 8_850.0, 0.89),
+            CurvePoint(1.0, 0.69),
+        )
+        val DEFAULT_THROTTLE_CURVE = listOf(
+            CurvePoint(0.0, 0.0),
+            CurvePoint(0.25, 0.18),
+            CurvePoint(0.50, 0.46),
+            CurvePoint(0.75, 0.76),
+            CurvePoint(1.0, 1.0),
+        )
+    }
+}
+
+data class AudioTuning(
+    val masterGain: Double = 0.72,
+    val exhaustLevel: Double = 1.00,
+    val intakeLevel: Double = 1.00,
+    val mechanicalLevel: Double = 1.00,
+    val overrunLevel: Double = 1.00,
+    val shiftLevel: Double = 1.00,
+    val harmonic2: Double = 1.00,
+    val harmonic3: Double = 1.00,
+    val harmonic4: Double = 1.00,
+    val harmonic5: Double = 1.00,
+) {
+    fun sanitized(): AudioTuning = copy(
+        masterGain = masterGain.coerceIn(0.0, 1.20),
+        exhaustLevel = exhaustLevel.coerceIn(0.0, 1.50),
+        intakeLevel = intakeLevel.coerceIn(0.0, 1.50),
+        mechanicalLevel = mechanicalLevel.coerceIn(0.0, 1.50),
+        overrunLevel = overrunLevel.coerceIn(0.0, 1.50),
+        shiftLevel = shiftLevel.coerceIn(0.0, 1.50),
+        harmonic2 = harmonic2.coerceIn(0.0, 1.50),
+        harmonic3 = harmonic3.coerceIn(0.0, 1.50),
+        harmonic4 = harmonic4.coerceIn(0.0, 1.50),
+        harmonic5 = harmonic5.coerceIn(0.0, 1.50),
+    )
+}
+
+data class TuningConfig(
+    val engine: EngineTuning = EngineTuning(),
+    val audio: AudioTuning = AudioTuning(),
+) {
+    fun sanitized(): TuningConfig = copy(engine = engine.sanitized(), audio = audio.sanitized())
+
+    companion object {
+        val DEFAULT = TuningConfig()
+    }
+}
+
+class TuningRepository(context: Context) {
+    private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+
+    fun load(): TuningConfig {
+        val defaults = TuningConfig.DEFAULT
+        val engine = defaults.engine.copy(
+            idleRpm = number(KEY_IDLE, defaults.engine.idleRpm),
+            maxRpm = number(KEY_MAX_RPM, defaults.engine.maxRpm),
+            redlineRpm = number(KEY_REDLINE_RPM, defaults.engine.redlineRpm),
+            limiterRpm = number(KEY_LIMITER_RPM, defaults.engine.limiterRpm),
+            upshiftRpm = number(KEY_UPSHIFT, defaults.engine.upshiftRpm),
+            downshiftRpm = number(KEY_DOWNSHIFT, defaults.engine.downshiftRpm),
+            maxTorqueNm = number(KEY_TORQUE, defaults.engine.maxTorqueNm),
+            engineInertiaKgM2 = number(KEY_INERTIA, defaults.engine.engineInertiaKgM2),
+            vehicleMassKg = number(KEY_MASS, defaults.engine.vehicleMassKg),
+            wheelRadiusMeters = number(KEY_WHEEL_RADIUS, defaults.engine.wheelRadiusMeters),
+            finalDrive = number(KEY_FINAL_DRIVE, defaults.engine.finalDrive),
+            throttleAttackMs = number(KEY_THROTTLE_ATTACK, defaults.engine.throttleAttackMs),
+            throttleReleaseMs = number(KEY_THROTTLE_RELEASE, defaults.engine.throttleReleaseMs),
+            brakeResponseMs = number(KEY_BRAKE_RESPONSE, defaults.engine.brakeResponseMs),
+            upshiftDurationMs = number(KEY_UPSHIFT_DURATION, defaults.engine.upshiftDurationMs),
+            downshiftDurationMs = number(KEY_DOWNSHIFT_DURATION, defaults.engine.downshiftDurationMs),
+            shiftDwellMs = number(KEY_SHIFT_DWELL, defaults.engine.shiftDwellMs),
+            gearRatios = decodeNumbers(preferences.getString(KEY_GEARS, null), defaults.engine.gearRatios),
+            torqueCurve = decodeCurve(preferences.getString(KEY_TORQUE_CURVE, null), defaults.engine.torqueCurve),
+            throttleCurve = decodeCurve(preferences.getString(KEY_THROTTLE_CURVE, null), defaults.engine.throttleCurve),
+        )
+        val audio = defaults.audio.copy(
+            masterGain = number(KEY_MASTER_GAIN, defaults.audio.masterGain),
+            exhaustLevel = number(KEY_EXHAUST, defaults.audio.exhaustLevel),
+            intakeLevel = number(KEY_INTAKE, defaults.audio.intakeLevel),
+            mechanicalLevel = number(KEY_MECHANICAL, defaults.audio.mechanicalLevel),
+            overrunLevel = number(KEY_OVERRUN, defaults.audio.overrunLevel),
+            shiftLevel = number(KEY_SHIFT_LEVEL, defaults.audio.shiftLevel),
+            harmonic2 = number(KEY_H2, defaults.audio.harmonic2),
+            harmonic3 = number(KEY_H3, defaults.audio.harmonic3),
+            harmonic4 = number(KEY_H4, defaults.audio.harmonic4),
+            harmonic5 = number(KEY_H5, defaults.audio.harmonic5),
+        )
+        return TuningConfig(engine, audio).sanitized()
+    }
+
+    fun save(config: TuningConfig) {
+        val clean = config.sanitized()
+        preferences.edit()
+            .putString(KEY_IDLE, clean.engine.idleRpm.toString())
+            .putString(KEY_MAX_RPM, clean.engine.maxRpm.toString())
+            .putString(KEY_REDLINE_RPM, clean.engine.redlineRpm.toString())
+            .putString(KEY_LIMITER_RPM, clean.engine.limiterRpm.toString())
+            .putString(KEY_UPSHIFT, clean.engine.upshiftRpm.toString())
+            .putString(KEY_DOWNSHIFT, clean.engine.downshiftRpm.toString())
+            .putString(KEY_TORQUE, clean.engine.maxTorqueNm.toString())
+            .putString(KEY_INERTIA, clean.engine.engineInertiaKgM2.toString())
+            .putString(KEY_MASS, clean.engine.vehicleMassKg.toString())
+            .putString(KEY_WHEEL_RADIUS, clean.engine.wheelRadiusMeters.toString())
+            .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
+            .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
+            .putString(KEY_THROTTLE_RELEASE, clean.engine.throttleReleaseMs.toString())
+            .putString(KEY_BRAKE_RESPONSE, clean.engine.brakeResponseMs.toString())
+            .putString(KEY_UPSHIFT_DURATION, clean.engine.upshiftDurationMs.toString())
+            .putString(KEY_DOWNSHIFT_DURATION, clean.engine.downshiftDurationMs.toString())
+            .putString(KEY_SHIFT_DWELL, clean.engine.shiftDwellMs.toString())
+            .putString(KEY_GEARS, encodeNumbers(clean.engine.gearRatios))
+            .putString(KEY_TORQUE_CURVE, encodeCurve(clean.engine.torqueCurve))
+            .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
+            .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
+            .putString(KEY_EXHAUST, clean.audio.exhaustLevel.toString())
+            .putString(KEY_INTAKE, clean.audio.intakeLevel.toString())
+            .putString(KEY_MECHANICAL, clean.audio.mechanicalLevel.toString())
+            .putString(KEY_OVERRUN, clean.audio.overrunLevel.toString())
+            .putString(KEY_SHIFT_LEVEL, clean.audio.shiftLevel.toString())
+            .putString(KEY_H2, clean.audio.harmonic2.toString())
+            .putString(KEY_H3, clean.audio.harmonic3.toString())
+            .putString(KEY_H4, clean.audio.harmonic4.toString())
+            .putString(KEY_H5, clean.audio.harmonic5.toString())
+            .apply()
+    }
+
+    fun reset(): TuningConfig {
+        preferences.edit().clear().apply()
+        return TuningConfig.DEFAULT
+    }
+
+    private fun number(key: String, fallback: Double): Double =
+        preferences.getString(key, null)?.toDoubleOrNull() ?: fallback
+
+    private companion object {
+        // v2 stores the independently configurable tachometer, redline and limiter values.
+        const val PREFERENCES_NAME = "engine_tuning_v2"
+        const val KEY_IDLE = "idle_rpm"
+        const val KEY_MAX_RPM = "max_rpm"
+        const val KEY_REDLINE_RPM = "redline_rpm"
+        const val KEY_LIMITER_RPM = "limiter_rpm"
+        const val KEY_UPSHIFT = "upshift_rpm"
+        const val KEY_DOWNSHIFT = "downshift_rpm"
+        const val KEY_TORQUE = "max_torque"
+        const val KEY_INERTIA = "engine_inertia"
+        const val KEY_MASS = "vehicle_mass"
+        const val KEY_WHEEL_RADIUS = "wheel_radius"
+        const val KEY_FINAL_DRIVE = "final_drive"
+        const val KEY_THROTTLE_ATTACK = "throttle_attack"
+        const val KEY_THROTTLE_RELEASE = "throttle_release"
+        const val KEY_BRAKE_RESPONSE = "brake_response"
+        const val KEY_UPSHIFT_DURATION = "upshift_duration"
+        const val KEY_DOWNSHIFT_DURATION = "downshift_duration"
+        const val KEY_SHIFT_DWELL = "shift_dwell"
+        const val KEY_GEARS = "gear_ratios"
+        const val KEY_TORQUE_CURVE = "torque_curve"
+        const val KEY_THROTTLE_CURVE = "throttle_curve"
+        const val KEY_MASTER_GAIN = "master_gain"
+        const val KEY_EXHAUST = "exhaust_level"
+        const val KEY_INTAKE = "intake_level"
+        const val KEY_MECHANICAL = "mechanical_level"
+        const val KEY_OVERRUN = "overrun_level"
+        const val KEY_SHIFT_LEVEL = "shift_level"
+        const val KEY_H2 = "harmonic_2"
+        const val KEY_H3 = "harmonic_3"
+        const val KEY_H4 = "harmonic_4"
+        const val KEY_H5 = "harmonic_5"
+    }
+}
+
+internal fun interpolateCurve(points: List<CurvePoint>, input: Double): Double {
+    if (points.isEmpty()) return input.coerceIn(0.0, 1.0)
+    val x = input.coerceIn(0.0, 1.0)
+    if (x <= points.first().x) return points.first().y
+    for (index in 0 until points.lastIndex) {
+        val left = points[index]
+        val right = points[index + 1]
+        if (x <= right.x) {
+            val width = (right.x - left.x).coerceAtLeast(0.0001)
+            val fraction = ((x - left.x) / width).coerceIn(0.0, 1.0)
+            return left.y + (right.y - left.y) * fraction
+        }
+    }
+    return points.last().y
+}
+
+private fun sanitizeGears(values: List<Double>): List<Double> {
+    val source = if (values.size in 3..10) values else EngineTuning.DEFAULT_GEARS
+    val output = mutableListOf<Double>()
+    source.forEachIndexed { index, raw ->
+        val upper = if (index == 0) 5.0 else output.last() - 0.05
+        output += raw.coerceIn(0.45, upper.coerceAtLeast(0.50))
+    }
+    return output
+}
+
+private fun sanitizeCurve(
+    values: List<CurvePoint>,
+    fallback: List<CurvePoint>,
+    lockEndpoints: Boolean,
+): List<CurvePoint> {
+    if (values.size !in 2..16) return fallback
+    val sorted = values.map { CurvePoint(it.x.coerceIn(0.0, 1.0), it.y.coerceIn(0.0, 1.15)) }
+        .sortedBy { it.x }
+        .toMutableList()
+    for (index in 1 until sorted.size) {
+        val minimum = sorted[index - 1].x + 0.015
+        sorted[index] = sorted[index].copy(x = max(minimum, sorted[index].x).coerceAtMost(1.0))
+    }
+    if (lockEndpoints) {
+        sorted[0] = CurvePoint(0.0, 0.0)
+        sorted[sorted.lastIndex] = CurvePoint(1.0, 1.0)
+    }
+    return sorted
+}
+
+private fun encodeNumbers(values: List<Double>): String = values.joinToString(",")
+
+private fun decodeNumbers(value: String?, fallback: List<Double>): List<Double> =
+    value?.split(',')?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.isNotEmpty() } ?: fallback
+
+private fun encodeCurve(values: List<CurvePoint>): String =
+    values.joinToString(";") { "${it.x},${it.y}" }
+
+private fun decodeCurve(value: String?, fallback: List<CurvePoint>): List<CurvePoint> =
+    value?.split(';')?.mapNotNull { item ->
+        val components = item.split(',')
+        if (components.size != 2) null else {
+            val x = components[0].toDoubleOrNull()
+            val y = components[1].toDoubleOrNull()
+            if (x == null || y == null) null else CurvePoint(x, y)
+        }
+    }?.takeIf { it.size >= 2 } ?: fallback

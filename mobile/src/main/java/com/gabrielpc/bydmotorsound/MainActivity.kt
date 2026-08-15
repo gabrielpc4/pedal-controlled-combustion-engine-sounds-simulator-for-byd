@@ -78,10 +78,11 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.bydmotorsound.drive.DriveController
 import com.gabrielpc.bydmotorsound.drive.DriveSnapshot
 import com.gabrielpc.bydmotorsound.simulation.DrivetrainState
-import com.gabrielpc.bydmotorsound.simulation.EngineProfile
+import com.gabrielpc.bydmotorsound.tuning.TuningConfig
 import com.gabrielpc.bydmotorsound.ui.theme.BYDMotorSoundTheme
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -132,6 +133,8 @@ class MainActivity : ComponentActivity() {
                         onCycleInput = controller::cycleInputMode,
                         onToggleSound = controller::toggleSound,
                         onCycleChannels = controller::cycleChannelMode,
+                        onConfigChange = controller::setTuning,
+                        onResetTuning = controller::resetTuning,
                     )
                 }
             }
@@ -172,7 +175,10 @@ private fun MotorSoundDashboard(
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
+    onConfigChange: (TuningConfig) -> Unit,
+    onResetTuning: () -> Unit,
 ) {
+    var tuningOpen by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
@@ -181,6 +187,7 @@ private fun MotorSoundDashboard(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
+                if (tuningOpen) return@onPreviewKeyEvent false
                 val pressed = event.type == KeyEventType.KeyDown
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
@@ -242,6 +249,7 @@ private fun MotorSoundDashboard(
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
                         onCycleChannels = onCycleChannels,
+                        onOpenTuning = { tuningOpen = true },
                     )
 
                     Row(
@@ -261,6 +269,9 @@ private fun MotorSoundDashboard(
                         )
                         Tachometer(
                             drivetrain = state.drivetrain,
+                            maxRpm = state.tuning.engine.maxRpm,
+                            redlineRpm = state.tuning.engine.redlineRpm,
+                            upshiftRpm = state.tuning.engine.upshiftRpm,
                             modifier = Modifier
                                 .weight(0.88f)
                                 .fillMaxHeight()
@@ -271,6 +282,15 @@ private fun MotorSoundDashboard(
                     DashboardFooter(
                         state = state,
                         viewport = "${viewportWidthPx}x${viewportHeightPx}",
+                    )
+                }
+
+                if (tuningOpen) {
+                    TuningPanel(
+                        state = state,
+                        onConfigChange = onConfigChange,
+                        onReset = onResetTuning,
+                        onClose = { tuningOpen = false },
                     )
                 }
             }
@@ -284,6 +304,7 @@ private fun DashboardHeader(
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
+    onOpenTuning: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -323,6 +344,12 @@ private fun DashboardHeader(
             StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
         }
 
+        HeaderButton(
+            primary = "TUNE",
+            secondary = "ENGINE PROFILE",
+            accent = Amber,
+            onClick = onOpenTuning,
+        )
         HeaderButton(
             primary = state.inputMode.displayName,
             secondary = "INPUT",
@@ -422,7 +449,12 @@ private fun CarStage(
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text("APEX V10", color = White, fontSize = 34.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
-            Text("5.2 L  •  10 CYL  •  8,600 REDLINE", color = CyanSoft, fontSize = 12.sp, letterSpacing = 1.1.sp)
+            Text(
+                "5.2 L  •  10 CYL  •  ${state.tuning.engine.redlineRpm.roundToInt()} REDLINE",
+                color = CyanSoft,
+                fontSize = 12.sp,
+                letterSpacing = 1.1.sp,
+            )
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusTag("${formatOneDecimal(state.drivetrain.speedKmh)} KM/H", Cyan)
@@ -562,9 +594,17 @@ private fun PedalControl(
 }
 
 @Composable
-private fun Tachometer(drivetrain: DrivetrainState, modifier: Modifier = Modifier) {
+private fun Tachometer(
+    drivetrain: DrivetrainState,
+    maxRpm: Double,
+    redlineRpm: Double,
+    upshiftRpm: Double,
+    modifier: Modifier = Modifier,
+) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val gaugeSize = if (maxWidth < maxHeight) maxWidth else maxHeight
+        val gaugeMaxRpm = ceil(maxRpm.coerceAtLeast(1_000.0) / 1_000.0) * 1_000.0
+        val majorIntervals = (gaugeMaxRpm / 1_000.0).roundToInt().coerceAtLeast(1)
         Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
             Canvas(Modifier.fillMaxSize()) {
                 val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
@@ -572,7 +612,7 @@ private fun Tachometer(drivetrain: DrivetrainState, modifier: Modifier = Modifie
                 val stroke = radius * 0.012f
                 val startAngle = 135f
                 val sweepAngle = 270f
-                val rpmFraction = (drivetrain.rpm / 10_000.0).toFloat().coerceIn(0f, 1f)
+                val rpmFraction = (drivetrain.rpm / gaugeMaxRpm).toFloat().coerceIn(0f, 1f)
 
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -606,8 +646,8 @@ private fun Tachometer(drivetrain: DrivetrainState, modifier: Modifier = Modifie
                 // Perfect full-throttle shift band and red zone.
                 drawArc(
                     color = Green,
-                    startAngle = startAngle + sweepAngle * 0.795f,
-                    sweepAngle = sweepAngle * 0.045f,
+                    startAngle = startAngle + sweepAngle * ((upshiftRpm - 250.0) / gaugeMaxRpm).toFloat().coerceIn(0f, 1f),
+                    sweepAngle = sweepAngle * (350.0 / gaugeMaxRpm).toFloat(),
                     useCenter = false,
                     topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.96f, center.y - radius * 0.96f),
                     size = androidx.compose.ui.geometry.Size(radius * 1.92f, radius * 1.92f),
@@ -615,21 +655,22 @@ private fun Tachometer(drivetrain: DrivetrainState, modifier: Modifier = Modifie
                 )
                 drawArc(
                     color = Red,
-                    startAngle = startAngle + sweepAngle * 0.86f,
-                    sweepAngle = sweepAngle * 0.14f,
+                    startAngle = startAngle + sweepAngle * (redlineRpm / gaugeMaxRpm).toFloat().coerceIn(0f, 1f),
+                    sweepAngle = sweepAngle * ((maxRpm - redlineRpm) / gaugeMaxRpm).toFloat().coerceAtLeast(0f),
                     useCenter = false,
                     topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.96f, center.y - radius * 0.96f),
                     size = androidx.compose.ui.geometry.Size(radius * 1.92f, radius * 1.92f),
                     style = Stroke(radius * 0.026f, cap = StrokeCap.Round),
                 )
 
-                for (tick in 0..50) {
-                    val fraction = tick / 50f
+                val tickCount = majorIntervals * 5
+                for (tick in 0..tickCount) {
+                    val fraction = tick / tickCount.toFloat()
                     val angle = startAngle + sweepAngle * fraction
                     val major = tick % 5 == 0
                     val outer = polar(center, radius * 0.91f, angle)
                     val inner = polar(center, radius * if (major) 0.80f else 0.85f, angle)
-                    val inRed = fraction >= 0.86f
+                    val inRed = fraction * gaugeMaxRpm >= redlineRpm
                     drawLine(
                         color = if (inRed) Red else if (major) Cyan else CyanSoft.copy(alpha = 0.60f),
                         start = inner,
@@ -646,9 +687,9 @@ private fun Tachometer(drivetrain: DrivetrainState, modifier: Modifier = Modifie
                         typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD_ITALIC)
                         textSize = radius * 0.105f
                     }
-                    for (number in 0..10) {
-                        val point = polar(center, radius * 0.69f, startAngle + sweepAngle * (number / 10f))
-                        paint.color = if (number >= 9) android.graphics.Color.rgb(255, 57, 79) else android.graphics.Color.WHITE
+                    for (number in 0..majorIntervals) {
+                        val point = polar(center, radius * 0.69f, startAngle + sweepAngle * (number / majorIntervals.toFloat()))
+                        paint.color = if (number * 1_000.0 >= redlineRpm) android.graphics.Color.rgb(255, 57, 79) else android.graphics.Color.WHITE
                         canvas.nativeCanvas.drawText(number.toString(), point.x, point.y + paint.textSize * 0.34f, paint)
                     }
                 }

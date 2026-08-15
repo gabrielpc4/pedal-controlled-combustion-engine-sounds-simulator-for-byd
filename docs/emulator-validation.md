@@ -38,17 +38,21 @@ The Android audio diagnostics confirmed:
 
 - the application held the top audio-focus entry;
 - an `AudioTrack` with `USAGE_GAME` / `CONTENT_TYPE_MUSIC` was started;
-- logical stereo, 48 kHz, session 297;
+- logical stereo, 48 kHz, session 369 after the restored 10,000-RPM-tach build was installed;
 - route `sdk_gphone64_x86_64 (#2)`;
 - 4,360-frame effective buffer and zero reported underruns during idle, throttle, and brake checks.
 
 The host audio backend is now enabled and the Android track is actively routed. Android diagnostics cannot prove the Windows speaker volume or perceived sound quality, but the previous `-no-audio` limitation is removed.
 
-Final accelerated interaction evidence:
+Final accelerated restored-profile build evidence:
 
-- `build/emulator/byd-hw-clean.png`: clean 950 RPM idle, 1920 x 990 viewport, zero underruns;
-- `build/emulator/byd-hw-throttle.png`: 70% touch throttle, third gear, 7,340 RPM;
-- `build/emulator/byd-hw-brake.png`: 92% brake and return to zero road speed/950 RPM;
+- APK size `13,258,042` bytes and SHA-256 `EC612CE507720B1AC5B59C63777049FB4B671F696106424110F9CE4432EF3479`;
+- 26 unit tests, debug assembly, and Android lint passed with zero failures or lint issues;
+- the dashboard again displays the original 0-10 tachometer with its 8,600 RPM red zone;
+- the separately modeled fuel cutoff is 8,850 RPM and the performance upshift point is 8,250 RPM;
+- the restored torque curve peaks at 6,500 RPM and retains its original nine absolute-RPM points;
+- the live-tuning menu exposes tachometer maximum, redline, and fuel cutoff as separate persisted controls;
+- the installed app reported a 1920 x 990 viewport, logical stereo at 48 kHz, and zero underruns at idle;
 - no application fatal exception or ANR was logged.
 
 The accelerated emulator was left open with the application running for interactive testing.
@@ -100,7 +104,7 @@ adb shell wm density 160
 
 The app's `WindowInsets.safeDrawing` measurement reported a `1920 x 990` content viewport, leaving the emulator's 90-pixel navigation region outside the dashboard. This confirms the requested layout target in this emulator only; the BYD panel must still be measured.
 
-## Final build and interaction evidence
+## Historical software-fallback build evidence
 
 Validated APK:
 

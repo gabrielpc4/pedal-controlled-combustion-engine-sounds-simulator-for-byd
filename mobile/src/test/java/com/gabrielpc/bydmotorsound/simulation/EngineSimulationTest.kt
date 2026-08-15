@@ -9,6 +9,17 @@ import org.junit.Test
 
 class EngineSimulationTest {
     @Test
+    fun apexV10UsesOriginalTenThousandRpmGaugeCalibration() {
+        val profile = EngineProfile.APEX_V10
+
+        assertEquals(8_600.0, profile.redlineRpm, 0.0)
+        assertEquals(8_850.0, profile.limiterRpm, 0.0)
+        assertEquals(8_250.0, profile.upshiftRpm, 0.0)
+        assertTrue(profile.upshiftRpm < profile.redlineRpm)
+        assertTrue(profile.redlineRpm < profile.limiterRpm)
+    }
+
+    @Test
     fun fullThrottleSpinsEngineProgressivelyInsteadOfJumpingToPedalMappedRpm() {
         val simulation = EngineSimulation()
         val initial = simulation.state

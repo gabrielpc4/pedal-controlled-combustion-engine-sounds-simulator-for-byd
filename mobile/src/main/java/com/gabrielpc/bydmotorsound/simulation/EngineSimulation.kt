@@ -1,5 +1,8 @@
 package com.gabrielpc.bydmotorsound.simulation
 
+import com.gabrielpc.bydmotorsound.tuning.CurvePoint
+import com.gabrielpc.bydmotorsound.tuning.EngineTuning
+import com.gabrielpc.bydmotorsound.tuning.interpolateCurve
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.min
@@ -19,6 +22,14 @@ data class EngineProfile(
     val wheelRadiusMeters: Double,
     val finalDrive: Double,
     val gearRatios: DoubleArray,
+    val torqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_TORQUE_CURVE,
+    val throttleCurve: List<CurvePoint> = EngineTuning.DEFAULT_THROTTLE_CURVE,
+    val throttleAttackSeconds: Double = 0.075,
+    val throttleReleaseSeconds: Double = 0.140,
+    val brakeResponseSeconds: Double = 0.055,
+    val upshiftDurationSeconds: Double = 0.270,
+    val downshiftDurationSeconds: Double = 0.340,
+    val shiftDwellSeconds: Double = 0.450,
 ) {
     companion object {
         val APEX_V10 = EngineProfile(
@@ -72,8 +83,10 @@ data class DrivetrainState(
  * driver controls -> engine torque -> transmission -> tyre force -> vehicle speed -> coupled RPM.
  */
 class EngineSimulation(
-    val profile: EngineProfile = EngineProfile.APEX_V10,
+    initialProfile: EngineProfile = EngineProfile.APEX_V10,
 ) {
+    var profile: EngineProfile = initialProfile
+        private set
     private var engineRpm = profile.idleRpm
     private var vehicleSpeedMps = 0.0
     private var currentGearIndex = 0
@@ -89,6 +102,12 @@ class EngineSimulation(
 
     val state: DrivetrainState
         get() = snapshot()
+
+    fun updateProfile(updated: EngineProfile) {
+        profile = updated
+        currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
+        engineRpm = engineRpm.coerceIn(profile.idleRpm * 0.72, profile.limiterRpm)
+    }
 
     fun reset() {
         engineRpm = profile.idleRpm
@@ -108,16 +127,21 @@ class EngineSimulation(
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
         val dt = deltaSeconds.coerceIn(1.0 / 1_000.0, 1.0 / 20.0)
         val requestedThrottle = input.throttle.coerceIn(0.0, 1.0)
+        val requestedEngineTorque = interpolateCurve(profile.throttleCurve, requestedThrottle)
         val requestedBrake = input.brake.coerceIn(0.0, 1.0)
 
         // A fast attack makes tip-in feel immediate; slower release preserves drivetrain inertia.
         filteredThrottle = approachExp(
             filteredThrottle,
-            requestedThrottle,
-            if (requestedThrottle > filteredThrottle) 0.075 else 0.14,
+            requestedEngineTorque,
+            if (requestedEngineTorque > filteredThrottle) {
+                profile.throttleAttackSeconds
+            } else {
+                profile.throttleReleaseSeconds
+            },
             dt,
         )
-        filteredBrake = approachExp(filteredBrake, requestedBrake, 0.055, dt)
+        filteredBrake = approachExp(filteredBrake, requestedBrake, profile.brakeResponseSeconds, dt)
 
         val externalMps = input.externalSpeedKmh?.coerceAtLeast(0.0)?.div(3.6)
         if (externalMps != null) {
@@ -200,7 +224,7 @@ class EngineSimulation(
 
         if (shift == null) {
             val emergencyUpshift = needsEmergencyUpshift()
-            if (emergencyUpshift || secondsSinceShift >= MIN_COMPLETED_GEAR_DWELL_SECONDS) {
+            if (emergencyUpshift || secondsSinceShift >= profile.shiftDwellSeconds) {
                 chooseAutomaticShift(emergencyUpshift)
             }
         }
@@ -313,7 +337,11 @@ class EngineSimulation(
             targetGearIndex = targetGearIndex,
             direction = direction,
             elapsed = 0.0,
-            duration = if (direction == ShiftDirection.UP) 0.27 else 0.34,
+            duration = if (direction == ShiftDirection.UP) {
+                profile.upshiftDurationSeconds
+            } else {
+                profile.downshiftDurationSeconds
+            },
             gearChanged = false,
         )
         secondsSinceShift = 0.0
@@ -372,18 +400,19 @@ class EngineSimulation(
         speedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
 
     private fun torqueCurve(rpm: Double): Double {
-        val points = TORQUE_CURVE
-        if (rpm <= points.first().first) return points.first().second
-        if (rpm >= points.last().first) return points.last().second
+        val normalizedRpm = (rpm / profile.limiterRpm).coerceIn(0.0, 1.0)
+        val points = profile.torqueCurve
+        if (points.isEmpty()) return 0.0
+        if (normalizedRpm <= points.first().x) return points.first().y
         for (index in 0 until points.lastIndex) {
             val left = points[index]
             val right = points[index + 1]
-            if (rpm <= right.first) {
-                val fraction = (rpm - left.first) / (right.first - left.first)
-                return lerp(left.second, right.second, smoothStep(fraction))
+            if (normalizedRpm <= right.x) {
+                val fraction = (normalizedRpm - left.x) / (right.x - left.x).coerceAtLeast(0.0001)
+                return lerp(left.y, right.y, smoothStep(fraction))
             }
         }
-        return points.last().second
+        return points.last().y
     }
 
     private fun snapshot(): DrivetrainState {
@@ -420,22 +449,9 @@ class EngineSimulation(
     )
 
     companion object {
-        private val TORQUE_CURVE = arrayOf(
-            850.0 to 0.34,
-            1_500.0 to 0.48,
-            2_500.0 to 0.68,
-            3_800.0 to 0.84,
-            5_200.0 to 0.96,
-            6_500.0 to 1.00,
-            7_500.0 to 0.97,
-            8_300.0 to 0.89,
-            8_850.0 to 0.69,
-        )
-
         private const val LAUNCH_RPM_SPAN = 2_500.0
         private const val CLUTCH_STIFFNESS = 10.0
         private const val REV_MATCH_STIFFNESS = 1.5
-        private const val MIN_COMPLETED_GEAR_DWELL_SECONDS = 0.45
         private const val EMERGENCY_UPSHIFT_REDLINE_FRACTION = 0.97
         private const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0

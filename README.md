@@ -10,6 +10,7 @@ The current application provides:
 - an original procedural V10 sound source driven by RPM, load, throttle, shifts, overrun, and limiter state;
 - negotiated stereo/quad/5.1/7.1 logical PCM output with routing and underrun diagnostics;
 - a car-and-tachometer dashboard targeting the 1920 x 990 safe area measured on the emulator, pending actual-car `WindowInsets` measurement;
+- a persistent live-tuning workstation with draggable torque/throttle curves, engine and shift calibration, all seven gear ratios, audio-layer mixing, and responsive graphs;
 - the original telemetry capability/permission diagnostics retained behind the controller.
 
 It invokes the documented BYD speed getters through reflection and does not package BYD framework classes. The manifest requests only the read-oriented `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET` permissions. No vehicle setter is implemented.
@@ -58,6 +59,7 @@ Wireless ADB is a privileged maintenance channel. Enable it only in a trusted en
 
 - [Engineering context](docs/README.md)
 - [Full implementation](docs/full-implementation.md)
+- [Live tuning interface](docs/tuning-interface.md)
 - [Emulator validation record](docs/emulator-validation.md)
 - [Drivetrain, game-audio, and sound-asset research](docs/drivetrain-audio-research.md)
 - [Implemented POC](docs/poc-implementation.md)

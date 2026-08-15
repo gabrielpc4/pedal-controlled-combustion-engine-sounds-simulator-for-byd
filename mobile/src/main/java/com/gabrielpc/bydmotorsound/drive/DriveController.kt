@@ -14,6 +14,8 @@ import com.gabrielpc.bydmotorsound.simulation.EngineSimulation
 import com.gabrielpc.bydmotorsound.telemetry.BydSpeedReader
 import com.gabrielpc.bydmotorsound.telemetry.ReaderState
 import com.gabrielpc.bydmotorsound.telemetry.TelemetrySnapshot
+import com.gabrielpc.bydmotorsound.tuning.TuningConfig
+import com.gabrielpc.bydmotorsound.tuning.TuningRepository
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -34,11 +36,15 @@ data class DriveSnapshot(
     val engineSoundEnabled: Boolean,
     val audio: AudioOutputState,
     val telemetry: TelemetrySnapshot,
+    val tuning: TuningConfig,
 )
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
 class DriveController(context: Context) {
-    private val profile = EngineProfile.APEX_V10
+    private val tuningRepository = TuningRepository(context.applicationContext)
+    private val tuningConfig = AtomicReference(tuningRepository.load())
+    private var appliedTuning = tuningConfig.get()
+    private var profile = appliedTuning.toEngineProfile()
     private val simulation = EngineSimulation(profile)
     private val vehicleReader = BydSpeedReader(context.applicationContext)
     private val audioEngine = EngineAudioEngine(context.applicationContext)
@@ -62,6 +68,7 @@ class DriveController(context: Context) {
         engineSoundEnabled = true,
         audio = AudioOutputState(),
         telemetry = TelemetrySnapshot(),
+        tuning = appliedTuning,
     )
 
     fun snapshot(): DriveSnapshot = latest.copy(audio = audioEngine.state())
@@ -117,6 +124,16 @@ class DriveController(context: Context) {
 
     fun setInputMode(mode: InputMode) {
         selectedInputMode.set(mode)
+    }
+
+    fun setTuning(config: TuningConfig) {
+        val clean = config.sanitized()
+        tuningConfig.set(clean)
+        tuningRepository.save(clean)
+    }
+
+    fun resetTuning() {
+        tuningConfig.set(tuningRepository.reset())
     }
 
     fun cycleInputMode() {
@@ -179,6 +196,12 @@ class DriveController(context: Context) {
     }
 
     private fun step(dt: Double) {
+        val tuning = tuningConfig.get()
+        if (tuning !== appliedTuning) {
+            profile = tuning.toEngineProfile()
+            simulation.updateProfile(profile)
+            appliedTuning = tuning
+        }
         val telemetry = vehicleReader.snapshot()
         val mode = selectedInputMode.get()
         val manual = manualInput.get()
@@ -204,6 +227,7 @@ class DriveController(context: Context) {
                 shifting = drivetrain.isShifting,
                 limiterActive = drivetrain.limiterActive,
                 enabled = enabled,
+                tuning = tuning.audio,
             ),
         )
         latest = DriveSnapshot(
@@ -215,6 +239,7 @@ class DriveController(context: Context) {
             engineSoundEnabled = enabled,
             audio = audioEngine.state(),
             telemetry = telemetry,
+            tuning = tuning,
         )
     }
 
@@ -225,6 +250,33 @@ class DriveController(context: Context) {
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
     }
+}
+
+private fun TuningConfig.toEngineProfile(): EngineProfile {
+    val engine = engine.sanitized()
+    return EngineProfile(
+        name = "Apex V10",
+        cylinders = 10,
+        idleRpm = engine.idleRpm,
+        redlineRpm = engine.redlineRpm,
+        limiterRpm = engine.limiterRpm,
+        upshiftRpm = engine.upshiftRpm,
+        downshiftRpm = engine.downshiftRpm,
+        maxTorqueNm = engine.maxTorqueNm,
+        engineInertiaKgM2 = engine.engineInertiaKgM2,
+        vehicleMassKg = engine.vehicleMassKg,
+        wheelRadiusMeters = engine.wheelRadiusMeters,
+        finalDrive = engine.finalDrive,
+        gearRatios = engine.gearRatios.toDoubleArray(),
+        torqueCurve = engine.torqueCurve,
+        throttleCurve = engine.throttleCurve,
+        throttleAttackSeconds = engine.throttleAttackMs / 1_000.0,
+        throttleReleaseSeconds = engine.throttleReleaseMs / 1_000.0,
+        brakeResponseSeconds = engine.brakeResponseMs / 1_000.0,
+        upshiftDurationSeconds = engine.upshiftDurationMs / 1_000.0,
+        downshiftDurationSeconds = engine.downshiftDurationMs / 1_000.0,
+        shiftDwellSeconds = engine.shiftDwellMs / 1_000.0,
+    )
 }
 
 internal data class ResolvedDriveInput(
