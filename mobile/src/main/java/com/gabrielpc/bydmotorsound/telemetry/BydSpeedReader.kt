@@ -15,6 +15,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 private const val BYD_SPEED_CLASS = "android.hardware.bydauto.speed.BYDAutoSpeedDevice"
 private const val BYD_SPEED_COMMON = "android.permission.BYDAUTO_SPEED_COMMON"
@@ -437,8 +438,7 @@ internal fun describeThrowable(throwable: Throwable): String {
     return if (message == null) cause.javaClass.simpleName else "${cause.javaClass.simpleName}: $message"
 }
 
-private fun formatRaw(raw: Double): String =
-    if (raw % 1.0 == 0.0) raw.toLong().toString() else "%.3f".format(raw)
+private fun formatRaw(raw: Double): String = raw.roundToInt().toString()
 
 private fun nanosToMillis(value: Long): Double = value / 1_000_000.0
 

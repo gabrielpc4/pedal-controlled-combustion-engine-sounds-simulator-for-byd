@@ -135,7 +135,7 @@ private fun TuningHeader(config: TuningConfig, onReset: () -> Unit, onClose: () 
                 Text("// APEX V10", color = TuneCyan, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.6.sp)
             }
             Text(
-                "Changes apply immediately and are saved automatically  •  ${newtonMetersToKgfm(config.engine.maxTorqueNm).format(1)} kgfm  •  ${kilowattsToHorsepower(config.engine.peakPowerKw).roundToInt()} HP  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
+                "Changes apply immediately and are saved automatically  •  ${newtonMetersToKgfm(config.engine.maxTorqueNm).roundToInt()} kgfm  •  ${kilowattsToHorsepower(config.engine.peakPowerKw).roundToInt()} HP  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
                 color = TuneMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
@@ -211,7 +211,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                     "PEAK TORQUE",
                     newtonMetersToKgfm(engine.maxTorqueNm),
                     newtonMetersToKgfm(150.0)..newtonMetersToKgfm(1_200.0),
-                    "%.1f kgfm",
+                    "%.0f kgfm",
                 ) {
                     onChange(config.copy(engine = engine.copy(maxTorqueNm = kgfmToNewtonMeters(it))))
                 }
@@ -219,7 +219,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                     "FRONT PEAK WHEEL TORQUE",
                     newtonMetersToKgfm(engine.frontPeakWheelTorqueNm),
                     newtonMetersToKgfm(500.0)..newtonMetersToKgfm(6_000.0),
-                    "%.1f kgfm",
+                    "%.0f kgfm",
                 ) {
                     onChange(config.copy(engine = engine.copy(frontPeakWheelTorqueNm = kgfmToNewtonMeters(it))))
                 }
@@ -227,7 +227,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                     "REAR PEAK WHEEL TORQUE",
                     newtonMetersToKgfm(engine.rearPeakWheelTorqueNm),
                     newtonMetersToKgfm(500.0)..newtonMetersToKgfm(7_000.0),
-                    "%.1f kgfm",
+                    "%.0f kgfm",
                 ) {
                     onChange(config.copy(engine = engine.copy(rearPeakWheelTorqueNm = kgfmToNewtonMeters(it))))
                 }
@@ -242,29 +242,29 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("MOTOR MAX SPEED", engine.motorMaxRpm, 8_000.0..25_000.0, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(motorMaxRpm = it)))
                 }
-                ParameterSlider("MOTOR REDUCTION", engine.motorReductionRatio, 5.0..18.0, "%.2f:1") {
-                    onChange(config.copy(engine = engine.copy(motorReductionRatio = it)))
+                ParameterSlider("MOTOR REDUCTION", engine.motorReductionRatio * 100.0, 500.0..1_800.0, "%.0f:100") {
+                    onChange(config.copy(engine = engine.copy(motorReductionRatio = it / 100.0)))
                 }
-                ParameterSlider("DRIVE EFFICIENCY", engine.drivetrainEfficiency, 0.70..0.99, "%.2f") {
-                    onChange(config.copy(engine = engine.copy(drivetrainEfficiency = it)))
+                ParameterSlider("DRIVE EFFICIENCY", engine.drivetrainEfficiency * 100.0, 70.0..99.0, "%.0f%%") {
+                    onChange(config.copy(engine = engine.copy(drivetrainEfficiency = it / 100.0)))
                 }
-                ParameterSlider("TRACTION LIMIT", engine.tractionLimitMps2, 3.0..12.0, "%.2f m/s²") {
+                ParameterSlider("TRACTION LIMIT", engine.tractionLimitMps2, 3.0..12.0, "%.0f m/s²") {
                     onChange(config.copy(engine = engine.copy(tractionLimitMps2 = it)))
                 }
                 ParameterSlider("VEHICLE MASS", engine.vehicleMassKg, 700.0..3_500.0, "%.0f kg") {
                     onChange(config.copy(engine = engine.copy(vehicleMassKg = it)))
                 }
-                ParameterSlider("ROTATING MASS FACTOR", engine.rotationalMassFactor, 1.0..1.30, "%.2f×") {
-                    onChange(config.copy(engine = engine.copy(rotationalMassFactor = it)))
+                ParameterSlider("ROTATING MASS FACTOR", engine.rotationalMassFactor * 100.0, 100.0..130.0, "%.0f%%") {
+                    onChange(config.copy(engine = engine.copy(rotationalMassFactor = it / 100.0)))
                 }
-                ParameterSlider("WHEEL RADIUS", engine.wheelRadiusMeters, 0.22..0.50, "%.3f m") {
-                    onChange(config.copy(engine = engine.copy(wheelRadiusMeters = it)))
+                ParameterSlider("WHEEL RADIUS", engine.wheelRadiusMeters * 1_000.0, 220.0..500.0, "%.0f mm") {
+                    onChange(config.copy(engine = engine.copy(wheelRadiusMeters = it / 1_000.0)))
                 }
-                ParameterSlider("DRAG AREA", engine.dragAreaM2, 0.30..1.20, "%.3f m²") {
-                    onChange(config.copy(engine = engine.copy(dragAreaM2 = it)))
+                ParameterSlider("DRAG AREA", engine.dragAreaM2 * 10_000.0, 3_000.0..12_000.0, "%.0f cm²") {
+                    onChange(config.copy(engine = engine.copy(dragAreaM2 = it / 10_000.0)))
                 }
-                ParameterSlider("ROLLING RESISTANCE", engine.rollingResistanceCoefficient, 0.005..0.030, "%.3f") {
-                    onChange(config.copy(engine = engine.copy(rollingResistanceCoefficient = it)))
+                ParameterSlider("ROLLING RESISTANCE", engine.rollingResistanceCoefficient * 1_000.0, 5.0..30.0, "%.0f ×10⁻³") {
+                    onChange(config.copy(engine = engine.copy(rollingResistanceCoefficient = it / 1_000.0)))
                 }
                 ParameterSlider("TOP SPEED", engine.topSpeedKmh, 100.0..350.0, "%.0f km/h") {
                     onChange(config.copy(engine = engine.copy(topSpeedKmh = it)))
@@ -286,7 +286,7 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             EditableCurveGraph(
                 points = engine.frontWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
-                yLabel = { "${newtonMetersToKgfm(it * engine.frontPeakWheelTorqueNm).format(1)} kgfm" },
+                yLabel = { "${newtonMetersToKgfm(it * engine.frontPeakWheelTorqueNm).roundToInt()} kgfm" },
                 currentX = currentSpeed,
                 accent = TuneAmber,
                 lockEndpointX = true,
@@ -298,7 +298,7 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             EditableCurveGraph(
                 points = engine.rearWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
-                yLabel = { "${newtonMetersToKgfm(it * engine.rearPeakWheelTorqueNm).format(1)} kgfm" },
+                yLabel = { "${newtonMetersToKgfm(it * engine.rearPeakWheelTorqueNm).roundToInt()} kgfm" },
                 currentX = currentSpeed,
                 accent = TuneRed,
                 lockEndpointX = true,
@@ -339,8 +339,8 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
             ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
-            ParameterSlider("LIFT-OFF RPM RETENTION", engine.liftOffRpmRetention, 0.45..0.90, "%.2f") {
-                onChange(config.copy(engine = engine.copy(liftOffRpmRetention = it)))
+            ParameterSlider("LIFT-OFF RPM RETENTION", engine.liftOffRpmRetention * 100.0, 45.0..90.0, "%.0f%%") {
+                onChange(config.copy(engine = engine.copy(liftOffRpmRetention = it / 100.0)))
             }
             ParameterSlider("LIFT-OFF RPM RESPONSE", engine.liftOffRpmResponseMs, 50.0..800.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(liftOffRpmResponseMs = it)))
@@ -356,8 +356,8 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("SOUND SHIFT CONTROL", "Presentation only • wheel torque stays continuous", Modifier.weight(0.76f)) {
-            ParameterSlider("SYNTHETIC FINAL DRIVE", engine.finalDrive, 2.0..6.0, "%.2f") {
-                onChange(config.copy(engine = engine.copy(finalDrive = it)))
+            ParameterSlider("SYNTHETIC FINAL DRIVE", engine.finalDrive * 100.0, 200.0..600.0, "%.0f:100") {
+                onChange(config.copy(engine = engine.copy(finalDrive = it / 100.0)))
             }
             ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
@@ -374,9 +374,9 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
                 engine.gearRatios.forEachIndexed { index, ratio ->
                     val maximum = if (index == 0) 5.0 else engine.gearRatios[index - 1] - 0.05
                     val minimum = if (index == engine.gearRatios.lastIndex) 0.45 else engine.gearRatios[index + 1] + 0.05
-                    ParameterSlider("GEAR ${index + 1}", ratio, minimum..maximum, "%.2f") { value ->
+                    ParameterSlider("GEAR ${index + 1}", ratio * 100.0, minimum * 100.0..maximum * 100.0, "%.0f:100") { value ->
                         val ratios = engine.gearRatios.toMutableList()
-                        ratios[index] = value
+                        ratios[index] = value / 100.0
                         onChange(config.copy(engine = engine.copy(gearRatios = ratios)))
                     }
                 }
@@ -457,7 +457,9 @@ private fun ParameterSlider(
 
 @Composable
 private fun AudioSlider(label: String, value: Double, range: ClosedFloatingPointRange<Double>, onChange: (Double) -> Unit) {
-    ParameterSlider(label, value, range, "%.2f×", onChange)
+    ParameterSlider(label, value * 100.0, range.start * 100.0..range.endInclusive * 100.0, "%.0f%%") {
+        onChange(it / 100.0)
+    }
 }
 
 @Composable
@@ -647,7 +649,7 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(53, 232, 242)
             canvas.nativeCanvas.drawText(
-                "WHEEL TORQUE  ${newtonMetersToKgfm(peakWheelTorque).format(1)} kgfm",
+                "WHEEL TORQUE  ${newtonMetersToKgfm(peakWheelTorque).roundToInt()} kgfm",
                 left,
                 bottom + 34f,
                 paint,
@@ -793,7 +795,7 @@ private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier
                 paint.color = android.graphics.Color.WHITE
                 canvas.nativeCanvas.drawText(if (index == 0) "FUND" else "H${index + 1}", x, bottom + 36f, paint)
                 paint.color = android.graphics.Color.rgb(255, 196, 86)
-                canvas.nativeCanvas.drawText(value.format(2), x, y - 12f, paint)
+                canvas.nativeCanvas.drawText("${(value * 100).roundToInt()}%", x, y - 12f, paint)
             }
         }
     }
@@ -856,8 +858,6 @@ internal fun kgfmToNewtonMeters(kgfm: Double): Double = kgfm * NEWTON_METERS_PER
 internal fun kilowattsToHorsepower(kilowatts: Double): Double = kilowatts / KILOWATTS_PER_HORSEPOWER
 
 internal fun horsepowerToKilowatts(horsepower: Double): Double = horsepower * KILOWATTS_PER_HORSEPOWER
-
-private fun Double.format(decimals: Int): String = String.format(Locale.US, "%.${decimals}f", this)
 
 private const val NEWTON_METERS_PER_KGFM = 9.80665
 private const val KILOWATTS_PER_HORSEPOWER = 0.7456998715822702

@@ -80,7 +80,6 @@ import com.gabrielpc.bydmotorsound.drive.DriveSnapshot
 import com.gabrielpc.bydmotorsound.simulation.DrivetrainState
 import com.gabrielpc.bydmotorsound.tuning.TuningConfig
 import com.gabrielpc.bydmotorsound.ui.theme.BYDMotorSoundTheme
-import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -457,8 +456,8 @@ private fun CarStage(
             )
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusTag("${formatOneDecimal(state.drivetrain.speedKmh)} KM/H", Cyan)
-                StatusTag("${formatOneDecimal(state.drivetrain.accelerationMps2 / 9.81)} G", Amber)
+                StatusTag("${formatWhole(state.drivetrain.speedKmh)} KM/H", Cyan)
+                StatusTag("${formatWhole(state.drivetrain.accelerationMps2 / 9.81)} G", Amber)
             }
         }
 
@@ -828,4 +827,4 @@ private fun polar(
 
 private fun formatRpm(rpm: Double): String = ((rpm / 10.0).roundToInt() * 10).toString()
 
-private fun formatOneDecimal(value: Double): String = String.format(Locale.US, "%.1f", value)
+private fun formatWhole(value: Double): String = value.roundToInt().toString()
