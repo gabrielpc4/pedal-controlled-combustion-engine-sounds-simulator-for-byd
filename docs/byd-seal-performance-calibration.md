@@ -69,6 +69,44 @@ The simulator evaluates these as two independent normalized wheel-torque curves 
 
 This measured shape supersedes the earlier generic constant-torque/constant-power approximation for vehicle acceleration. It still preserves the correct EV behavior: immediate strong torque, a smooth decline with speed, and no dependency on fictional sound RPM or gears.
 
+## Independent cross-checks found after the A2MAC1 calibration
+
+The A2MAC1-derived model was checked against measurements from unrelated vehicles and test teams rather than being tuned only to one chart:
+
+| Source | Independent result | How it is used |
+| --- | --- | --- |
+| Driving Enthusiast, Australian Performance AWD | 0–60 km/h 2.06 s; 0–100 km/h 3.96 s; 60–110 km/h 2.58 s; quarter mile 12.44 s at 178.3 km/h; peak 1.071 g | The first three values now have simulation regression bands. Quarter-mile and peak-g remain external checks because the compact model does not simulate rollout or test-device filtering. |
+| km77, AWD at about 60% SOC | 0–100 km/h 3.8 s; 80–120 km/h 2.7 s | The 80–120 result now has a regression band and shows that useful performance is not confined to a 95% SOC launch. |
+| IDA/VBox track test | 0–50 km/h 1.8 s; 0–100 km/h 4.13 s; 0–150 km/h 8.7 s; 80–120 km/h 2.6 s | Confirms the general low-speed and rolling-acceleration shape. Repeated runs slowed toward five seconds, evidence of thermal/SOC limiting that the current stateless curve does not model. |
+| Driving Enthusiast / IDA braking | 100–0 km/h in 37.8 m / 35.9 m | The virtual full-brake model now has a 35–39 m regression band. This is service braking, not accelerator-lift regeneration. |
+
+Sources:
+
+- [Driving Enthusiast instrumented review](https://drivingenthusiast.com.au/2024/10/2024-byd-seal-performance-review-video/)
+- [km77 instrumented driving impressions](https://www.km77.com/coches/byd/seal/2024/estandar/informacion/byd-seal-2024-impresiones-de-conduccion?amp=1)
+- [IDA/VBox track test](https://blog.idaoffice.org/posts/byd-seal-and-530-horsepower-our-test-at-the-track/)
+
+BYD's own owner manual defines a distinct full-throttle experience: at least 95% high-voltage battery SOC, SPORT mode, and the acceleration-timer page displayed. That is a documented condition for the headline launch, not evidence of the pedal curve itself. [Official BYD owner manual](https://www.byd.com/content/dam/byd-site/eu/support/service/manual/byd-seal/20231225/BYD%20SEAL%20Owner%27s%20Manual-Left-hand%20Drive-EN%2857.2M%29.pdf)
+
+The agreement is strong enough to retain the A2MAC1 axle curves. It is not evidence that every firmware, battery state, tire, road, or temperature produces one invariant curve.
+
+## Hardware details confirmed by deeper teardown and regulatory research
+
+- The export AWD motor identifiers are front `YS210XYA` and rear `TZ200XYC`; the front machine is an AC induction/asynchronous motor and the rear is a permanent-magnet synchronous motor. The Australian vehicle approval and owner handbook are stronger evidence than reposts that incorrectly call both motors permanent-magnet machines. [Australian vehicle type approval](https://www.rover.infrastructure.gov.au/PublishedApprovals/VTADetails/RVDEngines/?apprversionid=a5edf1fd-a311-ef11-9f89-6045bdc40e28&id=9a129752-955b-ee11-8def-00224893b94f)
+- A teardown of the rear 8-in-1 drive unit reports a 16,000 RPM rotor limit and a two-stage, three-shaft 10.81:1 reduction. This supports the values already exposed in the UI, but does **not** establish that the front drive unit has the same reduction. [Chinese reproduction of the Nikkei BP teardown](https://www.sohu.com/a/849102335_121124214)
+- FEV's teardown summary reports 172 series-connected Blade cells and about 550 V nominal battery voltage. These facts help interpret A2MAC1's battery-side 408 kW measurement, but the present sound/vehicle-response model does not simulate pack voltage or current. [FEV/MarkLines benchmark summary](https://www.marklines.com/en/teardown/fev-byd-seal_ev_2023my_eu)
+- Ono Sokki has measured mode-by-mode pedal opening versus driveshaft output, SOC-dependent output, chip-out deceleration, regeneration, road load, rolling resistance, efficiency, vibration, and motor sound on a 2022 China-spec AWD Seal. The numerical datasets are commercial and were not publicly accessible, so their existence must not be mistaken for recovered values. [Ono Sokki/MarkLines report catalog](https://www.marklines.com/ja/teardown/onosokki-byd-seal)
+
+## What owner reports and reviews clarify — and what they do not
+
+Multiple professional reviews and owner discussions independently describe a deliberately progressive power ramp, with Sport sharper than Normal/Eco but generally less abrupt than a Tesla. Some owners report a brief response delay, while others find Sport effectively immediate. Auto Hold, iTAC state, SOC, software version, and whether the car is already rolling plausibly explain some disagreement. Examples: [Autocar](https://open.em.autocar.co.uk/car-review/byd/seal), [Team-BHP](https://www.team-bhp.com/forum/electric-cars/279583-byd-seal-review.html), [Reddit owner discussion](https://www.reddit.com/r/BYD/comments/1c6l9ee/byd_seal_throttle_response/), and [later Reddit owner discussion](https://www.reddit.com/r/BYD/comments/1r8cr0z/byd_seal_excellence_strange_throttle_response_lag/).
+
+These reports support a smoothed rather than step-like default. They do not provide timestamps, pedal traces, requested torque, or CAN logs, so they do not justify adding a guessed fixed launch delay. The 120 ms exponential attack remains tied to the roughly 0.3-second torque buildup visible in the supplied A2MAC1 plot; release timing remains an approximation.
+
+BYD confirms that iTAC can transfer torque, reduce it, or command negative torque when managing slip, and that it uses motor-rotation sensing for finer detection than conventional wheel-speed-only control. The current front/rear curves describe the measured straight-line run, not iTAC's transient behavior on a changing-friction surface. [BYD iTAC technical explanation](https://www.byd.com/id/newsroom/byd-indonesia-kupas-tuntas-inovasi-teknologi-kendaraan-listrik-p)
+
+The owner manual confirms Standard and High accelerator-lift regeneration modes but publishes no deceleration or torque numbers. Reviews consistently characterize even High as mild and not true one-pedal driving. Therefore accelerator-lift regen is still not assigned an invented factory-exact curve; brake-pedal input continues to control the app's explicit braking response.
+
 ## Road-load and acceleration assumptions
 
 These values are derived or calibrated and are clearly exposed in the tuning UI:
@@ -121,6 +159,8 @@ This preserves the enjoyable rise, shift, RPM drop, and sound progression of a g
 - the 3,170/3,975 Nm axle peaks, 7,145 Nm total, and approximately 56% to 71% rearward distribution change;
 - stronger low-speed acceleration and a progressive high-speed taper;
 - 0–100 km/h inside the 3.90–4.02 second calibration band;
+- 0–60, 60–110, and 80–120 km/h split times against independent instrumented tests;
+- 100–0 km/h full-service-brake stopping distance against two independent track measurements;
 - no single-step wheel-torque interruption during a synthetic upshift;
 - no first-gear RPM reversal at any tested positive pedal position;
 - expected shift RPM drop, braking, live-speed synchronization, and limiter display hysteresis.

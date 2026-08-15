@@ -112,6 +112,44 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun fullThrottleSplitTimesAgreeWithIndependentInstrumentedTests() {
+        val simulation = EngineSimulation()
+        var elapsed = 0.0
+        val crossings = mutableMapOf<Int, Double>()
+        while (simulation.state.speedKmh < 120.0 && elapsed < 10.0) {
+            val state = simulation.update(DriverInput(throttle = 1.0), STEP)
+            elapsed += STEP
+            listOf(60, 80, 110, 120).forEach { speed ->
+                if (state.speedKmh >= speed && speed !in crossings) crossings[speed] = elapsed
+            }
+        }
+
+        val zeroToSixty = requireNotNull(crossings[60])
+        val sixtyToOneTen = requireNotNull(crossings[110]) - zeroToSixty
+        val eightyToOneTwenty = requireNotNull(crossings[120]) - requireNotNull(crossings[80])
+        assertTrue("0-60 km/h took $zeroToSixty seconds", zeroToSixty in 1.90..2.20)
+        assertTrue("60-110 km/h took $sixtyToOneTen seconds", sixtyToOneTen in 2.40..2.80)
+        assertTrue("80-120 km/h took $eightyToOneTwenty seconds", eightyToOneTwenty in 2.40..3.00)
+    }
+
+    @Test
+    fun fullBrakeStoppingDistanceMatchesIndependentTrackTests() {
+        val simulation = EngineSimulation()
+        simulation.update(DriverInput(externalSpeedKmh = 100.0), STEP)
+        var distanceMeters = 0.0
+        var elapsed = 0.0
+        while (simulation.state.speedKmh > 0.05 && elapsed < 8.0) {
+            val beforeMps = simulation.state.speedKmh / 3.6
+            val after = simulation.update(DriverInput(brake = 1.0), STEP)
+            val afterMps = after.speedKmh / 3.6
+            distanceMeters += (beforeMps + afterMps) * 0.5 * STEP
+            elapsed += STEP
+        }
+
+        assertTrue("100-0 km/h used $distanceMeters m", distanceMeters in 35.0..39.0)
+    }
+
+    @Test
     fun syntheticUpshiftNeverCutsElectricWheelTorque() {
         val simulation = EngineSimulation()
         var beforeShiftAcceleration: Double? = null
