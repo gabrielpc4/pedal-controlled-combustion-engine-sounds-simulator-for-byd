@@ -345,11 +345,8 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
             ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
-            ParameterSlider("LIFT-OFF RPM RETENTION", engine.liftOffRpmRetention * 100.0, 45.0..90.0, "%.0f%%") {
-                onChange(config.copy(engine = engine.copy(liftOffRpmRetention = it / 100.0)))
-            }
-            ParameterSlider("LIFT-OFF RPM RESPONSE", engine.liftOffRpmResponseMs, 50.0..800.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(liftOffRpmResponseMs = it)))
+            ParameterSlider("SIM COAST REGEN", engine.simulatorCoastRegenMps2, 0.0..1.50, "%.2f m/s²") {
+                onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
             }
             Spacer(Modifier.height(12.dp))
             ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
@@ -930,38 +927,23 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
             }
             return path
         }
-        fun liftOffRpmPath(): Path {
-            val path = Path()
-            repeat(101) { index ->
-                val timeSeconds = index / 100.0
-                val response = engine.liftOffRpmRetention +
-                    (1.0 - engine.liftOffRpmRetention) *
-                    kotlin.math.exp(-timeSeconds / (engine.liftOffRpmResponseMs / 1_000.0))
-                val x = left + width * index / 100f
-                val y = bottom - height * response.toFloat().coerceIn(0f, 1f)
-                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            return path
-        }
         drawPath(responsePath(engine.throttleAttackMs), TuneGreen, style = Stroke(3f))
         drawPath(responsePath(engine.throttleReleaseMs), TuneCyan, style = Stroke(3f))
         drawPath(responsePath(engine.brakeResponseMs), TuneRed, style = Stroke(3f))
-        drawPath(liftOffRpmPath(), TuneAmber, style = Stroke(3f))
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
             paint.textSize = 14f
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(140, 167, 181)
-            canvas.nativeCanvas.drawText("RESPONSE / RPM RETENTION (%)", left, 16f, paint)
+            canvas.nativeCanvas.drawText("RESPONSE (%)", left, 16f, paint)
             val legend = listOf(
                 "ATTACK" to android.graphics.Color.rgb(54, 227, 145),
                 "RELEASE" to android.graphics.Color.rgb(53, 232, 242),
                 "BRAKE" to android.graphics.Color.rgb(255, 70, 92),
-                "LIFT" to android.graphics.Color.rgb(255, 196, 86),
             )
             legend.forEachIndexed { index, (label, color) ->
                 paint.color = color
-                canvas.nativeCanvas.drawText(label, left + index * (width / 4f), 36f, paint)
+                canvas.nativeCanvas.drawText(label, left + index * (width / 3f), 36f, paint)
             }
             repeat(3) { index ->
                 val fraction = index / 2f

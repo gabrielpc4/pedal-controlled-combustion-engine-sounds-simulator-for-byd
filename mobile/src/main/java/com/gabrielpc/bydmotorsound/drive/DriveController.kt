@@ -253,6 +253,7 @@ class DriveController(context: Context) {
                 throttle = input.throttle,
                 brake = input.brake,
                 externalSpeedKmh = input.externalSpeedKmh,
+                simulateCoastRegen = mode == InputMode.SIMULATOR,
             ),
             dt,
         )
@@ -380,8 +381,7 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
-        liftOffRpmRetention = engine.liftOffRpmRetention,
-        liftOffRpmResponseSeconds = engine.liftOffRpmResponseMs / 1_000.0,
+        simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
         finalDrive = engine.finalDrive,
         gearRatios = engine.gearRatios.toDoubleArray(),
         frontWheelTorqueCurve = engine.frontWheelTorqueCurve,

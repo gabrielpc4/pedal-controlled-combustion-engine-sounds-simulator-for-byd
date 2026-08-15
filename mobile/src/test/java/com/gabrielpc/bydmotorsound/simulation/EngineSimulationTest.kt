@@ -249,44 +249,25 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun releasingPedalAtFirstUpshiftLandingPromptsImmediateDownshift() {
-        val simulation = EngineSimulation()
-        var previous = simulation.state
-        var firstUpshiftCompletion: DrivetrainState? = null
-        var elapsed = 0.0
-        while (elapsed < 10.0 && firstUpshiftCompletion == null) {
-            val state = simulation.update(DriverInput(throttle = 1.0), STEP)
-            if (previous.isShifting && !state.isShifting && state.gear == 2) {
-                firstUpshiftCompletion = state
-            }
-            previous = state
-            elapsed += STEP
-        }
+    fun releasingPedalKeepsRpmCoupledToRoadSpeed() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val simulation = EngineSimulation(profile)
+        simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 40.0), STEP)
+        simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
+        val beforeLift = simulation.state
+        val afterLift = simulation.runForExternal(0.35, speedKmh = 40.0, throttle = 0.0)
 
-        val landing = requireNotNull(firstUpshiftCompletion)
-        val expectedLandingRpm = postUpshiftLandingRpm(simulation.profile, 1)
-        assertEquals(expectedLandingRpm, landing.rpm, 80.0)
-
-        var downshiftStart: DrivetrainState? = null
-        var liftElapsed = 0.0
-        while (liftElapsed < 0.5 && downshiftStart == null) {
-            val state = simulation.update(DriverInput(), STEP)
-            liftElapsed += STEP
-            if (state.isShifting && state.shiftDirection == ShiftDirection.DOWN) {
-                downshiftStart = state
-            }
-        }
-
-        val downshift = requireNotNull(downshiftStart)
-        assertTrue("lift-off downshift waited $liftElapsed seconds", liftElapsed <= 0.10)
-        assertTrue(
-            "downshift started above the landing threshold: $downshift vs $expectedLandingRpm",
-            downshift.rpm <= expectedLandingRpm + 30.0,
+        assertEquals(40.0, afterLift.speedKmh, 0.001)
+        assertEquals(
+            "lift-off RPM should stay road-coupled when speed is held constant",
+            beforeLift.rpm,
+            afterLift.rpm,
+            120.0,
         )
     }
 
     @Test
-    fun liftOffDownshiftFromThirdDoesNotHuntBackToThird() {
+    fun liftOffFromThirdDoesNotUpshiftHuntWhileCoasting() {
         val simulation = EngineSimulation()
         var previous = simulation.state
         var reachedThird = false
@@ -301,10 +282,7 @@ class EngineSimulationTest {
         }
         assertTrue("full-throttle run did not reach third gear", reachedThird)
 
-        var downshiftToSecond = false
         var upshiftStartsAfterLift = 0
-        var gearChangesAfterLift = 0
-        var lastGear = simulation.state.gear
         var lastShiftSerial = simulation.state.shiftSerial
         elapsed = 0.0
         while (elapsed < 6.0) {
@@ -313,26 +291,18 @@ class EngineSimulationTest {
                 if (state.shiftDirection == ShiftDirection.UP) upshiftStartsAfterLift += 1
                 lastShiftSerial = state.shiftSerial
             }
-            if (state.gear != lastGear) {
-                gearChangesAfterLift += 1
-                if (lastGear == 3 && state.gear == 2) downshiftToSecond = true
-                lastGear = state.gear
-            }
             elapsed += STEP
         }
 
-        assertTrue("lift-off run did not produce the expected 3->2 downshift", downshiftToSecond)
         assertEquals(
-            "a lift-off downshift must not be immediately undone by an upshift",
+            "coasting lift-off must not trigger an upshift hunt",
             0,
             upshiftStartsAfterLift,
         )
-        assertEquals("third/second hunting caused unexpected repeated shifts", 1, gearChangesAfterLift)
-        assertEquals(2, simulation.state.gear)
     }
 
     @Test
-    fun liftOffDownshiftWithLiveSpeedDoesNotUndoItUntilDriveIsRequested() {
+    fun liftOffWithLiveSpeedHeldDoesNotHuntGears() {
         val profile = EngineProfile.APEX_V10.copy(
             redlineRpm = 2_800.0,
             limiterRpm = 3_000.0,
@@ -345,9 +315,7 @@ class EngineSimulationTest {
         assertEquals("calibrated live-speed setup should join in third", 3, joined.gear)
         simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 30.0), STEP)
 
-        var downshiftToSecond = false
         var upshiftStartsWhileLifted = 0
-        var lastGear = simulation.state.gear
         var lastShiftSerial = simulation.state.shiftSerial
         repeat((2.0 / STEP).toInt()) {
             val state = simulation.update(DriverInput(externalSpeedKmh = 35.0), STEP)
@@ -355,40 +323,10 @@ class EngineSimulationTest {
                 if (state.shiftDirection == ShiftDirection.UP) upshiftStartsWhileLifted += 1
                 lastShiftSerial = state.shiftSerial
             }
-            if (lastGear == 3 && state.gear == 2) downshiftToSecond = true
-            lastGear = state.gear
         }
 
-        assertTrue("live lift-off run did not produce the expected 3->2 downshift", downshiftToSecond)
-        assertEquals("live lift-off downshift immediately hunted upward", 0, upshiftStartsWhileLifted)
-        assertEquals(2, simulation.state.gear)
-
-        var upshiftAfterThrottle = false
-        lastShiftSerial = simulation.state.shiftSerial
-        repeat((1.0 / STEP).toInt()) {
-            val state = simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 35.0), STEP)
-            if (state.shiftSerial != lastShiftSerial) {
-                if (state.shiftDirection == ShiftDirection.UP) upshiftAfterThrottle = true
-                lastShiftSerial = state.shiftSerial
-            }
-        }
-        assertTrue("live road-speed safety did not resume after throttle application", upshiftAfterThrottle)
-    }
-
-    @Test
-    fun liftOffRpmFallsQuicklyEvenWhenRoadSpeedIsHeldConstant() {
-        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
-        val simulation = EngineSimulation(profile)
-        simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 40.0), STEP)
-        simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
-        val beforeLift = simulation.state
-        val afterLift = simulation.runForExternal(0.35, speedKmh = 40.0, throttle = 0.0)
-
-        assertEquals(40.0, afterLift.speedKmh, 0.001)
-        assertTrue(
-            "lift-off RPM only fell from ${beforeLift.rpm} to ${afterLift.rpm}",
-            beforeLift.rpm - afterLift.rpm > 750.0,
-        )
+        assertEquals("live lift-off at constant road speed must not hunt upward", 0, upshiftStartsWhileLifted)
+        assertEquals(3, simulation.state.gear)
     }
 
     @Test
@@ -475,14 +413,32 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun simulatorCoastRegenSlowsVirtualVehicleFasterThanDragAlone() {
+        val profile = EngineProfile.APEX_V10.copy(simulatorCoastRegenMps2 = 0.50)
+        val withoutRegen = EngineSimulation(profile)
+        val withRegen = EngineSimulation(profile)
+        withoutRegen.runFor(6.0, throttle = 1.0)
+        withRegen.runFor(6.0, throttle = 1.0, simulateCoastRegen = true)
+
+        val dragOnly = withoutRegen.runFor(2.0, throttle = 0.0)
+        val regenCoast = withRegen.runFor(2.0, throttle = 0.0, simulateCoastRegen = true)
+
+        assertTrue(
+            "simulator coast regen should reduce speed faster than drag alone: " +
+                "drag=${dragOnly.speedKmh} regen=${regenCoast.speedKmh}",
+            regenCoast.speedKmh < dragOnly.speedKmh - 2.0,
+        )
+    }
+
+    @Test
     fun brakingSlowsVehicleAndEngineMoreThanCoasting() {
         val coasting = EngineSimulation()
         val braking = EngineSimulation()
         coasting.runFor(8.0, throttle = 1.0)
         braking.runFor(8.0, throttle = 1.0)
 
-        val coastState = coasting.runFor(1.8, throttle = 0.0, brake = 0.0)
-        val brakeState = braking.runFor(1.8, throttle = 0.0, brake = 1.0)
+        val coastState = coasting.runFor(1.8, throttle = 0.0, brake = 0.0, simulateCoastRegen = true)
+        val brakeState = braking.runFor(1.8, throttle = 0.0, brake = 1.0, simulateCoastRegen = true)
 
         assertTrue(brakeState.speedKmh < coastState.speedKmh)
         assertTrue("braking should select the same or a lower gear", brakeState.gear <= coastState.gear)
@@ -508,10 +464,18 @@ class EngineSimulationTest {
         seconds: Double,
         throttle: Double = 0.0,
         brake: Double = 0.0,
+        simulateCoastRegen: Boolean = false,
     ): DrivetrainState {
         var result = state
         repeat((seconds / STEP).toInt()) {
-            result = update(DriverInput(throttle = throttle, brake = brake), STEP)
+            result = update(
+                DriverInput(
+                    throttle = throttle,
+                    brake = brake,
+                    simulateCoastRegen = simulateCoastRegen,
+                ),
+                STEP,
+            )
         }
         return result
     }

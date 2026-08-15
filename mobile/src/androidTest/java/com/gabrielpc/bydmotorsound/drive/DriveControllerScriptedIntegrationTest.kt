@@ -42,7 +42,7 @@ class DriveControllerScriptedIntegrationTest {
             PersistentDiagnosticLog.event("scripted_lift_off_started")
             assertTrue(
                 "scripted lift-off did not complete the expected third-to-second downshift",
-                waitUntil(timeoutMs = 7_000L) {
+                waitUntil(timeoutMs = 20_000L) {
                     val state = controller.snapshot().drivetrain
                     state.gear == 2 && !state.isShifting
                 },
