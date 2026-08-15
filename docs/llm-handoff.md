@@ -51,7 +51,7 @@ AAOS media-template shell and are not the BYD application.
   wheel torque;
 - a full-screen 1920 x 990 dashboard with simulator touch/keyboard pedals and a tuning workstation
   whose curves and parameters are editable in the UI;
-- UI torque in kgf·m, power in HP, and whole-number presentation values;
+- UI torque in kgf·m and power in values labeled HP (metric PS/cv), with wheel-derived graph values cosmetically scaled to motor ratings — see [UI display decisions](ui-display-and-simulation-decisions.md);
 - procedural synthesized engine audio, audio focus handling, and experimental logical
   stereo/quad/5.1/7.1 output;
 - read-only reflective probing/polling of BYD pedal and speed getters, with simulator fallback;
@@ -70,6 +70,7 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 | Audio | `audio/EngineAudioEngine.kt`, `EngineSynthesizer.kt` | AudioTrack lifecycle, focus, routing diagnostics, PCM synthesis/mirroring |
 | Telemetry | `telemetry/BydSpeedReader.kt` | reflective BYD capability probe and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
+| UI display | `VehicleDisplayUnits.kt`, `TuningPanel.kt` | cosmetic kgfm/HP conversions and graph annotation; does not alter physics |
 | Diagnostics | `BydMotorSoundApplication.kt`, `diagnostics/PersistentDiagnosticLog.kt` | process/lifecycle/crash and bounded persistent event storage |
 
 The manifest deliberately targets SDK 25 for the DiLink compatibility experiment while compiling
@@ -77,20 +78,15 @@ against SDK 37. It requests only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`.
 
 ## Current gear behavior and regression history
 
-Lift-off from third gear previously hunted `3 -> 2 -> 3`. The cause was an intentional lift-off RPM
-retention model: displayed RPM falls below raw road-coupled RPM, so a valid synthetic downshift was
-immediately undone by the raw-road emergency-upshift check.
+Lift-off from third gear previously hunted `3 -> 2 -> 3` when a **lift-off RPM retention** model made displayed RPM lag below road-coupled RPM. That retention layer was **removed** (2026-08). Synthetic RPM is now always road-coupled through the presentation gear ratio, filtered by `syntheticRpmResponseSeconds`.
 
 Current behavior:
 
-- virtual/simulator pedal lift suppresses that incompatible raw-road emergency correction;
-- live-speed lift-off downshifts use a scoped hold until road projection is 150 RPM below the
-  emergency trigger;
-- a throttle request or a new unsafe live-speed join resumes the over-rev protection;
-- direct deterministic regressions cover both virtual and live-speed behavior in
-  `EngineSimulationTest.kt`.
+- virtual and live-speed lift-off use the same road-coupled RPM target;
+- coasting downshifts settle without upshift hunting when road speed is held constant;
+- regressions in `EngineSimulationTest.kt` cover road-coupled lift-off for virtual and live-speed paths.
 
-Do not replace this with an arbitrary cooldown without preserving the above live-speed safety path.
+Do not reintroduce lift-off retention without a design that avoids the old display/road mismatch. Full context: [UI display and simulation decisions §3.2](ui-display-and-simulation-decisions.md#32-lift-off-rpm-retention-removed-2026-08).
 
 `DriveControllerScriptedIntegrationTest` is the preferred no-UI regression test: it drives the
 real controller directly to third gear, releases throttle, verifies it settles in second, then
@@ -169,10 +165,11 @@ the BYD amplifier/DSP channel mapping, or acoustic delay.
 1. [Engineering context](README.md)
 2. [Full implementation](full-implementation.md)
 3. [BYD Seal calibration](byd-seal-performance-calibration.md)
-4. [Persistent diagnostics](persistent-diagnostics.md)
-5. [POC implementation and test plan](poc-implementation.md) and
+4. [UI display and simulation decisions](ui-display-and-simulation-decisions.md)
+5. [Persistent diagnostics](persistent-diagnostics.md)
+6. [POC implementation and test plan](poc-implementation.md) and
    [POC plan](poc-plan.md)
-6. [BYD API manual notes](byd-dilink-api-v1.0.5.md) and
+7. [BYD API manual notes](byd-dilink-api-v1.0.5.md) and
    [research findings](research-findings.md)
 
 Use the source-material index for provenance. Prefer documented evidence over assumptions and keep

@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -208,7 +209,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
         PanelCard("SEAL PERFORMANCE", "Electric drive and road-load calibration", Modifier.weight(0.92f)) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 ParameterSlider(
-                    "PEAK TORQUE",
+                    "PEAK MOTOR TORQUE",
                     newtonMetersToKgfm(engine.maxTorqueNm),
                     newtonMetersToKgfm(150.0)..newtonMetersToKgfm(1_200.0),
                     "%.0f kgfm",
@@ -216,20 +217,24 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                     onChange(config.copy(engine = engine.copy(maxTorqueNm = kgfmToNewtonMeters(it))))
                 }
                 ParameterSlider(
-                    "FRONT PEAK WHEEL TORQUE",
-                    newtonMetersToKgfm(engine.frontPeakWheelTorqueNm),
-                    newtonMetersToKgfm(500.0)..newtonMetersToKgfm(6_000.0),
+                    "FRONT PEAK (≈ MOTOR)",
+                    engine.wheelTorqueDisplayKgfm(engine.frontPeakWheelTorqueNm),
+                    engine.wheelTorqueDisplayKgfm(500.0)..engine.wheelTorqueDisplayKgfm(6_000.0),
                     "%.0f kgfm",
                 ) {
-                    onChange(config.copy(engine = engine.copy(frontPeakWheelTorqueNm = kgfmToNewtonMeters(it))))
+                    onChange(config.copy(engine = engine.copy(
+                        frontPeakWheelTorqueNm = engine.wheelTorqueFromDisplayKgfm(it),
+                    )))
                 }
                 ParameterSlider(
-                    "REAR PEAK WHEEL TORQUE",
-                    newtonMetersToKgfm(engine.rearPeakWheelTorqueNm),
-                    newtonMetersToKgfm(500.0)..newtonMetersToKgfm(7_000.0),
+                    "REAR PEAK (≈ MOTOR)",
+                    engine.wheelTorqueDisplayKgfm(engine.rearPeakWheelTorqueNm),
+                    engine.wheelTorqueDisplayKgfm(500.0)..engine.wheelTorqueDisplayKgfm(7_000.0),
                     "%.0f kgfm",
                 ) {
-                    onChange(config.copy(engine = engine.copy(rearPeakWheelTorqueNm = kgfmToNewtonMeters(it))))
+                    onChange(config.copy(engine = engine.copy(
+                        rearPeakWheelTorqueNm = engine.wheelTorqueFromDisplayKgfm(it),
+                    )))
                 }
                 ParameterSlider(
                     "PEAK POWER",
@@ -271,7 +276,11 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 }
             }
         }
-        PanelCard("MEASURED WHEEL TORQUE + POWER", "Axle curves with configured motor-power ceiling", Modifier.weight(1.30f)) {
+        PanelCard(
+            "AXLE TORQUE + POWER",
+            "Wheel torque as ≈ motor-shaft kgfm (${engine.motorReductionRatio} : 1) • power scaled to motor rating, shown as HP (PS/cv)",
+            Modifier.weight(1.30f),
+        ) {
             TorquePowerGraph(engine, state.drivetrain.speedKmh, Modifier.fillMaxSize())
         }
     }
@@ -286,9 +295,15 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             EditableCurveGraph(
                 points = engine.frontWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
-                yLabel = { "${newtonMetersToKgfm(it * engine.frontPeakWheelTorqueNm).roundToInt()} kgfm" },
+                yLabel = {
+                    "${engine.wheelTorqueDisplayKgfm(it * engine.frontPeakWheelTorqueNm).roundToInt()}"
+                },
+                xMarkerLabel = { "${(it * engine.topSpeedKmh).roundToInt()} km/h" },
+                yMarkerLabel = {
+                    "${engine.wheelTorqueDisplayKgfm(it * engine.frontPeakWheelTorqueNm).roundToInt()} kgfm"
+                },
                 xAxisTitle = "ROAD SPEED (km/h)",
-                yAxisTitle = "WHEEL TORQUE (kgfm)",
+                yAxisTitle = "≈ MOTOR TORQUE (kgfm)",
                 currentX = currentSpeed,
                 accent = TuneAmber,
                 lockEndpointX = true,
@@ -300,9 +315,15 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             EditableCurveGraph(
                 points = engine.rearWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
-                yLabel = { "${newtonMetersToKgfm(it * engine.rearPeakWheelTorqueNm).roundToInt()} kgfm" },
+                yLabel = {
+                    "${engine.wheelTorqueDisplayKgfm(it * engine.rearPeakWheelTorqueNm).roundToInt()}"
+                },
+                xMarkerLabel = { "${(it * engine.topSpeedKmh).roundToInt()} km/h" },
+                yMarkerLabel = {
+                    "${engine.wheelTorqueDisplayKgfm(it * engine.rearPeakWheelTorqueNm).roundToInt()} kgfm"
+                },
                 xAxisTitle = "ROAD SPEED (km/h)",
-                yAxisTitle = "WHEEL TORQUE (kgfm)",
+                yAxisTitle = "≈ MOTOR TORQUE (kgfm)",
                 currentX = currentSpeed,
                 accent = TuneRed,
                 lockEndpointX = true,
@@ -323,8 +344,10 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
         PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1.35f)) {
             EditableCurveGraph(
                 points = engine.throttleCurve,
-                xLabel = { "${(it * 100).roundToInt()}%" },
-                yLabel = { "${(it * 100).roundToInt()}%" },
+                xLabel = { "${(it * 100).roundToInt()}" },
+                yLabel = { "${(it * 100).roundToInt()}" },
+                xMarkerLabel = { "${(it * 100).roundToInt()}%" },
+                yMarkerLabel = { "${(it * 100).roundToInt()}%" },
                 xAxisTitle = "PEDAL INPUT (%)",
                 yAxisTitle = "TORQUE REQUEST (%)",
                 currentX = state.throttle,
@@ -484,6 +507,8 @@ private fun EditableCurveGraph(
     points: List<CurvePoint>,
     xLabel: (Double) -> String,
     yLabel: (Double) -> String,
+    xMarkerLabel: (Double) -> String,
+    yMarkerLabel: (Double) -> String,
     xAxisTitle: String,
     yAxisTitle: String,
     currentX: Double,
@@ -548,11 +573,24 @@ private fun EditableCurveGraph(
         val width = right - left
         val height = bottom - top
 
-        repeat(6) { index ->
-            val fraction = index / 5f
-            val x = left + width * fraction
-            val y = bottom - height * fraction
+        val xTicks = axisTicksFromValues(
+            values = points.map { it.x },
+            positionOf = { it.toFloat() },
+            labelOf = xLabel,
+            minSpacing = 0.07f,
+        )
+        val yTicks = axisTicksFromValues(
+            values = listOf(0.0) + points.map { it.y },
+            positionOf = { (it / 1.15).toFloat() },
+            labelOf = yLabel,
+            minSpacing = 0.08f,
+        )
+        xTicks.forEach { tick ->
+            val x = left + width * tick.position
             drawLine(TuneLine.copy(alpha = 0.70f), Offset(x, top), Offset(x, bottom), 1f)
+        }
+        yTicks.forEach { tick ->
+            val y = bottom - height * tick.position
             drawLine(TuneLine.copy(alpha = 0.70f), Offset(left, y), Offset(right, y), 1f)
         }
 
@@ -586,15 +624,40 @@ private fun EditableCurveGraph(
             paint.textAlign = Paint.Align.LEFT
             canvas.nativeCanvas.drawText(yAxisTitle, left, 21f, paint)
             paint.textAlign = Paint.Align.CENTER
-            repeat(5) { index ->
-                val fraction = index / 4.0
-                canvas.nativeCanvas.drawText(xLabel(fraction), left + width * fraction.toFloat(), bottom + 30f, paint)
+            xTicks.forEach { tick ->
+                canvas.nativeCanvas.drawText(
+                    tick.label,
+                    left + width * tick.position,
+                    bottom + 30f,
+                    paint,
+                )
             }
             paint.textAlign = Paint.Align.RIGHT
-            repeat(4) { index ->
-                val fraction = index / 3.0 * 1.15
-                canvas.nativeCanvas.drawText(yLabel(fraction), left - 10f, bottom - height * (fraction / 1.15).toFloat() + 7f, paint)
+            yTicks.forEach { tick ->
+                canvas.nativeCanvas.drawText(
+                    tick.label,
+                    left - 10f,
+                    bottom - height * tick.position + 7f,
+                    paint,
+                )
             }
+            paint.textSize = 12f
+            val accentArgb = accent.toArgb()
+            points.forEach { point ->
+                val px = left + point.x.toFloat() * width
+                val py = bottom - (point.y.toFloat() / 1.15f) * height
+                paint.textAlign = Paint.Align.CENTER
+                paint.color = accentArgb
+                canvas.nativeCanvas.drawText(yMarkerLabel(point.y), px, py - 14f, paint)
+                paint.color = GRAPH_AXIS_LABEL_COLOR
+                canvas.nativeCanvas.drawText(
+                    xMarkerLabel(point.x),
+                    px,
+                    markerLabelYBelow(py, bottom),
+                    paint,
+                )
+            }
+            paint.textSize = 19f
             paint.textAlign = Paint.Align.CENTER
             canvas.nativeCanvas.drawText(xAxisTitle, left + width / 2f, bottom + 58f, paint)
         }
@@ -610,38 +673,59 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
         val bottom = size.height - 82f
         val width = right - left
         val height = bottom - top
-        repeat(6) { index ->
-            val f = index / 5f
-            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left + width * f, top), Offset(left + width * f, bottom), 1f)
-            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
+        val peakWheelTorque = engine.frontPeakWheelTorqueNm + engine.rearPeakWheelTorqueNm
+        val torqueScale = peakWheelTorque * 1.15
+        val peakWheelKw = peakWheelPowerKw(engine)
+        val powerScale = engine.peakPowerKw * 1.10
+        val displayPowerKw = { wheelKw: Double ->
+            engine.wheelPowerDisplayKw(wheelKw, peakWheelKw)
         }
+        val landmarks = torquePowerLandmarks(engine)
+        val xTicks = axisTicksFromValues(
+            values = landmarks.map { it.normalizedSpeed },
+            positionOf = { it.toFloat() },
+            labelOf = { normalized -> "${(normalized * engine.topSpeedKmh).roundToInt()}" },
+            minSpacing = 0.045f,
+            mergeTolerance = 3.0 / engine.topSpeedKmh,
+        )
+        val torqueYTicks = axisTicksFromValues(
+            values = landmarks.map { it.displayedTorqueNm },
+            positionOf = { (it / torqueScale).toFloat().coerceIn(0f, 1f) },
+            labelOf = { torqueNm ->
+                engine.wheelTorqueDisplayKgfm(torqueNm).roundToInt().toString()
+            },
+            minSpacing = 0.07f,
+            mergeTolerance = peakWheelTorque * 0.025,
+        )
+        val powerYTicks = axisTicksFromValues(
+            values = landmarks.map { it.powerKw },
+            positionOf = { (displayPowerKw(it) / powerScale).toFloat().coerceIn(0f, 1f) },
+            labelOf = { powerKw ->
+                kilowattsToHorsepower(displayPowerKw(powerKw)).roundToInt().toString()
+            },
+            minSpacing = 0.07f,
+            mergeTolerance = engine.peakPowerKw * 0.025,
+        )
+        xTicks.forEach { tick ->
+            val x = left + width * tick.position
+            drawLine(TuneLine.copy(alpha = 0.65f), Offset(x, top), Offset(x, bottom), 1f)
+        }
+        (torqueYTicks + powerYTicks)
+            .map { it.position }
+            .distinct()
+            .sorted()
+            .forEach { position ->
+                val y = bottom - height * position
+                drawLine(TuneLine.copy(alpha = 0.65f), Offset(left, y), Offset(right, y), 1f)
+            }
         val torquePath = Path()
         val powerPath = Path()
-        val peakWheelTorque = engine.frontPeakWheelTorqueNm + engine.rearPeakWheelTorqueNm
-        var maxPowerKw = 1.0
         repeat(101) { index ->
             val x = index / 100.0
-            val torque = totalWheelTorque(engine, x)
-            val wheelOmega = (x * engine.topSpeedKmh / 3.6) / engine.wheelRadiusMeters
-            maxPowerKw = max(
-                maxPowerKw,
-                min(engine.peakPowerKw * engine.drivetrainEfficiency, torque * wheelOmega / 1_000.0),
-            )
-        }
-        repeat(101) { index ->
-            val x = index / 100.0
-            val rawTorque = totalWheelTorque(engine, x)
-            val wheelOmega = (x * engine.topSpeedKmh / 3.6) / engine.wheelRadiusMeters
-            val powerLimitedTorque = if (wheelOmega < 1.0) {
-                rawTorque
-            } else {
-                engine.peakPowerKw * 1_000.0 * engine.drivetrainEfficiency / wheelOmega
-            }
-            val displayedTorque = min(rawTorque, powerLimitedTorque)
-            val power = displayedTorque * wheelOmega / 1_000.0
+            val sample = sampleTorquePower(engine, x)
             val px = left + width * x.toFloat()
-            val torqueY = bottom - height * (displayedTorque / (peakWheelTorque * 1.15)).toFloat()
-            val powerY = bottom - height * (power / (maxPowerKw * 1.10)).toFloat()
+            val torqueY = bottom - height * (sample.displayedTorqueNm / torqueScale).toFloat()
+            val powerY = bottom - height * (displayPowerKw(sample.powerKw) / powerScale).toFloat()
             if (index == 0) {
                 torquePath.moveTo(px, torqueY)
                 powerPath.moveTo(px, powerY)
@@ -652,6 +736,19 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
         }
         drawPath(torquePath, TuneCyan, style = Stroke(4f, cap = StrokeCap.Round))
         drawPath(powerPath, TuneAmber, style = Stroke(4f, cap = StrokeCap.Round))
+        landmarks.forEach { landmark ->
+            val px = left + width * landmark.normalizedSpeed.toFloat()
+            val torqueY = bottom - height * (landmark.displayedTorqueNm / torqueScale).toFloat()
+            val powerY = bottom - height * (displayPowerKw(landmark.powerKw) / powerScale).toFloat()
+            drawLine(
+                TuneWhite.copy(alpha = 0.18f),
+                Offset(px, top),
+                Offset(px, bottom),
+                1f,
+            )
+            drawCircle(TuneCyan.copy(alpha = 0.9f), 5f, Offset(px, torqueY))
+            drawCircle(TuneAmber.copy(alpha = 0.9f), 5f, Offset(px, powerY))
+        }
         val liveX = (currentSpeedKmh / engine.topSpeedKmh).coerceIn(0.0, 1.0).toFloat()
         drawLine(TuneWhite.copy(alpha = 0.45f), Offset(left + width * liveX, top), Offset(left + width * liveX, bottom), 2f)
         drawIntoCanvas { canvas ->
@@ -659,41 +756,68 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
             paint.textSize = 16f
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(53, 232, 242)
-            canvas.nativeCanvas.drawText("WHEEL TORQUE (kgfm)", left, 20f, paint)
+            canvas.nativeCanvas.drawText("≈ MOTOR TORQUE (kgfm)", left, 20f, paint)
             paint.textAlign = Paint.Align.RIGHT
             paint.color = android.graphics.Color.rgb(255, 196, 86)
-            canvas.nativeCanvas.drawText("POWER (HP)", right, 20f, paint)
-            repeat(5) { index ->
-                val fraction = index / 4f
-                val y = bottom - height * fraction
+            canvas.nativeCanvas.drawText("≈ MOTOR POWER (HP)", right, 20f, paint)
+            torqueYTicks.forEach { tick ->
                 paint.textAlign = Paint.Align.RIGHT
                 paint.color = android.graphics.Color.rgb(53, 232, 242)
                 canvas.nativeCanvas.drawText(
-                    newtonMetersToKgfm(peakWheelTorque * 1.15 * fraction).roundToInt().toString(),
+                    tick.label,
                     left - 10f,
-                    y + 6f,
+                    bottom - height * tick.position + 6f,
                     paint,
                 )
+            }
+            powerYTicks.forEach { tick ->
                 paint.textAlign = Paint.Align.LEFT
                 paint.color = android.graphics.Color.rgb(255, 196, 86)
                 canvas.nativeCanvas.drawText(
-                    kilowattsToHorsepower(maxPowerKw * 1.10 * fraction).roundToInt().toString(),
+                    tick.label,
                     right + 10f,
-                    y + 6f,
+                    bottom - height * tick.position + 6f,
                     paint,
                 )
             }
             paint.textAlign = Paint.Align.CENTER
-            paint.color = android.graphics.Color.rgb(140, 167, 181)
-            repeat(6) { index ->
-                val fraction = index / 5f
+            paint.textSize = 12f
+            val axisLabelColor = GRAPH_AXIS_LABEL_COLOR
+            xTicks.forEach { tick ->
+                paint.color = axisLabelColor
+                paint.textSize = 16f
                 canvas.nativeCanvas.drawText(
-                    (engine.topSpeedKmh * fraction).roundToInt().toString(),
-                    left + width * fraction,
+                    tick.label,
+                    left + width * tick.position,
                     bottom + 27f,
                     paint,
                 )
             }
+            paint.textSize = 12f
+            landmarks.forEach { landmark ->
+                val px = left + width * landmark.normalizedSpeed.toFloat()
+                val torqueY = bottom - height * (landmark.displayedTorqueNm / torqueScale).toFloat()
+                val powerY = bottom - height * (displayPowerKw(landmark.powerKw) / powerScale).toFloat()
+                val torqueLabel = engine.wheelTorqueDisplayKgfm(landmark.displayedTorqueNm).roundToInt().toString()
+                val powerLabel = kilowattsToHorsepower(displayPowerKw(landmark.powerKw)).roundToInt().toString()
+                val speedKmh = (landmark.normalizedSpeed * engine.topSpeedKmh).roundToInt()
+                val markerBottomY = max(torqueY, powerY)
+
+                paint.textAlign = Paint.Align.CENTER
+                paint.color = android.graphics.Color.rgb(53, 232, 242)
+                canvas.nativeCanvas.drawText(torqueLabel, px, torqueY - 10f, paint)
+                paint.color = android.graphics.Color.rgb(255, 196, 86)
+                canvas.nativeCanvas.drawText(powerLabel, px, powerY - 10f, paint)
+                paint.color = axisLabelColor
+                canvas.nativeCanvas.drawText(
+                    "$speedKmh km/h",
+                    px,
+                    markerLabelYBelow(markerBottomY, bottom),
+                    paint,
+                )
+            }
+            paint.textSize = 16f
+            paint.color = axisLabelColor
             canvas.nativeCanvas.drawText("ROAD SPEED (km/h)", left + width / 2f, bottom + 55f, paint)
         }
     }
@@ -702,6 +826,107 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
 private fun totalWheelTorque(engine: EngineTuning, normalizedSpeed: Double): Double =
     interpolateCurve(engine.frontWheelTorqueCurve, normalizedSpeed) * engine.frontPeakWheelTorqueNm +
         interpolateCurve(engine.rearWheelTorqueCurve, normalizedSpeed) * engine.rearPeakWheelTorqueNm
+
+private data class TorquePowerSample(
+    val normalizedSpeed: Double,
+    val displayedTorqueNm: Double,
+    val powerKw: Double,
+)
+
+private fun sampleTorquePower(engine: EngineTuning, normalizedSpeed: Double): TorquePowerSample {
+    val rawTorque = totalWheelTorque(engine, normalizedSpeed)
+    val wheelOmega = (normalizedSpeed * engine.topSpeedKmh / 3.6) / engine.wheelRadiusMeters
+    val powerLimitedTorque = if (wheelOmega < 1.0) {
+        rawTorque
+    } else {
+        engine.peakPowerKw * 1_000.0 * engine.drivetrainEfficiency / wheelOmega
+    }
+    val displayedTorque = min(rawTorque, powerLimitedTorque)
+    val power = displayedTorque * wheelOmega / 1_000.0
+    return TorquePowerSample(
+        normalizedSpeed = normalizedSpeed,
+        displayedTorqueNm = displayedTorque,
+        powerKw = power,
+    )
+}
+
+private fun buildTorquePowerSeries(engine: EngineTuning, steps: Int = 400): List<TorquePowerSample> {
+    return (0..steps).map { index ->
+        sampleTorquePower(engine, index / steps.toDouble())
+    }
+}
+
+private fun torquePowerLandmarks(engine: EngineTuning): List<TorquePowerSample> {
+    val steps = 400
+    val series = buildTorquePowerSeries(engine, steps)
+    val torqueValues = series.map { it.displayedTorqueNm }
+    val powerValues = series.map { it.powerKw }
+    val torqueRange = (torqueValues.maxOrNull() ?: 1.0) - (torqueValues.minOrNull() ?: 0.0)
+    val powerRange = (powerValues.maxOrNull() ?: 1.0) - (powerValues.minOrNull() ?: 0.0)
+
+    val indices = linkedSetOf(0, series.lastIndex)
+    indices.addAll(significantInflectionIndices(torqueValues, torqueRange * 0.0015))
+    indices.addAll(significantInflectionIndices(powerValues, powerRange * 0.0015))
+    indices.addAll(extremaIndices(powerValues))
+
+    var powerLimitOnsetIndex: Int? = null
+    series.forEachIndexed { index, sample ->
+        if (powerLimitOnsetIndex != null) {
+            return@forEachIndexed
+        }
+        val rawTorque = totalWheelTorque(engine, sample.normalizedSpeed)
+        if (sample.displayedTorqueNm + 1.0 < rawTorque) {
+            powerLimitOnsetIndex = index
+        }
+    }
+    if (powerLimitOnsetIndex != null) {
+        indices.add(powerLimitOnsetIndex!!)
+    }
+
+    val curveBreakpoints = engine.frontWheelTorqueCurve.map { it.x } +
+        engine.rearWheelTorqueCurve.map { it.x }
+    curveBreakpoints.forEach { normalized ->
+        val index = (normalized * steps).roundToInt().coerceIn(0, steps)
+        indices.add(index)
+    }
+
+    return indices
+        .sorted()
+        .map { series[it] }
+        .distinctBy { (it.normalizedSpeed * 1_000).roundToInt() }
+}
+
+private fun significantInflectionIndices(values: List<Double>, minCurvatureChange: Double): List<Int> {
+    if (values.size < 5) {
+        return emptyList()
+    }
+    val indices = mutableListOf<Int>()
+    for (index in 2 until values.size - 2) {
+        val curvatureBefore = values[index] - 2.0 * values[index - 1] + values[index - 2]
+        val curvatureAfter = values[index + 1] - 2.0 * values[index] + values[index - 1]
+        if (curvatureBefore * curvatureAfter < 0.0 &&
+            abs(curvatureAfter - curvatureBefore) > minCurvatureChange
+        ) {
+            indices.add(index)
+        }
+    }
+    return indices
+}
+
+private fun extremaIndices(values: List<Double>): List<Int> {
+    if (values.size < 3) {
+        return emptyList()
+    }
+    val indices = mutableListOf<Int>()
+    for (index in 1 until values.lastIndex) {
+        val localMaximum = values[index - 1] < values[index] && values[index] >= values[index + 1]
+        val localMinimum = values[index - 1] > values[index] && values[index] <= values[index + 1]
+        if (localMaximum || localMinimum) {
+            indices.add(index)
+        }
+    }
+    return indices
+}
 
 @Composable
 private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Double, modifier: Modifier = Modifier) {
@@ -712,10 +937,28 @@ private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Doubl
         val bottom = size.height - 82f
         val width = right - left
         val height = bottom - top
-        repeat(6) { index ->
-            val f = index / 5f
-            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left + width * f, top), Offset(left + width * f, bottom), 1f)
-            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
+        val distributionLandmarks = torqueDistributionLandmarks(engine)
+        val xTicks = axisTicksFromValues(
+            values = distributionLandmarks.map { it.normalizedSpeed },
+            positionOf = { it.toFloat() },
+            labelOf = { normalized -> "${(normalized * engine.topSpeedKmh).roundToInt()}" },
+            minSpacing = 0.08f,
+            mergeTolerance = 0.02,
+        )
+        val yTicks = axisTicksFromValues(
+            values = distributionLandmarks.map { it.rearShare },
+            positionOf = { it.toFloat() },
+            labelOf = { share -> "${(share * 100).roundToInt()}%" },
+            minSpacing = 0.10f,
+            mergeTolerance = 0.03,
+        )
+        xTicks.forEach { tick ->
+            val x = left + width * tick.position
+            drawLine(TuneLine.copy(alpha = 0.65f), Offset(x, top), Offset(x, bottom), 1f)
+        }
+        yTicks.forEach { tick ->
+            val y = bottom - height * tick.position
+            drawLine(TuneLine.copy(alpha = 0.65f), Offset(left, y), Offset(right, y), 1f)
         }
         val frontPath = Path()
         val rearPath = Path()
@@ -737,6 +980,15 @@ private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Doubl
         }
         drawPath(frontPath, TuneAmber, style = Stroke(4f, cap = StrokeCap.Round))
         drawPath(rearPath, TuneRed, style = Stroke(4f, cap = StrokeCap.Round))
+        distributionLandmarks.forEach { landmark ->
+            val px = left + width * landmark.normalizedSpeed.toFloat()
+            val rearShare = landmark.rearShare
+            val frontShare = 1.0 - rearShare
+            val frontY = bottom - height * frontShare.toFloat()
+            val rearY = bottom - height * rearShare.toFloat()
+            drawCircle(TuneAmber.copy(alpha = 0.9f), 5f, Offset(px, frontY))
+            drawCircle(TuneRed.copy(alpha = 0.9f), 5f, Offset(px, rearY))
+        }
         val liveX = (currentSpeedKmh / engine.topSpeedKmh).coerceIn(0.0, 1.0)
         drawLine(
             TuneWhite.copy(alpha = 0.45f),
@@ -753,26 +1005,51 @@ private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Doubl
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(140, 167, 181)
             canvas.nativeCanvas.drawText("TORQUE SHARE (%)", left, 20f, paint)
-            repeat(5) { index ->
-                val fraction = index / 4f
-                paint.textAlign = Paint.Align.RIGHT
+            paint.textAlign = Paint.Align.RIGHT
+            yTicks.forEach { tick ->
                 canvas.nativeCanvas.drawText(
-                    "${(fraction * 100).roundToInt()}%",
+                    tick.label,
                     left - 10f,
-                    bottom - height * fraction + 6f,
+                    bottom - height * tick.position + 6f,
                     paint,
                 )
             }
             paint.textAlign = Paint.Align.CENTER
-            repeat(6) { index ->
-                val fraction = index / 5f
+            xTicks.forEach { tick ->
+                paint.color = GRAPH_AXIS_LABEL_COLOR
+                paint.textSize = 16f
                 canvas.nativeCanvas.drawText(
-                    (engine.topSpeedKmh * fraction).roundToInt().toString(),
-                    left + width * fraction,
+                    tick.label,
+                    left + width * tick.position,
                     bottom + 27f,
                     paint,
                 )
             }
+            paint.textSize = 12f
+            distributionLandmarks.forEach { landmark ->
+                val px = left + width * landmark.normalizedSpeed.toFloat()
+                val rearShare = landmark.rearShare
+                val frontShare = 1.0 - rearShare
+                val frontY = bottom - height * frontShare.toFloat()
+                val rearY = bottom - height * rearShare.toFloat()
+                val speedKmh = (landmark.normalizedSpeed * engine.topSpeedKmh).roundToInt()
+                val markerBottomY = max(frontY, rearY)
+
+                paint.textAlign = Paint.Align.CENTER
+                paint.color = android.graphics.Color.rgb(255, 196, 86)
+                canvas.nativeCanvas.drawText("${(frontShare * 100).roundToInt()}%", px, frontY - 10f, paint)
+                paint.color = android.graphics.Color.rgb(255, 70, 92)
+                canvas.nativeCanvas.drawText("${(rearShare * 100).roundToInt()}%", px, rearY - 10f, paint)
+                paint.color = GRAPH_AXIS_LABEL_COLOR
+                canvas.nativeCanvas.drawText(
+                    "$speedKmh km/h",
+                    px,
+                    markerLabelYBelow(markerBottomY, bottom),
+                    paint,
+                )
+            }
+            paint.textSize = 16f
+            paint.color = GRAPH_AXIS_LABEL_COLOR
             canvas.nativeCanvas.drawText("ROAD SPEED (km/h)", left + width / 2f, bottom + 55f, paint)
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(255, 196, 86)
@@ -793,9 +1070,27 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
         val width = right - left
         val height = bottom - top
         val count = engine.gearRatios.lastIndex.coerceAtLeast(1)
-        repeat(5) { index ->
-            val f = index / 4f
-            drawLine(TuneLine.copy(alpha = 0.7f), Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
+        val xTicks = (0 until count).map { index ->
+            AxisTick(((index + 0.5f) / count), "${index + 1}")
+        }
+        val landingRpms = (0 until engine.gearRatios.lastIndex).map { index ->
+            engine.idleRpm +
+                (engine.upshiftRpm - engine.idleRpm) * engine.gearRatios[index + 1] / engine.gearRatios[index]
+        }
+        val yTicks = axisTicksFromValues(
+            values = listOf(engine.idleRpm, engine.downshiftRpm, engine.upshiftRpm) + landingRpms,
+            positionOf = { (it / engine.maxRpm).toFloat().coerceIn(0f, 1f) },
+            labelOf = { rpm -> rpm.roundToInt().toString() },
+            minSpacing = 0.09f,
+            mergeTolerance = engine.maxRpm * 0.04,
+        )
+        yTicks.forEach { tick ->
+            val y = bottom - height * tick.position
+            drawLine(TuneLine.copy(alpha = 0.7f), Offset(left, y), Offset(right, y), 1f)
+        }
+        xTicks.forEach { tick ->
+            val x = left + width * tick.position
+            drawLine(TuneLine.copy(alpha = 0.65f), Offset(x, top), Offset(x, bottom), 1f)
         }
         for (index in 0 until engine.gearRatios.lastIndex) {
             val postShift = engine.idleRpm +
@@ -812,10 +1107,15 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
             drawIntoCanvas { canvas ->
                 val paint = graphPaint()
                 paint.textAlign = Paint.Align.CENTER
-                paint.color = android.graphics.Color.WHITE
-                canvas.nativeCanvas.drawText("${index + 1}→${index + 2}", x, bottom + 34f, paint)
                 paint.color = android.graphics.Color.rgb(53, 232, 242)
                 canvas.nativeCanvas.drawText(postShift.roundToInt().toString(), x, y - 12f, paint)
+                paint.color = GRAPH_AXIS_LABEL_COLOR
+                canvas.nativeCanvas.drawText(
+                    "${index + 1}→${index + 2}",
+                    x,
+                    markerLabelYBelow(y, bottom),
+                    paint,
+                )
             }
         }
         val downshiftY = bottom - height * (engine.downshiftRpm / engine.maxRpm).toFloat()
@@ -826,13 +1126,12 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(140, 167, 181)
             canvas.nativeCanvas.drawText("LANDING RPM", left, 20f, paint)
-            repeat(5) { index ->
-                val fraction = index / 4f
-                paint.textAlign = Paint.Align.RIGHT
+            paint.textAlign = Paint.Align.RIGHT
+            yTicks.forEach { tick ->
                 canvas.nativeCanvas.drawText(
-                    (engine.maxRpm * fraction).roundToInt().toString(),
+                    tick.label,
                     left - 10f,
-                    bottom - height * fraction + 6f,
+                    bottom - height * tick.position + 6f,
                     paint,
                 )
             }
@@ -840,7 +1139,15 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
             paint.color = android.graphics.Color.rgb(255, 196, 86)
             canvas.nativeCanvas.drawText("DOWNSHIFT ${engine.downshiftRpm.roundToInt()} RPM", right, downshiftY - 8f, paint)
             paint.textAlign = Paint.Align.CENTER
-            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            paint.color = GRAPH_AXIS_LABEL_COLOR
+            xTicks.forEach { tick ->
+                canvas.nativeCanvas.drawText(
+                    tick.label,
+                    left + width * tick.position,
+                    bottom + 27f,
+                    paint,
+                )
+            }
             canvas.nativeCanvas.drawText("SHIFT EVENT", left + width / 2f, bottom + 62f, paint)
         }
     }
@@ -849,6 +1156,7 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 @Composable
 private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier) {
     val values = listOf(1.0, audio.harmonic2, audio.harmonic3, audio.harmonic4, audio.harmonic5)
+    val harmonicLabels = listOf("FUND", "H2", "H3", "H4", "H5")
     Canvas(modifier) {
         val left = 62f
         val right = size.width - 30f
@@ -856,9 +1164,19 @@ private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier
         val bottom = size.height - 86f
         val width = right - left
         val height = bottom - top
-        repeat(4) { index ->
-            val f = index / 3f
-            drawLine(TuneLine, Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
+        val yTicks = axisTicksFromValues(
+            values = listOf(0.0, 1.0, 1.5) + values,
+            positionOf = { (it / 1.5).toFloat().coerceIn(0f, 1f) },
+            labelOf = { gain -> "${(gain * 100).roundToInt()}" },
+            minSpacing = 0.10f,
+            mergeTolerance = 0.05,
+        )
+        val xTicks = values.indices.map { index ->
+            AxisTick(((index + 0.5f) / values.size), "${index + 1}")
+        }
+        yTicks.forEach { tick ->
+            val y = bottom - height * tick.position
+            drawLine(TuneLine, Offset(left, y), Offset(right, y), 1f)
         }
         values.forEachIndexed { index, value ->
             val slot = width / values.size
@@ -874,29 +1192,41 @@ private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier
             drawIntoCanvas { canvas ->
                 val paint = graphPaint()
                 paint.textAlign = Paint.Align.CENTER
-                paint.color = android.graphics.Color.WHITE
-                canvas.nativeCanvas.drawText(if (index == 0) "FUND" else "H${index + 1}", x, bottom + 36f, paint)
                 paint.color = android.graphics.Color.rgb(255, 196, 86)
                 canvas.nativeCanvas.drawText("${(value * 100).roundToInt()}%", x, y - 12f, paint)
+                paint.color = GRAPH_AXIS_LABEL_COLOR
+                canvas.nativeCanvas.drawText(
+                    harmonicLabels[index],
+                    x,
+                    markerLabelYBelow(y, bottom),
+                    paint,
+                )
             }
         }
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
             paint.textSize = 16f
             paint.textAlign = Paint.Align.LEFT
-            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            paint.color = GRAPH_AXIS_LABEL_COLOR
             canvas.nativeCanvas.drawText("GAIN (%)", left, 20f, paint)
-            repeat(4) { index ->
-                val fraction = index / 3f
-                paint.textAlign = Paint.Align.RIGHT
+            paint.textAlign = Paint.Align.RIGHT
+            yTicks.forEach { tick ->
                 canvas.nativeCanvas.drawText(
-                    "${(fraction * 150).roundToInt()}%",
+                    tick.label,
                     left - 10f,
-                    bottom - height * fraction + 6f,
+                    bottom - height * tick.position + 6f,
                     paint,
                 )
             }
             paint.textAlign = Paint.Align.CENTER
+            xTicks.forEach { tick ->
+                canvas.nativeCanvas.drawText(
+                    tick.label,
+                    left + width * tick.position,
+                    bottom + 27f,
+                    paint,
+                )
+            }
             canvas.nativeCanvas.drawText("HARMONIC", left + width / 2f, bottom + 62f, paint)
         }
     }
@@ -911,10 +1241,28 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
         val bottom = size.height - 68f
         val width = right - left
         val height = bottom - top
-        repeat(5) { index ->
-            val f = index / 4f
-            drawLine(TuneLine.copy(alpha = 0.7f), Offset(left + width * f, top), Offset(left + width * f, bottom), 1f)
-            drawLine(TuneLine.copy(alpha = 0.7f), Offset(left, bottom - height * f), Offset(right, bottom - height * f), 1f)
+        val responseTimesMs = listOf(0.0, engine.throttleAttackMs, engine.throttleReleaseMs, engine.brakeResponseMs)
+        val xTicks = axisTicksFromValues(
+            values = responseTimesMs,
+            positionOf = { (it / 1_000.0).toFloat().coerceIn(0f, 1f) },
+            labelOf = { timeMs -> "${timeMs.roundToInt()}" },
+            minSpacing = 0.08f,
+            mergeTolerance = 35.0,
+        )
+        val yTicks = axisTicksFromValues(
+            values = listOf(0.0, 0.632, 1.0),
+            positionOf = { it.toFloat() },
+            labelOf = { response -> "${(response * 100).roundToInt()}%" },
+            minSpacing = 0.12f,
+            mergeTolerance = 0.04,
+        )
+        xTicks.forEach { tick ->
+            val x = left + width * tick.position
+            drawLine(TuneLine.copy(alpha = 0.7f), Offset(x, top), Offset(x, bottom), 1f)
+        }
+        yTicks.forEach { tick ->
+            val y = bottom - height * tick.position
+            drawLine(TuneLine.copy(alpha = 0.7f), Offset(left, y), Offset(right, y), 1f)
         }
         fun responsePath(timeMs: Double): Path {
             val path = Path()
@@ -930,6 +1278,47 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
         drawPath(responsePath(engine.throttleAttackMs), TuneGreen, style = Stroke(3f))
         drawPath(responsePath(engine.throttleReleaseMs), TuneCyan, style = Stroke(3f))
         drawPath(responsePath(engine.brakeResponseMs), TuneRed, style = Stroke(3f))
+        val responseCurves = listOf(
+            Triple(engine.throttleAttackMs, android.graphics.Color.rgb(54, 227, 145), "ATTACK"),
+            Triple(engine.throttleReleaseMs, android.graphics.Color.rgb(53, 232, 242), "RELEASE"),
+            Triple(engine.brakeResponseMs, android.graphics.Color.rgb(255, 70, 92), "BRAKE"),
+        )
+        responseTimesMs.forEach { timeMs ->
+            val normalizedTime = (timeMs / 1_000.0).toFloat().coerceIn(0f, 1f)
+            val px = left + width * normalizedTime
+            var markerBottomY = bottom
+            val labelOffsets = listOf(-14f, 0f, 14f)
+            responseCurves.forEachIndexed { curveIndex, (tauMs, color, _) ->
+                val response = 1.0 - kotlin.math.exp(-(timeMs / 1_000.0) / (tauMs / 1_000.0))
+                val py = bottom - height * response.toFloat().coerceIn(0f, 1f)
+                markerBottomY = max(markerBottomY, py)
+                drawCircle(Color(color).copy(alpha = 0.9f), 4f, Offset(px, py))
+                drawIntoCanvas { canvas ->
+                    val paint = graphPaint()
+                    paint.textSize = 12f
+                    paint.textAlign = Paint.Align.CENTER
+                    paint.color = color
+                    canvas.nativeCanvas.drawText(
+                        "${(response * 100).roundToInt()}%",
+                        px + labelOffsets[curveIndex],
+                        py - 10f,
+                        paint,
+                    )
+                }
+            }
+            drawIntoCanvas { canvas ->
+                val paint = graphPaint()
+                paint.textSize = 12f
+                paint.textAlign = Paint.Align.CENTER
+                paint.color = GRAPH_AXIS_LABEL_COLOR
+                canvas.nativeCanvas.drawText(
+                    "${timeMs.roundToInt()} ms",
+                    px,
+                    markerLabelYBelow(markerBottomY, bottom),
+                    paint,
+                )
+            }
+        }
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
             paint.textSize = 14f
@@ -945,28 +1334,27 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
                 paint.color = color
                 canvas.nativeCanvas.drawText(label, left + index * (width / 3f), 36f, paint)
             }
-            repeat(3) { index ->
-                val fraction = index / 2f
-                paint.textAlign = Paint.Align.RIGHT
-                paint.color = android.graphics.Color.rgb(140, 167, 181)
+            paint.textAlign = Paint.Align.RIGHT
+            paint.color = android.graphics.Color.rgb(140, 167, 181)
+            yTicks.forEach { tick ->
                 canvas.nativeCanvas.drawText(
-                    "${(fraction * 100).roundToInt()}%",
+                    tick.label,
                     left - 10f,
-                    bottom - height * fraction + 5f,
+                    bottom - height * tick.position + 5f,
                     paint,
                 )
             }
             paint.textAlign = Paint.Align.CENTER
-            repeat(5) { index ->
-                val fraction = index / 4f
+            paint.color = GRAPH_AXIS_LABEL_COLOR
+            xTicks.forEach { tick ->
                 canvas.nativeCanvas.drawText(
-                    "${(fraction * 1_000).roundToInt()} ms",
-                    left + width * fraction,
+                    tick.label,
+                    left + width * tick.position,
                     bottom + 24f,
                     paint,
                 )
             }
-            canvas.nativeCanvas.drawText("TIME AFTER PEDAL CHANGE", left + width / 2f, bottom + 48f, paint)
+            canvas.nativeCanvas.drawText("TIME AFTER PEDAL CHANGE (ms)", left + width / 2f, bottom + 48f, paint)
         }
     }
 }
@@ -976,13 +1364,107 @@ private fun graphPaint(): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
 }
 
-internal fun newtonMetersToKgfm(newtonMeters: Double): Double = newtonMeters / NEWTON_METERS_PER_KGFM
+private val GRAPH_AXIS_LABEL_COLOR = 0xFF8CA7B5.toInt()
 
-internal fun kgfmToNewtonMeters(kgfm: Double): Double = kgfm * NEWTON_METERS_PER_KGFM
+private fun markerLabelYBelow(markerBottomY: Float, plotBottom: Float): Float {
+    val preferred = markerBottomY + 16f
+    if (preferred <= plotBottom - 8f) {
+        return preferred
+    }
+    return plotBottom + 14f
+}
 
-internal fun kilowattsToHorsepower(kilowatts: Double): Double = kilowatts / KILOWATTS_PER_HORSEPOWER
+private data class AxisTick(val position: Float, val label: String)
 
-internal fun horsepowerToKilowatts(horsepower: Double): Double = horsepower * KILOWATTS_PER_HORSEPOWER
+private fun axisTicksFromValues(
+    values: List<Double>,
+    positionOf: (Double) -> Float,
+    labelOf: (Double) -> String,
+    minSpacing: Float,
+    mergeTolerance: Double = 0.01,
+): List<AxisTick> {
+    val distinctValues = mergeCloseValues(values, mergeTolerance)
+    val ticks = distinctValues.map { value ->
+        AxisTick(positionOf(value), labelOf(value))
+    }
+    return filterAxisTicks(ticks, minSpacing)
+}
 
-private const val NEWTON_METERS_PER_KGFM = 9.80665
-private const val KILOWATTS_PER_HORSEPOWER = 0.7456998715822702
+private fun mergeCloseValues(values: List<Double>, tolerance: Double): List<Double> {
+    if (values.isEmpty()) {
+        return emptyList()
+    }
+    val sorted = values.sorted()
+    val merged = mutableListOf(sorted.first())
+    sorted.drop(1).forEach { value ->
+        if (abs(value - merged.last()) > tolerance) {
+            merged.add(value)
+        }
+    }
+    return merged
+}
+
+private fun filterAxisTicks(ticks: List<AxisTick>, minSpacing: Float): List<AxisTick> {
+    if (ticks.isEmpty()) {
+        return emptyList()
+    }
+    val sorted = ticks.sortedBy { it.position }
+    val kept = mutableListOf(sorted.first())
+    sorted.drop(1).forEach { tick ->
+        if (tick.position - kept.last().position >= minSpacing) {
+            kept.add(tick)
+        }
+    }
+    return kept
+}
+
+private data class DistributionLandmark(
+    val normalizedSpeed: Double,
+    val rearShare: Double,
+)
+
+private fun rearShareAt(engine: EngineTuning, normalizedSpeed: Double): Double {
+    val front = interpolateCurve(engine.frontWheelTorqueCurve, normalizedSpeed) * engine.frontPeakWheelTorqueNm
+    val rear = interpolateCurve(engine.rearWheelTorqueCurve, normalizedSpeed) * engine.rearPeakWheelTorqueNm
+    val total = front + rear
+    if (total <= 0.0) {
+        return 0.0
+    }
+    return rear / total
+}
+
+private fun torqueDistributionLandmarks(engine: EngineTuning): List<DistributionLandmark> {
+    val normalizedSpeeds = linkedSetOf(0.0, 1.0)
+    normalizedSpeeds.addAll(engine.frontWheelTorqueCurve.map { it.x })
+    normalizedSpeeds.addAll(engine.rearWheelTorqueCurve.map { it.x })
+
+    var crossover: Double? = null
+    var previousShare = rearShareAt(engine, 0.0)
+    repeat(101) { index ->
+        if (crossover != null) {
+            return@repeat
+        }
+        val normalized = index / 100.0
+        val share = rearShareAt(engine, normalized)
+        if ((previousShare - 0.5) * (share - 0.5) < 0.0) {
+            crossover = normalized
+        }
+        previousShare = share
+    }
+    if (crossover != null) {
+        normalizedSpeeds.add(crossover!!)
+    }
+
+    return normalizedSpeeds
+        .sorted()
+        .map { normalized -> DistributionLandmark(normalized, rearShareAt(engine, normalized)) }
+}
+
+private fun EngineTuning.wheelTorqueDisplayKgfm(wheelNewtonMeters: Double): Double =
+    wheelNewtonMetersToMotorEquivalentKgfm(wheelNewtonMeters, motorReductionRatio)
+
+private fun EngineTuning.wheelTorqueFromDisplayKgfm(displayKgfm: Double): Double =
+    motorEquivalentKgfmToWheelNewtonMeters(displayKgfm, motorReductionRatio)
+
+private fun EngineTuning.wheelPowerDisplayKw(wheelKilowatts: Double, peakWheelKw: Double): Double =
+    wheelKilowattsToMotorEquivalentDisplayKw(wheelKilowatts, peakPowerKw, peakWheelKw)

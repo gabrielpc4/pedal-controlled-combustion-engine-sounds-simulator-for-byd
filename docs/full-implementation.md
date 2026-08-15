@@ -105,17 +105,18 @@ At every 5 ms fixed step:
 3. In simulator mode, normalized road speed selects independent front and rear wheel torque from the digitized editable curves.
 4. Requested wheel torque is scaled by the filtered Sport-like pedal request and bounded by the configured motor-power/efficiency sanity ceiling.
 5. Wheel torque divided by tire radius produces drive force; the non-binding configurable traction ceiling remains available for tuning.
-6. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
-7. The independent sound RPM target comes from road speed and the current fictional gear while the pedal is applied. On lift-off it moves toward an editable retained fraction of that coupled RPM, using a separate decay response so the needle and pitch shed revs promptly.
-8. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
+6. In simulator mode only, lift-off can apply a constant coast-regen deceleration (`simulatorCoastRegenMps2`, default 0.50 m/s²) so virtual speed drops faster than aero drag alone.
+7. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
+8. The independent sound RPM target is road-coupled through the current presentation gear ratio and filtered with `syntheticRpmResponseSeconds`. There is no lift-off RPM retention layer.
+9. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
 
-Braking therefore slows the real or virtual vehicle first. Pedal lift also unloads the fictional engine sound without modifying EV wheel force. Lower road speed and the synthetic lift-off decay can request a lower presentation gear; there is no simulated clutch feeding torque back into the vehicle.
+Braking therefore slows the real or virtual vehicle first. Pedal lift unloads the fictional engine sound without modifying EV wheel force. Lower road speed can request a lower presentation gear; there is no simulated clutch feeding torque back into the vehicle.
 
 ### Synthetic automatic shifts
 
 Upshifts begin above the configured sound shift point with meaningful throttle and a higher presentation gear available. A projected synthetic over-rev near 97% of redline forces a safe sequential upshift, including the first externally supplied live-speed sample or an unsafe live-speed change. Every higher gear derives its downshift point from the exact RPM landing of the preceding upshift; the editable global value is retained only as a minimum floor. Synthetic-RPM and road-speed projections reject an over-rev before any downshift.
 
-The ratio changes at 38% of the configured shift animation. An upshift lasts 270 ms and a downshift 340 ms by default; a 450 ms completed-shift dwell prevents ordinary hunting. An explicit zero-pedal return to the gear's landing threshold can downshift immediately, matching the requested behavior. During a closed-throttle live-speed downshift, a scoped emergency-upshift hold remains until the road projection is 150 RPM below the trigger; that prevents an immediate reversal caused by the intentionally lower lift-off display RPM, while throttle demand or a new unsafe live-speed join resumes the safety check. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event.
+The ratio changes at 38% of the configured shift animation. An upshift lasts 270 ms and a downshift 340 ms by default; a 450 ms completed-shift dwell prevents ordinary hunting. An explicit zero-pedal return to the gear's landing threshold can downshift immediately. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. Synthetic RPM is always road-coupled on lift-off; retention/decay was removed after it caused gear hunting.
 
 ## Procedural sound model
 
@@ -172,7 +173,7 @@ The header/footer show the requested mode, active logical channel count/layout, 
 
 The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
 
-The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, synthetic RPM response, lift-off RPM retention/decay, all seven presentation ratios, shift timing, audio layers, and firing harmonics. Graphs visualize wheel torque/power, torque distribution, response timing, lift-off decay, shift landing/downshift points, and spectrum. See [Live tuning interface](tuning-interface.md).
+The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, synthetic RPM response, SIM coast regen, all seven presentation ratios, shift timing, audio layers, and firing harmonics. Graphs visualize ≈ motor torque/power (UI-scaled), torque distribution, response timing, shift landing/downshift points, and spectrum. Display-unit policy is in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Control inventory: [Live tuning interface](tuning-interface.md).
 
 The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
 

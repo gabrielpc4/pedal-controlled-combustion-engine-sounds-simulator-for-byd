@@ -151,6 +151,18 @@ The real Seal uses fixed-ratio single-speed electric drive units. In this app:
 
 This preserves the enjoyable rise, shift, RPM drop, and sound progression of a game while removing clutch slip, bogging, combustion torque buildup, and shift interruption from the electric vehicle response.
 
+## UI display layer (cosmetic only)
+
+The tuning graphs and sliders do **not** show raw wheel torque or raw wheel power. Presentation conversions are intentional and documented in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Summary:
+
+| Quantity | Stored / simulated | Shown in UI |
+| --- | --- | --- |
+| Torque | Wheel Nm from A2MAC1 curves | ≈ motor-shaft kgfm (`wheel Nm ÷ reduction`) |
+| Power | Wheel kW from `P = T × ω` | Scaled to match `peakPowerKw`, then PS/cv labeled **HP** |
+| Motor rating slider | `peakPowerKw` (default 390) | ~530 HP (PS/cv) at default |
+
+The 390 kW motor rating and 670 Nm motor torque in persisted config remain the physics authority. The ~338 kW peak implied by wheel torque at ~76 km/h is the honest wheel-power peak; the UI scale exists so the graphed maximum aligns with the brochure rating.
+
 ## Verification encoded in tests
 
 `EngineSimulationTest` checks:
