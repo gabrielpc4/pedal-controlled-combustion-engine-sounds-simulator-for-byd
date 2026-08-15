@@ -38,7 +38,7 @@ The Android audio diagnostics confirmed:
 
 - the application held the top audio-focus entry;
 - an `AudioTrack` with `USAGE_GAME` / `CONTENT_TYPE_MUSIC` was started;
-- logical stereo, 48 kHz, session 369;
+- logical stereo, 48 kHz, session 393;
 - route `sdk_gphone64_x86_64 (#2)`;
 - 4,360-frame effective buffer and zero reported underruns during idle, throttle, and brake checks.
 
@@ -46,13 +46,14 @@ The host audio backend is now enabled and the Android track is actively routed. 
 
 Final accelerated build evidence:
 
-- APK size `13,258,042` bytes and SHA-256 `BB18D1E52D2CA252700B81B62F71E1F8EC062EAF64D84E52580594D9B68D773E`;
-- 26 unit tests, debug assembly, and Android lint passed with zero failures or lint issues;
+- APK size `13,258,042` bytes and SHA-256 `D62B4994C565AE77ECFEF5BE7FFFDA1ECA6C1FCD0B6AB020CAAD0FD21366C6C2`;
+- 27 unit tests, debug assembly, and Android lint passed with zero failures or lint issues;
 - the dashboard displays a 0-10 tachometer with its 8,600 RPM red zone;
 - the separately modeled fuel cutoff is 8,850 RPM and the performance upshift point is 8,250 RPM;
 - the torque curve peaks at 6,500 RPM and uses nine absolute-RPM points;
 - the live-tuning menu exposes tachometer maximum, redline, and fuel cutoff as separate persisted controls;
 - the installed app reported a 1920 x 990 viewport, logical stereo at 48 kHz, and zero underruns at idle;
+- a sustained 95% touchscreen launch remained in first gear and climbed smoothly through 2,730 RPM without the previous clutch-engagement reversal;
 - no application fatal exception or ANR was logged.
 
 The accelerated emulator was left open with the application running for interactive testing.

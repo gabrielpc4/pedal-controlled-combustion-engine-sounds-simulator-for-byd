@@ -199,14 +199,26 @@ class EngineSimulation(
         val engineOmega = rpmToRadiansPerSecond(engineRpm)
         val gearboxOmega = rpmToRadiansPerSecond(gearboxRpm)
         val clutchCapacity = profile.maxTorqueNm * 1.45 * clutchEngagement
-        val clutchTorque = (CLUTCH_STIFFNESS * (engineOmega - gearboxOmega))
-            .coerceIn(-clutchCapacity, clutchCapacity)
         val revMatchTorque = shiftControl.revMatchTargetRpm?.let { targetRpm ->
             (REV_MATCH_STIFFNESS * rpmToRadiansPerSecond(targetRpm - engineRpm))
                 .coerceIn(0.0, profile.maxTorqueNm * 0.65)
         } ?: 0.0
-        val netEngineTorque = combustionTorque + idleTorque + revMatchTorque -
-            frictionTorque - pumpingTorque - clutchTorque
+        val engineTorqueBeforeClutch = combustionTorque + idleTorque + revMatchTorque -
+            frictionTorque - pumpingTorque
+        val rawClutchTorque = CLUTCH_STIFFNESS * (engineOmega - gearboxOmega)
+        val managingLaunchSlip = externalMps == null && currentGearIndex == 0 && shift == null &&
+            filteredThrottle > 0.05 && engineRpm > gearboxRpm + LAUNCH_SLIP_MARGIN_RPM
+        val positiveClutchCapacity = if (managingLaunchSlip) {
+            val minimumRiseRpmPerSecond = LAUNCH_MIN_RISE_RPM_PER_SECOND +
+                LAUNCH_THROTTLE_RISE_RPM_PER_SECOND * filteredThrottle
+            val accelerationReserveTorque = profile.engineInertiaKgM2 *
+                rpmToRadiansPerSecond(minimumRiseRpmPerSecond)
+            min(clutchCapacity, (engineTorqueBeforeClutch - accelerationReserveTorque).coerceAtLeast(0.0))
+        } else {
+            clutchCapacity
+        }
+        val clutchTorque = rawClutchTorque.coerceIn(-clutchCapacity, positiveClutchCapacity)
+        val netEngineTorque = engineTorqueBeforeClutch - clutchTorque
         val rpmDerivative = (netEngineTorque / profile.engineInertiaKgM2 * 60.0 / (2.0 * PI))
             .coerceIn(-7_500.0, 8_000.0)
         engineRpm = (engineRpm + rpmDerivative * dt)
@@ -450,6 +462,9 @@ class EngineSimulation(
 
     companion object {
         private const val LAUNCH_RPM_SPAN = 2_500.0
+        private const val LAUNCH_SLIP_MARGIN_RPM = 80.0
+        private const val LAUNCH_MIN_RISE_RPM_PER_SECOND = 150.0
+        private const val LAUNCH_THROTTLE_RISE_RPM_PER_SECOND = 600.0
         private const val CLUTCH_STIFFNESS = 10.0
         private const val REV_MATCH_STIFFNESS = 1.5
         private const val EMERGENCY_UPSHIFT_REDLINE_FRACTION = 0.97

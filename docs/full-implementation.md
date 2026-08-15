@@ -104,7 +104,7 @@ At every 5 ms fixed step:
 2. A valid external road-speed sample is applied before drivetrain math; the first live sample selects a safe cruise gear and synchronizes RPM without reporting a fake acceleration spike.
 3. Combustion torque is `maxTorque * torqueCurve(rpm) * throttle`, then modified by shift cut, limiter, and brake override.
 4. Idle feed-forward/control, mechanical friction, and closed-throttle pumping losses contribute to net engine torque.
-5. Clutch-slip torque is bounded by clutch capacity and applied equal-and-opposite: it is subtracted from the engine equation and passed through the gear/final-drive ratio to the wheels.
+5. Clutch-slip torque is bounded by clutch capacity and applied equal-and-opposite: it is subtracted from the engine equation and passed through the gear/final-drive ratio to the wheels. During a powered first-gear launch, transfer is additionally limited to the torque available after reserving positive engine acceleration; this prevents clutch engagement from pulling RPM backward before the shafts synchronize.
 6. Net engine torque divided by engine inertia advances RPM; the launch clutch engagement rises progressively as the engine spins above idle.
 7. In simulator mode, transmitted wheel force, aero drag, rolling resistance, engine braking, and service braking integrate vehicle speed. Reported acceleration comes from the actual clamped speed delta.
 8. During downshifts, bounded positive rev-match torque spins the engine toward the new coupled speed; no RPM value is directly forced.
@@ -205,6 +205,7 @@ The following command passes:
 Tests verify that:
 
 - sustained throttle increases RPM progressively rather than jumping directly to a pedal-derived target;
+- a full-throttle first-gear launch does not lose RPM while the clutch progressively couples the engine and wheels;
 - automatic shifts begin near the shift point, drop RPM, and honor completed-gear dwell;
 - joining live speed selects a safe ratio, and projected over-rev forces a throttle-independent emergency upshift;
 - virtual/live acceleration has the correct sign and bounds, including zero acceleration when braking at rest;

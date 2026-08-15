@@ -34,6 +34,27 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun fullThrottleLaunchDoesNotBogAsClutchEngages() {
+        val simulation = EngineSimulation()
+        var peakRpm = simulation.state.rpm
+        var largestDrop = 0.0
+        var state = simulation.state
+
+        repeat((3.0 / STEP).toInt()) {
+            state = simulation.update(DriverInput(throttle = 1.0), STEP)
+            if (state.gear == 1 && !state.isShifting) {
+                peakRpm = maxOf(peakRpm, state.rpm)
+                largestDrop = maxOf(largestDrop, peakRpm - state.rpm)
+            }
+        }
+
+        assertTrue(
+            "first-gear full-throttle launch lost $largestDrop RPM after reaching $peakRpm: $state",
+            largestDrop < 30.0,
+        )
+    }
+
+    @Test
     fun automaticShiftStartsAtTheShiftPointDropsRpmAndHonorsCompletedGearDwell() {
         val simulation = EngineSimulation()
         var firstShiftStart: DrivetrainState? = null
