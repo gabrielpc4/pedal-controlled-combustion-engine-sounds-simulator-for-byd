@@ -103,4 +103,3 @@ internal fun huracanTrofeoEvo2InteriorProfile(): EngineSampleProfile {
 
 private fun ampCurve(vararg points: Pair<Double, Double>) = AutomationCurve(points.map { CurvePoint(it.first, it.second) })
 private fun dbCurve(vararg points: Pair<Double, Double>) = AutomationCurve(points.map { CurvePoint(it.first, it.second) })
-
