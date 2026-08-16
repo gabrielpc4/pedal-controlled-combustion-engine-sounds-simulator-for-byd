@@ -218,6 +218,9 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("FULL PEDAL KICK", engine.fullThrottleKickRpmPerSecond, 6_000.0..60_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(fullThrottleKickRpmPerSecond = it)))
                 }
+                ParameterSlider("VIRTUAL SHIFT RPM", engine.upshiftRpm, (engine.fullThrottleSweetSpotRpm.coerceAtMost(engine.redlineRpm - 500.0) + 200.0)..(engine.redlineRpm - 50.0), "%.0f RPM") {
+                    onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
+                }
                 ParameterSlider("LIFT-OFF RPM FORCE", engine.liftOffRpmDecelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(liftOffRpmDecelerationPerSecond = it)))
                 }

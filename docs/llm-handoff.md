@@ -47,7 +47,7 @@ AAOS media-template shell and are not the BYD application.
 
 - a 200 Hz EV longitudinal model calibrated from public Seal Performance anchors and digitized
   A2MAC1 wheel-torque measurements;
-- a direct, playful tach model: no presentation gears or ratio changes affect RPM or sound;
+- a direct, playful tach model with unlimited virtual gear events; no ratio stack or top gear;
 - a full-screen 1920 x 990 dashboard with simulator touch/keyboard pedals and a tuning workstation
   whose curves and parameters are editable in the UI;
 - UI torque in kgf·m and power in values labeled HP (metric PS/cv), with wheel-derived graph values cosmetically scaled to motor ratings — see [UI display decisions](ui-display-and-simulation-decisions.md);
@@ -87,7 +87,7 @@ Current **D** behavior:
 - Full pedal uses a configurable fast kick to the sweet spot (default 5,200 RPM), then the editable fake-RPM progression curve provides a calmer climb toward the limiter.
 - In explicit SIM mode, speed is derived from the same normalized fake RPM, so lift-off and brake fall together with the tach.
 - Lift-off applies a constant strong negative RPM force immediately; brake adds a larger proportional negative force.
-- There are no upshifts, downshifts, ratios, or shift-triggered samples in direct-tach mode.
+- Unlimited virtual upshifts/downshifts still emit sample-bank shift events, but have no ratio stack or top gear.
 - Live speed remains useful for displayed speed/acceleration, but it cannot scale or directly move the needle.
 - The old road-coupled helper/calibration code and tests were deleted rather than retained as a compatibility path.
 

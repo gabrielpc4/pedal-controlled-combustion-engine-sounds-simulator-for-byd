@@ -7,10 +7,10 @@ import org.junit.Test
 
 class EngineSimulationTest {
     @Test
-    fun sampleProfileStartsAtItsOwnIdleAndHasNoSimulatedGear() {
+    fun sampleProfileStartsAtItsOwnIdleInFirstVirtualGear() {
         val simulation = EngineSimulation()
         assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 0.0)
-        assertEquals(0, simulation.state.gear)
+        assertEquals(1, simulation.state.gear)
         assertFalse(simulation.state.isShifting)
         assertEquals(0L, simulation.state.shiftSerial)
     }
@@ -35,28 +35,44 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun directTachNeverCreatesGearChanges() {
+    fun virtualGearsContinueUpshiftingWithoutAFixedTopGear() {
         val simulation = EngineSimulation()
         var state = simulation.state
-        repeat((12.0 / STEP).toInt()) {
+        repeat((18.0 / STEP).toInt()) {
             state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
         }
-        assertEquals(0, state.gear)
-        assertFalse(state.isShifting)
-        assertEquals(0L, state.shiftSerial)
+        assertTrue("full throttle should pass the old seven-gear ceiling: $state", state.gear > 7)
+        assertTrue("every virtual upshift needs an event serial", state.shiftSerial >= 7L)
+    }
+
+    @Test
+    fun liftOffDownshiftsThroughVirtualGearsAtTheLandingRpm() {
+        val simulation = EngineSimulation()
+        var state = simulation.state
+        repeat((5.0 / STEP).toInt()) {
+            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
+        }
+        val gearBeforeLift = state.gear
+        repeat((1.5 / STEP).toInt()) {
+            state = simulation.update(DriverInput(simulateCoastRegen = true), STEP)
+        }
+
+        assertTrue(gearBeforeLift > 1)
+        assertTrue("lift-off should step back down through virtual gears: $state", state.gear < gearBeforeLift)
+        assertTrue(state.shiftSerial > 0L)
     }
 
     @Test
     fun simulatorSpeedFollowsTheFakeTachOnLiftOff() {
         val simulation = EngineSimulation()
-        val launched = simulation.runFor(1.2, throttle = 1.0, sim = true)
-        val lifted = simulation.runFor(0.45, sim = true)
+        val launched = simulation.runFor(1.0, throttle = 0.35, sim = true)
+        val lifted = simulation.runFor(0.35, sim = true)
         val rpmSpan = simulation.profile.redlineRpm - simulation.profile.idleRpm
         val expectedSpeed = simulation.profile.topSpeedKmh *
             ((lifted.rpm - simulation.profile.idleRpm) / rpmSpan).coerceIn(0.0, 1.0)
         assertEquals(expectedSpeed, lifted.speedKmh, 0.01)
-        assertTrue(lifted.rpm < launched.rpm - 1_000.0)
-        assertTrue(lifted.speedKmh < launched.speedKmh - 20.0)
+        assertTrue(lifted.rpm < launched.rpm - 600.0)
+        assertTrue(lifted.speedKmh < launched.speedKmh - 15.0)
     }
 
     @Test
@@ -77,7 +93,7 @@ class EngineSimulationTest {
         simulation.update(DriverInput(externalSpeedKmh = 180.0), STEP)
         simulation.runForExternal(1.0, speedKmh = 20.0)
         assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 0.01)
-        assertEquals(0, simulation.state.gear)
+        assertEquals(1, simulation.state.gear)
     }
 
     @Test

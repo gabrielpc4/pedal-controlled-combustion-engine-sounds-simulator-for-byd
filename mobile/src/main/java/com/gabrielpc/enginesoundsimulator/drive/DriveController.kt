@@ -15,6 +15,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
+import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.ReaderState
@@ -81,6 +82,8 @@ class DriveController(context: Context) {
     private val selectedInputMode = AtomicReference(InputMode.AUTO)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val soundEnabled = AtomicBoolean(true)
+    private var lastLoggedShiftSerial = simulation.state.shiftSerial
+    private var lastShiftWasActive = false
     private var lastInputSignature = ""
     private var nextHeartbeatAtElapsedMs = 0L
     private var lastEffectTelemetryProfile = ""
@@ -133,6 +136,7 @@ class DriveController(context: Context) {
 
             // Start each visible/controller session with a fresh source line and heartbeat.
             lastInputSignature = ""
+            lastShiftWasActive = false
             nextHeartbeatAtElapsedMs = 0L
             val runId = generation.incrementAndGet()
             running.set(true)
@@ -402,8 +406,12 @@ class DriveController(context: Context) {
                 throttle = drivetrain.smoothedThrottle,
                 enabled = enabled,
                 enabledEffectMask = enabledEffectMask.get(),
-                shiftSerial = 0L,
-                shiftDirection = 0,
+                shiftSerial = drivetrain.shiftSerial,
+                shiftDirection = when (drivetrain.shiftDirection) {
+                    ShiftDirection.UP -> 1
+                    ShiftDirection.DOWN -> -1
+                    ShiftDirection.NONE -> 0
+                },
                 tuning = tuning.audio,
             ),
         )
@@ -446,6 +454,24 @@ class DriveController(context: Context) {
             lastInputSignature = inputSignature
             PersistentDiagnosticLog.event("input_source_changed", inputSignature)
         }
+        if (drivetrain.shiftSerial != lastLoggedShiftSerial) {
+            PersistentDiagnosticLog.event(
+                "virtual_shift_started",
+                "serial=${drivetrain.shiftSerial} direction=${drivetrain.shiftDirection.name} " +
+                    "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
+                    "landing_rpm=${profile.fullThrottleSweetSpotRpm.roundToInt()} " +
+                    "throttle_pct=${(input.throttle * 100.0).roundToInt()} source=${input.label}",
+            )
+            lastLoggedShiftSerial = drivetrain.shiftSerial
+        }
+        if (lastShiftWasActive && !drivetrain.isShifting) {
+            PersistentDiagnosticLog.event(
+                "virtual_shift_completed",
+                "serial=${drivetrain.shiftSerial} gear=${drivetrain.gear} " +
+                    "rpm=${drivetrain.rpm.roundToInt()} speed_kmh=${drivetrain.speedKmh.roundToInt()}",
+            )
+        }
+        lastShiftWasActive = drivetrain.isShifting
 
         val nowElapsedMs = SystemClock.elapsedRealtime()
         if (nowElapsedMs >= nextHeartbeatAtElapsedMs) {
@@ -465,13 +491,14 @@ class DriveController(context: Context) {
             }
             PersistentDiagnosticLog.event(
                 "drive_heartbeat",
-                "mode=DIRECT_TACH rpm=${drivetrain.rpm.roundToInt()} " +
+                "mode=DIRECT_TACH gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
                     "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
                     "rpm_curve_permille=${(drivetrain.rpmProgressionFraction * 1_000.0).roundToInt()} " +
                     "rpm_push_per_s=${drivetrain.rpmPositiveForcePerSecond.roundToInt()} " +
                     "rpm_drag_per_s=${drivetrain.rpmNegativeForcePerSecond.roundToInt()} " +
+                    "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
                     "source=${input.label} reader=${telemetry.readerState.name} " +
                     "car_profile=${selectedSampleProfile.get().id} sample_status=${audio.sampleStatus} " +
                     "simulation_rpm=${drivetrain.rpm.roundToInt()} " +

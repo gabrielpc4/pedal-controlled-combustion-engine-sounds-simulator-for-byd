@@ -34,8 +34,12 @@ class DriveControllerScriptedIntegrationTest {
                 waitUntil(timeoutMs = 1_500L) {
                     val state = controller.snapshot().drivetrain
                     state.rpm >= controller.snapshot().tuning.engine.fullThrottleSweetSpotRpm - 150.0 &&
-                        state.gear == 0 && !state.isShifting
+                        state.gear >= 1
                 },
+            )
+            assertTrue(
+                "scripted full throttle did not create a virtual upshift",
+                waitUntil(timeoutMs = 3_000L) { controller.snapshot().drivetrain.gear >= 2 },
             )
 
             val beforeLift = controller.snapshot().drivetrain
@@ -47,7 +51,7 @@ class DriveControllerScriptedIntegrationTest {
                     val state = controller.snapshot().drivetrain
                     state.rpm < beforeLift.rpm - 2_000.0 &&
                         state.speedKmh < beforeLift.speedKmh - 40.0 &&
-                        state.gear == 0 && !state.isShifting
+                        state.gear < beforeLift.gear
                 },
             )
         } finally {
@@ -57,7 +61,8 @@ class DriveControllerScriptedIntegrationTest {
         val log = File(context.filesDir, "diagnostics/drive-events.log").readText()
         val liftOffSession = log.substringAfterLast("event=scripted_lift_off_started", missingDelimiterValue = "")
         assertTrue("scripted session did not persist direct-tach telemetry", log.contains("mode=DIRECT_TACH"))
-        assertTrue("scripted session unexpectedly persisted a shift", !liftOffSession.contains("event=shift_"))
+        assertTrue("scripted session did not persist an upshift", log.contains("event=virtual_shift_started") && log.contains("direction=UP"))
+        assertTrue("scripted lift-off did not persist a virtual downshift", liftOffSession.contains("event=virtual_shift_started") && liftOffSession.contains("direction=DOWN"))
     }
 
     private fun waitUntil(timeoutMs: Long, predicate: () -> Boolean): Boolean {

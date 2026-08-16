@@ -1,11 +1,10 @@
 # Full engine-sound implementation
 
-> **Current behavior override:** D mode is a direct, playful fake-tach controller. It has no
-> presentation gearbox, ratios, automatic shifts, or shift-triggered samples. Full pedal rapidly
-> kicks to the editable sweet spot (default 5,200 RPM), then the editable tach-force curve slows
-> the upper-range climb. In explicit SIM mode, displayed speed follows normalized fake RPM so it
-> decays at the same time as the tach on lift-off and braking. Older gearbox details below are
-> retained as historical implementation context only.
+> **Current behavior override:** D mode is a direct, playful fake-tach controller with unlimited
+> virtual gears. There is no ratio stack or top gear: each shift lands at the editable sweet spot
+> (default 5,200 RPM), then the editable tach-force curve slows the upper-range climb. Virtual
+> shifts still emit audio/log events and lift-off steps back down. In explicit SIM mode, displayed
+> speed follows normalized fake RPM on lift-off/braking but is held through a virtual shift.
 
 Last verified: 2026-08-15
 

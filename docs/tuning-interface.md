@@ -33,7 +33,7 @@ Curve points are edited directly by dragging them. Their horizontal order is con
 
 Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is informed by the full-request torque rise visible in A2MAC1's acceleration chart, but the pedal map itself remains an approximation because BYD does not publish it.
 
-Synthetic RPM in **D** is force-integrated and independent of road speed. Pedal percentage pushes it upward, lift-off pulls it down, and brake intensifies that fall. There are no synthetic ratios, gear changes, or shift sounds. **N**/**P** retain the target-based free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
+Synthetic RPM in **D** is force-integrated and independent of road speed. Pedal percentage pushes it upward, lift-off pulls it down, and brake intensifies that fall. Unlimited virtual gears shift at the editable shift RPM and land at the sweet spot; there is no ratio stack or top gear. **N**/**P** retain the target-based free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
 
 ## Dashboard controls (outside TUNE)
 
