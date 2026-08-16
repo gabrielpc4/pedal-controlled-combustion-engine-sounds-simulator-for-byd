@@ -1,81 +1,82 @@
-# feat/drive-rpm-tuning-coast-fall — mudanças vs `main`
+# Plano: RPM em D por força do acelerador + tuning consolidado
 
-**Branch:** `feat/drive-rpm-tuning-coast-fall`  
-**Base:** `main` (`98283e6`)  
-**Commit:** `13d1205`  
-**Data:** 2026-08-16
+**Branch alvo:** `feat/drive-rpm-tuning-coast-fall`  
+**Base:** `main`  
+**Tipo:** especificação de implementação (o que precisa ser feito)
 
-Este documento resume **tudo o que mudou** nesta branch em relação à `main`. Serve como changelog técnico e guia de handoff para quem não acompanhou o desenvolvimento.
+Este documento descreve **o trabalho que precisa ser implementado** em relação à `main`. Serve como ticket técnico, guia de implementação e critério de aceite.
 
 ---
 
 ## Resumo em uma frase
 
-O tacômetro em **D** deixou de seguir a velocidade da estrada e passou a ser um **integrador por força do acelerador**, com sliders dedicados de subida/queda de RPM, todos os delays do programa num só painel, botões de restaurar padrão por seção, labels em português — e o **soft floor de coast foi removido** para que o lift-off respeite de fato a taxa configurada (ex.: 5000 RPM/s).
+Substituir o RPM acoplado à velocidade em **D** por um **integrador por força do acelerador**, expor sliders dedicados de subida/queda, consolidar todos os delays num painel, adicionar botão DEFAULTS por seção, usar labels em português nos sliders — e **remover o soft floor de coast** para o lift-off respeitar a taxa configurada (ex.: 5000 RPM/s).
 
 ---
 
-## Por que isso foi feito
+## Problema atual na `main`
 
-Na `main`, o RPM sintético em **D** era **acoplado à velocidade** (`roadCoupledRpmTarget`). Na prática:
+O RPM sintético em **D** segue a velocidade da estrada (`roadCoupledRpmTarget`). Isso causa:
 
-- O tacômetro “seguia o carro” em vez de responder ao pedal.
-- No BYD Live isso soava errado — o usuário queria sensação de motor a combustão: acelerou → sobe; soltou → cai rápido.
-- Os sliders de **SEAL PERFORMANCE** (massa, arrasto, picos de torque etc.) ocupavam espaço na UI mas o foco de tuning ao vivo era outro.
-- Delays (ataque do acelerador, tempo de marcha, dwell etc.) estavam espalhados em abas diferentes.
-- Havia um **soft floor** no coast que impedia o RPM de cair abaixo de um mínimo ligado à velocidade/marcha — isso anulava a taxa de queda configurada.
+- Tacômetro que “segue o carro” em vez de responder ao pedal.
+- Sensação errada no BYD Live — o usuário quer motor a combustão: acelerou → sobe; soltou → cai rápido.
+- Sliders de **SEAL PERFORMANCE** (massa, arrasto, picos etc.) ocupam a UI sem serem o foco de tuning ao vivo.
+- Delays (ataque do acelerador, tempo de marcha, dwell etc.) espalhados em abas diferentes.
+- **Soft floor** no coast impede o RPM de cair abaixo de um mínimo ligado à velocidade/marcha — anula a taxa de queda configurada.
 
 ---
 
 ## 1. Simulação — novo modelo de RPM em D
 
-**Arquivo principal:** `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/simulation/EngineSimulation.kt`
+**Arquivo:** `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/simulation/EngineSimulation.kt`
 
-### Antes (`main`)
+### Remover
 
-- Em **D**, o alvo de RPM era sempre `roadCoupledRpmTarget()` (velocidade × marcha × final drive + idle).
-- O RPM era suavizado com `approachExp()` em direção a esse alvo.
-- Lift-off com retenção de RPM antiga já tinha sido removido, mas o acoplamento à estrada permanecia.
+- Em **D**, o alvo contínuo `roadCoupledRpmTarget()` + `approachExp()` como modelo principal de RPM.
+- Qualquer **soft floor** no coast (piso mínimo de RPM ligado à velocidade/marcha durante lift-off).
 
-### Depois (esta branch)
+### Implementar
 
-- Em **D**, o RPM é integrado a cada passo de 200 Hz por **força**, não por alvo de velocidade:
+Integrar RPM a cada passo de 200 Hz por **força**:
 
 ```text
 Subida:  riseRpmPerSec = filteredThrottle × powerFraction(velocidade) × driveMaxRiseRpmPerSec
 Queda:   fallRpmPerSec = driveCoastFallRpmPerSec + filteredBrake × driveBrakeExtraFallRpmPerSec
 ```
 
-- **Lift-off** usa `requestedThrottleOutput` (pedal cru), não o throttle filtrado — resposta imediata ao soltar.
-- **Sem soft floor:** no coast o RPM cai até o idle (limite inferior), sem piso artificial ligado à velocidade.
-- **Entrada BYD Live:** ao conectar com o carro já em movimento, o RPM **inicial** ainda é semeado com `roadCoupledRpmAtSpeed()` — só na sincronização, não como piso contínuo.
-- **Durante troca de marcha:** RPM continua misturando para `rpmTarget` com `syntheticRpmResponseSeconds` (35 ms padrão).
-- **N / P:** inalterados — free-rev com inércia fixa (0,55 s subida / 0,90 s descida).
+Regras:
 
-### Novos helpers de potência
+- **Lift-off** deve usar `requestedThrottleOutput` (pedal cru), não o throttle filtrado — resposta imediata ao soltar.
+- **Sem soft floor:** no coast o RPM deve cair até o idle (único limite inferior via `coerceIn`).
+- **Entrada BYD Live:** ao conectar com o carro já em movimento, semear RPM **uma vez** com `roadCoupledRpmAtSpeed()` — só na sincronização, não como piso contínuo.
+- **Durante troca de marcha:** misturar RPM para `rpmTarget` com `syntheticRpmResponseSeconds` (35 ms padrão).
+- **N / P:** não alterar — free-rev com inércia fixa (0,55 s subida / 0,90 s descida).
 
-- `wheelPowerKwAtSpeed()` — potência na roda na velocidade atual.
-- `peakWheelPowerKw()` — pico da curva.
-- `wheelPowerFractionAtSpeed()` — fração 0–1 usada para escalar a subida do RPM; abaixo de `driveLaunchFullPowerSpeedKmh` (5 km/h padrão) a fração é **1,0** para largadas fortes parado.
+### Helpers de potência a criar
 
-### Upshift de emergência (anti-hunt)
+| Função | Responsabilidade |
+|--------|------------------|
+| `wheelPowerKwAtSpeed()` | Potência na roda na velocidade atual |
+| `peakWheelPowerKw()` | Pico da curva de potência |
+| `wheelPowerFractionAtSpeed()` | Fração 0–1 para escalar subida do RPM; abaixo de `driveLaunchFullPowerSpeedKmh` (5 km/h padrão) usar **1,0** |
 
-Sem o soft floor, o RPM cai rápido no lift-off. A lógica de upshift foi refinada para **não subir marcha** durante coast:
+### Upshift de emergência — ajustar para evitar hunt
 
-| Condição | Comportamento |
-|----------|---------------|
-| RPM alto + acelerador solto | **Não** faz upshift de emergência |
+Sem soft floor, o RPM cai rápido no lift-off. A lógica de upshift precisa ser refinada:
+
+| Condição | Comportamento esperado |
+|----------|------------------------|
+| RPM alto + acelerador solto | **Não** fazer upshift de emergência |
 | Acelerador pressionado + RPM ≥ limiar | Upshift de emergência permitido |
-| BYD Live: salto brusco de velocidade sem acelerador | Upshift só se aceleração bruta > 2 m/s² **e** tacômetro está > 250 RPM abaixo do acoplado à estrada |
+| BYD Live: salto brusco de velocidade sem acelerador | Upshift só se aceleração bruta > 2 m/s² **e** tacômetro > 250 RPM abaixo do acoplado à estrada |
 
-Constantes novas: `EMERGENCY_PROJECTED_RPM_MARGIN`, `EMERGENCY_SPEED_ACCEL_THRESHOLD_MPS2`, `rawExternalAcceleration`.
+Constantes a introduzir: `EMERGENCY_PROJECTED_RPM_MARGIN`, `EMERGENCY_SPEED_ACCEL_THRESHOLD_MPS2`, `rawExternalAcceleration`.
 
 ---
 
 ## 2. Configuração e persistência
 
-**Arquivo:** `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/tuning/TuningConfig.kt`  
-**Arquivo:** `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/drive/DriveController.kt`
+**Arquivos:** `TuningConfig.kt`, `DriveController.kt`
 
 ### Novos campos em `EngineTuning` / `EngineProfile`
 
@@ -86,38 +87,40 @@ Constantes novas: `EMERGENCY_PROJECTED_RPM_MARGIN`, `EMERGENCY_SPEED_ACCEL_THRES
 | `driveBrakeExtraFallRpmPerSec` | 4000 RPM/s | Queda extra ao frear |
 | `driveLaunchFullPowerSpeedKmh` | 5 km/h | Abaixo disso, subida usa 100% da força (largada) |
 
-- `CALIBRATION_REVISION` subiu para **7** — prefs antigas são resetadas para defaults na primeira carga.
-- Campos **Seal Performance** (massa, arrasto, picos etc.) **continuam persistidos** mas saíram da UI.
+Também:
 
-### Diagnóstico novo
+- Subir `CALIBRATION_REVISION` para **7** — resetar prefs antigas para defaults na primeira carga.
+- Manter campos **Seal Performance** persistidos, mas **remover da UI**.
+
+### Diagnóstico a adicionar
 
 Em `DriveController.recordDriveDiagnostics()`:
 
-- Evento `lift_off_coast` ao soltar o acelerador em **D** — registra RPM, velocidade, marcha, taxa de coast configurada e fonte de input (SIM / BYD).
+- Registrar evento `lift_off_coast` ao soltar o acelerador em **D** — RPM, velocidade, marcha, taxa de coast configurada, fonte de input (SIM / BYD).
 
 ---
 
 ## 3. Interface de tuning (Live Tuning)
 
-**Arquivo:** `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/TuningPanel.kt`
+**Arquivo:** `TuningPanel.kt`
 
-### Aba VEHICLE — painel DRIVE RPM
+### Aba VEHICLE — criar painel DRIVE RPM
 
-Substituiu os sliders de **SEAL PERFORMANCE** na UI (dados ainda existem no backend).
+Substituir os sliders de **SEAL PERFORMANCE** na UI (dados continuam no backend).
 
-**Sliders de força do RPM:**
+**Sliders de força do RPM** (labels em PT-BR):
 
-| Label na UI (PT-BR) | Campo |
-|---------------------|-------|
+| Label na UI | Campo |
+|-------------|-------|
 | Velocidade máxima de subida do RPM com acelerador (modo D) | `driveMaxRiseRpmPerSec` |
 | Velocidade de queda do RPM ao soltar o acelerador | `driveCoastFallRpmPerSec` |
 | Queda extra de RPM ao frear além do coast | `driveBrakeExtraFallRpmPerSec` |
 | Velocidade em que o motor atinge potência plena na largada | `driveLaunchFullPowerSpeedKmh` |
 
-**Seção TEMPOS E ATRASOS** (consolidada aqui; removida das abas Response e Gearing):
+**Seção TEMPOS E ATRASOS** — mover para cá e **remover duplicatas** das abas Response e Gearing:
 
-| Label na UI (PT-BR) | Campo | Padrão |
-|---------------------|-------|--------|
+| Label na UI | Campo | Padrão |
+|-------------|-------|--------|
 | Suavização do RPM durante troca de marcha | `syntheticRpmResponseMs` | 35 ms |
 | Tempo para o acelerador subir | `throttleAttackMs` | 120 ms |
 | Tempo para o acelerador cair no lift-off | `throttleReleaseMs` | 90 ms |
@@ -128,124 +131,125 @@ Substituiu os sliders de **SEAL PERFORMANCE** na UI (dados ainda existem no back
 
 ### Botão DEFAULTS por painel
 
-Todo `PanelCard` ganhou botão **DEFAULTS** no canto superior direito — restaura **só os valores daquele painel** a partir de `TuningConfig.DEFAULT`. O **RESET** global no topo continua resetando tudo.
+Cada `PanelCard` deve ter botão **DEFAULTS** no canto superior direito — restaura **só os valores daquele painel** a partir de `TuningConfig.DEFAULT`. O **RESET** global no topo continua resetando tudo.
 
 ### Labels em português
 
-Todos os títulos de sliders (`ParameterSlider` / `AudioSlider`) foram reescritos como explicações em **PT-BR** do que cada controle faz, mesmo com o resto da UI em inglês.
+Reescrever todos os títulos de sliders (`ParameterSlider` / `AudioSlider`) como explicações em **PT-BR** do que cada controle faz, mesmo com o resto da UI em inglês.
 
-### O que não mudou na UI
+### Não alterar
 
 - **TorquePowerGraph** — intocado.
-- Curvas AWD, pedal Sport, marchas, áudio — mantidos; apenas reorganização de delays e botões DEFAULTS.
+- Curvas AWD, pedal Sport, marchas, áudio — manter; apenas reorganizar delays e adicionar DEFAULTS.
 
 ---
 
-## 4. Correção de bug: coast fall não respeitava 5000 RPM/s
+## 4. Bug a corrigir: coast fall não respeita taxa configurada
 
-### Problema encontrado nos testes
+### Sintoma
 
-Com `driveCoastFallRpmPerSec = 5000`:
+Com `driveCoastFallRpmPerSec = 5000`, o usuário reporta que o RPM **não cai** na velocidade esperada ao soltar o acelerador.
 
-- **Parado:** queda medida = 5000 RPM/s ✓
-- **SIM após acelerar:** RPM parava de cair porque o **soft floor subia** junto com a velocidade virtual ainda crescendo por inércia
+### Causa provável (validar com testes + logs)
 
-### Solução aplicada (e depois simplificada)
+- **Soft floor** sobe junto com a velocidade (especialmente no SIM, onde o carro virtual ainda ganha velocidade por inércia após lift-off).
+- O piso “puxa” o RPM de volta para cima e anula a queda configurada.
 
-Primeiro foi congelada a velocidade de referência do piso no lift-off. Depois, a pedido, o **soft floor foi removido por completo** — solução definitiva e mais simples.
+### Solução
+
+Remover o soft floor por completo. O RPM no coast deve cair na taxa configurada até o idle.
+
+Validar com testes que medem a taxa real de queda em:
+
+- Parado (WOT → lift-off)
+- SIM após acelerar
+- BYD Live com velocidade externa constante
 
 ---
 
-## 5. Testes
+## 5. Testes a criar / atualizar
 
-**Arquivo:** `mobile/src/test/java/com/gabrielpc/enginesoundsimulator/simulation/EngineSimulationTest.kt`  
-**Arquivo:** `mobile/src/test/java/com/gabrielpc/enginesoundsimulator/tuning/TuningConfigTest.kt`
+**Arquivos:** `EngineSimulationTest.kt`, `TuningConfigTest.kt`
 
-### Novos
+### Criar
 
 - `driveModeWotAtStandstillRevsTowardRedline`
 - `driveModeLiftOffFallsAtConfiguredRateInSimulator`
 - `driveModeLiftOffFallsAtConfiguredRateAtStandstill`
 - `driveModeLiftOffAtConstantSpeedFallsTowardIdle`
 - `driveModeBrakeFallsFasterThanCoastOnly`
-- Sanitizer test para campos `drive*` em `TuningConfigTest`
+- Sanitizer para campos `drive*` em `TuningConfigTest`
 
-### Renomeados / atualizados
+### Atualizar (remover expectativas de soft floor)
 
-| Antes | Depois |
-|-------|--------|
-| `topGearAtConfiguredTopSpeedUsesSoftFloorWithoutThrottle` | `topGearAtConfiguredTopSpeedSyncsRoadCoupledRpmOnEntry` |
-| `driveModeCoastRespectsSoftFloorAtSpeed` | `driveModeLiftOffAtConstantSpeedFallsTowardIdle` |
-| `driveModeBrakePullsBelowSoftFloor` | `driveModeBrakeFallsFasterThanCoastOnly` |
-| `releasingPedalAtConstantSpeedDropsRpmButRespectsSoftFloor` | `releasingPedalAtConstantSpeedDropsRpmTowardIdle` |
-| `liftOffWithLiveSpeedHeldDoesNotHuntGears` | Relaxado: pode descer para 2ª marcha, mas não pode fazer hunt para cima |
-
-**Total na branch:** 62 testes unitários passando.
+| Teste atual na `main` | Ajuste necessário |
+|----------------------|-------------------|
+| `topGearAtConfiguredTopSpeedUsesSoftFloorWithoutThrottle` | Renomear; validar apenas seed de RPM na entrada BYD |
+| `driveModeCoastRespectsSoftFloorAtSpeed` | RPM deve cair em direção ao idle, sem piso |
+| `driveModeBrakePullsBelowSoftFloor` | Freio deve cair mais rápido que coast puro |
+| `releasingPedalAtConstantSpeedDropsRpmButRespectsSoftFloor` | Remover assertiva de piso mínimo |
+| `liftOffWithLiveSpeedHeldDoesNotHuntGears` | Permitir downshift (ex.: 3→2); proibir hunt para cima |
 
 ---
 
-## 6. Documentação atualizada
+## 6. Documentação a atualizar
 
-| Arquivo | O que mudou |
-|---------|-------------|
-| `docs/ui-display-and-simulation-decisions.md` | §3.3 reescrito — integrador throttle-driven, sem soft floor |
+| Arquivo | O que registrar |
+|---------|-----------------|
+| `docs/ui-display-and-simulation-decisions.md` | §3.3 — integrador throttle-driven, sem soft floor |
 | `docs/tuning-interface.md` | Inventário DRIVE RPM + delays consolidados |
-| `docs/full-implementation.md` | Descrição do pipeline de RPM em D |
-| `docs/llm-handoff.md` | Contexto para próxima sessão de IA |
+| `docs/full-implementation.md` | Pipeline de RPM em D |
+| `docs/llm-handoff.md` | Contexto para próxima sessão |
 
 ---
 
-## 7. Build
-
-- `mobile/build-number.properties` incrementado pelo Gradle no assemble (número de build sobe a cada compilação).
-
----
-
-## 8. Arquivos alterados (diff completo vs `main`)
+## 7. Arquivos previstos no diff
 
 ```
- docs/full-implementation.md                        |   4 +-
- docs/llm-handoff.md                                |  11 +-
- docs/tuning-interface.md                           |  14 +-
- docs/ui-display-and-simulation-decisions.md        |  33 +-
- mobile/build-number.properties                     |   4 +-
- mobile/.../TuningPanel.kt                          | 372 +++++++++++++++------
- mobile/.../drive/DriveController.kt               |  20 ++
- mobile/.../simulation/EngineSimulation.kt           | 117 ++++++-
- mobile/.../tuning/TuningConfig.kt                 |  31 +-
- mobile/.../simulation/EngineSimulationTest.kt      | 133 +++++++-
- mobile/.../tuning/TuningConfigTest.kt              |  15 +
- 11 files changed, 594 insertions(+), 160 deletions(-)
+mobile/src/main/java/.../simulation/EngineSimulation.kt
+mobile/src/main/java/.../tuning/TuningConfig.kt
+mobile/src/main/java/.../drive/DriveController.kt
+mobile/src/main/java/.../TuningPanel.kt
+mobile/src/test/java/.../simulation/EngineSimulationTest.kt
+mobile/src/test/java/.../tuning/TuningConfigTest.kt
+docs/ui-display-and-simulation-decisions.md
+docs/tuning-interface.md
+docs/full-implementation.md
+docs/llm-handoff.md
 ```
 
 ---
 
-## 9. Comportamento esperado ao testar
+## 8. Critérios de aceite
 
-1. Abra **Live Tuning → VEHICLE → DRIVE RPM**.
-2. Acelere forte em **D** (SIM ou BYD) — tacômetro sobe conforme curva de potência.
-3. Solte o acelerador — tacômetro cai na taxa do slider **“Velocidade de queda do RPM ao soltar o acelerador”** (padrão 5000 RPM/s) até o idle.
-4. Freie — queda mais rápida pelo slider de freio extra.
-5. Toque **DEFAULTS** em qualquer painel — só aquele bloco volta ao padrão de fábrica.
-6. No **DEBUG**, ao soltar o pedal em D, aparece log `lift_off_coast`.
-
----
-
-## 10. O que ficou de fora / limitações
-
-- Campos Seal Performance continuam ocultos na UI (ainda alimentam física EV e gráfico de torque/potência).
-- Inércia de N/P continua hardcoded (`NEUTRAL_REV_UP/DOWN_RESPONSE_SECONDS`).
-- Filtro de aceleração externa BYD continua em 0,10 s (`EXTERNAL_ACCELERATION_FILTER_SECONDS`).
-- Sem soft floor, lift-off agressivo pode **reduzir marcha** mais cedo (ex.: 3ª → 2ª) — comportamento intencional; upshift de hunt para cima foi bloqueado.
+1. Em **D**, acelerar → RPM sobe conforme curva de potência e `driveMaxRiseRpmPerSec`.
+2. Soltar acelerador → RPM cai na taxa de `driveCoastFallRpmPerSec` (±5% em teste unitário) até o idle.
+3. Frear → queda adicional via `driveBrakeExtraFallRpmPerSec`.
+4. **Live Tuning → VEHICLE → DRIVE RPM** concentra força do RPM + todos os delays.
+5. Cada painel tem **DEFAULTS** que restaura só aquela seção.
+6. Sliders com títulos em PT-BR explicando o que controlam.
+7. Log `lift_off_coast` no DEBUG ao soltar pedal em D.
+8. Todos os testes unitários passando.
+9. Build debug compila; app roda no emulador/dispositivo.
 
 ---
 
-## Como mergear
+## 9. Fora de escopo / limitações conhecidas
 
-```bash
-git checkout main
-git merge feat/drive-rpm-tuning-coast-fall
-```
+- Expor novamente Seal Performance na UI (permanece oculto; ainda alimenta física EV e gráfico).
+- Tornar editáveis as constantes de inércia de N/P (`NEUTRAL_REV_UP/DOWN_RESPONSE_SECONDS`).
+- Tornar editável o filtro de aceleração externa BYD (`EXTERNAL_ACCELERATION_FILTER_SECONDS`).
+- Sem soft floor, lift-off agressivo pode **reduzir marcha** mais cedo (ex.: 3ª → 2ª) — aceitável; o importante é **não** fazer hunt para cima.
 
-Ou abrir PR:  
-https://github.com/gabrielpc4/pedal-controlled-combustion-engine-sounds-simulator-for-byd/pull/new/feat/drive-rpm-tuning-coast-fall
+---
+
+## 10. Ordem sugerida de implementação
+
+1. `TuningConfig` + wiring em `DriveController` / `EngineProfile`
+2. `integrateDriveModeRpm()` + helpers de potência em `EngineSimulation`
+3. Remover soft floor; ajustar `needsEmergencyUpshift()`
+4. Testes de simulação (coast fall rate primeiro)
+5. `TuningPanel` — DRIVE RPM, delays, DEFAULTS, labels PT-BR
+6. Log `lift_off_coast`
+7. Atualizar docs
+8. Build + run no emulador
