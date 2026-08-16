@@ -27,34 +27,78 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun topGearAtConfiguredTopSpeedStaysInsideAuthoredRange() {
+    fun roadSpeedAloneNeverMovesTheFakeRpmOrGear() {
         val simulation = EngineSimulation()
         val state = simulation.update(
             DriverInput(
-                throttle = 1.0,
                 externalSpeedKmh = 190.0,
                 transmissionPosition = TransmissionPosition.DRIVE,
             ),
             STEP,
         )
 
-        assertEquals(7, state.gear)
+        assertEquals(1, state.gear)
         assertEquals(190.0, state.speedKmh, 0.5)
-        assertTrue(state.rpm in simulation.profile.idleRpm..simulation.profile.redlineRpm)
+        assertEquals(simulation.profile.idleRpm, state.rpm, 0.001)
     }
 
     @Test
-    fun fullThrottleBuildsSampleRpmProgressivelyWithRoadSpeed() {
+    fun fullThrottleBuildsFakeRpmProgressivelyFromPedalForce() {
         val simulation = EngineSimulation()
         val initial = simulation.state
         val afterHalfSecond = simulation.runFor(0.5, throttle = 1.0)
 
         assertTrue(
-            "rpm should rise progressively with electric road speed: $afterHalfSecond",
+            "rpm should rise progressively from pedal force: $afterHalfSecond",
             afterHalfSecond.rpm > initial.rpm + 200.0,
         )
         assertTrue(afterHalfSecond.rpm < simulation.profile.redlineRpm)
         assertTrue(afterHalfSecond.speedKmh > 0.0)
+    }
+
+    @Test
+    fun driveRpmForceScalesWithPedalPercentage() {
+        val singleGear = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14))
+        val half = EngineSimulation(singleGear)
+        val full = EngineSimulation(singleGear)
+
+        val halfState = half.runForExternal(0.55, speedKmh = 80.0, throttle = 0.50)
+        val fullState = full.runForExternal(0.55, speedKmh = 80.0, throttle = 1.00)
+        val halfRise = halfState.rpm - singleGear.idleRpm
+        val fullRise = fullState.rpm - singleGear.idleRpm
+
+        assertTrue("half pedal should add RPM", halfRise > 300.0)
+        assertTrue("full pedal should apply materially more RPM force", fullRise > halfRise * 1.75)
+    }
+
+    @Test
+    fun maximumDriveRpmForceFollowsTheSealPowerEnvelope() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
+        val launch = propulsionPowerFractionAtSpeed(profile, 0.0)
+        val peakRegion = propulsionPowerFractionAtSpeed(profile, 80.0)
+        val highSpeed = propulsionPowerFractionAtSpeed(profile, 180.0)
+
+        assertTrue("launch torque bridge must let the tach move from rest", launch > 0.90)
+        assertTrue("measured power should be near its peak around 80 km/h", peakRegion > 0.90)
+        assertTrue("measured high-speed power taper should reduce fake RPM force", highSpeed < peakRegion * 0.90)
+    }
+
+    @Test
+    fun brakeAddsSubstantiallyMoreNegativeRpmForceThanLiftOff() {
+        val singleGear = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14))
+        val coasting = EngineSimulation(singleGear)
+        val braking = EngineSimulation(singleGear)
+        coasting.runForExternal(0.9, speedKmh = 80.0, throttle = 1.0)
+        braking.runForExternal(0.9, speedKmh = 80.0, throttle = 1.0)
+        val before = coasting.state.rpm
+
+        val coastState = coasting.runForExternal(0.22, speedKmh = 80.0)
+        val brakeState = braking.runForExternal(0.22, speedKmh = 80.0, brake = 1.0)
+        val coastDrop = before - coastState.rpm
+        val brakeDrop = before - brakeState.rpm
+
+        assertTrue("lift-off should drop rapidly", coastDrop > 1_000.0)
+        assertTrue("brake should intensify RPM loss", brakeDrop > coastDrop * 1.65)
     }
 
     @Test
@@ -260,6 +304,27 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun everyFullThrottleUpshiftOccursInTheShiftZoneBeforeLimiter() {
+        val simulation = EngineSimulation()
+        val starts = mutableListOf<DrivetrainState>()
+        var lastSerial = 0L
+        repeat((20.0 / STEP).toInt()) {
+            val state = simulation.update(DriverInput(throttle = 1.0), STEP)
+            if (state.shiftSerial != lastSerial) {
+                if (state.shiftDirection == ShiftDirection.UP) starts += state
+                lastSerial = state.shiftSerial
+            }
+        }
+
+        assertEquals(simulation.profile.gearRatios.size - 1, starts.size)
+        starts.forEach { start ->
+            assertTrue("upshift started below the configured zone: $start", start.rpm >= simulation.profile.upshiftRpm)
+            assertTrue("upshift reached the limiter instead of shifting: $start", start.rpm < simulation.profile.limiterRpm - 40.0)
+            assertFalse("upshift started with limiter cut active: $start", start.limiterActive)
+        }
+    }
+
+    @Test
     fun eachDownshiftPointIsItsPrecedingUpshiftLandingRpm() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE
         for (gearIndex in 1..profile.gearRatios.lastIndex) {
@@ -271,7 +336,7 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun releasingPedalKeepsRpmCoupledToRoadSpeed() {
+    fun releasingPedalDropsRpmRapidlyEvenWhenRoadSpeedIsHeld() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
         simulation.update(
@@ -282,17 +347,12 @@ class EngineSimulationTest {
             ),
             STEP,
         )
-        simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
+        simulation.runForExternal(0.80, speedKmh = 40.0, throttle = 1.0)
         val beforeLift = simulation.state
         val afterLift = simulation.runForExternal(0.35, speedKmh = 40.0, throttle = 0.0)
 
         assertEquals(40.0, afterLift.speedKmh, 0.001)
-        assertEquals(
-            "lift-off RPM should stay road-coupled when speed is held constant",
-            beforeLift.rpm,
-            afterLift.rpm,
-            120.0,
-        )
+        assertTrue("lift-off force should rapidly reduce fake RPM", afterLift.rpm < beforeLift.rpm - 1_500.0)
     }
 
     @Test
@@ -381,51 +441,42 @@ class EngineSimulationTest {
 
     @Test
     fun liftOffWithLiveSpeedHeldDoesNotHuntGears() {
-        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
-            redlineRpm = 2_800.0,
-            limiterRpm = 3_000.0,
-            upshiftRpm = 2_600.0,
-            gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 0.10),
-        )
-        val simulation = EngineSimulation(profile)
-        val joined = simulation.update(DriverInput(externalSpeedKmh = 30.0), STEP)
-        assertEquals("calibrated live-speed setup should join in third", 3, joined.gear)
-        simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 30.0), STEP)
+        val simulation = EngineSimulation()
+        var state = simulation.state
+        repeat((8.0 / STEP).toInt()) {
+            state = simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 80.0), STEP)
+            if (state.gear >= 3 && !state.isShifting) return@repeat
+        }
+        assertTrue("pedal-driven tach should reach third", state.gear >= 3)
 
         var upshiftStartsWhileLifted = 0
         var lastShiftSerial = simulation.state.shiftSerial
         repeat((2.0 / STEP).toInt()) {
-            val state = simulation.update(DriverInput(externalSpeedKmh = 35.0), STEP)
-            if (state.shiftSerial != lastShiftSerial) {
-                if (state.shiftDirection == ShiftDirection.UP) upshiftStartsWhileLifted += 1
-                lastShiftSerial = state.shiftSerial
+            val lifted = simulation.update(DriverInput(externalSpeedKmh = 80.0), STEP)
+            if (lifted.shiftSerial != lastShiftSerial) {
+                if (lifted.shiftDirection == ShiftDirection.UP) upshiftStartsWhileLifted += 1
+                lastShiftSerial = lifted.shiftSerial
             }
         }
 
         assertEquals("live lift-off at constant road speed must not hunt upward", 0, upshiftStartsWhileLifted)
-        assertEquals(3, simulation.state.gear)
     }
 
     @Test
-    fun joiningLiveSpeedSelectsSafeGearAndEmergencyUpshiftsWithoutThrottle() {
+    fun arbitraryLiveSpeedChangesNeverSynchronizeFakeRpmOrGear() {
         val simulation = EngineSimulation()
         val joined = simulation.update(DriverInput(externalSpeedKmh = 100.0), STEP)
 
-        assertTrue("live join should not start in first gear: $joined", joined.gear >= 4)
-        assertTrue(joined.rpm < simulation.profile.redlineRpm * 0.95)
+        assertEquals(1, joined.gear)
+        assertEquals(simulation.profile.idleRpm, joined.rpm, 0.001)
         assertFalse(joined.limiterActive)
         assertEquals("first live sample has no acceleration history", 0.0, joined.accelerationMps2, 0.0)
 
-        simulation.reset()
-        simulation.update(DriverInput(externalSpeedKmh = 30.0), STEP)
-        var recovered = simulation.state
         repeat((2.0 / STEP).toInt()) {
-            recovered = simulation.update(DriverInput(externalSpeedKmh = 175.0), STEP)
+            simulation.update(DriverInput(externalSpeedKmh = 175.0), STEP)
         }
-
-        assertTrue("unsafe projected rpm should force sequential upshifts: $recovered", recovered.gear >= 4)
-        assertFalse("gear recovery should leave the limiter", recovered.limiterActive)
-        assertTrue(recovered.rpm < simulation.profile.redlineRpm)
+        assertEquals(1, simulation.state.gear)
+        assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 0.001)
     }
 
     @Test
@@ -562,6 +613,7 @@ class EngineSimulationTest {
         seconds: Double,
         speedKmh: Double,
         throttle: Double = 0.0,
+        brake: Double = 0.0,
         transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
     ): DrivetrainState {
         var result = state
@@ -569,6 +621,7 @@ class EngineSimulationTest {
             result = update(
                 DriverInput(
                     throttle = throttle,
+                    brake = brake,
                     externalSpeedKmh = speedKmh,
                     transmissionPosition = transmissionPosition,
                 ),
@@ -580,7 +633,7 @@ class EngineSimulationTest {
 
     private companion object {
         const val STEP = 1.0 / 200.0
-        const val MIN_EXPECTED_COMPLETED_DWELL_SECONDS = 0.44
+        const val MIN_EXPECTED_COMPLETED_DWELL_SECONDS = 0.14
         const val MAX_EXPECTED_REPORTED_ACCELERATION = 15.0
     }
 }

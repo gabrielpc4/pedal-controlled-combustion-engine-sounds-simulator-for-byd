@@ -8,7 +8,7 @@ The interface presents torque in **≈ motor-shaft kgfm** and power in values la
 
 ### Vehicle
 
-- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, and **RPM RESPONSE** (drive-mode tach tracking only; does not affect **N**/**P** neutral inertia)
+- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, and independent **MAX RPM FORCE**, **LIFT-OFF RPM FORCE**, and **BRAKE RPM FORCE** controls
 - Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
 - Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
 - Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
@@ -42,7 +42,7 @@ Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is
 
 Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change. These controls affect sound RPM and shift events only; a ratio edit cannot change electric acceleration.
 
-Synthetic RPM on lift-off in **D** is **road-coupled** (no retention/decay sliders). **N**/**P** use the free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08). Downshifts use per-gear landing RPM only; the old global downshift-floor slider was removed.
+Synthetic RPM in **D** is force-integrated and independent of road speed. Pedal percentage pushes it upward, lift-off pulls it down, and brake intensifies that fall. **N**/**P** retain the target-based free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08). Downshifts use per-gear landing RPM only.
 
 ## Dashboard controls (outside TUNE)
 
@@ -50,7 +50,7 @@ These affect runtime behavior immediately but are **not** persisted in `TuningRe
 
 | Control | Location | Effect |
 | --- | --- | --- |
-| **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; only **D** enables auto-shifts and road-coupled RPM |
+| **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; only **D** enables auto-shifts and the independent force-integrated RPM model |
 | **INPUT** | Header | Cycles AUTO / SIM / BYD LIVE |
 | **ENGINE AUDIO** | Header | Mutes/unmutes sample playback |
 | **CH OUTPUT** | Header | Cycles logical channel layout |

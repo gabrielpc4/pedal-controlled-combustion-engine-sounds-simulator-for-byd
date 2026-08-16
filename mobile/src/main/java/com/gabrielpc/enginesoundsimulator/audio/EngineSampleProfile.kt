@@ -63,8 +63,6 @@ internal data class EngineSampleProfile(
     val redlineRpm: Double,
     val limiterRpm: Double,
     val upshiftRpm: Double,
-    val downshiftRpm: Double,
-    val finalDrive: Double,
     val gearRatios: List<Double>,
     val upshiftDurationSeconds: Double,
     val downshiftDurationSeconds: Double,

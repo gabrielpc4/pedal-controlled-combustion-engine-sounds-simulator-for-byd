@@ -5,7 +5,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import java.io.File
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,7 +16,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
     @Test
-    fun scriptedThirdGearLiftOffStaysInSecondAndPersistsItsShiftTrail() {
+    fun scriptedThirdGearLiftOffFallsThroughLowerGearsWithoutUpshiftHunting() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         PersistentDiagnosticLog.install(context)
         PersistentDiagnosticLog.event("scripted_lift_off_test_started")
@@ -41,17 +40,21 @@ class DriveControllerScriptedIntegrationTest {
             controller.setManualThrottle(0.0)
             PersistentDiagnosticLog.event("scripted_lift_off_started")
             assertTrue(
-                "scripted lift-off did not complete the expected third-to-second downshift",
+                "scripted lift-off did not begin falling through the lower gears",
                 waitUntil(timeoutMs = 20_000L) {
                     val state = controller.snapshot().drivetrain
-                    state.gear == 2 && !state.isShifting
+                    state.gear <= 2
                 },
             )
 
-            // The former defect immediately reversed this downshift. Stay beyond its old loop
-            // interval without sending any UI input.
-            SystemClock.sleep(1_000L)
-            assertEquals(2, controller.snapshot().drivetrain.gear)
+            // Strong lift-off force should continue toward idle/first without reversing upward.
+            assertTrue(
+                "scripted lift-off did not settle in first gear",
+                waitUntil(timeoutMs = 4_000L) {
+                    val state = controller.snapshot().drivetrain
+                    state.gear == 1 && !state.isShifting
+                },
+            )
         } finally {
             controller.stop()
         }
@@ -59,7 +62,7 @@ class DriveControllerScriptedIntegrationTest {
         val log = File(context.filesDir, "diagnostics/drive-events.log").readText()
         val liftOffSession = log.substringAfterLast("event=scripted_lift_off_started", missingDelimiterValue = "")
         assertTrue("scripted session did not persist a downshift request", liftOffSession.contains("direction=DOWN"))
-        assertTrue("scripted session did not persist a second-gear completion", liftOffSession.contains("shift_completed") && liftOffSession.contains("gear=2"))
+        assertTrue("scripted session did not persist a first-gear completion", liftOffSession.contains("shift_completed") && liftOffSession.contains("gear=1"))
         assertTrue("scripted session unexpectedly persisted an upshift", !liftOffSession.contains("direction=UP"))
     }
 

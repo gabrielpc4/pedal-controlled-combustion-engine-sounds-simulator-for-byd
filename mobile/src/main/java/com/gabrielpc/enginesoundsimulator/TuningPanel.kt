@@ -203,8 +203,14 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
                 }
-                ParameterSlider("RPM RESPONSE", engine.sampleRpmResponseMs, 10.0..250.0, "%.0f ms") {
-                    onChange(config.copy(engine = engine.copy(sampleRpmResponseMs = it)))
+                ParameterSlider("MAX RPM FORCE", engine.driveRpmAccelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
+                    onChange(config.copy(engine = engine.copy(driveRpmAccelerationPerSecond = it)))
+                }
+                ParameterSlider("LIFT-OFF RPM FORCE", engine.liftOffRpmDecelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
+                    onChange(config.copy(engine = engine.copy(liftOffRpmDecelerationPerSecond = it)))
+                }
+                ParameterSlider("BRAKE RPM FORCE", engine.brakeRpmDecelerationPerSecond, 2_500.0..18_000.0, "%.0f RPM/s") {
+                    onChange(config.copy(engine = engine.copy(brakeRpmDecelerationPerSecond = it)))
                 }
             }
         }
@@ -384,9 +390,6 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("SOUND SHIFT CONTROL", "Presentation only • wheel torque stays continuous", Modifier.weight(0.76f)) {
-            ParameterSlider("SOUND FINAL DRIVE", engine.finalDrive * 100.0, 200.0..600.0, "%.0f:100") {
-                onChange(config.copy(engine = engine.copy(finalDrive = it / 100.0)))
-            }
             ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
             }

@@ -167,7 +167,7 @@ A column shifter beside the pedals selects **P**, **N**, or **D**. It is runtime
 
 | Position | Behavior |
 |----------|----------|
-| **D** | RPM follows road speed through the presentation gear; automatic upshifts/downshifts; throttle drives the virtual vehicle in SIM mode. Tach filter: editable **RPM RESPONSE** (`syntheticRpmResponseSeconds`, default **35 ms**). |
+| **D** | RPM is a free-running fictional state: pedal percentage adds positive RPM force, lift-off adds a strong constant negative force, and brake adds more negative force. Automatic presentation shifts remain. Road speed never targets or floors RPM. |
 | **N** | Neutral: RPM free-revs with throttle and falls on lift-off; **no** automatic gear changes; throttle does **not** drive the wheels (coast/brake still affect SIM speed). |
 | **P** | Park: same free-rev RPM model as **N**, but SIM speed is held at zero. |
 
@@ -185,38 +185,38 @@ targetRPM = idleRpm + filteredThrottle × (redlineRpm − idleRpm)
 
 **Steady-state at partial throttle:** holding ~50% pedal stabilizes RPM midway between idle and redline — the same equilibrium idea as a real engine in neutral (throttle opening balances internal friction). The needle stops climbing once it reaches the target; it does not run away.
 
-**Rev inertia (not editable in TUNE):** **N**/**P** use asymmetric fixed time constants in `EngineSimulation` instead of the 35 ms drive filter:
+**Rev inertia (not editable in TUNE):** **N**/**P** use asymmetric fixed time constants in `EngineSimulation`:
 
 | Direction | Constant | Default | Rationale |
 |-----------|----------|---------|-----------|
 | Revving up | `NEUTRAL_REV_UP_RESPONSE_SECONDS` | **0.55 s** | Crank/flywheel inertia with no wheel load |
 | Revving down | `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` | **0.90 s** | Slower coast-down toward idle after lift-off |
 
-Implementation uses the same `approachExp()` helper as drive mode; only the time constant changes. **D** lift-off remains road-coupled through the presentation ratio — see §3.3.
+This target-seeking model is intentionally separate from the force-integrated **D** model in §3.3.
 
 **Tests:** `neutralPositionRaisesRpmWithThrottleAtStandstill`, `neutralPositionLiftOffDropsRpmTowardIdleAtStandstill`, `neutralPositionDoesNotAutoShiftWhileRevving`, `parkPositionKeepsSimulatorSpeedAtZero`, plus existing lift-off hunting guards in **D**.
 
-### 3.3 Lift-off RPM retention removed (2026-08)
+### 3.3 Independent Drive RPM force model
 
-**Previous behavior:** on pedal release, synthetic RPM could lag above road-coupled RPM via an editable retention fraction and decay time. That made the needle sound “hang” but caused **gear hunting** (`3 → 2 → 3`) because downshift logic saw low displayed RPM while road speed still justified a higher gear.
-
-**Current behavior (D only):** in **D**, synthetic RPM target is **road-coupled** through the current presentation ratio:
+In **D**, RPM is integrated directly and has no speed-derived target or soft floor:
 
 ```text
-targetRPM = idle + wheelRPM × gearRatio × finalDrive
+positiveForce = maxRpmForce × filteredRawPedal × propulsionPowerFraction(speed) × (1 − brake)
+negativeForce = liftOffForce(if pedal is released) + brakeForce × brake + limiterCutForce
+rpm = clamp(rpm + (positiveForce − negativeForce) × dt, idle, limiter)
 ```
 
-Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No retention sliders remain in the tuning UI. In **N**/**P**, lift-off lowers RPM via the neutral free-rev model in §3.2 instead.
+`propulsionPowerFraction` is delivered Seal wheel power normalized by configured peak power. Mechanical power is zero at exactly zero speed despite maximum EV torque, so 0–30 km/h blends in the measured axle-torque envelope to let the fictional engine rev from rest. Speed has no other RPM role and cannot select a gear. The editable defaults are **6500 RPM/s** maximum positive force, **5500 RPM/s** lift-off force, and **8500 RPM/s** additional full-brake force.
 
-**Tests:** `liftOffRpmStaysRoadCoupledWhenSpeedHeldConstant`, `liftOffFromThirdDoesNotUpshiftHuntWhileCoasting`, `liftOffWithLiveSpeedHeldDoesNotHuntGears`, `releasingPedalKeepsRpmCoupledToRoadSpeed`.
+Upshifts happen at the profile shift point and drop the independent RPM state by the adjacent ratio. Released-pedal downshifts occur when RPM falls to the preceding upshift's landing RPM. Road-speed over-rev projections, live-speed gear synchronization, and emergency road-speed upshifts do not exist.
 
-**Rejected return path:** reintroducing retention without a scoped live-speed safety model. The old scoped emergency-upshift hold existed only to paper over the retention/display mismatch and was removed with retention.
+**Tests:** `roadSpeedAloneNeverMovesTheFakeRpmOrGear`, `driveRpmForceScalesWithPedalPercentage`, `maximumDriveRpmForceFollowsTheSealPowerEnvelope`, `releasingPedalDropsRpmRapidlyEvenWhenRoadSpeedIsHeld`, and `brakeAddsSubstantiallyMoreNegativeRpmForceThanLiftOff`.
 
 ### 3.4 Simulator coast regen (2026-08)
 
 **Problem:** in **SIM** mode, releasing the accelerator slowed the virtual car only through aero drag and rolling resistance — much slower than a real Seal’s mild lift-off regen.
 
-**Decision:** when `InputMode.SIMULATOR`, `DriverInput.simulateCoastRegen = true` applies a constant deceleration `simulatorCoastRegenMps2` (default **2.50 m/s²**) during lift-off integration only. This deliberately strong simulator setting makes speed and synthetic RPM fall promptly when the touchscreen pedal is released. It is not applied in BYD LIVE mode and is not a factory regen map.
+**Decision:** when `InputMode.SIMULATOR`, `DriverInput.simulateCoastRegen = true` applies a constant deceleration `simulatorCoastRegenMps2` (default **2.50 m/s²**) during lift-off integration only. This deliberately strong simulator setting makes virtual road speed fall promptly when the touchscreen pedal is released. Fake RPM has its own lift-off force. The speed setting is not applied in BYD LIVE mode and is not a factory regen map.
 
 **Tuning:** **SIM COAST REGEN** slider in the Response tab (0–4.00 m/s²). A dedicated preference revision migrates existing installations to the stronger default without resetting unrelated tuning.
 

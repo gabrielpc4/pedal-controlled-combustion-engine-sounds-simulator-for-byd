@@ -457,6 +457,9 @@ class DriveController(context: Context) {
                     "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
+                    "rpm_power_permille=${(drivetrain.rpmPowerFraction * 1_000.0).roundToInt()} " +
+                    "rpm_push_per_s=${drivetrain.rpmPositiveForcePerSecond.roundToInt()} " +
+                    "rpm_drag_per_s=${drivetrain.rpmNegativeForcePerSecond.roundToInt()} " +
                     "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
                     "source=${input.label} reader=${telemetry.readerState.name} " +
                     "car_profile=${selectedSampleProfile.get().id} sample_status=${audio.sampleStatus} " +
@@ -526,9 +529,10 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
-        sampleRpmResponseSeconds = engine.sampleRpmResponseMs / 1_000.0,
+        driveRpmAccelerationPerSecond = engine.driveRpmAccelerationPerSecond,
+        liftOffRpmDecelerationPerSecond = engine.liftOffRpmDecelerationPerSecond,
+        brakeRpmDecelerationPerSecond = engine.brakeRpmDecelerationPerSecond,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
-        finalDrive = engine.finalDrive,
         gearRatios = engine.gearRatios.toDoubleArray(),
         frontWheelTorqueCurve = engine.frontWheelTorqueCurve,
         rearWheelTorqueCurve = engine.rearWheelTorqueCurve,

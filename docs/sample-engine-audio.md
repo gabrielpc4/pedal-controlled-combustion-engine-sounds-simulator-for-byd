@@ -43,7 +43,7 @@ The source is an FMOD bank version `0x50` containing 165 streams, 20 events, 198
 
 `EngineSampleProfile.kt` is the durable numeric reconstruction. Values were decoded from the bank event/controller graph rather than inferred from WAV filenames. The renderer linearly interpolates recovered control points. FMOD curve tangent/shape metadata is not yet emulated, so transition curvature can still differ slightly from the original middleware.
 
-The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), seven ratios (`3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84`), final drive (`3.96`), and source shift durations (`60 ms` up, `150 ms` down). The bank axis remains `0..10000 RPM`; it is not stretched to the limiter. The normal automatic shift target is `8200 RPM`, ahead of the hard limiter and inside the limiter-layer transition.
+The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), seven adjacent presentation ratios (`3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84`), and source shift durations (`60 ms` up, `150 ms` down). The bank axis remains `0..10000 RPM`; it is not stretched to the limiter. The normal automatic shift target is `8200 RPM`, ahead of the hard limiter and inside the limiter-layer transition.
 
 ## Realtime rendering
 

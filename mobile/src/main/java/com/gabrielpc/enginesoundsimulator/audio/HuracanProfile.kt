@@ -97,8 +97,6 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
         redlineRpm = 8_200.0,
         limiterRpm = 8_350.0,
         upshiftRpm = 8_200.0,
-        downshiftRpm = 5_900.0,
-        finalDrive = 3.96,
         gearRatios = listOf(3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84),
         upshiftDurationSeconds = 0.060,
         downshiftDurationSeconds = 0.150,

@@ -146,17 +146,13 @@ The real Seal uses fixed-ratio single-speed electric drive units. In this app:
 - motor torque, road force, acceleration, drag, and braking are calculated without the synthetic gear ratio;
 - the seven editable ratios affect only the fictional engine RPM, sound, gauge, and shift event;
 - a synthetic shift never cuts wheel torque, opens a clutch, adds rev-match torque, or changes vehicle acceleration;
-- the displayed RPM follows road speed through the selected presentation ratio with a short editable response filter in **D**;
-- braking reduces real/virtual road speed, and that lower speed then lowers synthetic RPM and selects lower presentation gears.
+- displayed RPM in **D** is a separate force-integrated state driven by pedal, lift-off, brake, and a normalized Seal propulsion-power multiplier;
+- road speed only indexes that power multiplier and never targets RPM or selects a presentation gear.
 
-Default gearbox calibration (`SyntheticGearboxCalibration`) derives the seven presentation ratios from:
-
-- **190 km/h** configured top speed (this owner's Seal limit; BYD still publishes 180 km/h electronically);
-- the existing **8,600 RPM** redline, **8,250 RPM** upshift, and **10,000 RPM** tachometer scale;
-- fixed **3.82** final drive, **950 RPM** idle, and **0.347 m** tire radius;
-- a ~**0.856** geometric step between consecutive ratios so upshift speeds spread realistically, with 7th gear hitting **redline exactly at 190 km/h**.
-
-Example default ratios: `4.068, 3.482, 2.981, 2.552, 2.184, 1.870, 1.380`.
+Each selectable sound profile supplies its adjacent presentation ratios. Only their relative steps
+matter: an upshift scales the independent RPM state downward, and the same step determines the
+released-pedal downshift landing. There is no synthetic final-drive control or speed-derived ratio
+calibration because neither could affect the force-integrated gauge honestly.
 
 Axle torque curves remain digitized against a **180 km/h** chart reference (`TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH`); raising the vehicle top-speed slider to 190 does not rescale measured wheel torque.
 

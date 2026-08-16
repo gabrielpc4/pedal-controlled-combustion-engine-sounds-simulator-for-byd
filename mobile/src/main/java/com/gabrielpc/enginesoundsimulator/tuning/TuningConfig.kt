@@ -28,15 +28,19 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
-    val sampleRpmResponseMs: Double = 35.0,
+    /** Maximum positive fake-tach acceleration at full pedal and full propulsion power. */
+    val driveRpmAccelerationPerSecond: Double = 6_500.0,
+    /** Constant negative fake-tach acceleration as soon as the accelerator is released. */
+    val liftOffRpmDecelerationPerSecond: Double = 5_500.0,
+    /** Additional negative fake-tach acceleration at full brake. */
+    val brakeRpmDecelerationPerSecond: Double = 8_500.0,
     val simulatorCoastRegenMps2: Double = 2.50,
-    val finalDrive: Double = EngineSampleProfiles.default.finalDrive,
     val throttleAttackMs: Double = 120.0,
     val throttleReleaseMs: Double = 90.0,
     val brakeResponseMs: Double = 55.0,
     val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
     val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
-    val shiftDwellMs: Double = 450.0,
+    val shiftDwellMs: Double = 150.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -71,9 +75,10 @@ data class EngineTuning(
             dragAreaM2 = dragAreaM2.coerceIn(0.30, 1.20),
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
-            sampleRpmResponseMs = sampleRpmResponseMs.coerceIn(10.0, 250.0),
+            driveRpmAccelerationPerSecond = driveRpmAccelerationPerSecond.coerceIn(1_500.0, 12_000.0),
+            liftOffRpmDecelerationPerSecond = liftOffRpmDecelerationPerSecond.coerceIn(1_500.0, 12_000.0),
+            brakeRpmDecelerationPerSecond = brakeRpmDecelerationPerSecond.coerceIn(2_500.0, 18_000.0),
             simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 4.00),
-            finalDrive = finalDrive.coerceIn(2.0, 6.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
             brakeResponseMs = brakeResponseMs.coerceIn(15.0, 500.0),
@@ -162,7 +167,6 @@ internal fun TuningConfig.withSampleProfile(profile: EngineSampleProfile): Tunin
         redlineRpm = profile.redlineRpm,
         limiterRpm = profile.limiterRpm,
         upshiftRpm = profile.upshiftRpm,
-        finalDrive = profile.finalDrive,
         gearRatios = profile.gearRatios,
         upshiftDurationMs = profile.upshiftDurationSeconds * 1_000.0,
         downshiftDurationMs = profile.downshiftDurationSeconds * 1_000.0,
@@ -197,13 +201,14 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
-            sampleRpmResponseMs = number(KEY_SAMPLE_RPM_RESPONSE, defaults.engine.sampleRpmResponseMs),
+            driveRpmAccelerationPerSecond = number(KEY_DRIVE_RPM_ACCELERATION, defaults.engine.driveRpmAccelerationPerSecond),
+            liftOffRpmDecelerationPerSecond = number(KEY_LIFT_OFF_RPM_DECELERATION, defaults.engine.liftOffRpmDecelerationPerSecond),
+            brakeRpmDecelerationPerSecond = number(KEY_BRAKE_RPM_DECELERATION, defaults.engine.brakeRpmDecelerationPerSecond),
             simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
                 number(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2)
             } else {
                 defaults.engine.simulatorCoastRegenMps2
             },
-            finalDrive = number(KEY_FINAL_DRIVE, defaults.engine.finalDrive),
             throttleAttackMs = number(KEY_THROTTLE_ATTACK, defaults.engine.throttleAttackMs),
             throttleReleaseMs = number(KEY_THROTTLE_RELEASE, defaults.engine.throttleReleaseMs),
             brakeResponseMs = number(KEY_BRAKE_RESPONSE, defaults.engine.brakeResponseMs),
@@ -261,9 +266,10 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
-            .putString(KEY_SAMPLE_RPM_RESPONSE, clean.engine.sampleRpmResponseMs.toString())
+            .putString(KEY_DRIVE_RPM_ACCELERATION, clean.engine.driveRpmAccelerationPerSecond.toString())
+            .putString(KEY_LIFT_OFF_RPM_DECELERATION, clean.engine.liftOffRpmDecelerationPerSecond.toString())
+            .putString(KEY_BRAKE_RPM_DECELERATION, clean.engine.brakeRpmDecelerationPerSecond.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
-            .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
             .putString(KEY_THROTTLE_RELEASE, clean.engine.throttleReleaseMs.toString())
             .putString(KEY_BRAKE_RESPONSE, clean.engine.brakeResponseMs.toString())
@@ -289,7 +295,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 7
+        const val CALIBRATION_REVISION = 8
         const val KEY_COAST_DECELERATION_REVISION = "coast_deceleration_revision"
         const val COAST_DECELERATION_REVISION = 1
         const val KEY_IDLE = "idle_rpm"
@@ -311,9 +317,10 @@ class TuningRepository(context: Context) {
         const val KEY_DRAG_AREA = "drag_area"
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
-        const val KEY_SAMPLE_RPM_RESPONSE = "sample_rpm_response"
+        const val KEY_DRIVE_RPM_ACCELERATION = "drive_rpm_acceleration"
+        const val KEY_LIFT_OFF_RPM_DECELERATION = "lift_off_rpm_deceleration"
+        const val KEY_BRAKE_RPM_DECELERATION = "brake_rpm_deceleration"
         const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"
-        const val KEY_FINAL_DRIVE = "final_drive"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"
         const val KEY_THROTTLE_RELEASE = "throttle_release"
         const val KEY_BRAKE_RESPONSE = "brake_response"
