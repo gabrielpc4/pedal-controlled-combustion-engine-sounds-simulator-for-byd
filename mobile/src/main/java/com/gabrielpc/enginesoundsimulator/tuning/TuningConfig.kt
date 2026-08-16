@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator.tuning
 
 import android.content.Context
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
 import kotlin.math.max
 import kotlin.math.min
 
@@ -45,7 +46,7 @@ data class EngineTuning(
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
 ) {
     fun sanitized(): EngineTuning {
-        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.default.maximumRpm)
+        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.maximumSupportedRpm)
         val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 100.0)
         val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm)
         val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
@@ -153,6 +154,20 @@ data class TuningConfig(
         val DEFAULT = TuningConfig()
     }
 }
+
+internal fun TuningConfig.withSampleProfile(profile: EngineSampleProfile): TuningConfig = copy(
+    engine = engine.copy(
+        idleRpm = profile.idleRpm,
+        maxRpm = profile.maximumRpm,
+        redlineRpm = profile.redlineRpm,
+        limiterRpm = profile.limiterRpm,
+        upshiftRpm = profile.upshiftRpm,
+        finalDrive = profile.finalDrive,
+        gearRatios = profile.gearRatios,
+        upshiftDurationMs = profile.upshiftDurationSeconds * 1_000.0,
+        downshiftDurationMs = profile.downshiftDurationSeconds * 1_000.0,
+    ),
+).sanitized()
 
 class TuningRepository(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)

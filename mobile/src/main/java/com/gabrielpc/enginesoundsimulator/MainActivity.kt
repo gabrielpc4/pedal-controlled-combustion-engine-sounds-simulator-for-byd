@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator
 
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.os.Bundle
 import android.os.Handler
@@ -54,10 +55,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
@@ -67,7 +68,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -89,7 +93,7 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private val Night = Color(0xFF03070D)
+private val Night = Color(0xFF060606)
 private val Navy = Color(0xFF071321)
 private val Panel = Color(0xFF0B1925)
 private val PanelBright = Color(0xFF112837)
@@ -140,6 +144,8 @@ class MainActivity : ComponentActivity() {
                         onResetTuning = controller::resetTuning,
                         onRestartBydReader = controller::restartVehicleReader,
                         onRunSampleValidation = controller::runSampleAudioValidation,
+                        onPreviousCar = controller::selectPreviousCar,
+                        onNextCar = controller::selectNextCar,
                     )
                 }
             }
@@ -200,6 +206,8 @@ private fun MotorSoundDashboard(
     onResetTuning: () -> Unit,
     onRestartBydReader: () -> Unit,
     onRunSampleValidation: () -> Unit,
+    onPreviousCar: () -> Unit,
+    onNextCar: () -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -252,21 +260,6 @@ private fun MotorSoundDashboard(
                 val viewportWidthPx = with(density) { dashboardWidth.roundToPx() }
                 val viewportHeightPx = with(density) { dashboardHeight.roundToPx() }
 
-                Canvas(Modifier.fillMaxSize()) {
-                    drawRect(
-                        Brush.radialGradient(
-                            colors = listOf(Color(0xFF17243D), Navy, Night),
-                            center = androidx.compose.ui.geometry.Offset(size.width * 0.43f, size.height * 0.58f),
-                            radius = size.width * 0.58f,
-                        ),
-                    )
-                    drawRect(
-                        Brush.verticalGradient(
-                            listOf(Color.Black.copy(alpha = 0.40f), Color.Transparent, Color.Black.copy(alpha = 0.56f)),
-                        ),
-                    )
-                }
-
                 Column(modifier = Modifier.fillMaxSize()) {
                     DashboardHeader(
                         state = state,
@@ -289,6 +282,8 @@ private fun MotorSoundDashboard(
                             onThrottle = onThrottle,
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
+                            onPreviousCar = onPreviousCar,
+                            onNextCar = onNextCar,
                             modifier = Modifier
                                 .weight(1.12f)
                                 .fillMaxHeight(),
@@ -458,44 +453,18 @@ private fun CarStage(
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
+    onPreviousCar: () -> Unit,
+    onNextCar: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
-        Canvas(Modifier.fillMaxSize()) {
-            val throttleGlow = (0.18f + state.throttle.toFloat() * 0.32f)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(Cyan.copy(alpha = throttleGlow), Cyan.copy(alpha = 0.03f), Color.Transparent),
-                    center = androidx.compose.ui.geometry.Offset(size.width * 0.48f, size.height * 0.64f),
-                    radius = size.width * 0.40f,
-                ),
-                radius = size.width * 0.40f,
-                center = androidx.compose.ui.geometry.Offset(size.width * 0.48f, size.height * 0.64f),
-            )
-            if (state.throttle > 0.60) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        listOf(Amber.copy(alpha = state.throttle.toFloat() * 0.42f), Red.copy(alpha = 0.12f), Color.Transparent),
-                    ),
-                    radius = size.width * 0.10f,
-                    center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.69f),
-                )
-            }
-            drawLine(
-                color = Cyan.copy(alpha = 0.28f),
-                start = androidx.compose.ui.geometry.Offset(size.width * 0.06f, size.height * 0.77f),
-                end = androidx.compose.ui.geometry.Offset(size.width * 0.90f, size.height * 0.77f),
-                strokeWidth = 2.dp.toPx(),
-            )
-        }
-
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text(
-                "HURACÁN EVO2",
+                state.selectedCarName.uppercase(),
                 color = White,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Black,
@@ -503,7 +472,8 @@ private fun CarStage(
             )
             Text(
                 "RPM / LOAD LOOPSET  •  ${state.audio.sampleLoadedLoops} ENGINE LAYERS  •  " +
-                    "${state.tuning.engine.maxRpm.roundToInt()} RPM BANK",
+                    "${state.tuning.engine.maxRpm.roundToInt()} RPM BANK  •  " +
+                    "${state.selectedCarIndex + 1}/${state.availableCarCount}",
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -515,22 +485,36 @@ private fun CarStage(
             }
         }
 
-        Image(
-            painter = painterResource(R.drawable.apex_v10_car),
-            contentDescription = "Red sports car",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.69f)
-                .align(Alignment.Center)
-                .offset(y = 22.dp)
-                .graphicsLayer {
-                    val response = state.drivetrain.smoothedThrottle.toFloat()
-                    scaleX = 1.0f + response * 0.008f
-                    scaleY = 1.0f + response * 0.008f
-                    translationX = response * 4.0f
-                },
-        )
+        val context = LocalContext.current
+        val preview = remember(state.selectedCarPreviewAsset) {
+            runCatching {
+                context.assets.open(state.selectedCarPreviewAsset).use { input ->
+                    requireNotNull(BitmapFactory.decodeStream(input)).asImageBitmap()
+                }
+            }.getOrNull()
+        }
+        if (preview != null) {
+            Image(
+                bitmap = preview,
+                contentDescription = state.selectedCarName,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth(0.88f)
+                    .fillMaxHeight(0.65f)
+                    .align(Alignment.Center)
+                    .offset(y = 18.dp),
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.apex_v10_car),
+                contentDescription = state.selectedCarName,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth(0.84f).fillMaxHeight(0.62f).align(Alignment.Center),
+            )
+        }
+
+        CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
+        CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
 
         Row(
             modifier = Modifier
@@ -625,6 +609,33 @@ private fun TransmissionShifter(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CarSelectorArrow(
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.size(58.dp).semantics { this.contentDescription = contentDescription },
+        shape = CircleShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF111111).copy(alpha = 0.92f),
+            contentColor = White,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    ) {
+        Text(
+            text = label,
+            color = White,
+            fontSize = 42.sp,
+            fontWeight = FontWeight.Light,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

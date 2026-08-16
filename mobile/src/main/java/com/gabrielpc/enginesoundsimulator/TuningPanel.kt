@@ -121,7 +121,7 @@ internal fun TuningPanel(
                 TuningTab.CURVES -> CurvesTab(state, config, onConfigChange)
                 TuningTab.RESPONSE -> ResponseTab(state, config, onConfigChange)
                 TuningTab.TRANSMISSION -> TransmissionTab(config, onConfigChange)
-                TuningTab.AUDIO -> AudioTab(config, onConfigChange)
+                TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
             }
         }
     }
@@ -180,7 +180,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             Modifier.weight(0.78f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.default.maximumRpm, "%.0f RPM") {
+                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
                         redlineRpm = min(engine.redlineRpm, it - 100.0),
@@ -421,9 +421,9 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
 }
 
 @Composable
-private fun AudioTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
+private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (TuningConfig) -> Unit) {
     val audio = config.audio
-    val profile = EngineSampleProfiles.default
+    val profile = EngineSampleProfiles.find(selectedCarId)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("SAMPLE OUTPUT", "The recovered bank logic is the only engine source", Modifier.weight(0.72f)) {
             AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
@@ -437,7 +437,7 @@ private fun AudioTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             Text("${profile.layers.size} continuous layers · bank-authored RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
         }
         PanelCard("RPM LAYER COVERAGE", "Recovered FMOD regions on the bank's native parameter axis", Modifier.weight(1.85f)) {
-            SampleBankCoverageGraph(config.engine.redlineRpm, Modifier.fillMaxSize())
+            SampleBankCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
         }
     }
 }
@@ -1153,8 +1153,8 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SampleBankCoverageGraph(redlineRpm: Double, modifier: Modifier = Modifier) {
-    val profile = EngineSampleProfiles.default
+private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
+    val profile = EngineSampleProfiles.find(profileId)
     Canvas(modifier) {
         val left = 90f
         val right = size.width - 26f

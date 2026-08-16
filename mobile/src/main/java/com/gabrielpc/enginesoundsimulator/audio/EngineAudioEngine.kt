@@ -61,6 +61,7 @@ class EngineAudioEngine(context: Context) {
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
+    private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
     private val requestedMode = AtomicReference(AudioChannelMode.AUTO)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
@@ -139,6 +140,17 @@ class EngineAudioEngine(context: Context) {
         }
     }
 
+    internal fun setSampleProfile(profile: EngineSampleProfile) {
+        synchronized(lifecycleLock) {
+            val changed = selectedProfile.getAndSet(profile).id != profile.id
+            outputState.updateAndGet { it.copy(sampleProfile = profile.id) }
+            if (!changed) return
+            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
+            PersistentDiagnosticLog.event("audio_profile_selected", "profile=${profile.id}")
+            if (shouldRestart && stopLocked()) startLocked()
+        }
+    }
+
     private fun startLocked() {
         if (
             running.get() ||
@@ -149,7 +161,7 @@ class EngineAudioEngine(context: Context) {
             if (!stopLocked()) return
         }
 
-        val sampleProfile = EngineSampleProfiles.default
+        val sampleProfile = selectedProfile.get()
         PersistentDiagnosticLog.event(
             "audio_start_requested",
             "mode=${requestedMode.get().name} profile=${sampleProfile.id}",
@@ -197,7 +209,7 @@ class EngineAudioEngine(context: Context) {
             ),
         )
 
-        val thread = Thread({ renderLoop(runId) }, "engine-audio-renderer").apply { isDaemon = true }
+        val thread = Thread({ renderLoop(runId, sampleProfile) }, "engine-audio-renderer").apply { isDaemon = true }
         renderThread.set(thread)
         try {
             thread.start()
@@ -274,16 +286,15 @@ class EngineAudioEngine(context: Context) {
         return stopped
     }
 
-    private fun renderLoop(runId: Long) {
+    private fun renderLoop(runId: Long, sampleProfile: EngineSampleProfile) {
         val mode = requestedMode.get()
-        val sampleProfile = EngineSampleProfiles.default
         var opened: OpenedTrack? = null
         var failure: String? = null
 
         try {
             // Match the authored source rate. Unity-pitch voices remain sample-aligned and
             // Android performs at most one final device conversion.
-            val sampleRate = SAMPLE_BANK_SAMPLE_RATE
+            val sampleRate = sampleProfile.outputSampleRate
             val sampleRenderer = try {
                 SampleEngineRenderer.load(appContext.assets, sampleRate, sampleProfile)
             } catch (throwable: Throwable) {
@@ -625,7 +636,6 @@ class EngineAudioEngine(context: Context) {
     private companion object {
         const val RENDER_JOIN_TIMEOUT_MS = 750L
         const val RENDER_FORCE_RELEASE_JOIN_MS = 250L
-        const val SAMPLE_BANK_SAMPLE_RATE = 44_100
         val LAYOUT_7_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, 8, "7.1 MIRROR")
         val LAYOUT_5_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_5POINT1, 6, "5.1 MIRROR")
         val LAYOUT_QUAD = ChannelLayout(AudioFormat.CHANNEL_OUT_QUAD, 4, "QUAD MIRROR")

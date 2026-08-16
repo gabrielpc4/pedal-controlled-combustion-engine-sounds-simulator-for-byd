@@ -8,6 +8,7 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -21,6 +22,7 @@ import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
 import com.gabrielpc.enginesoundsimulator.tuning.TuningRepository
+import com.gabrielpc.enginesoundsimulator.tuning.withSampleProfile
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -44,14 +46,21 @@ data class DriveSnapshot(
     val audio: AudioOutputState,
     val telemetry: TelemetrySnapshot,
     val tuning: TuningConfig,
+    val selectedCarId: String,
+    val selectedCarName: String,
+    val selectedCarPreviewAsset: String,
+    val selectedCarIndex: Int,
+    val availableCarCount: Int,
 )
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
 class DriveController(context: Context) {
     private val tuningRepository = TuningRepository(context.applicationContext)
+    private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
+    private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private var appliedTuning = tuningConfig.get()
-    private var profile = appliedTuning.toEngineProfile()
+    private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
     private val simulation = EngineSimulation(profile)
     private val vehicleReader = BydSpeedReader(context.applicationContext)
     private val audioEngine = EngineAudioEngine(context.applicationContext)
@@ -83,9 +92,15 @@ class DriveController(context: Context) {
         audio = AudioOutputState(),
         telemetry = TelemetrySnapshot(),
         tuning = appliedTuning,
+        selectedCarId = selectedSampleProfile.get().id,
+        selectedCarName = selectedSampleProfile.get().displayName,
+        selectedCarPreviewAsset = selectedSampleProfile.get().previewAssetName,
+        selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
+        availableCarCount = EngineSampleProfiles.all.size,
     )
 
     init {
+        audioEngine.setSampleProfile(selectedSampleProfile.get())
         PersistentDiagnosticLog.event(
             "drive_controller_created",
             "profile=${profile.name} redline_rpm=${profile.redlineRpm.roundToInt()} " +
@@ -173,8 +188,31 @@ class DriveController(context: Context) {
     }
 
     fun resetTuning() {
-        tuningConfig.set(tuningRepository.reset())
+        val clean = tuningRepository.reset().withSampleProfile(selectedSampleProfile.get())
+        tuningConfig.set(clean)
+        tuningRepository.save(clean)
         PersistentDiagnosticLog.event("tuning_reset")
+    }
+
+    fun selectPreviousCar() = selectAdjacentCar(-1)
+
+    fun selectNextCar() = selectAdjacentCar(1)
+
+    private fun selectAdjacentCar(offset: Int) {
+        val previous = selectedSampleProfile.get()
+        val selected = EngineSampleProfiles.adjacent(previous.id, offset)
+        if (selected.id == previous.id) return
+        selectedSampleProfile.set(selected)
+        selectedCarRepository.save(selected)
+        val tuning = tuningConfig.get().withSampleProfile(selected)
+        tuningConfig.set(tuning)
+        tuningRepository.save(tuning)
+        audioEngine.setSampleProfile(selected)
+        PersistentDiagnosticLog.event(
+            "car_profile_changed",
+            "from=${previous.id} to=${selected.id} layers=${selected.layers.size} " +
+                "sample_rate=${selected.outputSampleRate} rpm_domain=${selected.minimumRpm.toInt()}-${selected.maximumRpm.toInt()}",
+        )
     }
 
     fun cycleInputMode() {
@@ -315,7 +353,7 @@ class DriveController(context: Context) {
     private fun step(dt: Double) {
         val tuning = tuningConfig.get()
         if (tuning !== appliedTuning) {
-            profile = tuning.toEngineProfile()
+            profile = tuning.toEngineProfile(selectedSampleProfile.get())
             simulation.updateProfile(profile)
             appliedTuning = tuning
         }
@@ -344,6 +382,7 @@ class DriveController(context: Context) {
                 tuning = tuning.audio,
             ),
         )
+        val selectedCar = selectedSampleProfile.get()
         latest = DriveSnapshot(
             drivetrain = drivetrain,
             inputMode = mode,
@@ -355,6 +394,11 @@ class DriveController(context: Context) {
             audio = audioEngine.state(),
             telemetry = telemetry,
             tuning = tuning,
+            selectedCarId = selectedCar.id,
+            selectedCarName = selectedCar.displayName,
+            selectedCarPreviewAsset = selectedCar.previewAssetName,
+            selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
+            availableCarCount = EngineSampleProfiles.all.size,
         )
     }
 
@@ -415,7 +459,7 @@ class DriveController(context: Context) {
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
                     "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
                     "source=${input.label} reader=${telemetry.readerState.name} " +
-                    "sample_status=${audio.sampleStatus} " +
+                    "car_profile=${selectedSampleProfile.get().id} sample_status=${audio.sampleStatus} " +
                     "simulation_rpm=${drivetrain.rpm.roundToInt()} " +
                     "sample_target_rpm=${audio.sampleTargetRpm} sample_render_rpm=${audio.sampleRenderRpm} " +
                     "rpm_delta=${audio.sampleRenderRpm - drivetrain.rpm.roundToInt()} " +
@@ -460,10 +504,10 @@ private fun sampleAudioLogDetails(audio: AudioOutputState): String =
         "over_range=${audio.sampleOverRangeSamples} underruns=${audio.underruns} " +
         "startup_underruns=${audio.startupUnderruns} steady_underruns=${audio.steadyStateUnderruns}"
 
-private fun TuningConfig.toEngineProfile(): EngineProfile {
+private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile): EngineProfile {
     val engine = engine.sanitized()
     return EngineProfile(
-        name = EngineSampleProfiles.default.displayName,
+        name = sampleProfile.displayName,
         idleRpm = engine.idleRpm,
         redlineRpm = engine.redlineRpm,
         limiterRpm = engine.limiterRpm,

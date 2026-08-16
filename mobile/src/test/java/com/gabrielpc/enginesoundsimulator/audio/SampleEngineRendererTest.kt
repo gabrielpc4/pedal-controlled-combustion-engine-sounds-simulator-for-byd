@@ -13,6 +13,25 @@ class SampleEngineRendererTest {
     private val profile = EngineSampleProfiles.default
 
     @Test
+    fun everySelectableCarHasACompleteDistinctSampleProfile() {
+        assertEquals(5, EngineSampleProfiles.all.size)
+        assertEquals(5, EngineSampleProfiles.all.map { it.id }.distinct().size)
+        assertEquals(5, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
+
+        EngineSampleProfiles.all.forEach { candidate ->
+            assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())
+            assertEquals(candidate.layers.size, candidate.requiredAssets.size)
+            assertTrue(candidate.outputSampleRate == 44_100 || candidate.outputSampleRate == 48_000)
+            for (rpm in candidate.idleRpm.toInt()..candidate.limiterRpm.toInt() step 25) {
+                val onLoad = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0) }
+                val lifted = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 0.0) }
+                assertTrue("${candidate.id} has no full-load voice at $rpm", onLoad > 0.0001)
+                assertTrue("${candidate.id} has no lift-off voice at $rpm", lifted > 0.0001)
+            }
+        }
+    }
+
+    @Test
     fun profileContainsRecoveredContinuousEngineEvent() {
         assertEquals(24, profile.layers.size)
         assertEquals(24, profile.requiredAssets.size)

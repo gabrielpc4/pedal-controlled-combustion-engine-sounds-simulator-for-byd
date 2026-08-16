@@ -2,17 +2,17 @@
 
 ## Status
 
-The app is sample-only and uses one continuous engine event from `fx_lamborghini_huracan_trofeo_evo2.bank`; there is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
+The app is sample-only and offers five selectable interior engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
-The implementation is designed for additional cars. An `EngineSampleProfile` owns the identity, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. Adding a car means adding a profile and its local assets, not modifying the realtime mixer.
+An `EngineSampleProfile` owns the identity, preview, authored output sample rate, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. The arrows beside the dashboard car select the adjacent profile, persist its ID, apply its gearbox/RPM defaults, and restart the audio renderer against only that bank. Selection and loading are recorded as `car_profile_changed`, `audio_profile_selected`, and `sample_engine_loaded` events.
 
 ## Local assets and licensing boundary
 
 The original bank and decoded recordings live under the ignored directory:
 
-`audio_samples/fx_lamborghini_huracan_trofeo_evo2`
+`audio_samples/<source-car-folder>`
 
-Twenty-four continuous engine streams are in `converted`. The build copies only those named files into `assets/sample_engine/lamborghini_huracan_trofeo_evo2/`. Throttle-lift/FOT one-shots, turbo, transmission, ignition, tire, wind, and other environmental noises are excluded.
+Each supported folder has a local `converted` directory. The build copies only the continuous engine streams named in `mobile/build.gradle.kts` into the corresponding generated `assets/sample_engine/<profile>/` directory. It also copies `preview1.jpg` to `assets/car_previews/`; the 812 pack has no root `preview1.jpg`, so its skin preview is the explicit fallback. Throttle-lift/FOT one-shots, turbo, transmission, ignition, tire, wind, and other environmental noises are excluded. The older Supra experiment is intentionally not in the selectable catalog.
 
 Extraction uses the official `vgmstream-cli` decoder. Each asset filename begins with its FSB5 subsong index. Preserve the original single-play duration and append available loop metadata with:
 
@@ -22,7 +22,11 @@ vgmstream-cli.exe -i -L -s 39 -o converted\s039_hur_c1.wav sfx\fx_lamborghini_hu
 
 Repeat for the indices named by `EngineSampleProfile.kt`/`mobile/build.gradle.kts`: `10, 31, 32, 37, 38, 39, 44, 49, 59, 61, 65, 73, 77, 78, 81, 89, 93, 113, 117, 126, 127, 134, 139, 149`. Do not extract with the default two-loop/fade playback duration, because that bakes duplicate audio and a fade into the runtime source.
 
-Neither the bank nor decoded audio is committed. The supplied mod does not grant a standalone-application redistribution license. Do not publish an APK containing these recordings without permission from the recording/mod rights holder.
+Neither banks, decoded audio, nor source preview images are committed. The supplied mods do not grant a standalone-application redistribution license. Do not publish an APK containing these recordings or images without permission from their rights holders.
+
+### Profile reconstruction confidence
+
+The Huracán profile is the exact recovered FMOD control graph described below. The F430, BMW, and Aventador profiles use recovered continuous interior stream names/root RPMs plus their source-car RPM/gear data, then use a generic adjacent-band crossfade where the original route automation was not recoverable. The 812 bank strips stream names; its continuous roots are recovered, but load/coast roles cannot be proven, so those voices use a neutral throttle blend rather than invented coast assignments. These distinctions are deliberate and remain visible in source rather than being presented as equally exact bank reconstructions.
 
 ## Recovered bank model
 
@@ -43,7 +47,7 @@ The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), se
 
 ## Realtime rendering
 
-1. All 24 PCM16 WAVs decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program at the recordings' authored 44.1 kHz rate.
+1. All WAVs required by the selected profile decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program at that profile's authored 44.1 or 48 kHz rate.
 2. Simulation and bank use one RPM axis. There is no redline remapping.
 3. Each layer evaluates its own RPM amplitude curves, RPM decibel curves, throttle route, base gain, pitch root, and base pitch.
 4. Each layer owns a persistent fractional cursor. Cubic interpolation handles varispeed and 44.1-to-48 kHz conversion.
@@ -89,6 +93,6 @@ The sequence selects simulator input, Drive, and sound, then applies 25%, 55%, 1
 
 ## Automated coverage
 
-`SampleEngineRendererTest` checks the interior profile, full-load and lift-off audibility through idle-to-limiter, recovered load/coast throttle direction, lossless stereo preservation, `smpl` metadata after the data chunk, direct profile RPM mapping, logical multichannel mapping, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
+`SampleEngineRendererTest` checks all selectable profile IDs/previews/rates and full-load/lift-off audibility every 25 RPM from idle to limiter. It additionally checks the fully reconstructed interior profile, recovered load/coast throttle direction, lossless stereo preservation, `smpl` metadata after the data chunk, direct profile RPM mapping, logical multichannel mapping, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
 
-The APK must also be inspected for all 24 generated profile assets because unit tests deliberately use generated signals rather than copyrighted local recordings.
+The APK must also be inspected for every generated profile asset because unit tests deliberately use generated signals rather than copyrighted local recordings.

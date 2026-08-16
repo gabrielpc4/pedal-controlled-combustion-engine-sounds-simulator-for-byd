@@ -55,6 +55,8 @@ internal data class EngineSampleProfile(
     val id: String,
     val displayName: String,
     val assetDirectory: String,
+    val previewAssetName: String,
+    val outputSampleRate: Int,
     val minimumRpm: Double,
     val maximumRpm: Double,
     val idleRpm: Double,
@@ -77,4 +79,19 @@ internal data class EngineSampleProfile(
 
 internal object EngineSampleProfiles {
     val default = huracanTrofeoEvo2Profile()
+    val all = listOf(
+        default,
+        ferrariF430Gt2Profile(),
+        ferrari812NlargoProfile(),
+        bmwM8CoupeProfile(),
+        lamborghiniAventadorSvProfile(),
+    )
+    val maximumSupportedRpm = all.maxOf { it.maximumRpm }
+
+    fun find(id: String?): EngineSampleProfile = all.firstOrNull { it.id == id } ?: default
+
+    fun adjacent(currentId: String, offset: Int): EngineSampleProfile {
+        val current = all.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+        return all[(current + offset).mod(all.size)]
+    }
 }
