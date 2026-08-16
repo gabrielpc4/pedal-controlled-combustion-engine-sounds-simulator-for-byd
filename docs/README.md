@@ -42,6 +42,7 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 - [UI display and simulation decisions](ui-display-and-simulation-decisions.md) - cosmetic kgfm/HP display, graph annotation policy, P/N/D shifter, neutral RPM inertia, lift-off RPM removal (D only), SIM coast regen, and other presentation choices that must not be mistaken for physics bugs.
 - [Emulator validation](emulator-validation.md) - exact software-ARM fallback, final APK identity, viewport, and pedal-test evidence.
 - [Drivetrain and audio research](drivetrain-audio-research.md) - professional simulation evidence, sound-synthesis references, commercial asset options, and licensing exclusions.
+- [High-fidelity isolated engine-audio strategy](high-fidelity-engine-audio-strategy.md) - evaluated paid libraries and middleware, clean-source requirements, licensing caveats, and the recommended controlled-dyno path.
 - [Research findings](research-findings.md) - platform identification, official versus community evidence, Android Automotive comparison, permissions, known failure modes, and source links.
 - [BYD DiLink API V1.0.5 notes](byd-dilink-api-v1.0.5.md) - English engineering notes and complete module/method inventory extracted from the 159-page Chinese manual.
 - [Reference APK analysis](reference-apk-analysis.md) - static inspection of the supplied BYD motor-sound APK and what can and cannot be inferred from it.
