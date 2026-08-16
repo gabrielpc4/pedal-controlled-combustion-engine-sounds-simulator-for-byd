@@ -140,7 +140,6 @@ internal object EngineSampleProfiles {
     val default = huracanTrofeoEvo2Profile()
     val all = listOf(
         default,
-        huracanTrofeoEvo2ExteriorProfile(),
         ferrariF430Gt2Profile(),
         ferrari812NlargoProfile(),
         bmwM8CoupeProfile(),
@@ -172,9 +171,6 @@ internal object EngineSampleProfiles {
             zeroToHundred = "2.9 s",
             weight = "1,422",
             priceBrl = "R$ 3.333.920",
-        ),
-        "lamborghini_huracan_trofeo_evo2_exterior" to CarSpecifications(
-            horsepower = "631", torqueKgfm = "61", zeroToHundred = "2.9 s", weight = "1,422", priceBrl = "R$ 3.333.920",
         ),
         "ferrari_f430_gt2_cabin" to CarSpecifications(
             horsepower = "483",

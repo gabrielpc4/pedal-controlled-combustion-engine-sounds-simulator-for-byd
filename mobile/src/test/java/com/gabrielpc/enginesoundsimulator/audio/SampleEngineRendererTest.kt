@@ -14,9 +14,8 @@ class SampleEngineRendererTest {
 
     @Test
     fun everySelectableCarHasACompleteDistinctSampleProfile() {
-        assertEquals(6, EngineSampleProfiles.all.size)
-        assertEquals(6, EngineSampleProfiles.all.map { it.id }.distinct().size)
-        // Cabin and exterior perspectives intentionally share the same selected car image.
+        assertEquals(5, EngineSampleProfiles.all.size)
+        assertEquals(5, EngineSampleProfiles.all.map { it.id }.distinct().size)
         assertEquals(5, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
 
         EngineSampleProfiles.all.forEach { candidate ->
