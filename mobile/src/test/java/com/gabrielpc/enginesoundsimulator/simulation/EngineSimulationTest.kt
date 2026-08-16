@@ -115,6 +115,19 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun simulatorSpeedIsTheExactTachMappingAtEveryFirstGearLiftOffStep() {
+        val simulation = EngineSimulation()
+        simulation.runFor(0.8, throttle = 0.35, sim = true)
+        repeat((5.0 / STEP).toInt()) {
+            val state = simulation.update(DriverInput(simulateCoastRegen = true), STEP)
+            val expectedSpeed = simulation.profile.topSpeedKmh *
+                ((state.rpm - simulation.profile.idleRpm) /
+                    (simulation.profile.redlineRpm - simulation.profile.idleRpm)).coerceIn(0.0, 1.0)
+            assertEquals("speed must follow the displayed tach without a held value", expectedSpeed, state.speedKmh, 0.001)
+        }
+    }
+
+    @Test
     fun brakeDropsDirectTachFasterThanLiftOff() {
         val coast = EngineSimulation()
         val brake = EngineSimulation()

@@ -234,7 +234,6 @@ class EngineSimulation(
             synchronizeSimulatorSpeedToTach(
                 dt = dt,
                 transmissionPosition = input.transmissionPosition,
-                followTachDown = pedalReleased || input.brake > PEDAL_RELEASE_THRESHOLD,
             )
         }
 
@@ -426,7 +425,6 @@ class EngineSimulation(
     private fun synchronizeSimulatorSpeedToTach(
         dt: Double,
         transmissionPosition: TransmissionPosition,
-        followTachDown: Boolean,
     ) {
         val previousSpeedMps = vehicleSpeedMps
         val rpmMappedSpeedMps = if (transmissionPosition == TransmissionPosition.DRIVE) {
@@ -436,18 +434,9 @@ class EngineSimulation(
         } else {
             0.0
         }
-        val targetSpeedMps = if (followTachDown) {
-            // A released pedal or brake makes SIM speed an exact tach mapping.  This keeps the
-            // two displays together even while the two-stage virtual downshift is animating.
-            rpmMappedSpeedMps
-        } else if (activeShift != null) {
-            vehicleSpeedMps
-        } else if (filteredThrottle > SPEED_HOLD_THROTTLE_THRESHOLD && filteredBrake < 0.01) {
-            max(vehicleSpeedMps, rpmMappedSpeedMps)
-        } else {
-            rpmMappedSpeedMps
-        }
-        vehicleSpeedMps = targetSpeedMps
+        // SIM speed is a display companion to the fake tach, not an independently integrated
+        // vehicle. Keeping this direct on every frame means idle RPM is always exactly 0 km/h.
+        vehicleSpeedMps = rpmMappedSpeedMps
         lastAcceleration = ((vehicleSpeedMps - previousSpeedMps) / dt)
             .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
     }
@@ -503,7 +492,6 @@ class EngineSimulation(
         private const val EXTERNAL_ACCELERATION_FILTER_SECONDS = 0.10
         private const val FULL_PEDAL_THRESHOLD = 0.96
         private const val SHIFT_THROTTLE_THRESHOLD = 0.10
-        private const val SPEED_HOLD_THROTTLE_THRESHOLD = 0.01
         private const val DOWNSHIFT_HEADROOM_RPM = 400.0
         private const val SHIFT_RPM_RESPONSE_FRACTION = 0.18
         /** Neutral/Park rev-up: engine inertia spooling with no wheel load. */
