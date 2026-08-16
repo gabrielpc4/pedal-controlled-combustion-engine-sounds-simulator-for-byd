@@ -86,10 +86,10 @@ Current **D** behavior:
 
 - RPM is an independent integrated fake gauge. Road speed never targets, floors, synchronizes, or selects a gear.
 - Raw pedal percentage, smoothed only for response, scales positive RPM force linearly.
-- The maximum positive force is multiplied by normalized delivered Seal power at current road speed. A measured-torque bridge covers 0–30 km/h because mechanical power is zero at rest.
+- The maximum positive force is multiplied by an editable fake-RPM progression curve. The gentle default remains strong across the whole range and has no low-RPM hole or sudden high-RPM surge.
 - Lift-off applies a constant strong negative RPM force immediately; brake adds a larger proportional negative force.
 - Upshifts and downshifts transform only fake RPM by the selected sound profile's adjacent ratios. They never alter EV road force.
-- Live speed remains useful for the power-envelope lookup and displayed speed/acceleration, but abrupt live-speed changes cannot directly move the needle or gear.
+- Live speed remains useful for EV road physics and displayed speed/acceleration, but it cannot scale or directly move the needle or gear.
 - The old road-coupled helper/calibration code and tests were deleted rather than retained as a compatibility path.
 
 Full detail: [UI display §3.3](ui-display-and-simulation-decisions.md#33-independent-drive-rpm-force-model).
@@ -112,9 +112,9 @@ session/activity lifecycle, controller start/stop/failures, BYD telemetry probe/
 start/completion, 1 Hz drivetrain heartbeats, audio focus/start/track/error state, and uncaught
 exceptions. Never call it for every 200 Hz simulation tick or audio render buffer.
 
-For the independent Drive RPM model, each heartbeat includes `rpm_power_permille` (the current
-Seal propulsion-envelope multiplier), `rpm_push_per_s`, and `rpm_drag_per_s`. These make the
-pedal/power/lift/brake behavior auditable after the Activity or process closes.
+For the independent Drive RPM model, each heartbeat includes `rpm_curve_permille` (the current
+fake-RPM progression multiplier), `rpm_push_per_s`, and `rpm_drag_per_s`. These make the
+pedal/curve/lift/brake behavior auditable after the Activity or process closes.
 
 For a debug APK:
 

@@ -146,8 +146,8 @@ The real Seal uses fixed-ratio single-speed electric drive units. In this app:
 - motor torque, road force, acceleration, drag, and braking are calculated without the synthetic gear ratio;
 - the seven editable ratios affect only the fictional engine RPM, sound, gauge, and shift event;
 - a synthetic shift never cuts wheel torque, opens a clutch, adds rev-match torque, or changes vehicle acceleration;
-- displayed RPM in **D** is a separate force-integrated state driven by pedal, lift-off, brake, and a normalized Seal propulsion-power multiplier;
-- road speed only indexes that power multiplier and never targets RPM or selects a presentation gear.
+- displayed RPM in **D** is a separate force-integrated state driven by pedal, lift-off, brake, and its own editable RPM-progression curve;
+- road speed and the Seal propulsion envelope do not scale, target, or floor fake RPM and cannot select a presentation gear.
 
 Each selectable sound profile supplies its adjacent presentation ratios. Only their relative steps
 matter: an upshift scales the independent RPM state downward, and the same step determines the

@@ -42,6 +42,8 @@ data class EngineProfile(
     val rearWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_REAR_WHEEL_TORQUE_CURVE,
     /** X is pedal position; Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = EngineTuning.DEFAULT_THROTTLE_CURVE,
+    /** X is normalized fake RPM; Y is the positive tach-force multiplier. */
+    val rpmProgressionCurve: List<CurvePoint> = EngineTuning.DEFAULT_RPM_PROGRESSION_CURVE,
     val throttleAttackSeconds: Double = 0.120,
     val throttleReleaseSeconds: Double = 0.090,
     val brakeResponseSeconds: Double = 0.055,
@@ -107,7 +109,7 @@ data class DrivetrainState(
     val shiftSerial: Long,
     val limiterActive: Boolean,
     val accelerationMps2: Double,
-    val rpmPowerFraction: Double,
+    val rpmProgressionFraction: Double,
     val rpmPositiveForcePerSecond: Double,
     val rpmNegativeForcePerSecond: Double,
 )
@@ -117,8 +119,8 @@ data class DrivetrainState(
  *
  * Road acceleration comes from the electric motors' torque/power envelope, fixed reduction,
  * vehicle mass, rolling resistance and aerodynamic drag. In Drive, pedal force integrates RPM as
- * an independent state; road speed only selects the Seal propulsion-power envelope that scales
- * positive RPM force. Speed can never target, floor, synchronize, or otherwise dictate RPM.
+ * an independent state with its own editable progression curve. Road speed can never scale,
+ * target, floor, synchronize, or otherwise dictate RPM.
  */
 class EngineSimulation(
     initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK_ENGINE,
@@ -137,7 +139,7 @@ class EngineSimulation(
     private var limiterLatched = false
     private var externalSpeedActive = false
     private var lastAcceleration = 0.0
-    private var lastRpmPowerFraction = 0.0
+    private var lastRpmProgressionFraction = 0.0
     private var lastRpmPositiveForce = 0.0
     private var lastRpmNegativeForce = 0.0
 
@@ -164,7 +166,7 @@ class EngineSimulation(
         limiterLatched = false
         externalSpeedActive = false
         lastAcceleration = 0.0
-        lastRpmPowerFraction = 0.0
+        lastRpmProgressionFraction = 0.0
         lastRpmPositiveForce = 0.0
         lastRpmNegativeForce = 0.0
     }
@@ -318,7 +320,7 @@ class EngineSimulation(
         val activeShift = shift
         val shiftRevTransition = activeShift?.gearChanged == true
         if (shiftRevTransition) {
-            lastRpmPowerFraction = propulsionPowerFractionAtSpeed(profile, vehicleSpeedMps * 3.6)
+            lastRpmProgressionFraction = rpmProgressionFractionAtRpm(profile, engineRpm)
             lastRpmPositiveForce = 0.0
             lastRpmNegativeForce = 0.0
             engineRpm = approachExp(
@@ -331,11 +333,11 @@ class EngineSimulation(
         }
 
         if (transmissionPosition == TransmissionPosition.DRIVE) {
-            val powerFraction = propulsionPowerFractionAtSpeed(profile, vehicleSpeedMps * 3.6)
-            val powerForce = if (!pedalReleased && !limiterLatched) {
+            val progressionFraction = rpmProgressionFractionAtRpm(profile, engineRpm)
+            val positiveForce = if (!pedalReleased && !limiterLatched) {
                 profile.driveRpmAccelerationPerSecond *
                     filteredGaugeThrottle *
-                    powerFraction *
+                    progressionFraction *
                     (1.0 - filteredBrake)
             } else {
                 0.0
@@ -344,15 +346,15 @@ class EngineSimulation(
             val brakeForce = profile.brakeRpmDecelerationPerSecond * filteredBrake
             val limiterCutForce = if (limiterLatched) LIMITER_CUT_RPM_DECELERATION_PER_SECOND else 0.0
             val negativeForce = liftOffForce + brakeForce + limiterCutForce
-            lastRpmPowerFraction = powerFraction
-            lastRpmPositiveForce = powerForce
+            lastRpmProgressionFraction = progressionFraction
+            lastRpmPositiveForce = positiveForce
             lastRpmNegativeForce = negativeForce
-            engineRpm = (engineRpm + (powerForce - negativeForce) * dt)
+            engineRpm = (engineRpm + (positiveForce - negativeForce) * dt)
                 .coerceIn(profile.idleRpm, profile.limiterRpm)
             return
         }
 
-        lastRpmPowerFraction = 0.0
+        lastRpmProgressionFraction = 0.0
         lastRpmPositiveForce = 0.0
         lastRpmNegativeForce = 0.0
         val targetRpm = freeRevRpmTarget()
@@ -473,7 +475,7 @@ class EngineSimulation(
             shiftSerial = shiftSerial,
             limiterActive = limiterLatched,
             accelerationMps2 = lastAcceleration,
-            rpmPowerFraction = lastRpmPowerFraction,
+            rpmProgressionFraction = lastRpmProgressionFraction,
             rpmPositiveForcePerSecond = lastRpmPositiveForce,
             rpmNegativeForcePerSecond = lastRpmNegativeForce,
         )
@@ -541,35 +543,11 @@ internal fun axleWheelTorqueAtSpeed(profile: EngineProfile, speedKmh: Double): A
     )
 }
 
-/**
- * Normalized positive force available to the fake tachometer at a road speed.
- *
- * Above launch this is delivered wheel power divided by the configured peak wheel power. At zero
- * speed physical power is necessarily zero despite maximum EV torque, so the first 30 km/h blend
- * in the measured torque envelope. This prevents a mathematically correct but unusable tachometer
- * that cannot begin revving from rest.
- */
-internal fun propulsionPowerFractionAtSpeed(profile: EngineProfile, speedKmh: Double): Double {
-    val cleanSpeedKmh = speedKmh.coerceIn(0.0, profile.topSpeedKmh)
-    val speedMps = cleanSpeedKmh / 3.6
-    val wheelOmega = speedMps / profile.wheelRadiusMeters
-    val axleTorque = axleWheelTorqueAtSpeed(profile, cleanSpeedKmh).totalNm
-    val peakAxleTorque = profile.frontPeakWheelTorqueNm + profile.rearPeakWheelTorqueNm
-    val peakWheelPowerWatts = profile.peakPowerKw * 1_000.0 * profile.drivetrainEfficiency
-    val powerLimitedTorque = if (wheelOmega < 1.0) {
-        axleTorque
-    } else {
-        peakWheelPowerWatts / wheelOmega
-    }
-    val deliveredTorque = min(axleTorque, powerLimitedTorque)
-    val powerFraction = if (peakWheelPowerWatts <= 0.0) {
-        0.0
-    } else {
-        deliveredTorque * wheelOmega / peakWheelPowerWatts
-    }
-    val launchBlend = (1.0 - cleanSpeedKmh / LAUNCH_POWER_BRIDGE_END_KMH).coerceIn(0.0, 1.0)
-    val launchTorqueFraction = if (peakAxleTorque <= 0.0) 0.0 else axleTorque / peakAxleTorque
-    return max(powerFraction, launchTorqueFraction * launchBlend).coerceIn(0.0, 1.0)
+/** Smooth fake-tach force curve, entirely independent from road speed and EV wheel power. */
+internal fun rpmProgressionFractionAtRpm(profile: EngineProfile, rpm: Double): Double {
+    val span = (profile.redlineRpm - profile.idleRpm).coerceAtLeast(1.0)
+    val normalizedRpm = ((rpm - profile.idleRpm) / span).coerceIn(0.0, 1.0)
+    return interpolateCurve(profile.rpmProgressionCurve, normalizedRpm).coerceIn(0.35, 1.15)
 }
 
 private fun approachExp(current: Double, target: Double, timeConstant: Double, dt: Double): Double {
@@ -577,5 +555,3 @@ private fun approachExp(current: Double, target: Double, timeConstant: Double, d
     val blend = 1.0 - kotlin.math.exp(-dt / timeConstant)
     return current + (target - current) * blend
 }
-
-private const val LAUNCH_POWER_BRIDGE_END_KMH = 30.0

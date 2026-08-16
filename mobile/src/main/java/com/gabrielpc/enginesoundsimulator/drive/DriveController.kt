@@ -502,7 +502,7 @@ class DriveController(context: Context) {
                     "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
-                    "rpm_power_permille=${(drivetrain.rpmPowerFraction * 1_000.0).roundToInt()} " +
+                    "rpm_curve_permille=${(drivetrain.rpmProgressionFraction * 1_000.0).roundToInt()} " +
                     "rpm_push_per_s=${drivetrain.rpmPositiveForcePerSecond.roundToInt()} " +
                     "rpm_drag_per_s=${drivetrain.rpmNegativeForcePerSecond.roundToInt()} " +
                     "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
@@ -596,6 +596,7 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         frontWheelTorqueCurve = engine.frontWheelTorqueCurve,
         rearWheelTorqueCurve = engine.rearWheelTorqueCurve,
         throttleCurve = engine.throttleCurve,
+        rpmProgressionCurve = engine.rpmProgressionCurve,
         throttleAttackSeconds = engine.throttleAttackMs / 1_000.0,
         throttleReleaseSeconds = engine.throttleReleaseMs / 1_000.0,
         brakeResponseSeconds = engine.brakeResponseMs / 1_000.0,

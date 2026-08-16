@@ -106,7 +106,7 @@ internal fun TuningPanel(
             .border(1.dp, TuneLine)
             .padding(horizontal = 30.dp, vertical = 22.dp),
     ) {
-        TuningHeader(config, onReset, onClose)
+        TuningHeader(config, state.selectedCarName, onReset, onClose)
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TuningTab.entries.forEachIndexed { index, tab ->
@@ -128,13 +128,25 @@ internal fun TuningPanel(
 }
 
 @Composable
-private fun TuningHeader(config: TuningConfig, onReset: () -> Unit, onClose: () -> Unit) {
+private fun TuningHeader(
+    config: TuningConfig,
+    selectedCarName: String,
+    onReset: () -> Unit,
+    onClose: () -> Unit,
+) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(10.dp).background(TuneGreen, CircleShape))
                 Text("LIVE TUNING", color = TuneWhite, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                Text("// SUPRA MK4 CABIN", color = TuneCyan, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.6.sp)
+                Text(
+                    "// ${selectedCarName.uppercase(Locale.ROOT).take(36)}",
+                    color = TuneCyan,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Light,
+                    letterSpacing = 1.2.sp,
+                    maxLines = 1,
+                )
             }
             Text(
                 "Changes apply immediately and are saved automatically  •  ${newtonMetersToKgfm(config.engine.maxTorqueNm).roundToInt()} kgfm  •  ${kilowattsToHorsepower(config.engine.peakPowerKw).roundToInt()} HP  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
@@ -176,7 +188,7 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
             "SAMPLE ENGINE",
-            "Tach follows road speed in D; use the P N D shifter beside the pedals for neutral revs",
+            "Fake RPM uses pedal force and its own curve; road speed never drives the tach",
             Modifier.weight(0.78f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -348,8 +360,10 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
 @Composable
 private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
+    val currentRpm = ((state.drivetrain.rpm - engine.idleRpm) / (engine.redlineRpm - engine.idleRpm))
+        .coerceIn(0.0, 1.0)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1.35f)) {
+        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1.05f)) {
             EditableCurveGraph(
                 points = engine.throttleCurve,
                 xLabel = { "${(it * 100).roundToInt()}" },
@@ -366,7 +380,23 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("PEDAL DYNAMICS", "Measured launch rise plus editable release/brake timing", Modifier.weight(1f)) {
+        PanelCard("TACH FORCE CURVE", "Drag points • independent from road speed", Modifier.weight(1.05f)) {
+            EditableCurveGraph(
+                points = engine.rpmProgressionCurve,
+                xLabel = { "${(engine.idleRpm + it * (engine.redlineRpm - engine.idleRpm)).roundToInt()}" },
+                yLabel = { "${(it * 100).roundToInt()}" },
+                xMarkerLabel = { "${(engine.idleRpm + it * (engine.redlineRpm - engine.idleRpm)).roundToInt()} RPM" },
+                yMarkerLabel = { "${(it * 100).roundToInt()}%" },
+                xAxisTitle = "FAKE ENGINE SPEED (RPM)",
+                yAxisTitle = "POSITIVE FORCE (%)",
+                currentX = currentRpm,
+                accent = TuneCyan,
+                lockEndpointX = true,
+                onPointsChange = { onChange(config.copy(engine = engine.copy(rpmProgressionCurve = it))) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        PanelCard("PEDAL DYNAMICS", "Editable input, lift and brake timing", Modifier.weight(0.82f)) {
             ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
             }

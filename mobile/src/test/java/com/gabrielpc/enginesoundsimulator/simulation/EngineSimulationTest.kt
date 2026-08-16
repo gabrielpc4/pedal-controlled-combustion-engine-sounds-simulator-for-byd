@@ -72,15 +72,23 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun maximumDriveRpmForceFollowsTheSealPowerEnvelope() {
+    fun driveRpmProgressionIsSmoothPositiveAndIndependentFromRoadSpeed() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE
-        val launch = propulsionPowerFractionAtSpeed(profile, 0.0)
-        val peakRegion = propulsionPowerFractionAtSpeed(profile, 80.0)
-        val highSpeed = propulsionPowerFractionAtSpeed(profile, 180.0)
+        val lowRpm = rpmProgressionFractionAtRpm(profile, profile.idleRpm)
+        val midRpm = rpmProgressionFractionAtRpm(profile, (profile.idleRpm + profile.redlineRpm) * 0.5)
+        val highRpm = rpmProgressionFractionAtRpm(profile, profile.redlineRpm)
 
-        assertTrue("launch torque bridge must let the tach move from rest", launch > 0.90)
-        assertTrue("measured power should be near its peak around 80 km/h", peakRegion > 0.90)
-        assertTrue("measured high-speed power taper should reduce fake RPM force", highSpeed < peakRegion * 0.90)
+        assertTrue("low RPM force must not have a weak combustion-like hole", lowRpm >= 0.80)
+        assertTrue("midrange should provide a gentle sense of progression", midRpm > lowRpm)
+        assertTrue("high RPM force must remain strong", highRpm >= 0.80)
+        assertTrue("the curve must not have an abrupt surge", midRpm / minOf(lowRpm, highRpm) < 1.25)
+
+        val stopped = EngineSimulation(profile.copy(gearRatios = doubleArrayOf(3.14)))
+        val fast = EngineSimulation(profile.copy(gearRatios = doubleArrayOf(3.14)))
+        val stoppedState = stopped.runForExternal(0.40, speedKmh = 0.0, throttle = 0.65)
+        val fastState = fast.runForExternal(0.40, speedKmh = 180.0, throttle = 0.65)
+        assertEquals(stoppedState.rpm, fastState.rpm, 0.001)
+        assertEquals(stoppedState.rpmPositiveForcePerSecond, fastState.rpmPositiveForcePerSecond, 0.001)
     }
 
     @Test

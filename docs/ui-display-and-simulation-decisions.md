@@ -201,16 +201,18 @@ This target-seeking model is intentionally separate from the force-integrated **
 In **D**, RPM is integrated directly and has no speed-derived target or soft floor:
 
 ```text
-positiveForce = maxRpmForce × filteredRawPedal × propulsionPowerFraction(speed) × (1 − brake)
+positiveForce = maxRpmForce × filteredRawPedal × rpmProgressionCurve(rpm) × (1 − brake)
 negativeForce = liftOffForce(if pedal is released) + brakeForce × brake + limiterCutForce
 rpm = clamp(rpm + (positiveForce − negativeForce) × dt, idle, limiter)
 ```
 
-`propulsionPowerFraction` is delivered Seal wheel power normalized by configured peak power. Mechanical power is zero at exactly zero speed despite maximum EV torque, so 0–30 km/h blends in the measured axle-torque envelope to let the fictional engine rev from rest. Speed has no other RPM role and cannot select a gear. The editable defaults are **6500 RPM/s** maximum positive force, **5500 RPM/s** lift-off force, and **8500 RPM/s** additional full-brake force.
+`rpmProgressionCurve` is a separate editable fake-engine curve indexed only by normalized RPM. Its default stays between 82% and 100%: it builds gently into the middle of the range and remains at 84% at redline, with no weak low-RPM hole or sharp high-RPM surge. Sanitization enforces a 35% minimum, so held positive throttle cannot stall because of the curve. Road speed, Seal wheel power, and physical motor torque do not participate in tach movement. The editable defaults are **6500 RPM/s** maximum positive force, **5500 RPM/s** lift-off force, and **8500 RPM/s** additional full-brake force.
 
 Upshifts happen at the profile shift point and drop the independent RPM state by the adjacent ratio. Released-pedal downshifts occur when RPM falls to the preceding upshift's landing RPM. Road-speed over-rev projections, live-speed gear synchronization, and emergency road-speed upshifts do not exist.
 
-**Tests:** `roadSpeedAloneNeverMovesTheFakeRpmOrGear`, `driveRpmForceScalesWithPedalPercentage`, `maximumDriveRpmForceFollowsTheSealPowerEnvelope`, `releasingPedalDropsRpmRapidlyEvenWhenRoadSpeedIsHeld`, and `brakeAddsSubstantiallyMoreNegativeRpmForceThanLiftOff`.
+The **RESPONSE** tab exposes the progression curve as `FAKE ENGINE SPEED (RPM)` versus `POSITIVE FORCE (%)`; all points can be dragged and persist with the rest of the tuning profile.
+
+**Tests:** `roadSpeedAloneNeverMovesTheFakeRpmOrGear`, `driveRpmForceScalesWithPedalPercentage`, `driveRpmProgressionIsSmoothPositiveAndIndependentFromRoadSpeed`, `releasingPedalDropsRpmRapidlyEvenWhenRoadSpeedIsHeld`, and `brakeAddsSubstantiallyMoreNegativeRpmForceThanLiftOff`.
 
 ### 3.4 Simulator coast regen (2026-08)
 

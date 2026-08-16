@@ -28,7 +28,7 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
-    /** Maximum positive fake-tach acceleration at full pedal and full propulsion power. */
+    /** Maximum positive fake-tach acceleration at full pedal and the peak progression multiplier. */
     val driveRpmAccelerationPerSecond: Double = 6_500.0,
     /** Constant negative fake-tach acceleration as soon as the accelerator is released. */
     val liftOffRpmDecelerationPerSecond: Double = 5_500.0,
@@ -48,6 +48,8 @@ data class EngineTuning(
     val rearWheelTorqueCurve: List<CurvePoint> = DEFAULT_REAR_WHEEL_TORQUE_CURVE,
     /** X is physical pedal position, Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
+    /** X is normalized fake RPM, Y is the positive tach-force multiplier. */
+    val rpmProgressionCurve: List<CurvePoint> = DEFAULT_RPM_PROGRESSION_CURVE,
 ) {
     fun sanitized(): EngineTuning {
         val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.maximumSupportedRpm)
@@ -97,6 +99,12 @@ data class EngineTuning(
                 lockEndpoints = false,
             ),
             throttleCurve = sanitizeCurve(throttleCurve, DEFAULT_THROTTLE_CURVE, lockEndpoints = true),
+            rpmProgressionCurve = sanitizeCurve(
+                rpmProgressionCurve,
+                DEFAULT_RPM_PROGRESSION_CURVE,
+                lockEndpoints = false,
+                minimumY = 0.35,
+            ),
         )
     }
 
@@ -137,6 +145,13 @@ data class EngineTuning(
             CurvePoint(0.50, 0.60),
             CurvePoint(0.75, 0.84),
             CurvePoint(1.0, 1.0),
+        )
+        val DEFAULT_RPM_PROGRESSION_CURVE = listOf(
+            CurvePoint(0.000, 0.82),
+            CurvePoint(0.200, 0.90),
+            CurvePoint(0.450, 1.00),
+            CurvePoint(0.700, 0.96),
+            CurvePoint(1.000, 0.84),
         )
     }
 }
@@ -225,6 +240,10 @@ class TuningRepository(context: Context) {
                 defaults.engine.rearWheelTorqueCurve,
             ),
             throttleCurve = decodeCurve(preferences.getString(KEY_THROTTLE_CURVE, null), defaults.engine.throttleCurve),
+            rpmProgressionCurve = decodeCurve(
+                preferences.getString(KEY_RPM_PROGRESSION_CURVE, null),
+                defaults.engine.rpmProgressionCurve,
+            ),
         )
         val engine = if (currentCalibration) storedEngine else defaults.engine
         val audio = defaults.audio.copy(
@@ -280,6 +299,7 @@ class TuningRepository(context: Context) {
             .putString(KEY_FRONT_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.frontWheelTorqueCurve))
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
             .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
+            .putString(KEY_RPM_PROGRESSION_CURVE, encodeCurve(clean.engine.rpmProgressionCurve))
             .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
             .apply()
     }
@@ -331,6 +351,7 @@ class TuningRepository(context: Context) {
         const val KEY_FRONT_WHEEL_TORQUE_CURVE = "front_wheel_torque_curve"
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
         const val KEY_THROTTLE_CURVE = "throttle_curve"
+        const val KEY_RPM_PROGRESSION_CURVE = "rpm_progression_curve"
         const val KEY_MASTER_GAIN = "master_gain"
     }
 }
@@ -365,9 +386,10 @@ private fun sanitizeCurve(
     values: List<CurvePoint>,
     fallback: List<CurvePoint>,
     lockEndpoints: Boolean,
+    minimumY: Double = 0.0,
 ): List<CurvePoint> {
     if (values.size !in 2..16) return fallback
-    val sorted = values.map { CurvePoint(it.x.coerceIn(0.0, 1.0), it.y.coerceIn(0.0, 1.15)) }
+    val sorted = values.map { CurvePoint(it.x.coerceIn(0.0, 1.0), it.y.coerceIn(minimumY, 1.15)) }
         .sortedBy { it.x }
         .toMutableList()
     for (index in 1 until sorted.size) {
