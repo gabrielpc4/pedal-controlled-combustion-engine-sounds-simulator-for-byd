@@ -39,6 +39,7 @@ data class AudioOutputState(
     val steadyStateUnderruns: Int = 0,
     val focusGranted: Boolean = false,
     val sampleProfile: String = "none",
+    val samplePerspective: String = "none",
     val sampleLoadedLoops: Int = 0,
     val sampleDecodedBytes: Long = 0L,
     val sampleTargetRpm: Int = 0,
@@ -297,7 +298,8 @@ class EngineAudioEngine(context: Context) {
                 "sample_engine_loaded",
                 "profile=${initialDiagnostics.profileId} loops=${initialDiagnostics.loadedLoops} " +
                     "decoded_bytes=${initialDiagnostics.decodedBytes} output_rate=$sampleRate " +
-                    "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()}",
+                    "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
+                    "perspective=${sampleProfile.perspective} program_channels=2",
             )
             // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
             // loading and JIT work cannot starve the newly opened output buffer.
@@ -361,7 +363,7 @@ class EngineAudioEngine(context: Context) {
             }
 
             val track = active.track
-            val mono = ShortArray(active.framesPerWrite)
+            val stereoProgram = ShortArray(active.framesPerWrite * 2)
             val interleaved = ShortArray(active.framesPerWrite * active.layout.channelCount)
             val duplicationGain = when (active.layout.channelCount) {
                 8 -> 0.23
@@ -387,6 +389,7 @@ class EngineAudioEngine(context: Context) {
                     underruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0,
                     focusGranted = previous.focusGranted,
                     sampleProfile = sampleProfile.id,
+                    samplePerspective = sampleProfile.perspective,
                     sampleLoadedLoops = initialDiagnostics.loadedLoops,
                     sampleDecodedBytes = initialDiagnostics.decodedBytes,
                 )
@@ -394,7 +397,7 @@ class EngineAudioEngine(context: Context) {
             PersistentDiagnosticLog.event(
                 "audio_track_active",
                 "mode=${mode.name} profile=${sampleProfile.id} layout=${active.layout.label} " +
-                    "logical_channels=${track.channelCount} " +
+                    "logical_channels=${track.channelCount} program_channels=2 " +
                     "sample_rate=${track.sampleRate} buffer_frames=" +
                     "${if (Build.VERSION.SDK_INT >= 24) track.bufferSizeInFrames else active.capacityFrames} " +
                     "route=${routedDeviceName(track)} session=${track.audioSessionId}",
@@ -403,8 +406,8 @@ class EngineAudioEngine(context: Context) {
             while (isCurrent(runId)) {
                 val frame = parameters.get()
                 val renderGain = duplicationGain * focusMultiplier.get()
-                sampleRenderer.render(frame, mono, renderGain)
-                duplicateAcrossChannels(mono, interleaved, active.layout.channelCount)
+                sampleRenderer.render(frame, stereoProgram, renderGain)
+                mapStereoAcrossChannels(stereoProgram, interleaved, active.layout.channelCount)
                 if (!writeFully(track, interleaved, runId)) break
                 writes += 1
                 if (writes % 48 == 0) {
@@ -623,12 +626,43 @@ class EngineAudioEngine(context: Context) {
     }
 }
 
-internal fun duplicateAcrossChannels(mono: ShortArray, output: ShortArray, channelCount: Int) {
-    require(channelCount > 0)
-    require(output.size >= mono.size * channelCount)
+internal fun mapStereoAcrossChannels(stereo: ShortArray, output: ShortArray, channelCount: Int) {
+    require(channelCount in setOf(2, 4, 6, 8))
+    require(stereo.size % 2 == 0)
+    require(output.size >= stereo.size / 2 * channelCount)
     var outputIndex = 0
-    for (sample in mono) {
-        repeat(channelCount) { output[outputIndex++] = sample }
+    for (frame in 0 until stereo.size / 2) {
+        val left = stereo[frame * 2]
+        val right = stereo[frame * 2 + 1]
+        val center = ((left.toInt() + right.toInt()) / 2).toShort()
+        when (channelCount) {
+            2 -> {
+                output[outputIndex++] = left
+                output[outputIndex++] = right
+            }
+            4 -> repeat(2) {
+                output[outputIndex++] = left
+                output[outputIndex++] = right
+            }
+            6 -> {
+                output[outputIndex++] = left   // FL
+                output[outputIndex++] = right  // FR
+                output[outputIndex++] = center // FC
+                output[outputIndex++] = center // LFE; logical mirror, OEM DSP decides bass routing
+                output[outputIndex++] = left   // BL
+                output[outputIndex++] = right  // BR
+            }
+            8 -> {
+                output[outputIndex++] = left   // FL
+                output[outputIndex++] = right  // FR
+                output[outputIndex++] = center // FC
+                output[outputIndex++] = center // LFE
+                output[outputIndex++] = left   // BL
+                output[outputIndex++] = right  // BR
+                output[outputIndex++] = left   // SL
+                output[outputIndex++] = right  // SR
+            }
+        }
     }
 }
 

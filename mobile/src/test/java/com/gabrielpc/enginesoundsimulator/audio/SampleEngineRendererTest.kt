@@ -13,9 +13,10 @@ class SampleEngineRendererTest {
     private val profile = EngineSampleProfiles.default
 
     @Test
-    fun profileContainsRecoveredContinuousCabinEvent() {
-        assertEquals(24, profile.layers.size)
-        assertEquals(24, profile.requiredAssets.size)
+    fun profileContainsRecoveredContinuousExteriorEvent() {
+        assertEquals(47, profile.layers.size)
+        assertEquals(47, profile.requiredAssets.size)
+        assertEquals("EXTERIOR / NEAR CAR", profile.perspective)
         assertEquals(7, profile.gearRatios.size)
         assertEquals(10_000.0, profile.maximumRpm, 0.0)
         assertEquals(8_350.0, profile.limiterRpm, 0.0)
@@ -32,15 +33,15 @@ class SampleEngineRendererTest {
 
     @Test
     fun recoveredThrottleCurvesCrossfadeLoadAndCoastLayers() {
-        val load = profile.layers.first { it.id == "l4_high" }
-        val coast = profile.layers.first { it.id == "c3" }
+        val load = profile.layers.first { it.id == "rear_l1" }
+        val coast = profile.layers.first { it.id == "ex_c2" }
 
-        assertTrue(load.gainAt(4_500.0, 1.0) > load.gainAt(4_500.0, 0.0) * 8.0)
-        assertTrue(coast.gainAt(5_000.0, 0.0) > coast.gainAt(5_000.0, 1.0) * 8.0)
+        assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0) * 8.0)
+        assertTrue(coast.gainAt(7_000.0, 0.0) > coast.gainAt(7_000.0, 1.0) * 8.0)
     }
 
     @Test
-    fun wavDecoderDownmixesStereoPcm16AndReadsLoopMetadataAfterData() {
+    fun wavDecoderPreservesStereoPcm16AndReadsLoopMetadataAfterData() {
         val wav = pcm16Wav(
             sampleRate = 44_100,
             channels = 2,
@@ -53,11 +54,13 @@ class SampleEngineRendererTest {
 
         assertEquals(44_100, decoded.sampleRate)
         assertEquals(2, decoded.sourceChannels)
-        assertEquals(40, decoded.monoSamples.size)
+        assertEquals(40, decoded.frameCount)
         assertEquals(7, decoded.loopStartFrame)
         assertEquals(32, decoded.loopEndFrameExclusive)
-        assertEquals(4_000.0 / 32_768.0, decoded.monoSamples[0].toDouble(), 0.00001)
-        assertEquals(-4_000.0 / 32_768.0, decoded.monoSamples[1].toDouble(), 0.00001)
+        assertEquals(12_000.0 / 32_768.0, decoded.channelSamples[0][0].toDouble(), 0.00001)
+        assertEquals(-4_000.0 / 32_768.0, decoded.channelSamples[1][0].toDouble(), 0.00001)
+        assertEquals(-16_000.0 / 32_768.0, decoded.channelSamples[0][1].toDouble(), 0.00001)
+        assertEquals(8_000.0 / 32_768.0, decoded.channelSamples[1][1].toDouble(), 0.00001)
     }
 
     @Test
@@ -73,14 +76,14 @@ class SampleEngineRendererTest {
                 step < 60 -> (step - 20) / 40.0
                 else -> 1.0
             }
-            val output = ShortArray(960)
+            val output = ShortArray(1_920)
             renderer.render(EngineAudioFrame(rpm = rpm, throttle = throttle), output, gain = 0.66)
             val nonZero = output.count { it != 0.toShort() }
             assertTrue("silent render at rpm=$rpm throttle=$throttle", nonZero > output.size * 0.75)
             totalNonZero += nonZero
         }
         repeat(12) {
-            renderer.render(EngineAudioFrame(rpm = profile.limiterRpm, throttle = 1.0), ShortArray(960), gain = 0.66)
+            renderer.render(EngineAudioFrame(rpm = profile.limiterRpm, throttle = 1.0), ShortArray(1_920), gain = 0.66)
         }
 
         val diagnostics = renderer.diagnostics()
@@ -97,7 +100,7 @@ class SampleEngineRendererTest {
     @Test
     fun rendererUsesProfileRpmWithoutAxisRemapping() {
         val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
-        val output = ShortArray(4_800)
+        val output = ShortArray(9_600)
 
         repeat(8) {
             renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5), output, gain = 0.5)
@@ -108,9 +111,21 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun rendererDoesNotCollapseTheStereoProgramToMono() {
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
+        val output = ShortArray(1_920)
+
+        repeat(12) {
+            renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 1.0), output, gain = 0.66)
+        }
+
+        assertTrue((output.indices step 2).any { output[it] != output[it + 1] })
+    }
+
+    @Test
     fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
         val decoded = mapOf(
-            profile.requiredAssets.first() to PcmLoopData(FloatArray(32) { 0.1f }, 48_000, 1),
+            profile.requiredAssets.first() to PcmLoopData(arrayOf(FloatArray(32) { 0.1f }), 48_000, 1),
         )
 
         val failure = runCatching { SampleEngineRenderer.fromDecoded(48_000, decoded, profile) }.exceptionOrNull()
@@ -119,17 +134,28 @@ class SampleEngineRendererTest {
         assertTrue(failure?.message?.startsWith("Missing ") == true)
     }
 
+    @Test
+    fun logicalChannelMappingPreservesStereoAndMirrorsTheProgram() {
+        val stereo = shortArrayOf(10, 30, -20, 40)
+        val surround = ShortArray(16)
+
+        mapStereoAcrossChannels(stereo, surround, 8)
+
+        assertEquals(listOf<Short>(10, 30, 20, 20, 10, 30, 10, 30), surround.take(8))
+        assertEquals(listOf<Short>(-20, 40, 10, 10, -20, 40, -20, 40), surround.drop(8))
+    }
+
     private fun strongestGain(rpm: Double, throttle: Double): Double =
         profile.layers.maxOf { it.gainAt(rpm, throttle) }
 
     private fun testBank(): Map<String, PcmLoopData> = profile.requiredAssets.associateWith { asset ->
         val frequency = 70.0 + abs(asset.hashCode() % 220)
+        val left = FloatArray(2_048) { frame ->
+            (sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35).toFloat()
+        }
         PcmLoopData(
-            monoSamples = FloatArray(2_048) { frame ->
-                (sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35).toFloat()
-            },
+            channelSamples = arrayOf(left, FloatArray(left.size) { -left[it] * 0.75f }),
             sampleRate = 44_100,
-            sourceChannels = 1,
             loopStartFrame = 250,
             loopEndFrameExclusive = 1_900,
         )

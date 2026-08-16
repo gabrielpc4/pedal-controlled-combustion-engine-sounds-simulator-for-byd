@@ -43,7 +43,9 @@ internal class SampleEngineRenderer private constructor(
     fun diagnostics(): SampleRendererDiagnostics = diagnostics
 
     fun render(target: EngineAudioFrame, output: ShortArray, gain: Double) {
-        val blockSeconds = output.size.toDouble() / outputSampleRate
+        require(output.size % PROGRAM_CHANNELS == 0) { "Stereo render buffer must contain whole frames" }
+        val frameCount = output.size / PROGRAM_CHANNELS
+        val blockSeconds = frameCount.toDouble() / outputSampleRate
         val rpmAlpha = 1.0 - exp(-blockSeconds / RPM_RESPONSE_SECONDS)
         val throttleAlpha = 1.0 - exp(-blockSeconds / THROTTLE_RESPONSE_SECONDS)
         val requestedRpm = target.rpm.coerceIn(profile.minimumRpm, profile.maximumRpm)
@@ -58,12 +60,14 @@ internal class SampleEngineRenderer private constructor(
         val layerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.012))
         var blockPeak = 0.0
 
-        for (index in output.indices) {
-            var mixed = 0.0
+        for (frameIndex in 0 until frameCount) {
+            var mixedLeft = 0.0
+            var mixedRight = 0.0
             for (voice in voices) {
                 voice.gain += (voice.targetGain - voice.gain) * layerAlpha
                 if (voice.gain > SILENCE_GAIN || voice.targetGain > SILENCE_GAIN) {
-                    mixed += voice.readCubic() * voice.gain
+                    mixedLeft += voice.readCubic(0) * voice.gain
+                    mixedRight += voice.readCubic(1) * voice.gain
                 }
                 // FMOD timelines keep running even while a layer is inaudible. Doing the same
                 // prevents an audible sample restart when an RPM or throttle fade opens again.
@@ -71,14 +75,20 @@ internal class SampleEngineRenderer private constructor(
             }
             masterGain += (targetMaster - masterGain) * masterAlpha
             enabledGain += (targetEnabled - enabledGain) * enabledAlpha
-            val preLimited = mixed * SAMPLE_HEADROOM * masterGain * enabledGain
-            if (abs(preLimited) > 1.0) overRangeSamples += 1
-            val limited = softClip(preLimited)
-            blockPeak = max(blockPeak, abs(limited))
-            output[index] = (limited.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+            val commonGain = SAMPLE_HEADROOM * masterGain * enabledGain
+            val preLimitedLeft = mixedLeft * commonGain
+            val preLimitedRight = mixedRight * commonGain
+            if (abs(preLimitedLeft) > 1.0) overRangeSamples += 1
+            if (abs(preLimitedRight) > 1.0) overRangeSamples += 1
+            val limitedLeft = softClip(preLimitedLeft)
+            val limitedRight = softClip(preLimitedRight)
+            blockPeak = max(blockPeak, max(abs(limitedLeft), abs(limitedRight)))
+            val outputIndex = frameIndex * PROGRAM_CHANNELS
+            output[outputIndex] = toPcm16(limitedLeft)
+            output[outputIndex + 1] = toPcm16(limitedRight)
         }
 
-        framesRendered += output.size
+        framesRendered += frameCount
         renderedBlocks += 1
         if (renderedBlocks % DIAGNOSTIC_BLOCK_INTERVAL == 0L || diagnostics.framesRendered == 0L) {
             val active = voices.asSequence()
@@ -121,13 +131,14 @@ internal class SampleEngineRenderer private constructor(
         var targetGain = 0.0
         private var hasLooped = false
 
-        fun readCubic(): Double {
+        fun readCubic(outputChannel: Int): Double {
+            val sourceChannel = outputChannel.coerceAtMost(data.sourceChannels - 1)
             val frame = phase.toInt()
             val fraction = phase - frame
-            val y0 = sampleAt(frame - 1).toDouble()
-            val y1 = sampleAt(frame).toDouble()
-            val y2 = sampleAt(frame + 1).toDouble()
-            val y3 = sampleAt(frame + 2).toDouble()
+            val y0 = sampleAt(sourceChannel, frame - 1).toDouble()
+            val y1 = sampleAt(sourceChannel, frame).toDouble()
+            val y2 = sampleAt(sourceChannel, frame + 1).toDouble()
+            val y3 = sampleAt(sourceChannel, frame + 2).toDouble()
             val a0 = y3 - y2 - y0 + y1
             val a1 = y0 - y1 - a0
             val a2 = y2 - y0
@@ -143,16 +154,16 @@ internal class SampleEngineRenderer private constructor(
             return true
         }
 
-        private fun sampleAt(index: Int): Float {
+        private fun sampleAt(channel: Int, index: Int): Float {
             val start = data.loopStartFrame
             val end = data.loopEndFrameExclusive
             val length = end - start
             val resolved = when {
                 index >= end -> start + (index - end) % length
                 hasLooped && index < start -> end - 1 - ((start - 1 - index) % length)
-                else -> index.coerceIn(0, data.monoSamples.lastIndex)
+                else -> index.coerceIn(0, data.frameCount - 1)
             }
-            return data.monoSamples[resolved]
+            return data.channelSamples[channel][resolved]
         }
     }
 
@@ -167,7 +178,9 @@ internal class SampleEngineRenderer private constructor(
                 val data = assetManager.open(path, AssetManager.ACCESS_STREAMING).use(WavPcmDecoder::decode)
                 LoopVoice(spec, data)
             }
-            val decodedBytes = voices.sumOf { it.data.monoSamples.size.toLong() * Float.SIZE_BYTES }
+            val decodedBytes = voices.sumOf {
+                it.data.frameCount.toLong() * it.data.sourceChannels * Float.SIZE_BYTES
+            }
             return SampleEngineRenderer(outputSampleRate, profile, voices, decodedBytes)
         }
 
@@ -183,11 +196,12 @@ internal class SampleEngineRenderer private constructor(
                 outputSampleRate,
                 profile,
                 voices,
-                voices.sumOf { it.data.monoSamples.size.toLong() * Float.SIZE_BYTES },
+                voices.sumOf { it.data.frameCount.toLong() * it.data.sourceChannels * Float.SIZE_BYTES },
             )
         }
 
         private const val SAMPLE_HEADROOM = 0.18
+        private const val PROGRAM_CHANNELS = 2
         private const val SILENCE_GAIN = 0.00001
         private const val DIAGNOSTIC_BLOCK_INTERVAL = 10L
         private const val RPM_RESPONSE_SECONDS = 0.016
@@ -196,3 +210,5 @@ internal class SampleEngineRenderer private constructor(
 }
 
 private fun softClip(value: Double): Double = value / (1.0 + abs(value))
+private fun toPcm16(value: Double): Short =
+    (value.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()

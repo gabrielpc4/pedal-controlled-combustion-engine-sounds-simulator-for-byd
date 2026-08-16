@@ -27,7 +27,7 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `simulation/TransmissionPosition.kt` | `P` / `N` / `D` enum consumed by `DriverInput` |
 | `audio/EngineSampleProfile.kt` | Car-profile metadata, gearbox calibration, layers, and recovered control curves |
 | `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and telemetry |
-| `audio/WavPcmDecoder.kt` | PCM16 downmix and embedded loop-point decoding |
+| `audio/WavPcmDecoder.kt` | PCM16 mono/stereo preservation and embedded loop-point decoding |
 | `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
@@ -51,7 +51,7 @@ BYD getters (when available)       Simulator touch / W-S keys
                  30 Hz              |
              Compose UI     SampleEngineRenderer
                                      |
-                              mono PCM16 program
+                            stereo PCM16 program
                                      |
                         duplicate into N channels
                                      |
@@ -126,7 +126,7 @@ The ratio changes at 38% of the configured shift animation. The initial sample p
 
 The public repository contains playback code and profile metadata but no recordings. Local ignored assets are required for a working audio build; redistribution requires permission from their rights holder.
 
-The initial profile reconstructs one FMOD cabin engine event with 24 continuous layers. Each layer has an RPM region, base level/pitch, optional autopitch root, recovered RPM amplitude/decibel envelopes, and a recovered throttle-route curve. WAV `smpl` metadata preserves the authored loop subsection. Persistent fractional cursors and cubic interpolation perform varispeed/resampling without restarting at buffer boundaries. Inaudible timelines continue advancing, layer/control gains are smoothed, and the final mono program uses fixed headroom plus soft clipping before channel duplication.
+The initial profile reconstructs one FMOD near-car exterior engine event with 47 continuous waveform layers. Each layer has an RPM region, base level/pitch, optional autopitch root, recovered RPM amplitude/decibel envelopes, and a recovered throttle-route curve. WAV `smpl` metadata preserves the authored loop subsection. Persistent fractional cursors and cubic interpolation perform varispeed/resampling without restarting at buffer boundaries. Inaudible timelines continue advancing, layer/control gains are smoothed, and the true-stereo program uses fixed headroom plus independent-channel soft clipping before logical output mapping.
 
 The native bank axis is retained directly; profile redline or limiter values do not stretch its sample regions. Full implementation and validation details are in [Profile-based sample engine audio](sample-engine-audio.md).
 
@@ -144,7 +144,7 @@ The setting cycles `AUTO -> 7.1 -> 5.1 -> QUAD -> STEREO`.
 - one blocking writer on an audio-priority thread;
 - reduced gain for 4/6/8-channel mirroring in an attempt to retain downmix headroom.
 
-The 5.1 and 7.1 experiments currently copy the same full-band sample into every logical channel, including LFE. That satisfies exact logical mirroring but is not a conventional surround mix. OEM bass management may filter, omit, or sum LFE, and a downmixer may combine correlated copies with unexpected gain. Keep test volume low. A production surround path should either omit LFE or feed it a separately limited, low-pass signal after the actual HAL/downmix behavior is known.
+The 5.1 and 7.1 experiments retain left/right on every matching front/rear/side pair and use the stereo midpoint for center and LFE. This is still not a conventional surround master. OEM bass management may filter, omit, or sum LFE, and a downmixer may combine correlated channels with unexpected gain. Keep test volume low. A production surround path should feed LFE a separately limited, low-pass signal after the actual HAL/downmix behavior is known.
 
 The application requests audio focus before creating the renderer. A denied request now prevents playback; duck, transient loss, recovery, and permanent loss update diagnostic state and use short gain ramps to avoid discontinuities. Shutdown and spontaneous renderer failure both release focus. Gain ramps are unit-tested and the lifecycle was exercised on the emulator, but platform focus acquisition/listener paths are not isolated behind a fake in the JVM suite. Actual coexistence with calls, navigation, ADAS, and system warnings still requires on-car policy testing.
 

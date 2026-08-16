@@ -138,6 +138,8 @@ internal fun DebugPanel(
             ) {
                 DebugLine("Sample status", state.audio.sampleStatus)
                 DebugLine("Sample profile", state.audio.sampleProfile)
+                DebugLine("Perspective", state.audio.samplePerspective)
+                DebugLine("Program format", "TRUE STEREO")
                 DebugLine("Loaded loops", state.audio.sampleLoadedLoops.toString())
                 DebugLine("Decoded memory", "${(state.audio.sampleDecodedBytes / (1024 * 1024.0)).roundToInt()} MiB")
                 DebugLine("Target sample RPM", state.audio.sampleTargetRpm.toString())

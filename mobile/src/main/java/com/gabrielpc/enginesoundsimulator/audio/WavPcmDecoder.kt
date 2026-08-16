@@ -6,12 +6,14 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 internal data class PcmLoopData(
-    val monoSamples: FloatArray,
+    val channelSamples: Array<FloatArray>,
     val sampleRate: Int,
-    val sourceChannels: Int,
     val loopStartFrame: Int = 0,
-    val loopEndFrameExclusive: Int = monoSamples.size,
-)
+    val loopEndFrameExclusive: Int = channelSamples.first().size,
+) {
+    val sourceChannels: Int get() = channelSamples.size
+    val frameCount: Int get() = channelSamples.first().size
+}
 
 internal object WavPcmDecoder {
     fun decode(input: InputStream): PcmLoopData = input.buffered().use { stream ->
@@ -66,26 +68,24 @@ internal object WavPcmDecoder {
         require(bytes.size % (channels * 2) == 0) { "Misaligned WAV PCM data" }
 
         val frameCount = bytes.size / (channels * 2)
-        val mono = FloatArray(frameCount)
+        val decodedChannels = Array(channels) { FloatArray(frameCount) }
         var byteIndex = 0
         for (frame in 0 until frameCount) {
-            var sum = 0.0f
-            repeat(channels) {
+            repeat(channels) { channel ->
                 val low = bytes[byteIndex++].toInt() and 0xff
                 val high = bytes[byteIndex++].toInt()
-                sum += ((high shl 8) or low).toShort() / 32768.0f
+                decodedChannels[channel][frame] = ((high shl 8) or low).toShort() / 32768.0f
             }
-            mono[frame] = sum / channels
         }
-        require(mono.size >= 32) { "WAV is too short to loop" }
-        val loopStart = smplLoopStart?.toInt()?.coerceIn(0, mono.lastIndex) ?: 0
+        require(frameCount >= 32) { "WAV is too short to loop" }
+        val loopStart = smplLoopStart?.toInt()?.coerceIn(0, frameCount - 1) ?: 0
         val loopEndExclusive = smplLoopEndInclusive
             ?.plus(1L)
             ?.toInt()
-            ?.coerceIn(loopStart + 1, mono.size)
-            ?: mono.size
+            ?.coerceIn(loopStart + 1, frameCount)
+            ?: frameCount
         require(loopEndExclusive - loopStart >= 4) { "WAV loop is too short" }
-        PcmLoopData(mono, sampleRate, channels, loopStart, loopEndExclusive)
+        PcmLoopData(decodedChannels, sampleRate, loopStart, loopEndExclusive)
     }
 }
 
