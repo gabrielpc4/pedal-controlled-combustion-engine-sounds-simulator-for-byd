@@ -35,7 +35,7 @@ data class EngineTuning(
     /** Fast initial RPM force used only below the full-pedal sweet spot. */
     val fullThrottleKickRpmPerSecond: Double = 30_000.0,
     /** Constant negative fake-tach acceleration as soon as the accelerator is released. */
-    val liftOffRpmDecelerationPerSecond: Double = 5_500.0,
+    val liftOffRpmDecelerationPerSecond: Double = 3_000.0,
     /** Additional negative fake-tach acceleration at full brake. */
     val brakeRpmDecelerationPerSecond: Double = 8_500.0,
     val simulatorCoastRegenMps2: Double = 2.50,
@@ -202,6 +202,8 @@ class TuningRepository(context: Context) {
         val currentCalibration = preferences.getInt(KEY_CALIBRATION_REVISION, 0) == CALIBRATION_REVISION
         val currentCoastDeceleration =
             preferences.getInt(KEY_COAST_DECELERATION_REVISION, 0) == COAST_DECELERATION_REVISION
+        val currentLiftOffResponse =
+            preferences.getInt(KEY_LIFT_OFF_RESPONSE_REVISION, 0) == LIFT_OFF_RESPONSE_REVISION
         val storedEngine = defaults.engine.copy(
             idleRpm = number(KEY_IDLE, defaults.engine.idleRpm),
             maxRpm = number(KEY_MAX_RPM, defaults.engine.maxRpm),
@@ -225,7 +227,11 @@ class TuningRepository(context: Context) {
             driveRpmAccelerationPerSecond = number(KEY_DRIVE_RPM_ACCELERATION, defaults.engine.driveRpmAccelerationPerSecond),
             fullThrottleSweetSpotRpm = number(KEY_FULL_THROTTLE_SWEET_SPOT, defaults.engine.fullThrottleSweetSpotRpm),
             fullThrottleKickRpmPerSecond = number(KEY_FULL_THROTTLE_KICK, defaults.engine.fullThrottleKickRpmPerSecond),
-            liftOffRpmDecelerationPerSecond = number(KEY_LIFT_OFF_RPM_DECELERATION, defaults.engine.liftOffRpmDecelerationPerSecond),
+            liftOffRpmDecelerationPerSecond = if (currentLiftOffResponse) {
+                number(KEY_LIFT_OFF_RPM_DECELERATION, defaults.engine.liftOffRpmDecelerationPerSecond)
+            } else {
+                defaults.engine.liftOffRpmDecelerationPerSecond
+            },
             brakeRpmDecelerationPerSecond = number(KEY_BRAKE_RPM_DECELERATION, defaults.engine.brakeRpmDecelerationPerSecond),
             simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
                 number(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2)
@@ -266,6 +272,12 @@ class TuningRepository(context: Context) {
                 .putString(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2.toString())
                 .apply()
         }
+        if (!currentLiftOffResponse) {
+            preferences.edit()
+                .putInt(KEY_LIFT_OFF_RESPONSE_REVISION, LIFT_OFF_RESPONSE_REVISION)
+                .putString(KEY_LIFT_OFF_RPM_DECELERATION, defaults.engine.liftOffRpmDecelerationPerSecond.toString())
+                .apply()
+        }
         return TuningConfig(engine, audio).sanitized()
     }
 
@@ -274,6 +286,7 @@ class TuningRepository(context: Context) {
         preferences.edit()
             .putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION)
             .putInt(KEY_COAST_DECELERATION_REVISION, COAST_DECELERATION_REVISION)
+            .putInt(KEY_LIFT_OFF_RESPONSE_REVISION, LIFT_OFF_RESPONSE_REVISION)
             .putString(KEY_IDLE, clean.engine.idleRpm.toString())
             .putString(KEY_MAX_RPM, clean.engine.maxRpm.toString())
             .putString(KEY_REDLINE_RPM, clean.engine.redlineRpm.toString())
@@ -328,6 +341,8 @@ class TuningRepository(context: Context) {
         const val CALIBRATION_REVISION = 9
         const val KEY_COAST_DECELERATION_REVISION = "coast_deceleration_revision"
         const val COAST_DECELERATION_REVISION = 1
+        const val KEY_LIFT_OFF_RESPONSE_REVISION = "lift_off_response_revision"
+        const val LIFT_OFF_RESPONSE_REVISION = 2
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
