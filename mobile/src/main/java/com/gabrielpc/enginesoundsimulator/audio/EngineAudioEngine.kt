@@ -25,7 +25,6 @@ enum class AudioChannelMode(val displayName: String) {
 data class AudioOutputState(
     val running: Boolean = false,
     val requestedMode: AudioChannelMode = AudioChannelMode.AUTO,
-    val requestedPerspective: EngineSoundPerspective = EngineSoundPerspective.INTERIOR,
     val sampleStatus: String = "OFFLINE",
     val activeChannels: Int = 0,
     val activeLayout: String = "OFFLINE",
@@ -40,7 +39,6 @@ data class AudioOutputState(
     val steadyStateUnderruns: Int = 0,
     val focusGranted: Boolean = false,
     val sampleProfile: String = "none",
-    val samplePerspective: String = "none",
     val sampleLoadedLoops: Int = 0,
     val sampleDecodedBytes: Long = 0L,
     val sampleTargetRpm: Int = 0,
@@ -56,10 +54,7 @@ data class AudioOutputState(
 )
 
 /** Streams the required sample-bank engine program into every negotiated logical output channel. */
-class EngineAudioEngine(
-    context: Context,
-    initialPerspective: EngineSoundPerspective = EngineSoundPerspective.INTERIOR,
-) {
+class EngineAudioEngine(context: Context) {
     private val appContext = context.applicationContext
     private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val lifecycleLock = Any()
@@ -67,20 +62,13 @@ class EngineAudioEngine(
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
     private val requestedMode = AtomicReference(AudioChannelMode.AUTO)
-    private val requestedPerspective = AtomicReference(initialPerspective)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
     private val outputState = AtomicReference(
-        AudioOutputState(
-            requestedPerspective = initialPerspective,
-            sampleProfile = EngineSampleProfiles.forPerspective(initialPerspective).id,
-            samplePerspective = EngineSampleProfiles.forPerspective(initialPerspective).perspective,
-        ),
+        AudioOutputState(sampleProfile = EngineSampleProfiles.default.id),
     )
     private val renderThread = AtomicReference<Thread?>(null)
     private val activeTrack = AtomicReference<AudioTrack?>(null)
-    private val previewThread = AtomicReference<Thread?>(null)
-    private val previewActive = AtomicBoolean(false)
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
@@ -151,111 +139,6 @@ class EngineAudioEngine(
         }
     }
 
-    fun setSoundPerspective(perspective: EngineSoundPerspective) {
-        synchronized(lifecycleLock) {
-            val changed = requestedPerspective.getAndSet(perspective) != perspective
-            outputState.updateAndGet {
-                it.copy(
-                    requestedPerspective = perspective,
-                    samplePerspective = EngineSampleProfiles.forPerspective(perspective).perspective,
-                )
-            }
-            if (!changed) return
-
-            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
-            if (shouldRestart && stopLocked()) {
-                startLocked()
-            }
-        }
-    }
-
-    /** Plays the authored cabin C1 loop once, without RPM mapping or gain processing. */
-    fun playExactInteriorC1Sample() {
-        synchronized(lifecycleLock) {
-            if (previewThread.get()?.isAlive == true) return
-            // Keep the renderer lifecycle intact; its gain is muted for the duration of this
-            // diagnostic preview so a slow bank decode cannot prevent the exact sample playing.
-
-            val decoded = runCatching {
-                appContext.assets.open("sample_engine/lamborghini_huracan_trofeo_evo2/s039_hur_c1.wav")
-                    .use { WavPcmDecoder.decode(it) }
-            }.getOrElse { throwable ->
-                PersistentDiagnosticLog.recordThrowable("interior_c1_preview_load_failed", throwable)
-                return
-            }
-            if (decoded.sourceChannels != 2 || decoded.frameCount == 0) {
-                PersistentDiagnosticLog.warning(
-                    "interior_c1_preview_invalid_format",
-                    "channels=${decoded.sourceChannels} frames=${decoded.frameCount}",
-                )
-                return
-            }
-            val samples = ShortArray(decoded.frameCount * 2)
-            for (frame in 0 until decoded.frameCount) {
-                samples[frame * 2] = (decoded.channelSamples[0][frame] * 32_767.0f)
-                    .coerceIn(-32_768f, 32_767f).toInt().toShort()
-                samples[frame * 2 + 1] = (decoded.channelSamples[1][frame] * 32_767.0f)
-                    .coerceIn(-32_768f, 32_767f).toInt().toShort()
-            }
-            val track = runCatching {
-                val format = AudioFormat.Builder()
-                    .setSampleRate(decoded.sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .build()
-                val attributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-                AudioTrack.Builder()
-                    .setAudioAttributes(attributes)
-                    .setAudioFormat(format)
-                    .setTransferMode(AudioTrack.MODE_STREAM)
-                    .setBufferSizeInBytes(
-                        AudioTrack.getMinBufferSize(
-                            decoded.sampleRate,
-                            AudioFormat.CHANNEL_OUT_STEREO,
-                            AudioFormat.ENCODING_PCM_16BIT,
-                        ).coerceAtLeast(4_096),
-                    )
-                    .build()
-                    .also { created ->
-                        check(created.state == AudioTrack.STATE_INITIALIZED)
-                    }
-            }.getOrElse { throwable ->
-                PersistentDiagnosticLog.recordThrowable("interior_c1_preview_open_failed", throwable)
-                return
-            }
-            previewActive.set(true)
-            outputState.updateAndGet { it.copy(sampleStatus = "PREVIEW", sampleError = null) }
-            PersistentDiagnosticLog.event(
-                "interior_c1_preview_started",
-                "source_rate=${decoded.sampleRate} channels=${decoded.sourceChannels} " +
-                    "frames=${decoded.frameCount} bytes=${samples.size * 2}",
-            )
-            val preview = Thread({
-                try {
-                    track.play()
-                    val written = track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
-                    check(written == samples.size)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                } finally {
-                    runCatching { track.stop() }
-                    track.release()
-                    PersistentDiagnosticLog.event("interior_c1_preview_finished")
-                    previewThread.compareAndSet(Thread.currentThread(), null)
-                    synchronized(lifecycleLock) {
-                        previewActive.set(false)
-                        outputState.updateAndGet { it.copy(sampleStatus = "OFFLINE") }
-                    }
-                }
-            }, "interior-c1-preview").apply { isDaemon = true }
-            previewThread.set(preview)
-            preview.start()
-        }
-    }
-
     private fun startLocked() {
         if (
             running.get() ||
@@ -266,11 +149,10 @@ class EngineAudioEngine(
             if (!stopLocked()) return
         }
 
-        val sampleProfile = selectedSampleProfile()
+        val sampleProfile = EngineSampleProfiles.default
         PersistentDiagnosticLog.event(
             "audio_start_requested",
-            "mode=${requestedMode.get().name} profile=${sampleProfile.id} " +
-                "perspective=${requestedPerspective.get().name}",
+            "mode=${requestedMode.get().name} profile=${sampleProfile.id}",
         )
         focusMultiplier.set(0.0)
         val focusResult = runCatching { requestFocus() }
@@ -308,12 +190,10 @@ class EngineAudioEngine(
             AudioOutputState(
                 running = true,
                 requestedMode = requestedMode.get(),
-                requestedPerspective = requestedPerspective.get(),
                 sampleStatus = "STARTING",
                 activeLayout = "STARTING",
                 focusGranted = true,
                 sampleProfile = sampleProfile.id,
-                samplePerspective = sampleProfile.perspective,
             ),
         )
 
@@ -373,7 +253,6 @@ class EngineAudioEngine(
             previous.copy(
                 running = false,
                 requestedMode = requestedMode.get(),
-                requestedPerspective = requestedPerspective.get(),
                 sampleStatus = "OFFLINE",
                 activeChannels = 0,
                 activeLayout = "OFFLINE",
@@ -397,14 +276,13 @@ class EngineAudioEngine(
 
     private fun renderLoop(runId: Long) {
         val mode = requestedMode.get()
-        val perspective = requestedPerspective.get()
-        val sampleProfile = EngineSampleProfiles.forPerspective(perspective)
+        val sampleProfile = EngineSampleProfiles.default
         var opened: OpenedTrack? = null
         var failure: String? = null
 
         try {
-            // Match the authored source rate used by the exact C1 preview. Unity-pitch voices
-            // remain sample-aligned and Android performs at most one final device conversion.
+            // Match the authored source rate. Unity-pitch voices remain sample-aligned and
+            // Android performs at most one final device conversion.
             val sampleRate = SAMPLE_BANK_SAMPLE_RATE
             val sampleRenderer = try {
                 SampleEngineRenderer.load(appContext.assets, sampleRate, sampleProfile)
@@ -427,7 +305,7 @@ class EngineAudioEngine(
                     "decoded_bytes=${initialDiagnostics.decodedBytes} output_rate=$sampleRate " +
                     "device_native_rate=${nativeSampleRate()} quality=SOURCE_RATE_TRANSPARENT " +
                     "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
-                    "perspective=${sampleProfile.perspective} program_channels=2",
+                    "program_channels=2",
             )
             // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
             // loading and JIT work cannot starve the newly opened output buffer.
@@ -505,7 +383,6 @@ class EngineAudioEngine(
                 AudioOutputState(
                     running = true,
                     requestedMode = mode,
-                    requestedPerspective = perspective,
                     sampleStatus = "ACTIVE",
                     activeChannels = track.channelCount,
                     activeLayout = active.layout.label,
@@ -518,7 +395,6 @@ class EngineAudioEngine(
                     underruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0,
                     focusGranted = previous.focusGranted,
                     sampleProfile = sampleProfile.id,
-                    samplePerspective = sampleProfile.perspective,
                     sampleLoadedLoops = initialDiagnostics.loadedLoops,
                     sampleDecodedBytes = initialDiagnostics.decodedBytes,
                 )
@@ -526,7 +402,6 @@ class EngineAudioEngine(
             PersistentDiagnosticLog.event(
                 "audio_track_active",
                 "mode=${mode.name} profile=${sampleProfile.id} layout=${active.layout.label} " +
-                    "perspective=${perspective.name} " +
                     "logical_channels=${track.channelCount} program_channels=2 " +
                     "sample_rate=${track.sampleRate} buffer_frames=" +
                     "${if (Build.VERSION.SDK_INT >= 24) track.bufferSizeInFrames else active.capacityFrames} " +
@@ -535,7 +410,7 @@ class EngineAudioEngine(
 
             while (isCurrent(runId)) {
                 val frame = parameters.get()
-                val renderGain = if (previewActive.get()) 0.0 else duplicationGain * focusMultiplier.get()
+                val renderGain = duplicationGain * focusMultiplier.get()
                 sampleRenderer.render(frame, stereoProgram, renderGain)
                 mapStereoAcrossChannels(stereoProgram, interleaved, active.layout.channelCount)
                 if (!writeFully(track, interleaved, runId)) break
@@ -594,9 +469,6 @@ class EngineAudioEngine(
             }
         }
     }
-
-    private fun selectedSampleProfile(): EngineSampleProfile =
-        EngineSampleProfiles.forPerspective(requestedPerspective.get())
 
     private fun isCurrent(runId: Long): Boolean = running.get() && generation.get() == runId
 

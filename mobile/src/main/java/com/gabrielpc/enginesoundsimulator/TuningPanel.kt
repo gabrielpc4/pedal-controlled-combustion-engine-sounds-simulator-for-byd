@@ -430,7 +430,6 @@ private fun AudioTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             Spacer(Modifier.height(20.dp))
             Text("PROFILE", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
             Text(profile.displayName, color = TuneWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(profile.perspective, color = TuneCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             Text("NATIVE RPM DOMAIN", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
             Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)

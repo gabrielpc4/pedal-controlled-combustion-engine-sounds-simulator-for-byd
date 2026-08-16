@@ -1,6 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-internal fun huracanTrofeoEvo2InteriorProfile(): EngineSampleProfile {
+internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
     val primaryLoad = dbCurve(0.0 to -42.0, 0.3715604 to -7.0, 0.84485775 to 0.0, 1.0 to 0.0)
     val highLoad = dbCurve(0.0 to -42.0, 0.077112384 to -24.625217, 0.16406891 to -13.84087, 1.0730107 to 0.0)
     val noiseLoad = dbCurve(0.021328958 to -39.839832, 0.19852336 to -10.845219, 1.2466724 to -1.1)
@@ -85,7 +85,6 @@ internal fun huracanTrofeoEvo2InteriorProfile(): EngineSampleProfile {
         id = "lamborghini_huracan_trofeo_evo2_cabin",
         displayName = "Lamborghini Huracán Super Trofeo EVO2",
         assetDirectory = "lamborghini_huracan_trofeo_evo2",
-        perspective = "INTERIOR / CABIN",
         minimumRpm = 0.0,
         maximumRpm = 10_000.0,
         idleRpm = 1_040.0,

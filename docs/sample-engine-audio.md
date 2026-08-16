@@ -2,7 +2,7 @@
 
 ## Status
 
-The app is sample-only and uses the continuous cabin engine event from `fx_lamborghini_huracan_trofeo_evo2.bank`; there is no procedural renderer or fallback sound. The `C1 SAMPLE` header button plays the original `s039_hur_c1.wav` PCM16 stereo stream once, without RPM mapping or gain processing. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
+The app is sample-only and uses one continuous engine event from `fx_lamborghini_huracan_trofeo_evo2.bank`; there is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
 The implementation is designed for additional cars. An `EngineSampleProfile` owns the identity, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. Adding a car means adding a profile and its local assets, not modifying the realtime mixer.
 
@@ -12,7 +12,7 @@ The original bank and decoded recordings live under the ignored directory:
 
 `audio_samples/fx_lamborghini_huracan_trofeo_evo2`
 
-Twenty-four continuous cabin-engine streams are in `converted`. The build copies only those named files into `assets/sample_engine/lamborghini_huracan_trofeo_evo2/`. Throttle-lift/FOT one-shots, turbo, transmission, ignition, tire, wind, and other environmental noises are excluded.
+Twenty-four continuous engine streams are in `converted`. The build copies only those named files into `assets/sample_engine/lamborghini_huracan_trofeo_evo2/`. Throttle-lift/FOT one-shots, turbo, transmission, ignition, tire, wind, and other environmental noises are excluded.
 
 Extraction uses the official `vgmstream-cli` decoder. Each asset filename begins with its FSB5 subsong index. Preserve the original single-play duration and append available loop metadata with:
 
@@ -26,7 +26,7 @@ Neither the bank nor decoded audio is committed. The supplied mod does not grant
 
 ## Recovered bank model
 
-The source is an FMOD bank version `0x50` containing 165 streams, 20 events, 198 instruments, 42 parameters, and 382 automation curves. The selected cabin engine event uses:
+The source is an FMOD bank version `0x50` containing 165 streams, 20 events, 198 instruments, 42 parameters, and 382 automation curves. The selected engine event uses:
 
 - RPM parameter `0..10000`;
 - throttle parameter `0..2` (the app drives its normal `0..1` pedal portion);
@@ -43,13 +43,17 @@ The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), se
 
 ## Realtime rendering
 
-1. All 24 PCM16 WAVs decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program at the recordings' authored 44.1 kHz rate, matching the exact C1 preview path.
+1. All 24 PCM16 WAVs decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program at the recordings' authored 44.1 kHz rate.
 2. Simulation and bank use one RPM axis. There is no redline remapping.
 3. Each layer evaluates its own RPM amplitude curves, RPM decibel curves, throttle route, base gain, pitch root, and base pitch.
 4. Each layer owns a persistent fractional cursor. Cubic interpolation handles varispeed and 44.1-to-48 kHz conversion.
 5. The decoder honors embedded `smpl` start/end points. The pre-loop intro plays once, then only the authored loop segment wraps.
 6. Timelines advance while inaudible, matching an always-running FMOD event and avoiding restarts when a fade reopens.
 7. Layer, enable, focus, and master gains are smoothed. Calibrated mix headroom protects the output, while samples inside the PCM range remain linear and unchanged; limiting occurs only on a genuine full-scale overload.
+
+### Load versus lift-off tone
+
+The authored throttle routes deliberately crossfade between different recordings. Around 7,000 RPM, full load is dominated by `engine_noise_7`, `l2a`, `l2a_high`, `n_up`, and `sine`; lift-off instead opens `c1`, `c2`, and `n2`. The load group contains more noisy, overlapping high-frequency material, while the coast group has fewer and more tonally coherent harmonic loops. Consequently, lift-off can sound clearer and subjectively louder even when telemetry reports a lower PCM peak. This is source/mix character, not a different sample rate or output-quality mode.
 
 The audio thread performs no file I/O or persistent logging. It publishes bounded diagnostics consumed by the 200 Hz drive controller once per second.
 
@@ -64,7 +68,7 @@ The audio thread performs no file I/O or persistent logging. It publishes bounde
 - rendered frames, authored loop wraps, peak, and pre-limiter over-range count;
 - startup and steady-state `AudioTrack` underruns.
 
-One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, `audio_track_active`, `interior_c1_preview_started`, and `interior_c1_preview_finished`, including profile ID, source format, and native RPM domain.
+One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, and `audio_track_active`, including profile ID, source format, and native RPM domain.
 
 The log is `/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log`. For a debug install:
 
@@ -81,7 +85,7 @@ adb shell am force-stop com.gabrielpc.enginesoundsimulator
 adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity --ez run_sample_audio_validation true
 ```
 
-The sequence selects simulator input, Drive, and sound, then applies 25%, 55%, 100%, and released-throttle stages. A valid run shows `sample_status=ACTIVE`, `sample_loops=24`, `perspective=INTERIOR / CABIN`, increasing frames/wraps, changing target/render RPM and active layers, and no renderer exception.
+The sequence selects simulator input, Drive, and sound, then applies 25%, 55%, 100%, and released-throttle stages. A valid run shows `sample_status=ACTIVE`, `sample_loops=24`, increasing frames/wraps, changing target/render RPM and active layers, and no renderer exception.
 
 ## Automated coverage
 

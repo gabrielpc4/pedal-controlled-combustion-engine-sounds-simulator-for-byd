@@ -13,10 +13,9 @@ class SampleEngineRendererTest {
     private val profile = EngineSampleProfiles.default
 
     @Test
-    fun defaultProfileContainsRecoveredContinuousInteriorEvent() {
+    fun profileContainsRecoveredContinuousEngineEvent() {
         assertEquals(24, profile.layers.size)
         assertEquals(24, profile.requiredAssets.size)
-        assertEquals("INTERIOR / CABIN", profile.perspective)
         assertEquals(7, profile.gearRatios.size)
         assertEquals(10_000.0, profile.maximumRpm, 0.0)
         assertEquals(8_350.0, profile.limiterRpm, 0.0)
@@ -29,24 +28,6 @@ class SampleEngineRendererTest {
             assertTrue("no audible full-load layer at $rpm", strongestGain(rpm.toDouble(), 1.0) > 0.0001)
             assertTrue("no audible lift-off layer at $rpm", strongestGain(rpm.toDouble(), 0.0) > 0.0001)
         }
-    }
-
-    @Test
-    fun perspectiveSelectorExposesCompleteExteriorAndInteriorEvents() {
-        val exterior = EngineSampleProfiles.forPerspective(EngineSoundPerspective.EXTERIOR)
-        val interior = EngineSampleProfiles.forPerspective(EngineSoundPerspective.INTERIOR)
-
-        assertEquals(47, exterior.layers.size)
-        assertEquals("EXTERIOR / NEAR CAR", exterior.perspective)
-        assertEquals(24, interior.layers.size)
-        assertEquals(24, interior.requiredAssets.size)
-        assertEquals("INTERIOR / CABIN", interior.perspective)
-        assertEquals(exterior.maximumRpm, interior.maximumRpm, 0.0)
-        assertEquals(exterior.idleRpm, interior.idleRpm, 0.0)
-        assertTrue(interior.layers.any { it.role == SampleLayerRole.IDLE })
-        assertTrue(interior.layers.any { it.role == SampleLayerRole.LOAD })
-        assertTrue(interior.layers.any { it.role == SampleLayerRole.COAST })
-        assertTrue(interior.layers.any { it.role == SampleLayerRole.LIMITER })
     }
 
     @Test
