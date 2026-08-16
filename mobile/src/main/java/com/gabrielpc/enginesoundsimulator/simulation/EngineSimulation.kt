@@ -207,11 +207,12 @@ class EngineSimulation(
         val externalMps = input.externalSpeedKmh?.coerceAtLeast(0.0)?.div(3.6)
         if (externalMps != null) {
             applyExternalSpeed(externalMps, dt)
-        } else if (!input.simulateCoastRegen) {
+        } else {
             externalSpeedActive = false
             integrateElectricVehicle(
                 dt = dt,
                 transmissionPosition = input.transmissionPosition,
+                applySimulatorRegen = input.simulateCoastRegen && rawThrottle <= PEDAL_RELEASE_THRESHOLD,
             )
             if (input.transmissionPosition == TransmissionPosition.PARK) {
                 vehicleSpeedMps = 0.0
@@ -230,19 +231,13 @@ class EngineSimulation(
         if (activeShift == null && input.transmissionPosition == TransmissionPosition.DRIVE) {
             chooseVirtualShift(pedalReleased)
         }
-        if (externalMps == null && input.simulateCoastRegen) {
-            synchronizeSimulatorSpeedToTach(
-                dt = dt,
-                transmissionPosition = input.transmissionPosition,
-            )
-        }
-
         return snapshot()
     }
 
     private fun integrateElectricVehicle(
         dt: Double,
         transmissionPosition: TransmissionPosition,
+        applySimulatorRegen: Boolean,
     ) {
         val previousSpeedMps = vehicleSpeedMps
         val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
@@ -266,13 +261,20 @@ class EngineSimulation(
             profile.vehicleMassKg * profile.tractionLimitMps2 * filteredThrottle,
         )
         val serviceBrakeForce = filteredBrake * profile.vehicleMassKg * MAX_SERVICE_BRAKE_MPS2
+        val regenerativeCoastForce = if (
+            applySimulatorRegen && transmissionPosition == TransmissionPosition.DRIVE && vehicleSpeedMps > 0.05
+        ) {
+            profile.vehicleMassKg * profile.simulatorCoastRegenMps2
+        } else {
+            0.0
+        }
         val aerodynamicDrag = 0.5 * AIR_DENSITY_KG_M3 * profile.dragAreaM2 * vehicleSpeedMps.pow(2)
         val rollingResistance = if (vehicleSpeedMps > 0.05 || driveForce > 0.0) {
             profile.vehicleMassKg * GRAVITY_MPS2 * profile.rollingResistanceCoefficient
         } else {
             0.0
         }
-        val acceleration = (driveForce - serviceBrakeForce - aerodynamicDrag - rollingResistance) /
+        val acceleration = (driveForce - serviceBrakeForce - regenerativeCoastForce - aerodynamicDrag - rollingResistance) /
             (profile.vehicleMassKg * profile.rotationalMassFactor)
         vehicleSpeedMps = (vehicleSpeedMps + acceleration * dt)
             .coerceIn(0.0, maximumVehicleSpeedMps())
@@ -419,26 +421,6 @@ class EngineSimulation(
         )
         shiftSerial += 1
         secondsSinceShift = 0.0
-    }
-
-    /** In SIM, visual speed is intentionally tied to fake RPM so lift-off decelerates both together. */
-    private fun synchronizeSimulatorSpeedToTach(
-        dt: Double,
-        transmissionPosition: TransmissionPosition,
-    ) {
-        val previousSpeedMps = vehicleSpeedMps
-        val rpmMappedSpeedMps = if (transmissionPosition == TransmissionPosition.DRIVE) {
-            val rpmSpan = (profile.redlineRpm - profile.idleRpm).coerceAtLeast(1.0)
-            val fraction = ((engineRpm - profile.idleRpm) / rpmSpan).coerceIn(0.0, 1.0)
-            profile.topSpeedKmh / 3.6 * fraction
-        } else {
-            0.0
-        }
-        // SIM speed is a display companion to the fake tach, not an independently integrated
-        // vehicle. Keeping this direct on every frame means idle RPM is always exactly 0 km/h.
-        vehicleSpeedMps = rpmMappedSpeedMps
-        lastAcceleration = ((vehicleSpeedMps - previousSpeedMps) / dt)
-            .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
     }
 
     private fun updateLimiterLatch() {

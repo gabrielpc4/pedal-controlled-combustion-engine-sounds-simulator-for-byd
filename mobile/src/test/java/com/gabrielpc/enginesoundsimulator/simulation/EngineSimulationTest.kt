@@ -91,40 +91,29 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun simulatorSpeedFollowsTheFakeTachOnLiftOff() {
-        val simulation = EngineSimulation()
-        val launched = simulation.runFor(1.0, throttle = 0.35, sim = true)
-        val lifted = simulation.runFor(0.80, sim = true)
-        val rpmSpan = simulation.profile.redlineRpm - simulation.profile.idleRpm
-        val expectedSpeed = simulation.profile.topSpeedKmh *
-            ((lifted.rpm - simulation.profile.idleRpm) / rpmSpan).coerceIn(0.0, 1.0)
-        assertEquals(expectedSpeed, lifted.speedKmh, 0.01)
-        assertTrue(lifted.rpm < launched.rpm - 600.0)
-        assertTrue(lifted.speedKmh < launched.speedKmh - 15.0)
+    fun simulatorUsesPhysicalAccelerationAndAddsRegenOnLiftOff() {
+        val withRegen = EngineSimulation()
+        val dragOnly = EngineSimulation()
+        val launchedWithRegen = withRegen.runFor(2.0, throttle = 1.0, sim = true)
+        val launchedDragOnly = dragOnly.runFor(2.0, throttle = 1.0)
+        assertEquals(launchedDragOnly.speedKmh, launchedWithRegen.speedKmh, 0.01)
+
+        val regenCoast = withRegen.runFor(0.8, sim = true)
+        val dragCoast = dragOnly.runFor(0.8)
+        assertTrue(regenCoast.speedKmh < dragCoast.speedKmh - 6.0)
+        assertTrue(regenCoast.rpm < launchedWithRegen.rpm - 600.0)
     }
 
     @Test
-    fun firstGearLiftOffReachesZeroSpeedWhenTheTachReachesIdle() {
+    fun fullThrottleAccelerationTargetsTheClaimedZeroToHundredWindow() {
         val simulation = EngineSimulation()
-        simulation.runFor(0.8, throttle = 0.35, sim = true)
-        val stopped = simulation.runFor(5.0, sim = true)
-
-        assertEquals(simulation.profile.idleRpm, stopped.rpm, 0.001)
-        assertEquals(0.0, stopped.speedKmh, 0.001)
-        assertEquals(1, stopped.gear)
-    }
-
-    @Test
-    fun simulatorSpeedIsTheExactTachMappingAtEveryFirstGearLiftOffStep() {
-        val simulation = EngineSimulation()
-        simulation.runFor(0.8, throttle = 0.35, sim = true)
-        repeat((5.0 / STEP).toInt()) {
-            val state = simulation.update(DriverInput(simulateCoastRegen = true), STEP)
-            val expectedSpeed = simulation.profile.topSpeedKmh *
-                ((state.rpm - simulation.profile.idleRpm) /
-                    (simulation.profile.redlineRpm - simulation.profile.idleRpm)).coerceIn(0.0, 1.0)
-            assertEquals("speed must follow the displayed tach without a held value", expectedSpeed, state.speedKmh, 0.001)
+        var elapsedSeconds = 0.0
+        var state = simulation.state
+        while (state.speedKmh < 100.0 && elapsedSeconds < 6.0) {
+            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
+            elapsedSeconds += STEP
         }
+        assertTrue("0-100 km/h should remain near the 3.8-second target: $elapsedSeconds", elapsedSeconds in 3.4..4.2)
     }
 
     @Test
