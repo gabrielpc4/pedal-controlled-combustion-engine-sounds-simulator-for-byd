@@ -109,7 +109,7 @@ At every 5 ms fixed step:
 3. In simulator mode, normalized road speed selects independent front and rear wheel torque from the digitized editable curves.
 4. Requested wheel torque is scaled by the filtered Sport-like pedal request and bounded by the configured motor-power/efficiency sanity ceiling.
 5. Wheel torque divided by tire radius produces drive force; the non-binding configurable traction ceiling remains available for tuning.
-6. In simulator mode only, lift-off can apply a constant coast-regen deceleration (`simulatorCoastRegenMps2`, default 0.50 m/s²) so virtual speed drops faster than aero drag alone.
+6. In simulator mode only, lift-off applies a strong constant coast deceleration (`simulatorCoastRegenMps2`, default 2.50 m/s²) so virtual speed and synthetic RPM fall promptly. The value is independently editable from 0–4 m/s² and never affects BYD Live input.
 7. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
 8. The independent sound RPM target follows the **P / N / D** shifter: **D** couples to wheel speed through the presentation gear (filtered by editable `syntheticRpmResponseSeconds`, default 35 ms); **N** and **P** free-rev with filtered throttle using fixed neutral inertia constants (`NEUTRAL_REV_UP_RESPONSE_SECONDS` = 0.55 s, `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` = 0.90 s). There is no lift-off RPM retention layer in **D**.
 9. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.

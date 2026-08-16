@@ -490,7 +490,7 @@ class EngineSimulationTest {
 
     @Test
     fun simulatorCoastRegenSlowsVirtualVehicleFasterThanDragAlone() {
-        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(simulatorCoastRegenMps2 = 0.50)
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(simulatorCoastRegenMps2 = 2.50)
         val withoutRegen = EngineSimulation(profile)
         val withRegen = EngineSimulation(profile)
         withoutRegen.runFor(6.0, throttle = 1.0)
@@ -502,7 +502,7 @@ class EngineSimulationTest {
         assertTrue(
             "simulator coast regen should reduce speed faster than drag alone: " +
                 "drag=${dragOnly.speedKmh} regen=${regenCoast.speedKmh}",
-            regenCoast.speedKmh < dragOnly.speedKmh - 2.0,
+            regenCoast.speedKmh < dragOnly.speedKmh - 12.0,
         )
     }
 

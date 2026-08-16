@@ -370,7 +370,7 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
             ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
-            ParameterSlider("SIM COAST REGEN", engine.simulatorCoastRegenMps2, 0.0..1.50, "%.2f m/s²") {
+            ParameterSlider("SIM COAST REGEN", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
                 onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
             }
             Spacer(Modifier.height(12.dp))

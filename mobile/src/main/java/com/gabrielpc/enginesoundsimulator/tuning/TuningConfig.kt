@@ -28,7 +28,7 @@ data class EngineTuning(
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
     val sampleRpmResponseMs: Double = 35.0,
-    val simulatorCoastRegenMps2: Double = 0.50,
+    val simulatorCoastRegenMps2: Double = 2.50,
     val finalDrive: Double = EngineSampleProfiles.default.finalDrive,
     val throttleAttackMs: Double = 120.0,
     val throttleReleaseMs: Double = 90.0,
@@ -71,7 +71,7 @@ data class EngineTuning(
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
             sampleRpmResponseMs = sampleRpmResponseMs.coerceIn(10.0, 250.0),
-            simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 1.50),
+            simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 4.00),
             finalDrive = finalDrive.coerceIn(2.0, 6.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
@@ -160,6 +160,8 @@ class TuningRepository(context: Context) {
     fun load(): TuningConfig {
         val defaults = TuningConfig.DEFAULT
         val currentCalibration = preferences.getInt(KEY_CALIBRATION_REVISION, 0) == CALIBRATION_REVISION
+        val currentCoastDeceleration =
+            preferences.getInt(KEY_COAST_DECELERATION_REVISION, 0) == COAST_DECELERATION_REVISION
         val storedEngine = defaults.engine.copy(
             idleRpm = number(KEY_IDLE, defaults.engine.idleRpm),
             maxRpm = number(KEY_MAX_RPM, defaults.engine.maxRpm),
@@ -181,10 +183,11 @@ class TuningRepository(context: Context) {
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
             sampleRpmResponseMs = number(KEY_SAMPLE_RPM_RESPONSE, defaults.engine.sampleRpmResponseMs),
-            simulatorCoastRegenMps2 = number(
-                KEY_SIMULATOR_COAST_REGEN,
-                defaults.engine.simulatorCoastRegenMps2,
-            ),
+            simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
+                number(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2)
+            } else {
+                defaults.engine.simulatorCoastRegenMps2
+            },
             finalDrive = number(KEY_FINAL_DRIVE, defaults.engine.finalDrive),
             throttleAttackMs = number(KEY_THROTTLE_ATTACK, defaults.engine.throttleAttackMs),
             throttleReleaseMs = number(KEY_THROTTLE_RELEASE, defaults.engine.throttleReleaseMs),
@@ -210,6 +213,12 @@ class TuningRepository(context: Context) {
         if (!currentCalibration) {
             preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).apply()
         }
+        if (!currentCoastDeceleration) {
+            preferences.edit()
+                .putInt(KEY_COAST_DECELERATION_REVISION, COAST_DECELERATION_REVISION)
+                .putString(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2.toString())
+                .apply()
+        }
         return TuningConfig(engine, audio).sanitized()
     }
 
@@ -217,6 +226,7 @@ class TuningRepository(context: Context) {
         val clean = config.sanitized()
         preferences.edit()
             .putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION)
+            .putInt(KEY_COAST_DECELERATION_REVISION, COAST_DECELERATION_REVISION)
             .putString(KEY_IDLE, clean.engine.idleRpm.toString())
             .putString(KEY_MAX_RPM, clean.engine.maxRpm.toString())
             .putString(KEY_REDLINE_RPM, clean.engine.redlineRpm.toString())
@@ -265,6 +275,8 @@ class TuningRepository(context: Context) {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
         const val CALIBRATION_REVISION = 7
+        const val KEY_COAST_DECELERATION_REVISION = "coast_deceleration_revision"
+        const val COAST_DECELERATION_REVISION = 1
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"

@@ -216,9 +216,9 @@ Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No re
 
 **Problem:** in **SIM** mode, releasing the accelerator slowed the virtual car only through aero drag and rolling resistance — much slower than a real Seal’s mild lift-off regen.
 
-**Decision:** when `InputMode.SIMULATOR`, `DriverInput.simulateCoastRegen = true` applies a constant deceleration `simulatorCoastRegenMps2` (default **0.50 m/s²**) during lift-off integration only. Not applied in BYD LIVE mode; not a factory regen map.
+**Decision:** when `InputMode.SIMULATOR`, `DriverInput.simulateCoastRegen = true` applies a constant deceleration `simulatorCoastRegenMps2` (default **2.50 m/s²**) during lift-off integration only. This deliberately strong simulator setting makes speed and synthetic RPM fall promptly when the touchscreen pedal is released. It is not applied in BYD LIVE mode and is not a factory regen map.
 
-**Tuning:** **SIM COAST REGEN** slider in the Response tab (0–1.50 m/s²).
+**Tuning:** **SIM COAST REGEN** slider in the Response tab (0–4.00 m/s²). A dedicated preference revision migrates existing installations to the stronger default without resetting unrelated tuning.
 
 **Test:** `simulatorCoastRegenSlowsVirtualVehicleFasterThanDragAlone`.
 

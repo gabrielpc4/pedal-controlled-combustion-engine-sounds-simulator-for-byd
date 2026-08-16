@@ -71,7 +71,7 @@ data class EngineProfile(
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 190.0,
             sampleRpmResponseSeconds = 0.035,
-            simulatorCoastRegenMps2 = 0.50,
+            simulatorCoastRegenMps2 = 2.50,
             finalDrive = bank.finalDrive,
             gearRatios = bank.gearRatios.toDoubleArray(),
             upshiftDurationSeconds = bank.upshiftDurationSeconds,
