@@ -1,5 +1,6 @@
 package com.gabrielpc.enginesoundsimulator
 
+import android.content.Intent
 import android.graphics.Paint
 import android.os.Bundle
 import android.os.Handler
@@ -134,14 +135,29 @@ class MainActivity : ComponentActivity() {
                         onCycleInput = controller::cycleInputMode,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
+                        onCycleSoundMode = controller::cycleSoundMode,
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
                         onRestartBydReader = controller::restartVehicleReader,
+                        onRunSampleValidation = controller::runSampleAudioValidation,
                     )
                 }
             }
         }
+        maybeScheduleSampleValidation(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        maybeScheduleSampleValidation(intent)
+    }
+
+    private fun maybeScheduleSampleValidation(intent: Intent?) {
+        if (!BuildConfig.DEBUG || intent?.getBooleanExtra(EXTRA_RUN_SAMPLE_VALIDATION, false) != true) return
+        intent.removeExtra(EXTRA_RUN_SAMPLE_VALIDATION)
+        uiHandler.postDelayed(controller::runSampleAudioValidation, 1_500L)
     }
 
     override fun onStart() {
@@ -178,10 +194,12 @@ private fun MotorSoundDashboard(
     onCycleInput: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
+    onCycleSoundMode: () -> Unit,
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
     onRestartBydReader: () -> Unit,
+    onRunSampleValidation: () -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -254,6 +272,7 @@ private fun MotorSoundDashboard(
                         state = state,
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
+                        onCycleSoundMode = onCycleSoundMode,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
                         onOpenDebug = { debugOpen = true },
@@ -307,6 +326,7 @@ private fun MotorSoundDashboard(
                     DebugPanel(
                         state = state,
                         onRestartBydReader = onRestartBydReader,
+                        onRunSampleValidation = onRunSampleValidation,
                         onClose = { debugOpen = false },
                     )
                 }
@@ -315,11 +335,14 @@ private fun MotorSoundDashboard(
     }
 }
 
+private const val EXTRA_RUN_SAMPLE_VALIDATION = "run_sample_audio_validation"
+
 @Composable
 private fun DashboardHeader(
     state: DriveSnapshot,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
+    onCycleSoundMode: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
     onOpenDebug: () -> Unit,
@@ -353,7 +376,7 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             Text(
-                text = "// SYNTH",
+                text = "// ${state.audio.activeSoundMode}",
                 color = Cyan,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Light,
@@ -378,6 +401,12 @@ private fun DashboardHeader(
             primary = state.inputMode.displayName,
             secondary = "INPUT",
             onClick = onCycleInput,
+        )
+        HeaderButton(
+            primary = state.audio.requestedSoundMode.displayName,
+            secondary = "SOUND PROFILE",
+            accent = if (state.audio.activeSoundMode == "SAMPLE") Green else Amber,
+            onClick = onCycleSoundMode,
         )
         HeaderButton(
             primary = if (state.engineSoundEnabled) "ON" else "MUTED",
@@ -439,6 +468,7 @@ private fun CarStage(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val sampleActive = state.audio.activeSoundMode == "SAMPLE"
     Box(modifier = modifier) {
         Canvas(Modifier.fillMaxSize()) {
             val throttleGlow = (0.18f + state.throttle.toFloat() * 0.32f)
@@ -473,9 +503,20 @@ private fun CarStage(
                 .align(Alignment.TopStart)
                 .padding(start = 28.dp, top = 26.dp),
         ) {
-            Text("APEX V10", color = White, fontSize = 34.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
             Text(
-                "SEAL AWD RESPONSE  •  10 CYL SOUND  •  ${state.tuning.engine.redlineRpm.roundToInt()} REDLINE",
+                if (sampleActive) "SUPRA MK4 CABIN" else "APEX V10",
+                color = White,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.2.sp,
+            )
+            Text(
+                if (sampleActive) {
+                    "RPM / LOAD LOOPSET  •  ${state.audio.sampleLoadedLoops} ENGINE LAYERS  •  " +
+                        "${state.tuning.engine.redlineRpm.roundToInt()} REDLINE"
+                } else {
+                    "SEAL AWD RESPONSE  •  10 CYL SOUND  •  ${state.tuning.engine.redlineRpm.roundToInt()} REDLINE"
+                },
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -890,8 +931,9 @@ private fun DashboardFooter(state: DriveSnapshot, viewport: String) {
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         FooterMetric("AUDIO", audioStatus, audioStatusColor)
+        FooterMetric("SOURCE", audio.activeSoundMode, if (audio.activeSoundMode == "SAMPLE") Green else Amber)
         FooterMetric("ROUTE", audio.routedDevice, CyanSoft, Modifier.weight(1f))
-        FooterMetric("FORMAT", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.underruns} underruns" else "NEGOTIATING", CyanSoft)
+        FooterMetric("FORMAT", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.steadyStateUnderruns} new underruns" else "NEGOTIATING", CyanSoft)
         FooterMetric("SESSION", if (audio.sessionId > 0) audio.sessionId.toString() else "—", CyanSoft)
         FooterMetric("VIEWPORT", "$viewport px", Muted)
     }

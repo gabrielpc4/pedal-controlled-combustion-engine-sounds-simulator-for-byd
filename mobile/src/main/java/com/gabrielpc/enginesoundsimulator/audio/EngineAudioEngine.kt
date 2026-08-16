@@ -25,6 +25,8 @@ enum class AudioChannelMode(val displayName: String) {
 data class AudioOutputState(
     val running: Boolean = false,
     val requestedMode: AudioChannelMode = AudioChannelMode.AUTO,
+    val requestedSoundMode: EngineSoundMode = EngineSoundMode.SAMPLE,
+    val activeSoundMode: String = "OFFLINE",
     val activeChannels: Int = 0,
     val activeLayout: String = "OFFLINE",
     val sampleRate: Int = 0,
@@ -34,18 +36,34 @@ data class AudioOutputState(
     val routedDevice: String = "none",
     val advertisedChannels: String = "unknown",
     val underruns: Int = 0,
+    val startupUnderruns: Int = 0,
+    val steadyStateUnderruns: Int = 0,
     val focusGranted: Boolean = false,
+    val sampleProfile: String = "none",
+    val sampleLoadedLoops: Int = 0,
+    val sampleDecodedBytes: Long = 0L,
+    val sampleMappedRpm: Int = 0,
+    val sampleLoadGainDb: Double = -120.0,
+    val sampleCoastGainDb: Double = -120.0,
+    val sampleActiveLayers: String = "none",
+    val sampleFramesRendered: Long = 0L,
+    val sampleLoopWraps: Long = 0L,
+    val samplePeak: Double = 0.0,
+    val sampleOverRangeSamples: Long = 0L,
+    val sampleError: String? = null,
     val error: String? = null,
 )
 
-/** Streams one synthesized engine program into every negotiated logical output channel. */
+/** Streams the selected engine program into every negotiated logical output channel. */
 class EngineAudioEngine(context: Context) {
+    private val appContext = context.applicationContext
     private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val lifecycleLock = Any()
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
     private val requestedMode = AtomicReference(AudioChannelMode.AUTO)
+    private val requestedSoundMode = AtomicReference(EngineSoundMode.SAMPLE)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
     private val outputState = AtomicReference(AudioOutputState())
@@ -121,6 +139,18 @@ class EngineAudioEngine(context: Context) {
         }
     }
 
+    fun setSoundMode(mode: EngineSoundMode) {
+        synchronized(lifecycleLock) {
+            val changed = requestedSoundMode.getAndSet(mode) != mode
+            outputState.updateAndGet { it.copy(requestedSoundMode = mode) }
+            if (!changed) return
+
+            PersistentDiagnosticLog.event("engine_sound_mode_changed", "to=${mode.name}")
+            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
+            if (shouldRestart && stopLocked()) startLocked()
+        }
+    }
+
     private fun startLocked() {
         if (
             running.get() ||
@@ -131,7 +161,10 @@ class EngineAudioEngine(context: Context) {
             if (!stopLocked()) return
         }
 
-        PersistentDiagnosticLog.event("audio_start_requested", "mode=${requestedMode.get().name}")
+        PersistentDiagnosticLog.event(
+            "audio_start_requested",
+            "mode=${requestedMode.get().name} sound=${requestedSoundMode.get().name}",
+        )
         focusMultiplier.set(0.0)
         val focusResult = runCatching { requestFocus() }
         val focusGranted = focusResult.getOrDefault(false)
@@ -148,6 +181,8 @@ class EngineAudioEngine(context: Context) {
                 it.copy(
                     running = false,
                     requestedMode = requestedMode.get(),
+                    requestedSoundMode = requestedSoundMode.get(),
+                    activeSoundMode = "OFFLINE",
                     activeChannels = 0,
                     activeLayout = "OFFLINE",
                     focusGranted = false,
@@ -167,6 +202,8 @@ class EngineAudioEngine(context: Context) {
             AudioOutputState(
                 running = true,
                 requestedMode = requestedMode.get(),
+                requestedSoundMode = requestedSoundMode.get(),
+                activeSoundMode = "STARTING",
                 activeLayout = "STARTING",
                 focusGranted = true,
             ),
@@ -185,6 +222,7 @@ class EngineAudioEngine(context: Context) {
                 it.copy(
                     running = false,
                     activeLayout = "OFFLINE",
+                    activeSoundMode = "OFFLINE",
                     focusGranted = false,
                     error = "Audio renderer start failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty()}",
                 )
@@ -227,6 +265,8 @@ class EngineAudioEngine(context: Context) {
             previous.copy(
                 running = false,
                 requestedMode = requestedMode.get(),
+                requestedSoundMode = requestedSoundMode.get(),
+                activeSoundMode = "OFFLINE",
                 activeChannels = 0,
                 activeLayout = "OFFLINE",
                 sampleRate = 0,
@@ -249,12 +289,42 @@ class EngineAudioEngine(context: Context) {
 
     private fun renderLoop(runId: Long) {
         val mode = requestedMode.get()
+        val soundMode = requestedSoundMode.get()
         var opened: OpenedTrack? = null
         var failure: String? = null
 
         try {
-            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             val sampleRate = nativeSampleRate()
+            var sampleFailure: String? = null
+            val sampleRenderer = if (soundMode == EngineSoundMode.SAMPLE) {
+                runCatching { SampleEngineRenderer.load(appContext.assets, sampleRate) }
+                    .onFailure { throwable ->
+                        sampleFailure = "${throwable.javaClass.simpleName}: ${throwable.message.orEmpty()}"
+                        PersistentDiagnosticLog.recordThrowable(
+                            "sample_engine_fallback",
+                            throwable,
+                            "profile=${SampleEngineManifest.PROFILE_ID}",
+                        )
+                    }
+                    .getOrNull()
+            } else {
+                null
+            }
+            sampleRenderer?.diagnostics()?.let { diagnostics ->
+                PersistentDiagnosticLog.event(
+                    "sample_engine_loaded",
+                    "profile=${diagnostics.profileId} loops=${diagnostics.loadedLoops} " +
+                        "decoded_bytes=${diagnostics.decodedBytes} output_rate=$sampleRate",
+                )
+            }
+            // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
+            // loading and JIT work cannot starve the newly opened output buffer.
+            sampleRenderer?.let { renderer ->
+                val warmup = ShortArray(512)
+                repeat(3) { renderer.render(parameters.get(), warmup, gain = 0.0) }
+            }
+            if (!isCurrent(runId)) return
+            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             val advertised = advertisedChannelSummary()
             val candidates = channelCandidates(mode, advertised.maxChannels)
             var lastFailure: String? = null
@@ -275,7 +345,7 @@ class EngineAudioEngine(context: Context) {
 
                     // Queue a silent burst before play(). This warms the path without advancing the
                     // engine model, and prevents the predictable first-buffer startup underrun.
-                    val primingBuffer = ShortArray(candidateTrack.framesPerWrite * candidate.channelCount)
+                    val primingBuffer = ShortArray(candidateTrack.framesPerWrite * candidate.channelCount * 2)
                     if (!writeFully(candidateTrack.track, primingBuffer, runId)) {
                         throw IllegalStateException("renderer cancelled during priming")
                     }
@@ -302,6 +372,8 @@ class EngineAudioEngine(context: Context) {
                 outputState.updateAndGet {
                     it.copy(
                         requestedMode = mode,
+                        requestedSoundMode = soundMode,
+                        sampleError = sampleFailure,
                         advertisedChannels = advertised.description,
                         error = failure,
                     )
@@ -313,7 +385,12 @@ class EngineAudioEngine(context: Context) {
             val track = active.track
             val mono = ShortArray(active.framesPerWrite)
             val interleaved = ShortArray(active.framesPerWrite * active.layout.channelCount)
-            val synthesizer = EngineSynthesizer(sampleRate)
+            val synthesizer = if (sampleRenderer == null) EngineSynthesizer(sampleRate) else null
+            val activeSoundMode = when {
+                sampleRenderer != null -> EngineSoundMode.SAMPLE.displayName
+                soundMode == EngineSoundMode.SAMPLE -> "SYNTH FALLBACK"
+                else -> EngineSoundMode.SYNTH.displayName
+            }
             val duplicationGain = when (active.layout.channelCount) {
                 8 -> 0.23
                 6 -> 0.27
@@ -321,10 +398,13 @@ class EngineAudioEngine(context: Context) {
                 else -> 0.66
             }
             var writes = 0
+            var startupUnderruns = 0
             outputState.updateAndGet { previous ->
                 AudioOutputState(
                     running = true,
                     requestedMode = mode,
+                    requestedSoundMode = soundMode,
+                    activeSoundMode = activeSoundMode,
                     activeChannels = track.channelCount,
                     activeLayout = active.layout.label,
                     sampleRate = track.sampleRate,
@@ -335,26 +415,50 @@ class EngineAudioEngine(context: Context) {
                     advertisedChannels = advertised.description,
                     underruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0,
                     focusGranted = previous.focusGranted,
+                    sampleProfile = if (sampleRenderer != null) SampleEngineManifest.PROFILE_ID else "none",
+                    sampleLoadedLoops = sampleRenderer?.diagnostics()?.loadedLoops ?: 0,
+                    sampleDecodedBytes = sampleRenderer?.diagnostics()?.decodedBytes ?: 0L,
+                    sampleError = sampleFailure,
                 )
             }
             PersistentDiagnosticLog.event(
                 "audio_track_active",
-                "mode=${mode.name} layout=${active.layout.label} logical_channels=${track.channelCount} " +
+                "mode=${mode.name} sound=$activeSoundMode layout=${active.layout.label} " +
+                    "logical_channels=${track.channelCount} " +
                     "sample_rate=${track.sampleRate} buffer_frames=" +
                     "${if (Build.VERSION.SDK_INT >= 24) track.bufferSizeInFrames else active.capacityFrames} " +
                     "route=${routedDeviceName(track)} session=${track.audioSessionId}",
             )
 
             while (isCurrent(runId)) {
-                synthesizer.render(parameters.get(), mono, duplicationGain * focusMultiplier.get())
+                val frame = parameters.get()
+                val renderGain = duplicationGain * focusMultiplier.get()
+                if (sampleRenderer != null) {
+                    sampleRenderer.render(frame, mono, renderGain)
+                } else {
+                    synthesizer!!.render(frame, mono, renderGain)
+                }
                 duplicateAcrossChannels(mono, interleaved, active.layout.channelCount)
                 if (!writeFully(track, interleaved, runId)) break
                 writes += 1
                 if (writes % 48 == 0) {
+                    val sampleDiagnostics = sampleRenderer?.diagnostics()
+                    val currentUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0
+                    if (writes == 48) startupUnderruns = currentUnderruns
                     outputState.updateAndGet {
                         it.copy(
                             routedDevice = routedDeviceName(track),
-                            underruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0,
+                            underruns = currentUnderruns,
+                            startupUnderruns = startupUnderruns,
+                            steadyStateUnderruns = (currentUnderruns - startupUnderruns).coerceAtLeast(0),
+                            sampleMappedRpm = sampleDiagnostics?.mappedAudioRpm ?: 0,
+                            sampleLoadGainDb = sampleDiagnostics?.loadGainDb ?: -120.0,
+                            sampleCoastGainDb = sampleDiagnostics?.coastGainDb ?: -120.0,
+                            sampleActiveLayers = sampleDiagnostics?.activeLayers ?: "none",
+                            sampleFramesRendered = sampleDiagnostics?.framesRendered ?: 0L,
+                            sampleLoopWraps = sampleDiagnostics?.loopWraps ?: 0L,
+                            samplePeak = sampleDiagnostics?.peak ?: 0.0,
+                            sampleOverRangeSamples = sampleDiagnostics?.overRangeSamples ?: 0L,
                         )
                     }
                 }
@@ -379,6 +483,7 @@ class EngineAudioEngine(context: Context) {
                         running = false,
                         activeChannels = 0,
                         activeLayout = "OFFLINE",
+                        activeSoundMode = "OFFLINE",
                         focusGranted = false,
                         error = failure ?: it.error ?: "Audio renderer stopped unexpectedly",
                     )

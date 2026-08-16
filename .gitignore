@@ -23,4 +23,5 @@ keystore.properties
 # User-supplied reverse-engineering references are not redistributable and may
 # contain vehicle identifiers. Their hashes/provenance remain in docs only.
 reference/
+audio_samples/
 docs/source-material/*.pdf

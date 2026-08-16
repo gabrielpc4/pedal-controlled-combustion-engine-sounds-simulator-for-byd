@@ -67,6 +67,7 @@ Use only while parked or in a controlled environment. Synthetic engine audio can
 
 ## Documentation
 
+- [Sample-based engine audio](docs/sample-engine-audio.md) — local asset packaging, seamless RPM/load blending, diagnostics, and code-driven validation.
 - [Engineering context](docs/README.md)
 - [Full implementation](docs/full-implementation.md)
 - [BYD Seal Performance calibration](docs/byd-seal-performance-calibration.md)

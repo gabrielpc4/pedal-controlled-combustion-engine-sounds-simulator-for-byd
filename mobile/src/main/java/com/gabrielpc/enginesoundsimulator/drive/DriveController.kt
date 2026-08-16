@@ -7,6 +7,7 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioChannelMode
 import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
+import com.gabrielpc.enginesoundsimulator.audio.EngineSoundMode
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -65,6 +66,7 @@ class DriveController(context: Context) {
     private var lastShiftWasActive = false
     private var lastInputSignature = ""
     private var nextHeartbeatAtElapsedMs = 0L
+    private val validationThread = AtomicReference<Thread?>(null)
 
     @Volatile
     private var loopThread: Thread? = null
@@ -138,6 +140,10 @@ class DriveController(context: Context) {
             val thread = loopThread
             thread?.interrupt()
             if (thread == null || joinLoop(thread)) loopThread = null
+            validationThread.getAndSet(null)?.let { validation ->
+                validation.interrupt()
+                joinLoop(validation)
+            }
             vehicleReader.stop()
             audioEngine.stop()
             manualInput.set(ManualInput())
@@ -210,6 +216,66 @@ class DriveController(context: Context) {
         val selected = order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size]
         audioEngine.setChannelMode(selected)
         PersistentDiagnosticLog.event("audio_channel_mode_changed", "from=${current.name} to=${selected.name}")
+    }
+
+    fun cycleSoundMode() {
+        val current = audioEngine.state().requestedSoundMode
+        val selected = if (current == EngineSoundMode.SAMPLE) EngineSoundMode.SYNTH else EngineSoundMode.SAMPLE
+        audioEngine.setSoundMode(selected)
+    }
+
+    /** Runs a deterministic pedal program for on-device sample-renderer and telemetry validation. */
+    fun runSampleAudioValidation() {
+        synchronized(lifecycleLock) {
+            if (validationThread.get()?.isAlive == true) {
+                PersistentDiagnosticLog.warning("sample_validation_already_running")
+                return
+            }
+            selectedInputMode.set(InputMode.SIMULATOR)
+            transmissionPosition.set(TransmissionPosition.DRIVE)
+            manualInput.set(ManualInput())
+            audioEngine.setSoundMode(EngineSoundMode.SAMPLE)
+            if (!soundEnabled.getAndSet(true) && running.get()) audioEngine.start()
+
+            val validation = Thread(
+                {
+                    var completed = false
+                    try {
+                        PersistentDiagnosticLog.event("sample_validation_started")
+                        var previousThrottle = 0.0
+                        VALIDATION_STAGES.forEachIndexed { index, stage ->
+                            PersistentDiagnosticLog.event(
+                                "sample_validation_stage",
+                                "index=$index throttle_pct=${(stage.throttle * 100.0).roundToInt()} " +
+                                    "duration_ms=${stage.durationMs}",
+                            )
+                            val stageStarted = SystemClock.elapsedRealtime()
+                            while (SystemClock.elapsedRealtime() - stageStarted < stage.durationMs) {
+                                val elapsed = SystemClock.elapsedRealtime() - stageStarted
+                                val ramp = (elapsed / VALIDATION_RAMP_MS.toDouble()).coerceIn(0.0, 1.0)
+                                val throttle = previousThrottle + (stage.throttle - previousThrottle) * ramp
+                                manualInput.set(ManualInput(throttle = throttle, brake = 0.0))
+                                Thread.sleep(VALIDATION_UPDATE_MS)
+                            }
+                            previousThrottle = stage.throttle
+                        }
+                        completed = true
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    } finally {
+                        manualInput.set(ManualInput())
+                        PersistentDiagnosticLog.event(
+                            "sample_validation_finished",
+                            "completed=$completed ${sampleAudioLogDetails(audioEngine.state())}",
+                        )
+                        validationThread.compareAndSet(Thread.currentThread(), null)
+                    }
+                },
+                "sample-audio-validation",
+            ).apply { isDaemon = true }
+            validationThread.set(validation)
+            validation.start()
+        }
     }
 
     private fun runLoop(runId: Long) {
@@ -353,6 +419,7 @@ class DriveController(context: Context) {
         val nowElapsedMs = SystemClock.elapsedRealtime()
         if (nowElapsedMs >= nextHeartbeatAtElapsedMs) {
             nextHeartbeatAtElapsedMs = nowElapsedMs + DIAGNOSTIC_HEARTBEAT_INTERVAL_MS
+            val audio = audioEngine.state()
             PersistentDiagnosticLog.event(
                 "drive_heartbeat",
                 "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
@@ -360,7 +427,17 @@ class DriveController(context: Context) {
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
                     "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
-                    "source=${input.label} reader=${telemetry.readerState.name}",
+                    "source=${input.label} reader=${telemetry.readerState.name} " +
+                    "audio_source=${audio.activeSoundMode.replace(' ', '_')} " +
+                    "audio_rpm=${audio.sampleMappedRpm} sample_loops=${audio.sampleLoadedLoops} " +
+                    "load_db_tenths=${(audio.sampleLoadGainDb * 10.0).roundToInt()} " +
+                    "coast_db_tenths=${(audio.sampleCoastGainDb * 10.0).roundToInt()} " +
+                    "layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
+                    "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
+                    "peak_milli=${(audio.samplePeak * 1_000.0).roundToInt()} " +
+                    "over_range=${audio.sampleOverRangeSamples} underruns=${audio.underruns} " +
+                    "startup_underruns=${audio.startupUnderruns} " +
+                    "steady_underruns=${audio.steadyStateUnderruns}",
             )
         }
     }
@@ -372,8 +449,26 @@ class DriveController(context: Context) {
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
         const val DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 1_000L
+        const val VALIDATION_RAMP_MS = 500L
+        const val VALIDATION_UPDATE_MS = 50L
+        val VALIDATION_STAGES = listOf(
+            ValidationStage(throttle = 0.25, durationMs = 2_500L),
+            ValidationStage(throttle = 0.55, durationMs = 3_000L),
+            ValidationStage(throttle = 1.00, durationMs = 9_000L),
+            ValidationStage(throttle = 0.00, durationMs = 5_000L),
+        )
     }
+
+    private data class ValidationStage(val throttle: Double, val durationMs: Long)
 }
+
+private fun sampleAudioLogDetails(audio: AudioOutputState): String =
+    "audio_source=${audio.activeSoundMode.replace(' ', '_')} audio_rpm=${audio.sampleMappedRpm} " +
+        "sample_loops=${audio.sampleLoadedLoops} layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
+        "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
+        "peak_milli=${(audio.samplePeak * 1_000.0).roundToInt()} " +
+        "over_range=${audio.sampleOverRangeSamples} underruns=${audio.underruns} " +
+        "startup_underruns=${audio.startupUnderruns} steady_underruns=${audio.steadyStateUnderruns}"
 
 private fun TuningConfig.toEngineProfile(): EngineProfile {
     val engine = engine.sanitized()

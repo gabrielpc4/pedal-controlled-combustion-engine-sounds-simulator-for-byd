@@ -6,6 +6,7 @@ plugins {
 import java.io.File
 import java.time.Instant
 import java.util.Properties
+import org.gradle.api.tasks.Sync
 
 val buildNumberFile = file("build-number.properties")
 val buildNumberProperties = Properties()
@@ -43,6 +44,20 @@ fun gitShortShaFromFiles(rootDir: File): String {
 val gitSha = gitShortShaFromFiles(rootProject.projectDir)
 val buildTimeUtc: String = Instant.now().toString()
 
+val sampleEngineSourceDir = rootProject.file("audio_samples/Toyota_Supra_MK4/converted")
+val sampleEngineAssetNames = listOf(
+    "010_1.wav", "060_3.wav", "036_6.wav", "097_31.wav", "089_11.wav", "049_21.wav",
+    "088_29.wav", "022_32.wav", "080_33.wav", "090_37.wav", "053_39.wav", "068_45.wav",
+    "077_41.wav", "055_6.1 INT.wav", "046_54.wav", "032_56.wav", "029_idle int 2.wav",
+    "030_decel 9.wav", "056_decel 2.wav", "023_decel 3.wav", "014_decel 6.wav",
+    "086_decel 8.wav", "092_4.2 int.wav",
+)
+val generatedSampleEngineAssets = file("build/generated/sampleEngineAssets")
+val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets") {
+    from(sampleEngineSourceDir) { include(sampleEngineAssetNames) }
+    into(generatedSampleEngineAssets.resolve("sample_engine"))
+}
+
 if (isAssembling) {
     val nextBuildNumber = stampedBuildNumber
     val targetBuildNumberFile = buildNumberFile
@@ -58,6 +73,10 @@ if (isAssembling) {
     tasks.named("preBuild").configure {
         dependsOn("persistBuildNumber")
     }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(prepareSampleEngineAssets)
 }
 
 android {
@@ -98,6 +117,7 @@ android {
         compose = true
         buildConfig = true
     }
+    sourceSets.getByName("main").assets.srcDir(generatedSampleEngineAssets)
     lint {
         // This APK is intentionally sideloaded on a BYD DiLink head unit. Target 25 is a
         // compatibility requirement for its vendor framework, not a Google Play configuration.

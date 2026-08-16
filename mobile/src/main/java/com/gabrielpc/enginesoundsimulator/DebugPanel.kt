@@ -34,6 +34,7 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.SignalValue
 import com.gabrielpc.enginesoundsimulator.telemetry.buildBydAvailabilityReport
 import com.gabrielpc.enginesoundsimulator.telemetry.formatTelemetryNumber
+import kotlin.math.roundToInt
 
 private val DbgBackground = Color(0xFA03080E)
 private val DbgPanel = Color(0xFF091721)
@@ -49,6 +50,7 @@ private val DbgMuted = Color(0xFF8CA7B5)
 internal fun DebugPanel(
     state: DriveSnapshot,
     onRestartBydReader: () -> Unit,
+    onRunSampleValidation: () -> Unit,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -69,7 +71,11 @@ internal fun DebugPanel(
             .border(1.dp, DbgLine)
             .padding(horizontal = 30.dp, vertical = 22.dp),
     ) {
-        DebugHeader(onRestartBydReader = onRestartBydReader, onClose = onClose)
+        DebugHeader(
+            onRestartBydReader = onRestartBydReader,
+            onRunSampleValidation = onRunSampleValidation,
+            onClose = onClose,
+        )
         Spacer(Modifier.height(16.dp))
 
         Column(
@@ -126,6 +132,37 @@ internal fun DebugPanel(
                 }
             }
 
+            DebugSection(
+                title = "ENGINE SAMPLE AUDIO",
+                accent = if (state.audio.activeSoundMode == "SAMPLE") DbgGreen else DbgAmber,
+            ) {
+                DebugLine("Requested source", state.audio.requestedSoundMode.displayName)
+                DebugLine("Active source", state.audio.activeSoundMode)
+                DebugLine("Sample profile", state.audio.sampleProfile)
+                DebugLine("Loaded loops", state.audio.sampleLoadedLoops.toString())
+                DebugLine("Decoded memory", "${(state.audio.sampleDecodedBytes / (1024 * 1024.0)).roundToInt()} MiB")
+                DebugLine("Mapped audio RPM", state.audio.sampleMappedRpm.toString())
+                DebugLine("Load track gain", "${state.audio.sampleLoadGainDb.roundToInt()} dB")
+                DebugLine("Coast track gain", "${state.audio.sampleCoastGainDb.roundToInt()} dB")
+                DebugLine("Rendered frames", state.audio.sampleFramesRendered.toString())
+                DebugLine("Loop wraps", state.audio.sampleLoopWraps.toString())
+                DebugLine("Output peak", "${(state.audio.samplePeak * 100.0).roundToInt()}%")
+                DebugLine("Over-range before limiter", state.audio.sampleOverRangeSamples.toString())
+                DebugLine("Startup underruns", state.audio.startupUnderruns.toString())
+                DebugLine("New underruns", state.audio.steadyStateUnderruns.toString())
+                Text(
+                    "Active layers: ${state.audio.sampleActiveLayers}",
+                    color = DbgWhite,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                state.audio.sampleError?.let { error ->
+                    Text("Fallback reason: $error", color = DbgRed, fontSize = 11.sp, lineHeight = 16.sp)
+                }
+            }
+
             DebugSection(title = "PERSISTED EVENT LOG", accent = DbgCyan) {
                 Text(
                     text = "Path: ${PersistentDiagnosticLog.activeLogPath(context)}",
@@ -150,6 +187,7 @@ internal fun DebugPanel(
 @Composable
 private fun DebugHeader(
     onRestartBydReader: () -> Unit,
+    onRunSampleValidation: () -> Unit,
     onClose: () -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -173,6 +211,8 @@ private fun DebugHeader(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
+        DebugAction("RUN AUDIO TEST", DbgGreen, onRunSampleValidation)
+        Spacer(Modifier.width(10.dp))
         DebugAction("RETRY BYD", DbgAmber, onRestartBydReader)
         Spacer(Modifier.width(10.dp))
         DebugAction("CLOSE", DbgCyan, onClose)
