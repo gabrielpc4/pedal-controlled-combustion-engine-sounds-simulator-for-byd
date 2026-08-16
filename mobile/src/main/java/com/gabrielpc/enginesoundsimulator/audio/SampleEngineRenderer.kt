@@ -80,8 +80,10 @@ internal class SampleEngineRenderer private constructor(
             val preLimitedRight = mixedRight * commonGain
             if (abs(preLimitedLeft) > 1.0) overRangeSamples += 1
             if (abs(preLimitedRight) > 1.0) overRangeSamples += 1
-            val limitedLeft = softClip(preLimitedLeft)
-            val limitedRight = softClip(preLimitedRight)
+            // Stay transparent throughout the normal range. Saturation now happens only on
+            // a genuine full-scale overload instead of reshaping every quiet sample.
+            val limitedLeft = transparentLimit(preLimitedLeft)
+            val limitedRight = transparentLimit(preLimitedRight)
             blockPeak = max(blockPeak, max(abs(limitedLeft), abs(limitedRight)))
             val outputIndex = frameIndex * PROGRAM_CHANNELS
             output[outputIndex] = toPcm16(limitedLeft)
@@ -200,7 +202,7 @@ internal class SampleEngineRenderer private constructor(
             )
         }
 
-        private const val SAMPLE_HEADROOM = 0.18
+        private const val SAMPLE_HEADROOM = 0.65
         private const val PROGRAM_CHANNELS = 2
         private const val SILENCE_GAIN = 0.00001
         private const val DIAGNOSTIC_BLOCK_INTERVAL = 10L
@@ -209,6 +211,6 @@ internal class SampleEngineRenderer private constructor(
     }
 }
 
-private fun softClip(value: Double): Double = value / (1.0 + abs(value))
+private fun transparentLimit(value: Double): Double = value.coerceIn(-1.0, 1.0)
 private fun toPcm16(value: Double): Short =
     (value.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()

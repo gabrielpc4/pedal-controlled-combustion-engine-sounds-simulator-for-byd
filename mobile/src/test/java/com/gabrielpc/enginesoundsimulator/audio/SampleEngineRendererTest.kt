@@ -84,7 +84,7 @@ class SampleEngineRendererTest {
     @Test
     fun codeDrivenSweepKeepsNativeRangeAudibleAndReportsRuntimeTelemetry() {
         val decoded = testBank()
-        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, profile)
+        val renderer = SampleEngineRenderer.fromDecoded(44_100, decoded, profile)
         var totalNonZero = 0
 
         for (step in 0..100) {
@@ -95,13 +95,13 @@ class SampleEngineRendererTest {
                 else -> 1.0
             }
             val output = ShortArray(1_920)
-            renderer.render(EngineAudioFrame(rpm = rpm, throttle = throttle), output, gain = 0.66)
+            renderer.render(EngineAudioFrame(rpm = rpm, throttle = throttle), output, gain = 1.0)
             val nonZero = output.count { it != 0.toShort() }
             assertTrue("silent render at rpm=$rpm throttle=$throttle", nonZero > output.size * 0.75)
             totalNonZero += nonZero
         }
         repeat(12) {
-            renderer.render(EngineAudioFrame(rpm = profile.limiterRpm, throttle = 1.0), ShortArray(1_920), gain = 0.66)
+            renderer.render(EngineAudioFrame(rpm = profile.limiterRpm, throttle = 1.0), ShortArray(1_920), gain = 1.0)
         }
 
         val diagnostics = renderer.diagnostics()
@@ -113,6 +113,7 @@ class SampleEngineRendererTest {
         assertTrue(diagnostics.loopWraps > 0)
         assertTrue(diagnostics.activeLayers != "none")
         assertTrue(diagnostics.peak in 0.01..1.0)
+        assertEquals(0L, diagnostics.overRangeSamples)
     }
 
     @Test

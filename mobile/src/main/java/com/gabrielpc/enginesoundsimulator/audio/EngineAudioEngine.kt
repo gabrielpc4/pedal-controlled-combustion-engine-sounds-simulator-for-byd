@@ -403,7 +403,9 @@ class EngineAudioEngine(
         var failure: String? = null
 
         try {
-            val sampleRate = nativeSampleRate()
+            // Match the authored source rate used by the exact C1 preview. Unity-pitch voices
+            // remain sample-aligned and Android performs at most one final device conversion.
+            val sampleRate = SAMPLE_BANK_SAMPLE_RATE
             val sampleRenderer = try {
                 SampleEngineRenderer.load(appContext.assets, sampleRate, sampleProfile)
             } catch (throwable: Throwable) {
@@ -423,6 +425,7 @@ class EngineAudioEngine(
                 "sample_engine_loaded",
                 "profile=${initialDiagnostics.profileId} loops=${initialDiagnostics.loadedLoops} " +
                     "decoded_bytes=${initialDiagnostics.decodedBytes} output_rate=$sampleRate " +
+                    "device_native_rate=${nativeSampleRate()} quality=SOURCE_RATE_TRANSPARENT " +
                     "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
                     "perspective=${sampleProfile.perspective} program_channels=2",
             )
@@ -494,7 +497,7 @@ class EngineAudioEngine(
                 8 -> 0.23
                 6 -> 0.27
                 4 -> 0.38
-                else -> 0.66
+                else -> 1.0
             }
             var writes = 0
             var startupUnderruns = 0
@@ -749,6 +752,7 @@ class EngineAudioEngine(
     private companion object {
         const val RENDER_JOIN_TIMEOUT_MS = 750L
         const val RENDER_FORCE_RELEASE_JOIN_MS = 250L
+        const val SAMPLE_BANK_SAMPLE_RATE = 44_100
         val LAYOUT_7_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, 8, "7.1 MIRROR")
         val LAYOUT_5_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_5POINT1, 6, "5.1 MIRROR")
         val LAYOUT_QUAD = ChannelLayout(AudioFormat.CHANNEL_OUT_QUAD, 4, "QUAD MIRROR")

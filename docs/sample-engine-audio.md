@@ -43,13 +43,13 @@ The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), se
 
 ## Realtime rendering
 
-1. All 24 PCM16 WAVs decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program.
+1. All 24 PCM16 WAVs decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program at the recordings' authored 44.1 kHz rate, matching the exact C1 preview path.
 2. Simulation and bank use one RPM axis. There is no redline remapping.
 3. Each layer evaluates its own RPM amplitude curves, RPM decibel curves, throttle route, base gain, pitch root, and base pitch.
 4. Each layer owns a persistent fractional cursor. Cubic interpolation handles varispeed and 44.1-to-48 kHz conversion.
 5. The decoder honors embedded `smpl` start/end points. The pre-loop intro plays once, then only the authored loop segment wraps.
 6. Timelines advance while inaudible, matching an always-running FMOD event and avoiding restarts when a fade reopens.
-7. Layer, enable, focus, and master gains are smoothed. Fixed mix headroom and a final soft clipper protect the output.
+7. Layer, enable, focus, and master gains are smoothed. Calibrated mix headroom protects the output, while samples inside the PCM range remain linear and unchanged; limiting occurs only on a genuine full-scale overload.
 
 The audio thread performs no file I/O or persistent logging. It publishes bounded diagnostics consumed by the 200 Hz drive controller once per second.
 
