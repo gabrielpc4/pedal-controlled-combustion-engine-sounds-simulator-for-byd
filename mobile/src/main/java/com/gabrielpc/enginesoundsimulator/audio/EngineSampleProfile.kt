@@ -4,6 +4,9 @@ import kotlin.math.pow
 
 internal enum class SampleLayerRole { IDLE, LOAD, COAST, TEXTURE, LIMITER }
 
+/** Keeps the continuous idle program present in the cabin without raising driving-layer volume. */
+private const val IDLE_LAYER_GAIN_BOOST_DB = 8.0
+
 internal enum class SampleEffectTrigger { TRANSMISSION_LOOP, SHIFT_UP, SHIFT_DOWN, THROTTLE_LIFT }
 
 internal data class SampleEffectControlSpec(
@@ -84,7 +87,8 @@ internal data class SampleLayerSpec(
         if (rpm !in startRpm..endRpm) return 0.0
         val amplitude = rpmAmplitudeCurves.fold(1.0) { gain, curve -> gain * curve.valueAt(rpm) }
         if (amplitude <= 0.0) return 0.0
-        val decibels = baseGainDb + (throttleGainDb?.valueAt(throttle) ?: 0.0) +
+        val decibels = baseGainDb + (if (role == SampleLayerRole.IDLE) IDLE_LAYER_GAIN_BOOST_DB else 0.0) +
+            (throttleGainDb?.valueAt(throttle) ?: 0.0) +
             rpmGainDbCurves.sumOf { it.valueAt(rpm) }
         return amplitude * 10.0.pow(decibels / 20.0)
     }
