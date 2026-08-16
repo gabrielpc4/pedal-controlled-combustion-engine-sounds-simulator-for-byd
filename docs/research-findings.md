@@ -10,7 +10,9 @@ Determine the lowest-latency practical way for an Android application running on
 
 The direct API exists in BYD's proprietary DiLink framework. Use `BYDAutoSpeedDevice` and `AbsBYDAutoSpeedListener`, guarded by `android.permission.BYDAUTO_SPEED_GET`. Standard Android Automotive pedal properties are not the primary route for this firmware.
 
-The unresolved issue is whether an ordinary development-signed APK can receive `BYDAUTO_SPEED_GET` on system version `13.1.33.2503250.1`. Official BYD documentation says the APK needs a system signature; a community system log shows the permission as signature-only; and the supplied reference motor-sound APK is BYD-signed. The first implementation must therefore be a capability/permission probe that fails explicitly and records evidence.
+The first on-car test resolved the ordinary-app question on system version `13.1.33.2503250.1`: the class and methods are present, but the getters throw `SecurityException` because the development-signed APK does not hold `BYDAUTO_SPEED_GET`. The exact exception wording identifies Android's `enforceCallingOrSelfPermission()` path.
+
+BYD's speed wrapper receives a caller-supplied `Context`. Current community code, live-tested on another DiLink 3 firmware, demonstrates that this particular SDK family performs its GET check through that context rather than in the remote vehicle service. The app therefore now supplies a read-only compatibility `ContextWrapper` that answers granted only for `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`. Whether firmware `2503` performs any second server-side check remains to be verified on the car.
 
 ## Evidence model
 
@@ -165,6 +167,26 @@ Sources:
 
 Community reports and reverse-engineered samples span different DiLink generations. Some describe comparatively open/readable vehicle APIs, while other logs show signature-only definitions. The exact permission definition is a firmware/system-package property and can change without the class names changing.
 
+### Confirmed firmware `2503` result and restricted compatibility path
+
+**Artifact/on-car test:** an ordinary build of this app reached `BYDAutoSpeedDevice`, then reported:
+
+```text
+SecurityException: Neither user <app uid> nor current process has
+android.permission.BYDAUTO_SPEED_GET.
+```
+
+The app UID is installation-specific and is intentionally not treated as part of the compatibility rule.
+
+**AOSP:** this wording is emitted by `ContextImpl.enforceCallingOrSelfPermission()`. It differs from a Binder service rejecting the remote caller by UID and strongly indicates a client-side context check.
+
+**Community:** `wheregoes/byd-apps` documents and implements a `ContextWrapper` whose permission methods satisfy these client-side checks, with live results on DiLink 3 firmware `13.1.32.2507250.1`:
+
+- <https://github.com/wheregoes/byd-apps/blob/8f066fb4e0dfea9d9b50dcee19ae1d419bc27eeb/apps/byd-probe/src/main/java/com/wheregoes/bydprobe/BydPermissionContext.java>
+- <https://github.com/wheregoes/byd-apps/blob/8f066fb4e0dfea9d9b50dcee19ae1d419bc27eeb/research/byd-auto-api-reference.md>
+
+This does not change the package permission reported by PackageManager. It works only where BYD's own client library trusts methods on the supplied context. The implementation in this repository is deliberately narrower than the community probe: it recognizes exactly the two speed read permissions, remains inside the telemetry package, and exposes no vehicle setter.
+
 Do not hard-code “permission will work” or “permission will never work.” The app should report:
 
 - permission name absent;
@@ -261,7 +283,7 @@ The current `minSdk 28` is compatible with an Android 10/API 29 target. A high c
 - Read-only vehicle APIs only during the POC.
 - Do not log VIN, IMEI, ICCID, account tokens, precise location, or complete vehicle traces by default.
 - Keep raw telemetry local unless the user explicitly authorizes export and the BYD developer terms permit it.
-- Do not root/flash the vehicle or bypass signature checks as a first-line implementation strategy.
+- Do not root/flash the vehicle, alter PackageManager signature grants, or widen the restricted speed-read compatibility context to vehicle SET permissions.
 
 ## Questions that remain open until the on-car test
 

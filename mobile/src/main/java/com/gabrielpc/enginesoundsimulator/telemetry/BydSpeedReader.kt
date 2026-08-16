@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
 import android.os.Build
 import android.os.SystemClock
+import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -18,8 +19,8 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private const val BYD_SPEED_CLASS = "android.hardware.bydauto.speed.BYDAutoSpeedDevice"
-private const val BYD_SPEED_COMMON = "android.permission.BYDAUTO_SPEED_COMMON"
-private const val BYD_SPEED_GET = "android.permission.BYDAUTO_SPEED_GET"
+internal const val BYD_SPEED_COMMON = "android.permission.BYDAUTO_SPEED_COMMON"
+internal const val BYD_SPEED_GET = "android.permission.BYDAUTO_SPEED_GET"
 
 enum class ReaderState {
     IDLE,
@@ -146,7 +147,11 @@ class BydSpeedReader(
                     method.parameterTypes[0].isAssignableFrom(appContext.javaClass)
             } ?: throw NoSuchMethodException("$BYD_SPEED_CLASS.getInstance(Context)")
 
-            val device = getInstance.invoke(null, appContext)
+            // This must be the first Context used for the process-local BYD singleton. Supplying
+            // the ordinary application Context first can leave the singleton permanently holding
+            // a context that rejects its client-side signature permission check.
+            val deviceContext = BydReadOnlyPermissionContext(appContext)
+            val device = getInstance.invoke(null, deviceContext)
                 ?: throw IllegalStateException("BYD speed getInstance returned null")
 
             val runtimeType = device.javaClass
@@ -162,6 +167,7 @@ class BydSpeedReader(
             diagnostics += "Getter accelerator: ${if (throttle == null) "missing" else "present"}"
             diagnostics += "Getter brake: ${if (brake == null) "missing" else "present"}"
             diagnostics += "Getter speed: ${if (speed == null) "missing" else "present"}"
+            diagnostics += "Read-only BYD speed compatibility context: active"
             diagnostics += describeListenerApi(runtimeType)
             diagnostics += "Delivery: polling every ${pollIntervalMs} ms (listener SDK not packaged)"
 
@@ -172,6 +178,10 @@ class BydSpeedReader(
                 deliveryMode = "POLL ${pollIntervalMs} ms",
                 diagnostics = diagnostics,
                 lastError = null,
+            )
+            PersistentDiagnosticLog.event(
+                "byd_telemetry_probe_succeeded",
+                "delivery=poll interval_ms=$pollIntervalMs compatibility_context=read_only_speed",
             )
 
             try {
@@ -188,6 +198,7 @@ class BydSpeedReader(
             if (!isCurrent(runId)) return
             val error = describeThrowable(throwable)
             diagnostics += "Probe failure: $error"
+            PersistentDiagnosticLog.recordThrowable("byd_telemetry_probe_failed", throwable)
             latestSnapshot = latestSnapshot.copy(
                 readerState = ReaderState.UNAVAILABLE,
                 deliveryMode = "NONE",
@@ -218,6 +229,15 @@ class BydSpeedReader(
         )
 
         if (!isCurrent(runId)) return
+        val currentError = errors.takeIf { it.isNotEmpty() }?.joinToString(" | ")
+        if (currentError != previous.lastError) {
+            if (currentError == null) {
+                PersistentDiagnosticLog.event("byd_telemetry_reads_recovered")
+            } else {
+                PersistentDiagnosticLog.warning("byd_telemetry_read_failed", currentError)
+            }
+        }
+
         latestSnapshot = previous.copy(
             readerState = ReaderState.ACTIVE,
             accelerator = updateSignal(previous.accelerator, throttleRead.raw, throttleValidation, completedAt),
@@ -226,7 +246,7 @@ class BydSpeedReader(
             lastReadAtNanos = completedAt,
             lastReadDurationMs = nanosToMillis(completedAt - startedAt),
             cadence = cadenceTracker.record(completedAt),
-            lastError = errors.takeIf { it.isNotEmpty() }?.joinToString(" | "),
+            lastError = currentError,
         )
     }
 

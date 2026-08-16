@@ -10,6 +10,7 @@ Core files:
 
 - `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt` — adaptive Compose dashboard and Activity lifecycle.
 - `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/telemetry/BydSpeedReader.kt` — capability probe, reflection bindings, polling, validation, and cadence metrics.
+- `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/telemetry/BydReadOnlyPermissionContext.kt` — exact speed-read-only compatibility scope for BYD's client-side context checks.
 - `mobile/src/test/java/com/gabrielpc/enginesoundsimulator/telemetry/TelemetryValidationTest.kt` — value/sentinel and timing-statistics unit tests.
 - `mobile/src/main/AndroidManifest.xml` — read-only BYD permissions and launcher configuration.
 
@@ -29,7 +30,7 @@ It never reflects or calls a setter.
 1. The Activity starts the reader in `onStart()` and stops it in `onStop()`.
 2. A worker thread inspects Android/build information and the two BYD speed permissions.
 3. It resolves `android.hardware.bydauto.speed.BYDAutoSpeedDevice` from the car's class loader.
-4. It creates the speed device and independently discovers each getter on the runtime object.
+4. It creates the speed device with the restricted read-only compatibility context, then independently discovers each getter on the runtime object. This must be the first context passed to the process-local BYD singleton.
 5. At least one getter must exist; missing getters remain visible as individual errors.
 6. One worker polls sequentially with a 20 ms delay after each batch. Reads cannot overlap and delayed reads do not cause catch-up bursts.
 7. The UI refreshes from the latest immutable snapshot every 50 ms.
@@ -45,6 +46,8 @@ Displayed information includes:
 - whether `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET` are defined, their protection level, and whether they are granted;
 - runtime class/loader, available getters, and discovered listener registration signature;
 - narrow exception/error text with reflection wrappers removed.
+
+The displayed permission status remains PackageManager's real status. A line saying the read-only compatibility context is active does not claim the signature permission was installed or granted to the APK.
 
 Zero pedal input is valid and is never used to represent failure. Invalid values retain their raw number and are labeled. Known diagnostic sentinels include SDK unavailable, feature unbound, statistic unavailable, uninitialized, permission denied, framework booting, no data, and device not registered.
 
@@ -98,7 +101,7 @@ adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
 
 The same APK can be copied to the head unit and installed through its package installer if preferred.
 
-## First on-car evidence to capture
+## Next on-car evidence to capture
 
 Photograph or transcribe the **Capability diagnostics** panel without exposing IMEI, ICCID, VIN, location, or ADB keys. Record:
 
@@ -114,8 +117,8 @@ Photograph or transcribe the **Capability diagnostics** panel without exposing I
 
 Likely outcomes:
 
-- **ACTIVE with plausible values:** direct access works; add a compile-only listener stub/JAR next and compare callback latency.
-- **Class present, permission denied/service error:** implement the independently documented read-only shell helper path.
+- **ACTIVE with plausible values:** the client-side context path works; add a compile-only listener stub/JAR next and compare callback latency.
+- **Class present, server-side permission error:** preserve the exact persistent log and evaluate a separately launched, read-only shell helper; do not widen the context to SET permissions.
 - **Class missing:** inspect the runtime BYD framework for a renamed/generic device API before considering external OBD/CAN.
 
 Do not test by operating the screen while driving. Do not add vehicle setters merely to test whether they are accepted.

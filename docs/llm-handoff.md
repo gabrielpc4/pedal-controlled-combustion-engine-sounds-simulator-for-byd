@@ -9,9 +9,8 @@ linked engineering documents before changing vehicle, audio, or simulator behavi
 - A separate `C:\Users\Gabriel\Documents\ChatGPT\BYDMotorSound` directory may exist as an empty,
   unborn Git repository containing only local `docs/` and `tmp/`. Do **not** implement or commit
   there.
-- Active branch: `full-engine-simulator`.
-- Remote: `origin` -> `git@github.com:gabrielpc4/BYDMotorSound.git`.
-- Handoff commit: `978ad23 fix: persist diagnostics and stop lift-off gear hunting`.
+- Default/source branch: `main`.
+- Remote: `origin` -> `git@github.com:gabrielpc4/pedal-controlled-combustion-engine-sounds-simulator-for-byd.git`.
 - Confirm the current state yourself with `git status -sb` and `git log -1 --oneline`; another
   agent may have moved the branch after this handoff was written.
 
@@ -22,8 +21,9 @@ The user requires this workflow after **every** change, including documentation-
 3. Commit and push the change.
 
 Never commit APKs, AABs, build output, reference APKs, PDFs, or other supplied artifacts. They are
-ignored intentionally. Keep commits on `full-engine-simulator` unless the user explicitly directs
-otherwise.
+ignored intentionally. Start new work from an up-to-date `main`. Use a short-lived `codex/` branch
+for the change, then make sure the requested pushed result is reachable from the repository branch
+agreed with the user.
 
 ## Product and safety boundary
 
@@ -68,7 +68,7 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 | Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, transmission position, simulation/audio coordination, transition/heartbeat logging |
 | Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | EV road force, synthetic RPM/gears, P/N/D behavior, shifts, live-speed handling |
 | Audio | `audio/EngineAudioEngine.kt`, `EngineSynthesizer.kt` | AudioTrack lifecycle, focus, routing diagnostics, PCM synthesis/mirroring |
-| Telemetry | `telemetry/BydSpeedReader.kt` | reflective BYD capability probe and 20 ms getter polling |
+| Telemetry | `telemetry/BydSpeedReader.kt`, `telemetry/BydReadOnlyPermissionContext.kt` | reflective BYD capability probe, restricted client-context compatibility, and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
 | UI display | `VehicleDisplayUnits.kt`, `TuningPanel.kt` | cosmetic kgfm/HP conversions and graph annotation; does not alter physics |
 | Diagnostics | `EngineSoundsSimulatorApplication.kt`, `diagnostics/PersistentDiagnosticLog.kt` | process/lifecycle/crash and bounded persistent event storage |
@@ -103,7 +103,7 @@ The app writes low-rate, fsynced events to:
 ```
 
 It rotates to `drive-events.previous.log` at 256 KiB (about 512 KiB retained total). It logs
-session/activity lifecycle, controller start/stop/failures, input-source changes, every shift
+session/activity lifecycle, controller start/stop/failures, BYD telemetry probe/read transitions, input-source changes, every shift
 start/completion, 1 Hz drivetrain heartbeats, audio focus/start/track/error state, and uncaught
 exceptions. Never call it for every 200 Hz simulation tick or audio render buffer.
 
@@ -141,17 +141,15 @@ The connected emulator has been `emulator-5554`, using AVD `BYD_Seal_1920x1080` 
 x86_64, 1920 x 1080 at 160 dpi). The app's intended safe dashboard viewport is 1920 x 990.
 Android 16 needs `--bypass-low-target-sdk-block` because the app intentionally targets SDK 25.
 
-At this handoff, 43 JVM tests and 2 instrumentation tests pass. Lint has no errors; its warnings
+At this handoff, 50 JVM tests and 2 instrumentation tests pass. Lint has no errors; its warnings
 are pre-existing compatibility/dependency/resource warnings, not blockers.
 
 ## Open vehicle-validation work
 
-The biggest unresolved question is the exact target head unit, not the simulator:
+The first target-head-unit test established that the BYD speed class/getters exist but an ordinary application context is denied the signature-only `BYDAUTO_SPEED_GET`. The next validation questions are:
 
-1. Are `android.hardware.bydauto.speed.BYDAutoSpeedDevice` and its getter methods present on
-   firmware `2503`?
-2. Is the signature-level BYD permission granted to a sideloaded third-party app, and are returned
-   accelerator/brake/speed values plausible?
+1. Does the restricted `BydReadOnlyPermissionContext` satisfy the getter checks on firmware `2503`, and are accelerator/brake/speed values plausible?
+2. If it fails, does the persistent stack trace show a second server-side/Binder check that requires the separately reviewed shell-helper fallback?
 3. Can the abstract BYD listener be integrated safely using a compile-only vendor SDK, or is 20 ms
    polling the safe fallback?
 4. Does the car media route expose multichannel logical output, or does its DSP distribute a

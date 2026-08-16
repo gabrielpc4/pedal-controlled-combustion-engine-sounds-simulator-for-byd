@@ -9,7 +9,8 @@ session, which may not retain the useful part of a failure.
 The app creates an event when its process and dashboard lifecycle begin/end. The drivetrain
 controller records input-source changes, control toggles, every shift start/completion, and a
 one-second heartbeat containing gear, RPM, speed, throttle, brake, shift serial, and reader state.
-It also records controller/loop failures. The common logger remains available for audio-route
+It also records controller/loop failures, BYD telemetry probe failures with stack traces, and
+telemetry read failure/recovery transitions. The common logger remains available for audio-route
 changes and other low-rate state changes. It must not be called from the 200 Hz simulation loop or
 audio-buffer writer on every iteration: log transitions and a bounded-rate heartbeat instead.
 

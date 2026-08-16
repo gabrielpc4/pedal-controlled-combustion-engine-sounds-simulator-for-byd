@@ -29,7 +29,8 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
-| `telemetry/BydSpeedReader.kt` | Existing read-only reflective DiLink capability probe and getter polling |
+| `telemetry/BydSpeedReader.kt` | Read-only reflective DiLink capability probe and getter polling |
+| `telemetry/BydReadOnlyPermissionContext.kt` | Exact speed-read-only scope for BYD client-side permission checks |
 | `diagnostics/PersistentDiagnosticLog.kt` | Bounded, synced app-private transition/crash event trail |
 | `EngineSoundsSimulatorApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
 | `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
@@ -76,7 +77,7 @@ The header input button cycles these modes:
 
 When a valid BYD road-speed value is present in live-pedal mode, it replaces simulated vehicle speed. In the current build, valid live pedals can coexist with an invalid/missing speed value; in that case `externalSpeedKmh` is null and virtual speed is still integrated. This is acceptable only for the bench POC. Before moving-car testing, live mode should require valid speed or enter a clearly disabled/frozen state rather than inventing vehicle motion. The same engine, shift, gauge, and audio model is otherwise used in both modes.
 
-The vendor interaction remains read-only. Reflection invokes the vendor `getInstance(Context)` factory and the documented accelerator, brake, and current-speed getters; no vehicle setter permission or setter call was added.
+The vendor interaction remains read-only. Reflection invokes the vendor `getInstance(Context)` factory and the documented accelerator, brake, and current-speed getters; no vehicle setter permission or setter call was added. Firmware `2503` denied those getters under the ordinary application context. The reader now supplies a restricted context that recognizes only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`; PackageManager still correctly reports the signature permission as denied.
 
 ## Electric vehicle and synthetic engine model
 
@@ -250,7 +251,7 @@ adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 ## Known limitations and next work
 
 - The real-car getters are still polled every 20 ms. Reflection can call the getters, but `AbsBYDAutoSpeedListener` is an abstract vendor class and cannot be instantiated by `java.lang.reflect.Proxy`. Add a trustworthy compile-only BYD SDK/stub or a carefully reviewed runtime subclass mechanism before callback testing.
-- Exact on-car BYD permission behavior remains unknown until firmware `13.1.33.2503250.1` is tested.
+- Firmware `13.1.33.2503250.1` confirms the class/getters exist and an ordinary context is denied `BYDAUTO_SPEED_GET`. The restricted speed-read context still needs on-car validation for plausible values and any second server-side check.
 - Live-pedal mode currently falls back to integrating virtual speed if BYD speed is invalid. Require a valid speed signal or fail closed before any moving-car test.
 - The included synthesis is responsive and dependency-free, not a recorded AAA sample bank. See [drivetrain and audio research](drivetrain-audio-research.md) before licensing recordings.
 - `AUTO` can inspect Android capability metadata, but only actual-car dumpsys and listening can establish physical speaker routing.

@@ -2,13 +2,13 @@
 
 Last updated: 2026-08-15
 
-> Implementation status: the reflection/getter and 20 ms polling portion is implemented in the `mobile` module and builds successfully. See [poc-implementation.md](poc-implementation.md). Listener callbacks and the optional shell helper remain later steps pending the first on-car result.
+> Implementation status: the reflection/getter and 20 ms polling portion is implemented in the `mobile` module and builds successfully. The first on-car run confirmed the API and an ordinary-context signature-permission denial. A restricted speed-read compatibility context is now implemented for the second on-car run. See [poc-implementation.md](poc-implementation.md). Listener callbacks and an optional shell helper remain later steps.
 
 ## POC objective
 
 Build the smallest application that can prove or disprove access to BYD accelerator depth, brake depth, and speed on the target Seal firmware, while measuring callback cadence and application/UI delay.
 
-The POC is read-only. It must not control vehicle functions, write CAN data, or attempt to bypass platform signature enforcement.
+The POC is read-only. It must not control vehicle functions, write CAN data, alter PackageManager grants, or claim that the APK owns BYD's signature permission. The only client compatibility exception is the exact speed-read context documented in this repository; no SET permission is recognized.
 
 ## Required output on screen
 
@@ -326,13 +326,13 @@ Minimum technical success:
 - no crashes on repeated start/stop;
 - callback/poll timing is recorded.
 
-Direct-path success:
+Restricted client-context success:
 
-- `BYDAUTO_SPEED_GET` granted;
+- PackageManager still reports `BYDAUTO_SPEED_GET` denied, without misleading the user;
 - getters return values in documented ranges;
-- listener callbacks arrive for pedal changes;
-- callback values agree with getter values;
-- UI reflects a callback within the next display frame under normal load.
+- values respond to pedal changes during a safely parked test;
+- the 20 ms polling cadence and getter-batch duration are recorded;
+- no BYD SET permission or method is introduced.
 
 Permission-blocked result is still a successful diagnostic POC if it records:
 
@@ -342,20 +342,17 @@ Permission-blocked result is still a successful diagnostic POC if it records:
 - thrown exception/service behavior;
 - APK signing certificate used for the test.
 
-## Decision tree after the first vehicle test
+## Decision tree after the second vehicle test
 
 ```mermaid
 flowchart TD
-    A["Install diagnostic APK"] --> B{"BYD speed classes present?"}
-    B -- No --> C["Use external telemetry or obtain correct BYD SDK/firmware support"]
-    B -- Yes --> D{"Permission granted?"}
-    D -- No --> E["Pursue BYD developer signing/authorization"]
-    D -- Yes --> F{"Getters work?"}
-    F -- No --> G["Capture service exception and inspect firmware mapping"]
-    F -- Yes --> H{"Callbacks work?"}
-    H -- Yes --> I["Use event-driven direct pedal telemetry"]
-    H -- No --> J["Short polling experiment and callback compatibility investigation"]
-    E --> K["Meanwhile evaluate speed-derived load or read-only external OBD/CAN"]
+    A["Install updated diagnostic APK"] --> B{"Restricted-context getters work?"}
+    B -- Yes --> C{"Values are plausible and responsive?"}
+    C -- Yes --> D["Keep polling and investigate compile-only listener integration"]
+    C -- No --> E["Capture raw values, sentinel codes, and cadence"]
+    B -- No --> F["Retrieve persistent exception and identify any server-side check"]
+    F --> G["Review BYD authorization or a separately launched read-only shell helper"]
+    G --> H["Meanwhile keep simulator or speed-derived load fallback"]
 ```
 
 ## Later audio phase - intentionally not part of this POC

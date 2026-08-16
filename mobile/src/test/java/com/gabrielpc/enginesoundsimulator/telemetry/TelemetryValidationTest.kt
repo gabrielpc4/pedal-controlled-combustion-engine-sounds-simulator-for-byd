@@ -59,4 +59,32 @@ class TelemetryValidationTest {
         assertEquals(40.0, fourth.p95IntervalMs!!, 0.0)
         assertEquals(40.0, fourth.maxIntervalMs!!, 0.0)
     }
+
+    @Test
+    fun readOnlyCompatibilityPolicyAllowsOnlySpeedReadPermissions() {
+        assertTrue(
+            BydReadOnlyPermissionPolicy.treatAsGranted(
+                "android.permission.BYDAUTO_SPEED_COMMON",
+            ),
+        )
+        assertTrue(
+            BydReadOnlyPermissionPolicy.treatAsGranted(
+                "android.permission.BYDAUTO_SPEED_GET",
+            ),
+        )
+
+        assertEquals(
+            false,
+            BydReadOnlyPermissionPolicy.treatAsGranted(
+                "android.permission.BYDAUTO_SPEED_SET",
+            ),
+        )
+        assertEquals(
+            false,
+            BydReadOnlyPermissionPolicy.treatAsGranted(
+                "android.permission.BYDAUTO_AC_GET",
+            ),
+        )
+        assertEquals(false, BydReadOnlyPermissionPolicy.treatAsGranted(null))
+    }
 }

@@ -22,6 +22,15 @@ These artifacts are deliberately excluded from the public repository. They remai
 - Static analysis is recorded in `../reference-apk-analysis.md`.
 - The APK is a behavioral reference, not a redistributable SDK and not proof that an unsigned application has the same permissions.
 
+### Electro Car App APK
+
+- Local filename: `reference/Electro-Car-App.apk`
+- Package: `br.com.rory.electro`
+- Version: `1.12.0` (`versionCode 180`)
+- SHA-256: `17B419B5C81F1235F895757D36E8D8A269CDF1DBC7F67AD079045DA1F5E2CD32`
+- Static analysis: [Electro APK analysis](../electro-apk-analysis.md).
+- The APK is excluded from Git and must not be redistributed.
+
 ## Generated UI asset
 
 ### Apex V10 car concept
@@ -71,6 +80,7 @@ No newer publicly downloadable official API PDF was found during the search. The
 - Decompiled speed listener: <https://github.com/tonysmith1sme/Car-Staus-Helper/blob/master/byd_sdk_33/src/main/java/android/hardware/bydauto/speed/AbsBYDAutoSpeedListener.java>
 - Community manifest permission example: <https://github.com/tonysmith1sme/Car-Staus-Helper/blob/master/app/src/main/AndroidManifest.xml>
 - Captured DiLink log: <https://github.com/tonysmith1sme/Car-Staus-Helper/blob/master/log/log111.txt>
+- Live-tested client-side BYD permission context: <https://github.com/wheregoes/byd-apps/blob/8f066fb4e0dfea9d9b50dcee19ae1d419bc27eeb/apps/byd-probe/src/main/java/com/wheregoes/bydprobe/BydPermissionContext.java>
 - Community firmware archive/index: <https://wiki.defective.tech/en/BYD/Firmware>
 
 Community materials are useful for implementation clues and firmware comparison. They are not guarantees for the target Seal or authorization to redistribute BYD code.
