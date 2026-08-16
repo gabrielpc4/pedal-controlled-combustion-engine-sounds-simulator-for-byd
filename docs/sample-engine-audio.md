@@ -53,7 +53,7 @@ The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), se
 
 ### Load versus lift-off tone
 
-The authored throttle routes deliberately crossfade between different recordings. Around 7,000 RPM, full load is dominated by `engine_noise_7`, `l2a`, `l2a_high`, `n_up`, and `sine`; lift-off instead opens `c1`, `c2`, and `n2`. The load group contains more noisy, overlapping high-frequency material, while the coast group has fewer and more tonally coherent harmonic loops. Consequently, lift-off can sound clearer and subjectively louder even when telemetry reports a lower PCM peak. This is source/mix character, not a different sample rate or output-quality mode.
+The authored throttle routes deliberately crossfade between different recordings. Around 7,000 RPM, full load is dominated by `l2a`, `l2a_high`, `n_up`, and `sine`; lift-off instead emphasizes `c1`, `c2`, and `n2`. The original load group contained more noisy, overlapping high-frequency material, while the coast group had fewer and more tonally coherent harmonic loops. Consequently, lift-off sounded clearer and subjectively louder even when telemetry reported a lower PCM peak. The app now retains the C1/C2 tonal loops at a restrained `-9 dB` under load and reduces the always-running `engine_noise_7` layer by `3.1 dB`. This narrows the tonal difference without eliminating the intended load/coast response.
 
 The audio thread performs no file I/O or persistent logging. It publishes bounded diagnostics consumed by the 200 Hz drive controller once per second.
 

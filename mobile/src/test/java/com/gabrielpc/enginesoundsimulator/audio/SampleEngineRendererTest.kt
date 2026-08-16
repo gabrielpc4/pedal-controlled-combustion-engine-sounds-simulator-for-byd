@@ -31,12 +31,15 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun recoveredThrottleCurvesCrossfadeLoadAndCoastLayers() {
+    fun throttleCurvesKeepTonalBodyWhileStillFavoringTheCorrectLayerSet() {
         val load = profile.layers.first { it.id == "l1" }
         val coast = profile.layers.first { it.id == "c2" }
+        val broadbandNoise = profile.layers.first { it.id == "engine_noise_7" }
 
         assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0) * 8.0)
-        assertTrue(coast.gainAt(7_000.0, 0.0) > coast.gainAt(7_000.0, 1.0) * 8.0)
+        assertTrue(coast.gainAt(7_000.0, 0.0) > coast.gainAt(7_000.0, 1.0) * 2.5)
+        assertTrue(coast.gainAt(7_000.0, 1.0) > 0.10)
+        assertEquals(-0.5, broadbandNoise.baseGainDb, 0.0)
     }
 
     @Test

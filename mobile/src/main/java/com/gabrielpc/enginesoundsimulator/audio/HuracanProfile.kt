@@ -7,6 +7,9 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
     val textureLoad = dbCurve(0.021328958 to -39.839832, 0.707137 to -16.23739, 1.2466724 to -1.1)
     val sineLoad = dbCurve(0.012417219 to -9.0, 0.990894 to 0.0)
     val coast = dbCurve(0.24935648 to 0.0, 0.5758819 to -23.426956, 0.8728466 to -42.0)
+    // Keep a restrained amount of the clean C1/C2 harmonic body under load. The source event
+    // originally closes these loops almost completely, leaving the noisier load layers exposed.
+    val tonalCoast = dbCurve(0.24935648 to 0.0, 0.5758819 to -10.0, 0.8728466 to -9.0)
     val coastNoise = dbCurve(0.01640689 to -4.0, 0.12797375 to -38.1)
     val idle = dbCurve(0.0024834438 to -14.5, 1.0 to -10.5)
 
@@ -34,7 +37,7 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
             amplitude = listOf(ampCurve(1372.0 to 1.0, 2352.0 to 0.0))),
         layer("c3", "s134_hur_c3.wav", SampleLayerRole.COAST, 3822.0, 6294.06, 4821.6, throttleCurve = coast,
             amplitude = listOf(ampCurve(3822.0 to 0.0, 4900.0 to 1.0), ampCurve(5235.374 to 1.0, 6294.06 to 0.0))),
-        layer("engine_noise_7", "s077_eng_noise7.wav", SampleLayerRole.TEXTURE, 1666.0, 9800.0, pitch = 2.5, gain = 2.6,
+        layer("engine_noise_7", "s077_eng_noise7.wav", SampleLayerRole.TEXTURE, 1666.0, 9800.0, pitch = 2.5, gain = -0.5,
             amplitude = listOf(ampCurve(1666.0 to 0.0, 4366.0 to 1.0), ampCurve(9600.0 to 1.0, 9800.0 to 0.0))),
         layer("engine_noise_9_high", "s049_eng_noise9_high.wav", SampleLayerRole.LOAD, 6958.0, 9800.0, pitch = 0.0,
             throttleCurve = textureLoad, amplitude = listOf(ampCurve(6958.0 to 0.0, 7658.0 to 1.0))),
@@ -75,9 +78,9 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
             amplitude = listOf(ampCurve(1666.0 to 0.0, 3466.0 to 1.0), ampCurve(3621.9033 to 1.0, 4421.657 to 0.0))),
         layer("l2a_high", "s081_hur_high_l2a.wav", SampleLayerRole.LOAD, 1078.0, 7644.0, 6125.0, throttleCurve = highLoad,
             amplitude = listOf(ampCurve(1078.0 to 0.0, 1370.3842 to 1.0)), rpmGain = listOf(l2Gain)),
-        layer("c2", "s059_hur_c2.wav", SampleLayerRole.COAST, 5235.374, 7644.0, 6487.6, throttleCurve = coast,
+        layer("c2", "s059_hur_c2.wav", SampleLayerRole.COAST, 5235.374, 7644.0, 6487.6, throttleCurve = tonalCoast,
             amplitude = listOf(ampCurve(5235.374 to 0.0, 6294.06 to 1.0), ampCurve(6117.147 to 1.0, 7644.0 to 0.0))),
-        layer("c1", "s039_hur_c1.wav", SampleLayerRole.COAST, 6117.147, 9800.0, 7448.0, throttleCurve = coast,
+        layer("c1", "s039_hur_c1.wav", SampleLayerRole.COAST, 6117.147, 9800.0, 7448.0, throttleCurve = tonalCoast,
             amplitude = listOf(ampCurve(6117.147 to 0.0, 7644.0 to 1.0))),
     )
 
