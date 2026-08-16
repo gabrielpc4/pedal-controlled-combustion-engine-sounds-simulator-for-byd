@@ -326,10 +326,17 @@ class EngineSimulation(
         } else {
             freeRevRpmTarget()
         }
+        val responseSeconds = if (transmissionPosition == TransmissionPosition.DRIVE) {
+            profile.syntheticRpmResponseSeconds
+        } else if (targetRpm >= engineRpm) {
+            NEUTRAL_REV_UP_RESPONSE_SECONDS
+        } else {
+            NEUTRAL_REV_DOWN_RESPONSE_SECONDS
+        }
         engineRpm = approachExp(
             current = engineRpm,
             target = targetRpm,
-            timeConstant = profile.syntheticRpmResponseSeconds,
+            timeConstant = responseSeconds,
             dt = dt,
         ).coerceIn(profile.idleRpm, profile.limiterRpm)
     }
@@ -492,6 +499,10 @@ class EngineSimulation(
         private const val COAST_REGEN_THROTTLE_THRESHOLD = 0.02
         private const val COAST_REGEN_BRAKE_THRESHOLD = 0.02
         private const val EXTERNAL_ACCELERATION_FILTER_SECONDS = 0.10
+        /** Neutral/Park rev-up: engine inertia spooling with no wheel load. */
+        private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
+        /** Neutral/Park rev-down: coasting back toward idle after lift-off. */
+        private const val NEUTRAL_REV_DOWN_RESPONSE_SECONDS = 0.90
     }
 }
 

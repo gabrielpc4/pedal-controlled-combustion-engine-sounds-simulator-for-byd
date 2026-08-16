@@ -11,7 +11,7 @@ Built for the rotating BYD tablet on DiLink firmware `13.1.33.2503250.1` (`2503`
 - **Presentation gears that never bog the car** — seven synthetic ratios shape tachometer RPM and sound only; wheel torque stays continuous through every shift
 - **Procedural V10 audio** — original synthesis driven by RPM, load, throttle, shift events, overrun crackle, and limiter state
 - **Cabin audio routing** — stereo, quad, 5.1, or 7.1 logical output with live route, buffer, and underrun diagnostics
-- **Full-screen dashboard** — landscape tachometer, virtual pedals, input-mode controls, and a persistent tuning workstation for curves, ratios, and audio layers
+- **Full-screen dashboard** — landscape tachometer, virtual pedals, **P / N / D** shifter, input-mode controls, and a persistent tuning workstation for curves, ratios, and audio layers
 - **On-device diagnostics** — durable shift, lifecycle, and crash logs for field tuning without a live `logcat` session
 
 ## How it works

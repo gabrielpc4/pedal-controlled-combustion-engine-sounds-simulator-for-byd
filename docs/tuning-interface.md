@@ -8,7 +8,7 @@ The interface presents torque in **≈ motor-shaft kgfm** and power in values la
 
 ### Vehicle
 
-- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, and RPM response time
+- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, and **RPM RESPONSE** (drive-mode tach tracking only; does not affect **N**/**P** neutral inertia)
 - Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
 - Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
 - Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
@@ -42,7 +42,20 @@ Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is
 
 Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change. These controls affect sound RPM and shift events only; a ratio edit cannot change electric acceleration.
 
-Synthetic RPM on lift-off is **road-coupled** (no retention/decay sliders). See [lift-off decision record](ui-display-and-simulation-decisions.md#32-lift-off-rpm-retention-removed-2026-08).
+Synthetic RPM on lift-off in **D** is **road-coupled** (no retention/decay sliders). **N**/**P** use the free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08). Downshifts use per-gear landing RPM only; the old global downshift-floor slider was removed.
+
+## Dashboard controls (outside TUNE)
+
+These affect runtime behavior immediately but are **not** persisted in `TuningRepository`:
+
+| Control | Location | Effect |
+| --- | --- | --- |
+| **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; only **D** enables auto-shifts and road-coupled RPM |
+| **INPUT** | Header | Cycles AUTO / SIM / BYD LIVE |
+| **ENGINE AUDIO** | Header | Mutes/unmutes synthesis |
+| **CH OUTPUT** | Header | Cycles logical channel layout |
+
+See [UI display and simulation decisions §3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08) for neutral steady-state and inertia timing.
 
 ### Audio
 

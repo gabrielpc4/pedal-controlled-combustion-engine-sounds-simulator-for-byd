@@ -37,7 +37,7 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 
 - [Full engine-sound implementation](full-implementation.md) - architecture, drivetrain, input policy, procedural audio, logical multichannel routing, UI, controls, verification, and on-car acceptance.
 - [BYD Seal Performance calibration](byd-seal-performance-calibration.md) - published vehicle anchors, digitized A2MAC1 axle curves, Sport-pedal uncertainty, road-load assumptions, and synthetic-gear separation.
-- [UI display and simulation decisions](ui-display-and-simulation-decisions.md) - cosmetic kgfm/HP display, graph annotation policy, lift-off RPM removal, SIM coast regen, and other presentation choices that must not be mistaken for physics bugs.
+- [UI display and simulation decisions](ui-display-and-simulation-decisions.md) - cosmetic kgfm/HP display, graph annotation policy, P/N/D shifter, neutral RPM inertia, lift-off RPM removal (D only), SIM coast regen, and other presentation choices that must not be mistaken for physics bugs.
 - [Emulator validation](emulator-validation.md) - exact software-ARM fallback, final APK identity, viewport, and pedal-test evidence.
 - [Drivetrain and audio research](drivetrain-audio-research.md) - professional simulation evidence, sound-synthesis references, commercial asset options, and licensing exclusions.
 - [Research findings](research-findings.md) - platform identification, official versus community evidence, Android Automotive comparison, permissions, known failure modes, and source links.

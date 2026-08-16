@@ -163,15 +163,36 @@ See [calibration doc — Synthetic gears](byd-seal-performance-calibration.md#sy
 
 ### 3.2 P / N / D shifter (2026-08)
 
-A column shifter beside the pedals selects **P**, **N**, or **D**. It is runtime-only (not stored in engine tuning).
+A column shifter beside the pedals selects **P**, **N**, or **D**. It is runtime-only (not stored in engine tuning). `DriveController.setTransmissionPosition()` passes the choice into `DriverInput.transmissionPosition` on every 200 Hz step. Position changes are logged as `transmission_position_changed`.
 
 | Position | Behavior |
 |----------|----------|
-| **D** | RPM follows road speed through the presentation gear; automatic upshifts/downshifts; throttle drives the virtual vehicle in SIM mode. |
+| **D** | RPM follows road speed through the presentation gear; automatic upshifts/downshifts; throttle drives the virtual vehicle in SIM mode. Tach filter: editable **RPM RESPONSE** (`syntheticRpmResponseSeconds`, default **35 ms**). |
 | **N** | Neutral: RPM free-revs with throttle and falls on lift-off; **no** automatic gear changes; throttle does **not** drive the wheels (coast/brake still affect SIM speed). |
-| **P** | Park: same free-rev RPM as **N**, but SIM speed is held at zero. |
+| **P** | Park: same free-rev RPM model as **N**, but SIM speed is held at zero. |
 
 The tachometer shows the gear number in **D** and **P**/**N** on the range readout when not in drive.
+
+#### Neutral / park RPM model
+
+In **N** and **P**, the synthetic tachometer target is throttle-driven, not road-coupled:
+
+```text
+targetRPM = idleRpm + filteredThrottle × (redlineRpm − idleRpm)
+```
+
+`filteredThrottle` still passes through the Sport-like pedal curve and the editable attack/release exponentials (defaults **120 ms** / **90 ms**), so partial pedal input is not a step change.
+
+**Steady-state at partial throttle:** holding ~50% pedal stabilizes RPM midway between idle and redline — the same equilibrium idea as a real engine in neutral (throttle opening balances internal friction). The needle stops climbing once it reaches the target; it does not run away.
+
+**Rev inertia (not editable in TUNE):** **N**/**P** use asymmetric fixed time constants in `EngineSimulation` instead of the 35 ms drive filter:
+
+| Direction | Constant | Default | Rationale |
+|-----------|----------|---------|-----------|
+| Revving up | `NEUTRAL_REV_UP_RESPONSE_SECONDS` | **0.55 s** | Crank/flywheel inertia with no wheel load |
+| Revving down | `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` | **0.90 s** | Slower coast-down toward idle after lift-off |
+
+Implementation uses the same `approachExp()` helper as drive mode; only the time constant changes. **D** lift-off remains road-coupled through the presentation ratio — see §3.3.
 
 **Tests:** `neutralPositionRaisesRpmWithThrottleAtStandstill`, `neutralPositionLiftOffDropsRpmTowardIdleAtStandstill`, `neutralPositionDoesNotAutoShiftWhileRevving`, `parkPositionKeepsSimulatorSpeedAtZero`, plus existing lift-off hunting guards in **D**.
 
@@ -179,15 +200,15 @@ The tachometer shows the gear number in **D** and **P**/**N** on the range reado
 
 **Previous behavior:** on pedal release, synthetic RPM could lag above road-coupled RPM via an editable retention fraction and decay time. That made the needle sound “hang” but caused **gear hunting** (`3 → 2 → 3`) because downshift logic saw low displayed RPM while road speed still justified a higher gear.
 
-**Current behavior:** synthetic RPM target is **always road-coupled** through the current presentation ratio:
+**Current behavior (D only):** in **D**, synthetic RPM target is **road-coupled** through the current presentation ratio:
 
 ```text
 targetRPM = idle + wheelRPM × gearRatio × finalDrive
 ```
 
-Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No retention sliders remain in the tuning UI.
+Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No retention sliders remain in the tuning UI. In **N**/**P**, lift-off lowers RPM via the neutral free-rev model in §3.2 instead.
 
-**Tests:** `liftOffRpmStaysRoadCoupledWhenSpeedHeldConstant`, `liftOffFromThirdDoesNotUpshiftHuntWhileCoasting`, `liftOffWithLiveSpeedHeldDoesNotHuntGears`.
+**Tests:** `liftOffRpmStaysRoadCoupledWhenSpeedHeldConstant`, `liftOffFromThirdDoesNotUpshiftHuntWhileCoasting`, `liftOffWithLiveSpeedHeldDoesNotHuntGears`, `releasingPedalKeepsRpmCoupledToRoadSpeed`.
 
 **Rejected return path:** reintroducing retention without a scoped live-speed safety model. The old scoped emergency-upshift hold existed only to paper over the retention/display mismatch and was removed with retention.
 

@@ -24,6 +24,7 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | File | Responsibility |
 | --- | --- |
 | `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, and independent sound-RPM shift controller |
+| `simulation/TransmissionPosition.kt` | `P` / `N` / `D` enum consumed by `DriverInput` |
 | `audio/EngineSynthesizer.kt` | Allocation-free procedural V10 source |
 | `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
@@ -107,7 +108,7 @@ At every 5 ms fixed step:
 5. Wheel torque divided by tire radius produces drive force; the non-binding configurable traction ceiling remains available for tuning.
 6. In simulator mode only, lift-off can apply a constant coast-regen deceleration (`simulatorCoastRegenMps2`, default 0.50 m/s²) so virtual speed drops faster than aero drag alone.
 7. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
-8. The independent sound RPM target follows the **P / N / D** shifter: **D** couples to wheel speed through the presentation gear; **N** and **P** free-rev with throttle. Filtered with `syntheticRpmResponseSeconds`. There is no lift-off RPM retention layer.
+8. The independent sound RPM target follows the **P / N / D** shifter: **D** couples to wheel speed through the presentation gear (filtered by editable `syntheticRpmResponseSeconds`, default 35 ms); **N** and **P** free-rev with filtered throttle using fixed neutral inertia constants (`NEUTRAL_REV_UP_RESPONSE_SECONDS` = 0.55 s, `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` = 0.90 s). There is no lift-off RPM retention layer in **D**.
 9. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
 
 Braking therefore slows the real or virtual vehicle first. Pedal lift unloads the fictional engine sound without modifying EV wheel force. Lower road speed can request a lower presentation gear; there is no simulated clutch feeding torque back into the vehicle.
@@ -181,6 +182,7 @@ Controls:
 
 - touch and drag vertically on the right accelerator pedal;
 - touch and drag vertically on the left brake pedal;
+- tap **P**, **N**, or **D** on the column shifter to the right of the pedals (runtime only; not saved in tuning);
 - keyboard `W` or Up Arrow for full throttle;
 - keyboard `S`, Down Arrow, or Space for full brake;
 - tap the input header to cycle AUTO/SIM/BYD LIVE;
@@ -201,7 +203,7 @@ Tests verify that:
 
 - the default physical profile contains the published 670 Nm, 390 kW, 2,185 kg, and 180 km/h anchors;
 - the digitized axle curves reproduce the 3,170/3,975 Nm peaks and approximately 56% to 71% rear-share progression;
-- sustained throttle increases sound RPM progressively with road speed rather than jumping directly to a pedal-derived target;
+- sustained throttle in **D** increases sound RPM progressively with road speed rather than jumping directly to a pedal-derived target; in **N**/**P**, partial throttle stabilizes at a free-rev setpoint;
 - first-gear sound RPM does not reverse at any tested positive throttle input;
 - full-throttle virtual acceleration reaches 100 km/h inside the 3.90–4.02 second A2MAC1 calibration band;
 - low-speed acceleration is stronger than high-speed acceleration, and a synthetic upshift causes no wheel-torque discontinuity;
