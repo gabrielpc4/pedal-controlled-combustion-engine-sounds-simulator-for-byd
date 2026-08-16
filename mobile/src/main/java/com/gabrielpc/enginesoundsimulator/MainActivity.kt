@@ -67,7 +67,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -75,7 +74,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -259,10 +257,6 @@ private fun MotorSoundDashboard(
                     .width(dashboardWidth)
                     .height(dashboardHeight),
             ) {
-                val density = LocalDensity.current
-                val viewportWidthPx = with(density) { dashboardWidth.roundToPx() }
-                val viewportHeightPx = with(density) { dashboardHeight.roundToPx() }
-
                 Column(modifier = Modifier.fillMaxSize()) {
                     DashboardHeader(
                         state = state,
@@ -304,11 +298,6 @@ private fun MotorSoundDashboard(
                                 .padding(start = 16.dp, bottom = 6.dp),
                         )
                     }
-
-                    DashboardFooter(
-                        state = state,
-                        viewport = "${viewportWidthPx}x${viewportHeightPx}",
-                    )
                 }
 
                 if (tuningOpen) {
@@ -564,15 +553,6 @@ private fun CarStage(
             )
         }
 
-        Text(
-            text = "TOUCH / DRAG PEDALS   •   P N D SHIFTER   •   W or ↑ THROTTLE   •   S, ↓ or SPACE BRAKE",
-            color = Muted,
-            fontSize = 10.sp,
-            letterSpacing = 0.6.sp,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 22.dp, bottom = 8.dp),
-        )
     }
 }
 
@@ -877,9 +857,6 @@ private fun Tachometer(
                     lineHeight = 48.sp,
                     fontWeight = FontWeight.Black,
                 )
-                Text(
-                    if (transmissionPosition == TransmissionPosition.DRIVE) "VIRTUAL GEAR" else "RANGE",
-                    color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
             }
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -909,52 +886,6 @@ private fun Tachometer(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun DashboardFooter(state: DriveSnapshot, viewport: String) {
-    val audio = state.audio
-    val audioStatus = when {
-        !state.engineSoundEnabled -> "OFF"
-        audio.running -> audio.activeLayout
-        audio.error != null -> audio.error
-        else -> "NEGOTIATING"
-    }
-    val audioStatusColor = when {
-        !state.engineSoundEnabled -> Muted
-        audio.running -> Green
-        audio.error != null -> Red
-        else -> Amber
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(46.dp)
-            .background(Color.Black.copy(alpha = 0.55f))
-            .border(1.dp, Line.copy(alpha = 0.45f))
-            .padding(horizontal = 34.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        FooterMetric("AUDIO", audioStatus, audioStatusColor)
-        FooterMetric("SAMPLE BANK", audio.sampleStatus, if (audio.sampleStatus == "ACTIVE") Green else Amber)
-        FooterMetric("ROUTE", audio.routedDevice, CyanSoft, Modifier.weight(1f))
-        FooterMetric("FORMAT", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.steadyStateUnderruns} new underruns" else "NEGOTIATING", CyanSoft)
-        FooterMetric("SESSION", if (audio.sessionId > 0) audio.sessionId.toString() else "—", CyanSoft)
-        FooterMetric("VIEWPORT", "$viewport px", Muted)
-    }
-}
-
-@Composable
-private fun FooterMetric(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
-        Text(value, color = color, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
