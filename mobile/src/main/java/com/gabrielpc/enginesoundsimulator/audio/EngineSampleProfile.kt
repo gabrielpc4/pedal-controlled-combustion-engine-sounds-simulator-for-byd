@@ -120,6 +120,18 @@ internal data class EngineSampleProfile(
         10.0.pow((throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0)
 }
 
+/** Common road-car figures presented for the model family represented by a sound profile. */
+internal data class CarSpecifications(
+    val horsepower: String,
+    val torqueKgfm: String,
+    val zeroToHundred: String,
+    val weight: String,
+    val msrp: String,
+) {
+    fun summary(): String =
+        "$horsepower HP  •  $torqueKgfm kgfm  •  0–100 $zeroToHundred  •  $weight kg  •  MSRP $msrp"
+}
+
 internal object EngineSampleProfiles {
     val default = huracanTrofeoEvo2Profile()
     val all = listOf(
@@ -137,4 +149,52 @@ internal object EngineSampleProfiles {
         val current = all.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
         return all[(current + offset).mod(all.size)]
     }
+
+    fun specificationsFor(id: String): CarSpecifications = specifications[id] ?: unavailableSpecifications
+
+    private val unavailableSpecifications = CarSpecifications(
+        horsepower = "—",
+        torqueKgfm = "—",
+        zeroToHundred = "—",
+        weight = "—",
+        msrp = "—",
+    )
+
+    private val specifications = mapOf(
+        "lamborghini_huracan_trofeo_evo2_cabin" to CarSpecifications(
+            horsepower = "631",
+            torqueKgfm = "61",
+            zeroToHundred = "2.9 s",
+            weight = "1,422",
+            msrp = "$208,571",
+        ),
+        "ferrari_f430_gt2_cabin" to CarSpecifications(
+            horsepower = "483",
+            torqueKgfm = "47",
+            zeroToHundred = "4.0 s",
+            weight = "1,340",
+            msrp = "$186,925",
+        ),
+        "ferrari_812_nlargo_cabin" to CarSpecifications(
+            horsepower = "789",
+            torqueKgfm = "73",
+            zeroToHundred = "2.9 s",
+            weight = "1,525",
+            msrp = "$335,000",
+        ),
+        "bmw_m8_coupe_cabin" to CarSpecifications(
+            horsepower = "600",
+            torqueKgfm = "76",
+            zeroToHundred = "3.3 s",
+            weight = "1,948",
+            msrp = "$133,000",
+        ),
+        "lamborghini_aventador_sv_cabin" to CarSpecifications(
+            horsepower = "730",
+            torqueKgfm = "70",
+            zeroToHundred = "2.9 s",
+            weight = "1,575",
+            msrp = "$421,350",
+        ),
+    )
 }

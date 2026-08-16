@@ -81,6 +81,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -479,9 +480,7 @@ private fun CarStage(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                "RPM / LOAD LOOPSET  •  ${state.audio.sampleLoadedLoops} ENGINE LAYERS  •  " +
-                    "${state.tuning.engine.maxRpm.roundToInt()} RPM BANK  •  " +
-                    "${state.selectedCarIndex + 1}/${state.availableCarCount}",
+                EngineSampleProfiles.specificationsFor(state.selectedCarId).summary(),
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
