@@ -18,12 +18,29 @@ class EngineSimulationTest {
         assertEquals(3_170.0, profile.frontPeakWheelTorqueNm, 0.0)
         assertEquals(3_975.0, profile.rearPeakWheelTorqueNm, 0.0)
         assertEquals(2_185.0, profile.vehicleMassKg, 0.0)
-        assertEquals(180.0, profile.topSpeedKmh, 0.0)
+        assertEquals(190.0, profile.topSpeedKmh, 0.0)
         assertEquals(8_600.0, profile.redlineRpm, 0.0)
         assertEquals(8_850.0, profile.limiterRpm, 0.0)
         assertEquals(8_250.0, profile.upshiftRpm, 0.0)
         assertTrue(profile.upshiftRpm < profile.redlineRpm)
         assertTrue(profile.redlineRpm < profile.limiterRpm)
+    }
+
+    @Test
+    fun topGearAtConfiguredTopSpeedRedlines() {
+        val simulation = EngineSimulation()
+        val state = simulation.update(
+            DriverInput(
+                throttle = 1.0,
+                externalSpeedKmh = 190.0,
+                transmissionPosition = TransmissionPosition.DRIVE,
+            ),
+            STEP,
+        )
+
+        assertEquals(7, state.gear)
+        assertEquals(190.0, state.speedKmh, 0.5)
+        assertEquals(simulation.profile.redlineRpm, state.rpm, 25.0)
     }
 
     @Test
@@ -182,7 +199,11 @@ class EngineSimulationTest {
 
     @Test
     fun automaticShiftStartsAtTheShiftPointDropsRpmAndHonorsCompletedGearDwell() {
-        val simulation = EngineSimulation()
+        val simulation = EngineSimulation(
+            EngineProfile.APEX_V10.copy(
+                gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69),
+            ),
+        )
         var firstShiftStart: DrivetrainState? = null
         var firstShiftCompletion: DrivetrainState? = null
         var firstCompletionTime: Double? = null
@@ -399,7 +420,7 @@ class EngineSimulationTest {
         simulation.update(DriverInput(externalSpeedKmh = 30.0), STEP)
         var recovered = simulation.state
         repeat((2.0 / STEP).toInt()) {
-            recovered = simulation.update(DriverInput(externalSpeedKmh = 200.0), STEP)
+            recovered = simulation.update(DriverInput(externalSpeedKmh = 175.0), STEP)
         }
 
         assertTrue("unsafe projected rpm should force sequential upshifts: $recovered", recovered.gear >= 4)

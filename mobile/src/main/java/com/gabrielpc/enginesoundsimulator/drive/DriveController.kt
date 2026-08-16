@@ -17,6 +17,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.ReaderState
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
+import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
 import com.gabrielpc.enginesoundsimulator.tuning.TuningRepository
 import java.util.concurrent.atomic.AtomicBoolean
@@ -181,6 +182,11 @@ class DriveController(context: Context) {
         if (previous != position) {
             PersistentDiagnosticLog.event("transmission_position_changed", "from=${previous.name} to=${position.name}")
         }
+    }
+
+    fun restartVehicleReader() {
+        vehicleReader.restart()
+        PersistentDiagnosticLog.event("byd_reader_restart_requested")
     }
 
     fun toggleSound() {
@@ -422,8 +428,7 @@ internal fun resolveDriveInput(
     simulatorThrottle: Double,
     simulatorBrake: Double,
 ): ResolvedDriveInput {
-    val vehicleAvailable = telemetry.readerState == ReaderState.ACTIVE &&
-        telemetry.accelerator.isValid && telemetry.brake.isValid
+    val vehicleAvailable = telemetry.vehiclePedalsAvailable()
 
     if (vehicleAvailable && mode != InputMode.SIMULATOR) {
         return ResolvedDriveInput(

@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator.simulation
 
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
+import com.gabrielpc.enginesoundsimulator.tuning.SyntheticGearboxCalibration
 import com.gabrielpc.enginesoundsimulator.tuning.interpolateCurve
 import kotlin.math.PI
 import kotlin.math.max
@@ -69,11 +70,11 @@ data class EngineProfile(
             wheelRadiusMeters = 0.347,
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
-            topSpeedKmh = 180.0,
+            topSpeedKmh = 190.0,
             syntheticRpmResponseSeconds = 0.035,
             simulatorCoastRegenMps2 = 0.50,
             finalDrive = 3.82,
-            gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69),
+            gearRatios = SyntheticGearboxCalibration.computeGearRatios().toDoubleArray(),
         )
     }
 }
@@ -521,9 +522,12 @@ internal fun postUpshiftLandingRpm(profile: EngineProfile, gearIndex: Int): Doub
     return profile.idleRpm + (profile.upshiftRpm - profile.idleRpm) * currentRatio / previousRatio
 }
 
+/** Digitized A2MAC1 axle curves were sampled against a 180 km/h chart; keep that reference for physics. */
+internal const val TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH = 180.0
+
 /** Digitized axle-output envelope, evaluated against normalized road speed. */
 internal fun axleWheelTorqueAtSpeed(profile: EngineProfile, speedKmh: Double): AxleWheelTorque {
-    val normalizedSpeed = (speedKmh / profile.topSpeedKmh).coerceIn(0.0, 1.0)
+    val normalizedSpeed = (speedKmh / TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH).coerceIn(0.0, 1.0)
     return AxleWheelTorque(
         frontNm = profile.frontPeakWheelTorqueNm * interpolateCurve(
             profile.frontWheelTorqueCurve,

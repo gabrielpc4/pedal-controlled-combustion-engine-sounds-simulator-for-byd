@@ -146,8 +146,19 @@ The real Seal uses fixed-ratio single-speed electric drive units. In this app:
 - motor torque, road force, acceleration, drag, and braking are calculated without the synthetic gear ratio;
 - the seven editable ratios affect only the fictional engine RPM, sound, gauge, and shift event;
 - a synthetic shift never cuts wheel torque, opens a clutch, adds rev-match torque, or changes vehicle acceleration;
-- the displayed RPM follows road speed through the selected presentation ratio with a short editable response filter;
+- the displayed RPM follows road speed through the selected presentation ratio with a short editable response filter in **D**;
 - braking reduces real/virtual road speed, and that lower speed then lowers synthetic RPM and selects lower presentation gears.
+
+Default gearbox calibration (`SyntheticGearboxCalibration`) derives the seven presentation ratios from:
+
+- **190 km/h** configured top speed (this owner's Seal limit; BYD still publishes 180 km/h electronically);
+- the existing **8,600 RPM** redline, **8,250 RPM** upshift, and **10,000 RPM** tachometer scale;
+- fixed **3.82** final drive, **950 RPM** idle, and **0.347 m** tire radius;
+- a ~**0.856** geometric step between consecutive ratios so upshift speeds spread realistically, with 7th gear hitting **redline exactly at 190 km/h**.
+
+Example default ratios: `4.068, 3.482, 2.981, 2.552, 2.184, 1.870, 1.380`.
+
+Axle torque curves remain digitized against a **180 km/h** chart reference (`TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH`); raising the vehicle top-speed slider to 190 does not rescale measured wheel torque.
 
 This preserves the enjoyable rise, shift, RPM drop, and sound progression of a game while removing clutch slip, bogging, combustion torque buildup, and shift interruption from the electric vehicle response.
 
@@ -167,7 +178,7 @@ The 390 kW motor rating and 670 Nm motor torque in persisted config remain the p
 
 `EngineSimulationTest` checks:
 
-- the published 670 Nm, 390 kW, 2,185 kg, and 180 km/h anchors;
+- the published 670 Nm, 390 kW, 2,185 kg anchors, **190 km/h** presentation top speed, and the original **8,600 RPM** redline;
 - the 3,170/3,975 Nm axle peaks, 7,145 Nm total, and approximately 56% to 71% rearward distribution change;
 - stronger low-speed acceleration and a progressive high-speed taper;
 - 0–100 km/h inside the 3.90–4.02 second calibration band;
@@ -175,7 +186,8 @@ The 390 kW motor rating and 670 Nm motor torque in persisted config remain the p
 - 100–0 km/h full-service-brake stopping distance against two independent track measurements;
 - no single-step wheel-torque interruption during a synthetic upshift;
 - no first-gear RPM reversal at any tested positive pedal position;
-- expected shift RPM drop, braking, live-speed synchronization, and limiter display hysteresis.
+- expected shift RPM drop, braking, live-speed synchronization, and limiter display hysteresis;
+- `SyntheticGearboxCalibrationTest` verifies the derived ratios hit **8,600 RPM** at 190 km/h in 7th gear.
 
 ## Further source used for the reduction
 

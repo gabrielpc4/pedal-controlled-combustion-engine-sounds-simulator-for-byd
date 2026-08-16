@@ -137,6 +137,7 @@ class MainActivity : ComponentActivity() {
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
+                        onRestartBydReader = controller::restartVehicleReader,
                     )
                 }
             }
@@ -180,8 +181,10 @@ private fun MotorSoundDashboard(
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
+    onRestartBydReader: () -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
+    var debugOpen by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
@@ -190,7 +193,7 @@ private fun MotorSoundDashboard(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (tuningOpen) return@onPreviewKeyEvent false
+                if (tuningOpen || debugOpen) return@onPreviewKeyEvent false
                 val pressed = event.type == KeyEventType.KeyDown
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
@@ -253,6 +256,7 @@ private fun MotorSoundDashboard(
                         onToggleSound = onToggleSound,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
+                        onOpenDebug = { debugOpen = true },
                     )
 
                     Row(
@@ -298,6 +302,14 @@ private fun MotorSoundDashboard(
                         onClose = { tuningOpen = false },
                     )
                 }
+
+                if (debugOpen) {
+                    DebugPanel(
+                        state = state,
+                        onRestartBydReader = onRestartBydReader,
+                        onClose = { debugOpen = false },
+                    )
+                }
             }
         }
     }
@@ -310,6 +322,7 @@ private fun DashboardHeader(
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
+    onOpenDebug: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -349,6 +362,12 @@ private fun DashboardHeader(
             StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
         }
 
+        HeaderButton(
+            primary = "DEBUG",
+            secondary = "BYD / LOGS",
+            accent = if (state.activeInput == "BYD UNAVAILABLE") Red else Cyan,
+            onClick = onOpenDebug,
+        )
         HeaderButton(
             primary = "TUNE",
             secondary = "ENGINE PROFILE",

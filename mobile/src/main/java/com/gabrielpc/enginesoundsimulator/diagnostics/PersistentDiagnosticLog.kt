@@ -99,6 +99,35 @@ object PersistentDiagnosticLog {
     fun activeLogPath(context: Context): String =
         File(File(context.applicationContext.filesDir, directoryName), activeFileName).absolutePath
 
+    /** Returns the newest diagnostic lines for on-device troubleshooting screens. */
+    fun readRecentLogText(context: Context, maxBytes: Long = 120_000L): String {
+        val directory = File(context.applicationContext.filesDir, directoryName)
+        val active = File(directory, activeFileName)
+        val previous = File(directory, previousFileName)
+        val chunks = mutableListOf<String>()
+        if (previous.exists() && previous.length() > 0L) {
+            chunks += readTail(previous, maxBytes / 2)
+        }
+        if (active.exists() && active.length() > 0L) {
+            chunks += readTail(active, maxBytes)
+        }
+        return chunks.joinToString("\n").trim().ifBlank { "(no persisted events yet)" }
+    }
+
+    private fun readTail(file: File, maxBytes: Long): String {
+        if (!file.exists()) {
+            return ""
+        }
+        val length = file.length()
+        val start = (length - maxBytes).coerceAtLeast(0L)
+        file.inputStream().use { input ->
+            if (start > 0L) {
+                input.skip(start)
+            }
+            return input.bufferedReader().readText()
+        }
+    }
+
     private fun record(level: String, name: String, details: String, priority: Int) {
         val nowWallMs = System.currentTimeMillis()
         val elapsedMs = SystemClock.elapsedRealtime()

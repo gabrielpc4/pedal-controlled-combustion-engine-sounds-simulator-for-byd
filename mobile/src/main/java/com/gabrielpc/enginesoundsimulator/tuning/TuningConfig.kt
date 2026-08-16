@@ -25,7 +25,7 @@ data class EngineTuning(
     val wheelRadiusMeters: Double = 0.347,
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
-    val topSpeedKmh: Double = 180.0,
+    val topSpeedKmh: Double = 190.0,
     val syntheticRpmResponseMs: Double = 35.0,
     val simulatorCoastRegenMps2: Double = 0.50,
     val finalDrive: Double = 3.82,
@@ -94,7 +94,7 @@ data class EngineTuning(
     }
 
     companion object {
-        val DEFAULT_GEARS = listOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69)
+        val DEFAULT_GEARS = SyntheticGearboxCalibration.computeGearRatios()
         val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),
             CurvePoint(0.156, 0.989),
@@ -299,7 +299,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 4
+        const val CALIBRATION_REVISION = 6
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"

@@ -181,7 +181,7 @@ class BydSpeedReader(
             )
             PersistentDiagnosticLog.event(
                 "byd_telemetry_probe_succeeded",
-                "delivery=poll interval_ms=$pollIntervalMs compatibility_context=read_only_speed",
+                "delivery=poll interval_ms=$pollIntervalMs compatibility_context=read_only_speed runtime=${runtimeType.name}",
             )
 
             try {
@@ -205,6 +205,7 @@ class BydSpeedReader(
                 diagnostics = diagnostics,
                 lastError = error,
             )
+            PersistentDiagnosticLog.warning("byd_reader_unavailable", error)
         }
     }
 

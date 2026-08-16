@@ -3,6 +3,63 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+import java.io.File
+import java.time.Instant
+import java.util.Properties
+
+val buildNumberFile = file("build-number.properties")
+val buildNumberProperties = Properties()
+if (buildNumberFile.exists()) {
+    buildNumberFile.inputStream().use { buildNumberProperties.load(it) }
+}
+
+val isAssembling = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("assemble", ignoreCase = true)
+}
+
+val storedBuildNumber = buildNumberProperties.getProperty("buildNumber", "1").toInt()
+val stampedBuildNumber = if (isAssembling) storedBuildNumber + 1 else storedBuildNumber
+
+fun gitShortShaFromFiles(rootDir: File): String {
+    val gitHead = File(rootDir, ".git/HEAD")
+    if (!gitHead.exists()) {
+        return "unknown"
+    }
+
+    val headContent = gitHead.readText().trim()
+    if (!headContent.startsWith("ref:")) {
+        return headContent.take(7)
+    }
+
+    val refPath = headContent.removePrefix("ref:").trim()
+    val refFile = File(rootDir, ".git/$refPath")
+    if (!refFile.exists()) {
+        return "unknown"
+    }
+
+    return refFile.readText().trim().take(7)
+}
+
+val gitSha = gitShortShaFromFiles(rootProject.projectDir)
+val buildTimeUtc: String = Instant.now().toString()
+
+if (isAssembling) {
+    val nextBuildNumber = stampedBuildNumber
+    val targetBuildNumberFile = buildNumberFile
+    tasks.register("persistBuildNumber") {
+        doLast {
+            val props = Properties()
+            props.setProperty("buildNumber", nextBuildNumber.toString())
+            targetBuildNumberFile.outputStream().use { output ->
+                props.store(output, "Auto-incremented on assemble")
+            }
+        }
+    }
+    tasks.named("preBuild").configure {
+        dependsOn("persistBuildNumber")
+    }
+}
+
 android {
     namespace = "com.gabrielpc.enginesoundsimulator"
     compileSdk {
@@ -16,8 +73,12 @@ android {
         // while this read-only compatibility probe uses the vendor boot-classpath API.
         minSdk = 25
         targetSdk = 25
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = stampedBuildNumber
+        versionName = "1.0.$stampedBuildNumber"
+
+        buildConfigField("int", "BUILD_NUMBER", stampedBuildNumber.toString())
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -35,6 +96,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     lint {
         // This APK is intentionally sideloaded on a BYD DiLink head unit. Target 25 is a
