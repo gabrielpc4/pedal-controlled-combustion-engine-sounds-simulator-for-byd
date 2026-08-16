@@ -115,7 +115,11 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
     // reconstructed interior event. It replaces only the idle layer; driving layers remain
     // the recovered cabin program.
     from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted_exterior")) {
-        include("s013_ex_idle.wav")
+        include(
+            "s009_ex_l3.wav", "s013_ex_idle.wav", "s016_ex_c2.wav", "s025_rear_l1.wav",
+            "s042_ex_l6.wav", "s058_ex_c1e.wav", "s114_ex_limiter.wav", "s123_ex_l4.wav",
+            "s131_ex_l5.wav", "s132_front_l2.wav", "s138_ex_c4.wav", "s145_ex_c3.wav",
+        )
         into("sample_engine/lamborghini_huracan_trofeo_evo2")
     }
     into(generatedSampleEngineAssets)

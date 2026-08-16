@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
+                        onToggleExteriorSound = controller::toggleExteriorSound,
                     )
                 }
             }
@@ -209,6 +210,7 @@ private fun MotorSoundDashboard(
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
+    onToggleExteriorSound: () -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -267,6 +269,7 @@ private fun MotorSoundDashboard(
                         onOpenTuning = { tuningOpen = true },
                         onOpenDebug = { debugOpen = true },
                         onOpenEffects = { effectsOpen = true },
+                        onToggleExteriorSound = onToggleExteriorSound,
                     )
 
                     Row(
@@ -342,6 +345,7 @@ private fun DashboardHeader(
     onOpenTuning: () -> Unit,
     onOpenDebug: () -> Unit,
     onOpenEffects: () -> Unit,
+    onToggleExteriorSound: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -393,6 +397,14 @@ private fun DashboardHeader(
             accent = if (state.soundEffects.any { it.enabled }) Green else Muted,
             onClick = onOpenEffects,
         )
+        if (state.exteriorSoundAvailable) {
+            HeaderButton(
+                primary = if (state.exteriorSoundEnabled) "EXTERIOR" else "CABIN",
+                secondary = "HURACÁN SOUND",
+                accent = if (state.exteriorSoundEnabled) Green else Cyan,
+                onClick = onToggleExteriorSound,
+            )
+        }
         HeaderButton(
             primary = "TUNE",
             secondary = "ENGINE PROFILE",

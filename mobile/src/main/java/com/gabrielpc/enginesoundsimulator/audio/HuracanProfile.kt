@@ -130,5 +130,60 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
     )
 }
 
+/**
+ * The same source bank's separately decoded engine_ext event. Stream names identify the
+ * exterior microphone positions, so this can be selected without guessing perspective.
+ */
+internal fun huracanTrofeoEvo2ExteriorProfile(): EngineSampleProfile {
+    fun layer(
+        id: String,
+        asset: String,
+        role: SampleLayerRole,
+        start: Double,
+        end: Double,
+        root: Double,
+        throttleCurve: AutomationCurve? = null,
+        gain: Double = -5.0,
+        amplitude: List<AutomationCurve> = emptyList(),
+    ) = SampleLayerSpec(id, asset, role, start, end, root, 0.0, gain, throttleCurve, amplitude)
+
+    val load = dbCurve(0.0 to -38.0, 0.15 to -15.0, 0.45 to -5.0, 1.0 to 0.0)
+    val coast = dbCurve(0.0 to 0.0, 0.25 to -5.0, 0.60 to -20.0, 1.0 to -40.0)
+    val idle = dbCurve(0.0 to 0.0, 1.0 to -10.0)
+    val layers = listOf(
+        layer("ex_idle", "s013_ex_idle.wav", SampleLayerRole.IDLE, 0.0, 2_300.0, 1_254.0, idle, -3.0,
+            listOf(ampCurve(1_350.0 to 1.0, 2_300.0 to 0.0))),
+        layer("ex_l1", "s025_rear_l1.wav", SampleLayerRole.LOAD, 1_100.0, 3_000.0, 2_000.0, load),
+        layer("ex_l2", "s132_front_l2.wav", SampleLayerRole.LOAD, 2_200.0, 4_900.0, 3_800.0, load),
+        layer("ex_l3", "s009_ex_l3.wav", SampleLayerRole.LOAD, 3_800.0, 6_500.0, 5_200.0, load),
+        layer("ex_l4", "s123_ex_l4.wav", SampleLayerRole.LOAD, 5_300.0, 7_600.0, 6_500.0, load),
+        layer("ex_l5", "s131_ex_l5.wav", SampleLayerRole.LOAD, 6_500.0, 8_900.0, 7_600.0, load),
+        layer("ex_l6", "s042_ex_l6.wav", SampleLayerRole.LOAD, 7_500.0, 10_000.0, 8_700.0, load),
+        layer("ex_c1", "s058_ex_c1e.wav", SampleLayerRole.COAST, 1_800.0, 4_400.0, 3_000.0, coast),
+        layer("ex_c2", "s016_ex_c2.wav", SampleLayerRole.COAST, 3_300.0, 6_300.0, 4_800.0, coast),
+        layer("ex_c3", "s145_ex_c3.wav", SampleLayerRole.COAST, 5_200.0, 8_000.0, 6_500.0, coast),
+        layer("ex_c4", "s138_ex_c4.wav", SampleLayerRole.COAST, 7_000.0, 10_000.0, 8_300.0, coast),
+        layer("ex_limiter", "s114_ex_limiter.wav", SampleLayerRole.LIMITER, 7_800.0, 10_000.0, 8_200.0, load, -6.0),
+    )
+    return EngineSampleProfile(
+        id = "lamborghini_huracan_trofeo_evo2_exterior",
+        displayName = "Lamborghini Huracán Super Trofeo EVO2",
+        assetDirectory = "lamborghini_huracan_trofeo_evo2",
+        previewAssetName = "car_previews/lamborghini_huracan_trofeo_evo2.jpg",
+        outputSampleRate = 44_100,
+        minimumRpm = 0.0,
+        maximumRpm = 10_000.0,
+        idleRpm = 1_040.0,
+        redlineRpm = 8_200.0,
+        limiterRpm = 8_350.0,
+        upshiftRpm = 8_200.0,
+        gearRatios = listOf(3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84),
+        upshiftDurationSeconds = 0.060,
+        downshiftDurationSeconds = 0.150,
+        layers = layers,
+        throttleOutputGainDb = dbCurve(0.0 to 0.0, 1.0 to 0.75),
+    )
+}
+
 private fun ampCurve(vararg points: Pair<Double, Double>) = AutomationCurve(points.map { CurvePoint(it.first, it.second) })
 private fun dbCurve(vararg points: Pair<Double, Double>) = AutomationCurve(points.map { CurvePoint(it.first, it.second) })
