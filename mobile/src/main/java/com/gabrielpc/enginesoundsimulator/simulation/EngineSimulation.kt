@@ -32,9 +32,13 @@ data class EngineProfile(
     val driveRpmAccelerationPerSecond: Double,
     val liftOffRpmDecelerationPerSecond: Double,
     val brakeRpmDecelerationPerSecond: Double,
-    /** Constant deceleration applied on lift-off while integrating virtual speed in SIM mode. */
+    /** Full-pedal launches rapidly climb to this fun, audible part of the sample bank. */
+    val fullThrottleSweetSpotRpm: Double = 5_200.0,
+    /** Positive RPM force while full pedal is below [fullThrottleSweetSpotRpm]. */
+    val fullThrottleKickRpmPerSecond: Double = 30_000.0,
+    /** Retained for the real-car road model; SIM speed follows the fun tach directly. */
     val simulatorCoastRegenMps2: Double,
-    /** These ratios shape only the sample playback RPM and tachometer. */
+    /** Legacy physical-model data; direct-tach mode never selects or applies a ratio. */
     val gearRatios: DoubleArray,
     /** X is normalized road speed; Y is normalized front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -117,10 +121,9 @@ data class DrivetrainState(
 /**
  * Fixed-step Seal Performance longitudinal model with an independent fake engine tachometer.
  *
- * Road acceleration comes from the electric motors' torque/power envelope, fixed reduction,
- * vehicle mass, rolling resistance and aerodynamic drag. In Drive, pedal force integrates RPM as
- * an independent state with its own editable progression curve. Road speed can never scale,
- * target, floor, synchronize, or otherwise dictate RPM.
+ * External road speed stays external. In SIM mode, Drive is deliberately a direct, playful tach:
+ * pedal force integrates fake RPM, full pedal launches to a sweet spot, and the displayed speed
+ * follows that tach. There are no simulated gears, ratios, or gear-change RPM drops.
  */
 class EngineSimulation(
     initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK_ENGINE,
@@ -129,13 +132,9 @@ class EngineSimulation(
         private set
     private var engineRpm = profile.idleRpm
     private var vehicleSpeedMps = 0.0
-    private var currentGearIndex = 0
     private var filteredThrottle = 0.0
     private var filteredGaugeThrottle = 0.0
     private var filteredBrake = 0.0
-    private var shift: ActiveShift? = null
-    private var shiftSerial = 0L
-    private var secondsSinceShift = 10.0
     private var limiterLatched = false
     private var externalSpeedActive = false
     private var lastAcceleration = 0.0
@@ -148,7 +147,6 @@ class EngineSimulation(
 
     fun updateProfile(updated: EngineProfile) {
         profile = updated
-        currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
         vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
     }
@@ -156,13 +154,9 @@ class EngineSimulation(
     fun reset() {
         engineRpm = profile.idleRpm
         vehicleSpeedMps = 0.0
-        currentGearIndex = 0
         filteredThrottle = 0.0
         filteredGaugeThrottle = 0.0
         filteredBrake = 0.0
-        shift = null
-        shiftSerial = 0L
-        secondsSinceShift = 10.0
         limiterLatched = false
         externalSpeedActive = false
         lastAcceleration = 0.0
@@ -204,11 +198,10 @@ class EngineSimulation(
         val externalMps = input.externalSpeedKmh?.coerceAtLeast(0.0)?.div(3.6)
         if (externalMps != null) {
             applyExternalSpeed(externalMps, dt)
-        } else {
+        } else if (!input.simulateCoastRegen) {
             externalSpeedActive = false
             integrateElectricVehicle(
                 dt = dt,
-                applyCoastRegen = input.simulateCoastRegen,
                 transmissionPosition = input.transmissionPosition,
             )
             if (input.transmissionPosition == TransmissionPosition.PARK) {
@@ -217,20 +210,16 @@ class EngineSimulation(
             }
         }
 
-        shift?.let { updateShift(it, dt) }
-        if (shift == null) secondsSinceShift += dt
-
         val pedalReleased = rawThrottle <= PEDAL_RELEASE_THRESHOLD
-        updateSampleRpm(dt, input.transmissionPosition, pedalReleased)
+        updateSampleRpm(
+            dt = dt,
+            transmissionPosition = input.transmissionPosition,
+            pedalReleased = pedalReleased,
+            fullPedal = rawThrottle >= FULL_PEDAL_THRESHOLD,
+        )
         updateLimiterLatch()
-
-        if (shift == null && input.transmissionPosition == TransmissionPosition.DRIVE) {
-            val promptLiftOffDownshift = pedalReleased &&
-                currentGearIndex > 0 &&
-                engineRpm <= downshiftThresholdRpm(currentGearIndex)
-            if (promptLiftOffDownshift || secondsSinceShift >= profile.shiftDwellSeconds) {
-                chooseAutomaticShift(allowDownshift = pedalReleased || filteredBrake > 0.05)
-            }
+        if (externalMps == null && input.simulateCoastRegen) {
+            synchronizeSimulatorSpeedToTach(dt, input.transmissionPosition)
         }
 
         return snapshot()
@@ -238,7 +227,6 @@ class EngineSimulation(
 
     private fun integrateElectricVehicle(
         dt: Double,
-        applyCoastRegen: Boolean,
         transmissionPosition: TransmissionPosition,
     ) {
         val previousSpeedMps = vehicleSpeedMps
@@ -269,17 +257,7 @@ class EngineSimulation(
         } else {
             0.0
         }
-        val coastRegenForce = if (
-            applyCoastRegen &&
-            filteredThrottle <= COAST_REGEN_THROTTLE_THRESHOLD &&
-            filteredBrake <= COAST_REGEN_BRAKE_THRESHOLD &&
-            vehicleSpeedMps > 0.05
-        ) {
-            profile.vehicleMassKg * profile.simulatorCoastRegenMps2
-        } else {
-            0.0
-        }
-        val acceleration = (driveForce - serviceBrakeForce - aerodynamicDrag - rollingResistance - coastRegenForce) /
+        val acceleration = (driveForce - serviceBrakeForce - aerodynamicDrag - rollingResistance) /
             (profile.vehicleMassKg * profile.rotationalMassFactor)
         vehicleSpeedMps = (vehicleSpeedMps + acceleration * dt)
             .coerceIn(0.0, maximumVehicleSpeedMps())
@@ -316,25 +294,15 @@ class EngineSimulation(
         dt: Double,
         transmissionPosition: TransmissionPosition,
         pedalReleased: Boolean,
+        fullPedal: Boolean,
     ) {
-        val activeShift = shift
-        val shiftRevTransition = activeShift?.gearChanged == true
-        if (shiftRevTransition) {
-            lastRpmProgressionFraction = rpmProgressionFractionAtRpm(profile, engineRpm)
-            lastRpmPositiveForce = 0.0
-            lastRpmNegativeForce = 0.0
-            engineRpm = approachExp(
-                current = engineRpm,
-                target = activeShift.rpmTarget,
-                timeConstant = (activeShift.duration * SHIFT_RPM_RESPONSE_FRACTION).coerceAtLeast(0.012),
-                dt = dt,
-            ).coerceIn(profile.idleRpm, profile.limiterRpm)
-            return
-        }
-
         if (transmissionPosition == TransmissionPosition.DRIVE) {
             val progressionFraction = rpmProgressionFractionAtRpm(profile, engineRpm)
-            val positiveForce = if (!pedalReleased && !limiterLatched) {
+            val fullPedalKick = fullPedal &&
+                engineRpm < profile.fullThrottleSweetSpotRpm
+            val positiveForce = if (fullPedalKick && !limiterLatched) {
+                profile.fullThrottleKickRpmPerSecond
+            } else if (!pedalReleased && !limiterLatched) {
                 profile.driveRpmAccelerationPerSecond *
                     filteredGaugeThrottle *
                     progressionFraction *
@@ -376,70 +344,19 @@ class EngineSimulation(
         return profile.idleRpm + filteredThrottle.coerceIn(0.0, 1.0) * revSpan
     }
 
-    private fun chooseAutomaticShift(
-        allowDownshift: Boolean,
-    ) {
-        val canUpshift = currentGearIndex < profile.gearRatios.lastIndex
-        val normalUpshift = engineRpm >= profile.upshiftRpm && filteredThrottle > 0.10
-        if (canUpshift && normalUpshift) {
-            beginShift(currentGearIndex + 1, ShiftDirection.UP)
-            return
+    /** In SIM, visual speed is intentionally tied to fake RPM so lift-off decelerates both together. */
+    private fun synchronizeSimulatorSpeedToTach(dt: Double, transmissionPosition: TransmissionPosition) {
+        val previousSpeedMps = vehicleSpeedMps
+        val targetSpeedMps = if (transmissionPosition == TransmissionPosition.DRIVE) {
+            val rpmSpan = (profile.redlineRpm - profile.idleRpm).coerceAtLeast(1.0)
+            val fraction = ((engineRpm - profile.idleRpm) / rpmSpan).coerceIn(0.0, 1.0)
+            profile.topSpeedKmh / 3.6 * fraction
+        } else {
+            0.0
         }
-
-        if (currentGearIndex == 0 || !allowDownshift) return
-        val lowerRatio = profile.gearRatios[currentGearIndex - 1]
-        val currentRatio = profile.gearRatios[currentGearIndex]
-        val projectedLowerRpm = profile.idleRpm +
-            (engineRpm - profile.idleRpm) * lowerRatio / currentRatio
-        val maximumSafeDownshiftRpm = min(profile.upshiftRpm + 100.0, profile.redlineRpm * 0.98)
-        val safeDownshift = projectedLowerRpm <= maximumSafeDownshiftRpm
-        val lowRpm = engineRpm <= downshiftThresholdRpm(currentGearIndex)
-        if (safeDownshift && lowRpm) {
-            beginShift(
-                targetGearIndex = currentGearIndex - 1,
-                direction = ShiftDirection.DOWN,
-            )
-        }
-    }
-
-    private fun downshiftThresholdRpm(gearIndex: Int): Double =
-        postUpshiftLandingRpm(profile, gearIndex)
-
-    private fun beginShift(
-        targetGearIndex: Int,
-        direction: ShiftDirection,
-    ) {
-        val currentRatio = profile.gearRatios[currentGearIndex]
-        val targetRatio = profile.gearRatios[targetGearIndex]
-        shift = ActiveShift(
-            targetGearIndex = targetGearIndex,
-            direction = direction,
-            elapsed = 0.0,
-            duration = if (direction == ShiftDirection.UP) {
-                profile.upshiftDurationSeconds
-            } else {
-                profile.downshiftDurationSeconds
-            },
-            rpmTarget = (profile.idleRpm +
-                (engineRpm - profile.idleRpm) * targetRatio / currentRatio)
-                .coerceIn(profile.idleRpm, profile.limiterRpm),
-            gearChanged = false,
-        )
-        secondsSinceShift = 0.0
-        shiftSerial += 1
-    }
-
-    private fun updateShift(active: ActiveShift, dt: Double) {
-        active.elapsed += dt
-        val progress = (active.elapsed / active.duration).coerceIn(0.0, 1.0)
-        if (!active.gearChanged && progress >= 0.38) {
-            currentGearIndex = active.targetGearIndex
-            active.gearChanged = true
-        }
-        if (progress >= 1.0) {
-            shift = null
-            secondsSinceShift = 0.0
-        }
+        vehicleSpeedMps = targetSpeedMps
+        lastAcceleration = ((vehicleSpeedMps - previousSpeedMps) / dt)
+            .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
     }
 
     private fun updateLimiterLatch() {
@@ -458,21 +375,20 @@ class EngineSimulation(
     }
 
     private fun snapshot(): DrivetrainState {
-        val currentShift = shift
         val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
         val peakWheelTorque = profile.frontPeakWheelTorqueNm + profile.rearPeakWheelTorqueNm
         val wheelTorqueFraction = (axleTorque.totalNm / peakWheelTorque).coerceIn(0.0, 1.0)
         return DrivetrainState(
             rpm = engineRpm,
-            gear = currentGearIndex + 1,
+            gear = 0,
             speedKmh = vehicleSpeedMps * 3.6,
             smoothedThrottle = filteredThrottle,
             smoothedBrake = filteredBrake,
             engineLoad = (filteredThrottle * (0.35 + 0.65 * wheelTorqueFraction)).coerceIn(0.0, 1.0),
-            isShifting = currentShift != null,
-            shiftDirection = currentShift?.direction ?: ShiftDirection.NONE,
-            shiftProgress = currentShift?.let { (it.elapsed / it.duration).coerceIn(0.0, 1.0) } ?: 0.0,
-            shiftSerial = shiftSerial,
+            isShifting = false,
+            shiftDirection = ShiftDirection.NONE,
+            shiftProgress = 0.0,
+            shiftSerial = 0L,
             limiterActive = limiterLatched,
             accelerationMps2 = lastAcceleration,
             rpmProgressionFraction = lastRpmProgressionFraction,
@@ -480,15 +396,6 @@ class EngineSimulation(
             rpmNegativeForcePerSecond = lastRpmNegativeForce,
         )
     }
-
-    private data class ActiveShift(
-        val targetGearIndex: Int,
-        val direction: ShiftDirection,
-        var elapsed: Double,
-        val duration: Double,
-        val rpmTarget: Double,
-        var gearChanged: Boolean,
-    )
 
     companion object {
         private const val AIR_DENSITY_KG_M3 = 1.225
@@ -499,10 +406,8 @@ class EngineSimulation(
         private const val LIMITER_CUT_RPM_DECELERATION_PER_SECOND = 4_000.0
         private const val MAX_REPORTED_ACCELERATION = 15.0
         private const val PEDAL_RELEASE_THRESHOLD = 0.001
-        private const val COAST_REGEN_THROTTLE_THRESHOLD = 0.02
-        private const val COAST_REGEN_BRAKE_THRESHOLD = 0.02
         private const val EXTERNAL_ACCELERATION_FILTER_SECONDS = 0.10
-        private const val SHIFT_RPM_RESPONSE_FRACTION = 0.18
+        private const val FULL_PEDAL_THRESHOLD = 0.96
         /** Neutral/Park rev-up: engine inertia spooling with no wheel load. */
         private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
         /** Neutral/Park rev-down: coasting back toward idle after lift-off. */

@@ -861,9 +861,6 @@ private fun Tachometer(
                 )
                 drawCircle(Color(0xFF07141F), radius * 0.14f, center)
                 drawCircle(Cyan, radius * 0.14f, center, style = Stroke(radius * 0.008f))
-                if (drivetrain.isShifting) {
-                    drawCircle(Green.copy(alpha = 0.55f), radius * 0.985f, center, style = Stroke(radius * 0.018f))
-                }
             }
 
             Column(
@@ -871,22 +868,14 @@ private fun Tachometer(
                 modifier = Modifier.offset(y = (-2).dp),
             ) {
                 Text(
-                    text = if (transmissionPosition == TransmissionPosition.DRIVE) {
-                        drivetrain.gear.toString()
-                    } else {
-                        transmissionPosition.displayName
-                    },
+                    text = if (transmissionPosition == TransmissionPosition.DRIVE) "D" else transmissionPosition.displayName,
                     color = Cyan,
                     fontSize = 48.sp,
                     lineHeight = 48.sp,
                     fontWeight = FontWeight.Black,
                 )
                 Text(
-                    if (transmissionPosition == TransmissionPosition.DRIVE) {
-                        "GEAR"
-                    } else {
-                        "RANGE"
-                    },
+                    if (transmissionPosition == TransmissionPosition.DRIVE) "DIRECT" else "RANGE",
                     color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
             }
             Column(
@@ -905,18 +894,6 @@ private fun Tachometer(
                     letterSpacing = 2.sp,
                 )
                 Text("RPM", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-            }
-            if (drivetrain.isShifting) {
-                Text(
-                    text = if (drivetrain.shiftDirection.name == "UP") "PERFECT SHIFT" else "REV MATCH",
-                    color = Green,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.4.sp,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = gaugeSize * 0.08f),
-                )
             }
         }
     }

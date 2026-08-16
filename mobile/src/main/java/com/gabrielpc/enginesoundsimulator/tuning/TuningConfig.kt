@@ -30,6 +30,10 @@ data class EngineTuning(
     val topSpeedKmh: Double = 190.0,
     /** Maximum positive fake-tach acceleration at full pedal and the peak progression multiplier. */
     val driveRpmAccelerationPerSecond: Double = 6_500.0,
+    /** Full pedal quickly reaches this engaging part of the selected car's RPM range. */
+    val fullThrottleSweetSpotRpm: Double = 5_200.0,
+    /** Fast initial RPM force used only below the full-pedal sweet spot. */
+    val fullThrottleKickRpmPerSecond: Double = 30_000.0,
     /** Constant negative fake-tach acceleration as soon as the accelerator is released. */
     val liftOffRpmDecelerationPerSecond: Double = 5_500.0,
     /** Additional negative fake-tach acceleration at full brake. */
@@ -78,6 +82,8 @@ data class EngineTuning(
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
             driveRpmAccelerationPerSecond = driveRpmAccelerationPerSecond.coerceIn(1_500.0, 12_000.0),
+            fullThrottleSweetSpotRpm = fullThrottleSweetSpotRpm.coerceIn(cleanIdle + 800.0, cleanRedline - 350.0),
+            fullThrottleKickRpmPerSecond = fullThrottleKickRpmPerSecond.coerceIn(6_000.0, 60_000.0),
             liftOffRpmDecelerationPerSecond = liftOffRpmDecelerationPerSecond.coerceIn(1_500.0, 12_000.0),
             brakeRpmDecelerationPerSecond = brakeRpmDecelerationPerSecond.coerceIn(2_500.0, 18_000.0),
             simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 4.00),
@@ -147,11 +153,11 @@ data class EngineTuning(
             CurvePoint(1.0, 1.0),
         )
         val DEFAULT_RPM_PROGRESSION_CURVE = listOf(
-            CurvePoint(0.000, 0.82),
-            CurvePoint(0.200, 0.90),
-            CurvePoint(0.450, 1.00),
-            CurvePoint(0.700, 0.96),
-            CurvePoint(1.000, 0.84),
+            CurvePoint(0.000, 0.90),
+            CurvePoint(0.250, 0.95),
+            CurvePoint(0.560, 0.72),
+            CurvePoint(0.720, 0.64),
+            CurvePoint(1.000, 0.56),
         )
     }
 }
@@ -217,6 +223,8 @@ class TuningRepository(context: Context) {
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
             driveRpmAccelerationPerSecond = number(KEY_DRIVE_RPM_ACCELERATION, defaults.engine.driveRpmAccelerationPerSecond),
+            fullThrottleSweetSpotRpm = number(KEY_FULL_THROTTLE_SWEET_SPOT, defaults.engine.fullThrottleSweetSpotRpm),
+            fullThrottleKickRpmPerSecond = number(KEY_FULL_THROTTLE_KICK, defaults.engine.fullThrottleKickRpmPerSecond),
             liftOffRpmDecelerationPerSecond = number(KEY_LIFT_OFF_RPM_DECELERATION, defaults.engine.liftOffRpmDecelerationPerSecond),
             brakeRpmDecelerationPerSecond = number(KEY_BRAKE_RPM_DECELERATION, defaults.engine.brakeRpmDecelerationPerSecond),
             simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
@@ -286,6 +294,8 @@ class TuningRepository(context: Context) {
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
             .putString(KEY_DRIVE_RPM_ACCELERATION, clean.engine.driveRpmAccelerationPerSecond.toString())
+            .putString(KEY_FULL_THROTTLE_SWEET_SPOT, clean.engine.fullThrottleSweetSpotRpm.toString())
+            .putString(KEY_FULL_THROTTLE_KICK, clean.engine.fullThrottleKickRpmPerSecond.toString())
             .putString(KEY_LIFT_OFF_RPM_DECELERATION, clean.engine.liftOffRpmDecelerationPerSecond.toString())
             .putString(KEY_BRAKE_RPM_DECELERATION, clean.engine.brakeRpmDecelerationPerSecond.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
@@ -315,7 +325,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 8
+        const val CALIBRATION_REVISION = 9
         const val KEY_COAST_DECELERATION_REVISION = "coast_deceleration_revision"
         const val COAST_DECELERATION_REVISION = 1
         const val KEY_IDLE = "idle_rpm"
@@ -338,6 +348,8 @@ class TuningRepository(context: Context) {
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
         const val KEY_DRIVE_RPM_ACCELERATION = "drive_rpm_acceleration"
+        const val KEY_FULL_THROTTLE_SWEET_SPOT = "full_throttle_sweet_spot_rpm"
+        const val KEY_FULL_THROTTLE_KICK = "full_throttle_kick_rpm_per_second"
         const val KEY_LIFT_OFF_RPM_DECELERATION = "lift_off_rpm_deceleration"
         const val KEY_BRAKE_RPM_DECELERATION = "brake_rpm_deceleration"
         const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"

@@ -11,12 +11,12 @@ import org.junit.runner.RunWith
 
 /**
  * Exercises the real controller worker with direct inputs rather than slow UI gestures. It also
- * proves the persistent transition trail can explain a scripted lift-off session after shutdown.
+ * proves the persistent trail can explain a scripted direct-tach lift-off session after shutdown.
  */
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
     @Test
-    fun scriptedThirdGearLiftOffFallsThroughLowerGearsWithoutUpshiftHunting() {
+    fun scriptedFullPedalKickAndLiftOffStayInDirectTachMode() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         PersistentDiagnosticLog.install(context)
         PersistentDiagnosticLog.event("scripted_lift_off_test_started")
@@ -30,29 +30,24 @@ class DriveControllerScriptedIntegrationTest {
             controller.setManualThrottle(1.0)
 
             assertTrue(
-                "scripted full throttle did not reach third gear",
-                waitUntil(timeoutMs = 12_000L) {
+                "scripted full throttle did not reach the direct-tach sweet spot",
+                waitUntil(timeoutMs = 1_500L) {
                     val state = controller.snapshot().drivetrain
-                    state.gear == 3 && !state.isShifting
+                    state.rpm >= controller.snapshot().tuning.engine.fullThrottleSweetSpotRpm - 150.0 &&
+                        state.gear == 0 && !state.isShifting
                 },
             )
 
+            val beforeLift = controller.snapshot().drivetrain
             controller.setManualThrottle(0.0)
             PersistentDiagnosticLog.event("scripted_lift_off_started")
             assertTrue(
-                "scripted lift-off did not begin falling through the lower gears",
-                waitUntil(timeoutMs = 20_000L) {
+                "scripted lift-off did not rapidly reduce direct RPM and SIM speed",
+                waitUntil(timeoutMs = 1_500L) {
                     val state = controller.snapshot().drivetrain
-                    state.gear <= 2
-                },
-            )
-
-            // Strong lift-off force should continue toward idle/first without reversing upward.
-            assertTrue(
-                "scripted lift-off did not settle in first gear",
-                waitUntil(timeoutMs = 4_000L) {
-                    val state = controller.snapshot().drivetrain
-                    state.gear == 1 && !state.isShifting
+                    state.rpm < beforeLift.rpm - 2_000.0 &&
+                        state.speedKmh < beforeLift.speedKmh - 40.0 &&
+                        state.gear == 0 && !state.isShifting
                 },
             )
         } finally {
@@ -61,9 +56,8 @@ class DriveControllerScriptedIntegrationTest {
 
         val log = File(context.filesDir, "diagnostics/drive-events.log").readText()
         val liftOffSession = log.substringAfterLast("event=scripted_lift_off_started", missingDelimiterValue = "")
-        assertTrue("scripted session did not persist a downshift request", liftOffSession.contains("direction=DOWN"))
-        assertTrue("scripted session did not persist a first-gear completion", liftOffSession.contains("shift_completed") && liftOffSession.contains("gear=1"))
-        assertTrue("scripted session unexpectedly persisted an upshift", !liftOffSession.contains("direction=UP"))
+        assertTrue("scripted session did not persist direct-tach telemetry", log.contains("mode=DIRECT_TACH"))
+        assertTrue("scripted session unexpectedly persisted a shift", !liftOffSession.contains("event=shift_"))
     }
 
     private fun waitUntil(timeoutMs: Long, predicate: () -> Boolean): Boolean {

@@ -1,5 +1,12 @@
 # Full engine-sound implementation
 
+> **Current behavior override:** D mode is a direct, playful fake-tach controller. It has no
+> presentation gearbox, ratios, automatic shifts, or shift-triggered samples. Full pedal rapidly
+> kicks to the editable sweet spot (default 5,200 RPM), then the editable tach-force curve slows
+> the upper-range climb. In explicit SIM mode, displayed speed follows normalized fake RPM so it
+> decays at the same time as the tach on lift-off and braking. Older gearbox details below are
+> retained as historical implementation context only.
+
 Last verified: 2026-08-15
 
 This document is the durable implementation handoff for the interactive motor-sound application that followed the original pedal-telemetry POC. Read this together with [the BYD telemetry notes](research-findings.md), not instead of them.

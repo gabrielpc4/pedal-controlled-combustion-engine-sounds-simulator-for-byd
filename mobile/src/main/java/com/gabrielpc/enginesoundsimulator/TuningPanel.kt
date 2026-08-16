@@ -79,7 +79,6 @@ private enum class TuningTab(val title: String, val subtitle: String) {
     ENGINE("VEHICLE", "SEAL RESPONSE MODEL"),
     CURVES("AWD CURVES", "FRONT / REAR WHEEL TORQUE"),
     RESPONSE("RESPONSE", "SPORT PEDAL DYNAMICS"),
-    TRANSMISSION("GEARING", "RATIOS & SHIFT LOGIC"),
     AUDIO("AUDIO", "SAMPLE BANK"),
 }
 
@@ -120,7 +119,6 @@ internal fun TuningPanel(
                 TuningTab.ENGINE -> EngineTab(state, config, onConfigChange)
                 TuningTab.CURVES -> CurvesTab(state, config, onConfigChange)
                 TuningTab.RESPONSE -> ResponseTab(state, config, onConfigChange)
-                TuningTab.TRANSMISSION -> TransmissionTab(config, onConfigChange)
                 TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
             }
         }
@@ -203,7 +201,6 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                     onChange(config.copy(engine = engine.copy(
                         redlineRpm = it,
                         limiterRpm = max(engine.limiterRpm, it),
-                        upshiftRpm = min(engine.upshiftRpm, it - 100.0),
                     )))
                 }
                 ParameterSlider("SOUND LIMITER", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
@@ -212,11 +209,14 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
                     onChange(config.copy(engine = engine.copy(idleRpm = it)))
                 }
-                ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
-                    onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
-                }
                 ParameterSlider("MAX RPM FORCE", engine.driveRpmAccelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(driveRpmAccelerationPerSecond = it)))
+                }
+                ParameterSlider("FULL PEDAL SWEET SPOT", engine.fullThrottleSweetSpotRpm, (engine.idleRpm + 800.0)..(engine.redlineRpm - 350.0), "%.0f RPM") {
+                    onChange(config.copy(engine = engine.copy(fullThrottleSweetSpotRpm = it)))
+                }
+                ParameterSlider("FULL PEDAL KICK", engine.fullThrottleKickRpmPerSecond, 6_000.0..60_000.0, "%.0f RPM/s") {
+                    onChange(config.copy(engine = engine.copy(fullThrottleKickRpmPerSecond = it)))
                 }
                 ParameterSlider("LIFT-OFF RPM FORCE", engine.liftOffRpmDecelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(liftOffRpmDecelerationPerSecond = it)))
@@ -411,44 +411,6 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
             }
             Spacer(Modifier.height(12.dp))
             ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
-    val engine = config.engine
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SOUND SHIFT CONTROL", "Presentation only • wheel torque stays continuous", Modifier.weight(0.76f)) {
-            ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
-            }
-            ParameterSlider("DOWNSHIFT TIME", engine.downshiftDurationMs, 120.0..1_000.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(downshiftDurationMs = it)))
-            }
-            ParameterSlider("GEAR DWELL", engine.shiftDwellMs, 100.0..1_500.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
-            }
-        }
-        PanelCard("SAMPLE GEAR RATIOS", "Changes RPM and sound, never physical acceleration", Modifier.weight(0.96f)) {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                engine.gearRatios.forEachIndexed { index, ratio ->
-                    val maximum = if (index == 0) 5.0 else engine.gearRatios[index - 1] - 0.05
-                    val minimum = if (index == engine.gearRatios.lastIndex) 0.45 else engine.gearRatios[index + 1] + 0.05
-                    ParameterSlider("GEAR ${index + 1}", ratio * 100.0, minimum * 100.0..maximum * 100.0, "%.0f:100") { value ->
-                        val ratios = engine.gearRatios.toMutableList()
-                        ratios[index] = value / 100.0
-                        onChange(config.copy(engine = engine.copy(gearRatios = ratios)))
-                    }
-                }
-            }
-        }
-        PanelCard(
-            "SHIFT LANDING / DOWNSHIFT",
-            "Landing RPM after each upshift is that gear's automatic downshift threshold",
-            Modifier.weight(1.25f),
-        ) {
-            GearDropGraph(engine, Modifier.fillMaxSize())
         }
     }
 }

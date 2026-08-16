@@ -47,19 +47,18 @@ AAOS media-template shell and are not the BYD application.
 
 - a 200 Hz EV longitudinal model calibrated from public Seal Performance anchors and digitized
   A2MAC1 wheel-torque measurements;
-- independent presentation-only sound gears: shifts affect sound/RPM only and never interrupt EV
-  wheel torque;
+- a direct, playful tach model: no presentation gears or ratio changes affect RPM or sound;
 - a full-screen 1920 x 990 dashboard with simulator touch/keyboard pedals and a tuning workstation
   whose curves and parameters are editable in the UI;
 - UI torque in kgf·m and power in values labeled HP (metric PS/cv), with wheel-derived graph values cosmetically scaled to motor ratings — see [UI display decisions](ui-display-and-simulation-decisions.md);
 - profile-based multi-layer sample audio, audio focus handling, and experimental logical
   stereo/quad/5.1/7.1 output; local recordings under `audio_samples/` are ignored and must never be committed;
-- profile-specific optional cabin powertrain effects (gear changes, transmission, and verified
-  exhaust overrun) mixed in the same renderer, with persisted per-car checkboxes in `CAR EFFECTS`;
+- profile-specific optional cabin powertrain effects (transmission and verified exhaust overrun)
+  mixed in the same renderer, with persisted per-car checkboxes in `CAR EFFECTS`;
 - read-only reflective probing/polling of BYD pedal and speed getters, with simulator fallback;
-- durable app-private diagnostics, including crash retention and shift transitions.
+- durable app-private diagnostics, including crash retention and direct-tach force telemetry.
 
-The current design intentionally behaves like an EV with simulated sound gears. Do not reintroduce
+The current design intentionally behaves like a fun, direct-pedal sound simulator. Do not reintroduce
 combustion-engine clutch bog, torque interruption, or launch lag into the vehicle model.
 
 ## Architecture map
@@ -68,7 +67,7 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 | --- | --- | --- |
 | UI | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt`, `TuningPanel.kt`, `SoundEffectsPanel.kt` | Compose dashboard, pedals, P/N/D shifter, target viewport, tuning and effect controls |
 | Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, transmission position, simulation/audio coordination, transition/heartbeat logging |
-| Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | EV road force, synthetic RPM/gears, P/N/D behavior, shifts, live-speed handling |
+| Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | Direct fake RPM, P/N/D behavior, SIM speed mapping, live-speed handling |
 | Audio | `audio/EngineAudioEngine.kt`, `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `SoundEffectsRepository.kt`, `WavPcmDecoder.kt` | AudioTrack lifecycle, profile automation, engine/effect mixing, per-car persistence, resampling, focus, and diagnostics |
 | Telemetry | `telemetry/BydSpeedReader.kt`, `telemetry/BydReadOnlyPermissionContext.kt` | reflective BYD capability probe, restricted client-context compatibility, and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
@@ -78,26 +77,25 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 The manifest deliberately targets SDK 25 for the DiLink compatibility experiment while compiling
 against SDK 37. It requests only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`.
 
-## Current gear and RPM behavior
+## Current direct tach and RPM behavior
 
-A **P / N / D** column shifter passes the selected position into the 200 Hz simulation. **N** free-revs toward a throttle-position target with no automatic shifts or wheel drive. **P** uses the same tach model and holds SIM speed at zero.
+A **P / N / D** column shifter passes the selected position into the 200 Hz simulation. **D** is direct-tach mode, **N** free-revs toward a throttle-position target with no wheel drive, and **P** holds SIM speed at zero.
 
 Current **D** behavior:
 
 - RPM is an independent integrated fake gauge. Road speed never targets, floors, synchronizes, or selects a gear.
-- Raw pedal percentage, smoothed only for response, scales positive RPM force linearly.
-- The maximum positive force is multiplied by an editable fake-RPM progression curve. The gentle default remains strong across the whole range and has no low-RPM hole or sudden high-RPM surge.
+- Full pedal uses a configurable fast kick to the sweet spot (default 5,200 RPM), then the editable fake-RPM progression curve provides a calmer climb toward the limiter.
+- In explicit SIM mode, speed is derived from the same normalized fake RPM, so lift-off and brake fall together with the tach.
 - Lift-off applies a constant strong negative RPM force immediately; brake adds a larger proportional negative force.
-- Upshifts and downshifts transform only fake RPM by the selected sound profile's adjacent ratios. They never alter EV road force.
-- Live speed remains useful for EV road physics and displayed speed/acceleration, but it cannot scale or directly move the needle or gear.
+- There are no upshifts, downshifts, ratios, or shift-triggered samples in direct-tach mode.
+- Live speed remains useful for displayed speed/acceleration, but it cannot scale or directly move the needle.
 - The old road-coupled helper/calibration code and tests were deleted rather than retained as a compatibility path.
 
 Full detail: [UI display §3.3](ui-display-and-simulation-decisions.md#33-independent-drive-rpm-force-model).
 
 `DriveControllerScriptedIntegrationTest` is the preferred no-UI regression test: it drives the
-real controller directly to third gear, releases throttle, verifies the strong negative force
-settles it through the lower ratios into first, then asserts that the persistent log contains no
-upward shift after the lift marker.
+real controller directly through full-pedal kick, sweet-spot climb, lift-off, and braking while
+checking the persisted direct-tach telemetry.
 
 ## Persistent diagnostics
 
@@ -108,8 +106,8 @@ The app writes low-rate, fsynced events to:
 ```
 
 It rotates to `drive-events.previous.log` at 256 KiB (about 512 KiB retained total). It logs
-session/activity lifecycle, controller start/stop/failures, BYD telemetry probe/read transitions, input-source changes, every shift
-start/completion, 1 Hz drivetrain heartbeats, audio focus/start/track/error state, and uncaught
+session/activity lifecycle, controller start/stop/failures, BYD telemetry probe/read transitions, input-source changes,
+1 Hz drivetrain heartbeats, audio focus/start/track/error state, and uncaught
 exceptions. Never call it for every 200 Hz simulation tick or audio render buffer.
 
 For the independent Drive RPM model, each heartbeat includes `rpm_curve_permille` (the current
@@ -122,7 +120,7 @@ For a debug APK:
 $adb = 'D:\Users\sgabr\AppData\Local\Android\Sdk\platform-tools\adb.exe'
 & $adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log
 & $adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log |
-    Select-String 'shift_started|shift_completed|drive_heartbeat'
+    Select-String 'drive_heartbeat|mode=DIRECT_TACH'
 ```
 
 The log remains readable after `adb shell am force-stop com.gabrielpc.enginesoundsimulator`. See

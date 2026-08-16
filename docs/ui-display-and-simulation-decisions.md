@@ -1,5 +1,12 @@
 # UI display and simulation presentation decisions
 
+> **Current direct-tach override:** Historical synthetic-gear material below is retained only as
+> research context. Current **D** mode has no simulated gears, ratios, shift events, or
+> shift-triggered samples. Full pedal rapidly kicks to the editable sweet spot (default 5,200 RPM),
+> then the editable RPM-force curve intentionally climbs more gently. In explicit SIM mode,
+> displayed speed is a normalized direct mapping of fake RPM, so it falls together with RPM on
+> lift-off or braking. BYD LIVE speed remains read-only telemetry and never moves the tach.
+
 Last updated: 2026-08-15
 
 This document records **product and presentation decisions** that are easy to misread as physics bugs. It complements the calibration evidence in [BYD Seal Performance calibration](byd-seal-performance-calibration.md) and the control inventory in [Live tuning interface](tuning-interface.md).
