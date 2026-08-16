@@ -382,47 +382,47 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             Text(
-                text = "// ÁUDIO",
+                text = "// SAMPLE",
                 color = Cyan,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Light,
                 letterSpacing = 2.0.sp,
             )
-            StatusTag(state.activeInput, if (state.activeInput.contains("BYD")) Green else Cyan)
+            StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
         }
 
         HeaderButton(
-            primary = "DIAGNÓSTICO",
-            secondary = "BYD / REGISTROS",
-            accent = if (state.activeInput == "BYD INDISPONÍVEL") Red else Cyan,
+            primary = "DEBUG",
+            secondary = "BYD / LOGS",
+            accent = if (state.activeInput == "BYD UNAVAILABLE") Red else Cyan,
             onClick = onOpenDebug,
         )
         HeaderButton(
-            primary = if (state.soundEffects.isEmpty()) "MOTOR" else "${state.soundEffects.count { it.enabled }}/${state.soundEffects.size} LIG.",
-            secondary = "EFEITOS DO CARRO",
+            primary = if (state.soundEffects.isEmpty()) "ENGINE" else "${state.soundEffects.count { it.enabled }}/${state.soundEffects.size} ON",
+            secondary = "CAR EFFECTS",
             accent = if (state.soundEffects.any { it.enabled }) Green else Muted,
             onClick = onOpenEffects,
         )
         HeaderButton(
-            primary = "AJUSTAR",
-            secondary = "SOM E GIROS",
+            primary = "TUNE",
+            secondary = "ENGINE PROFILE",
             accent = Amber,
             onClick = onOpenTuning,
         )
         HeaderButton(
             primary = state.inputMode.displayName,
-            secondary = "CONTROLE",
+            secondary = "INPUT",
             onClick = onCycleInput,
         )
         HeaderButton(
-            primary = if (state.engineSoundEnabled) "LIGADO" else "MUDO",
-            secondary = "SOM DO MOTOR",
+            primary = if (state.engineSoundEnabled) "ON" else "MUTED",
+            secondary = "ENGINE AUDIO",
             accent = if (state.engineSoundEnabled) Green else Red,
             onClick = onToggleSound,
         )
         HeaderButton(
             primary = state.audio.requestedMode.displayName,
-            secondary = "${state.audio.activeChannels.coerceAtLeast(0)} CANAIS",
+            secondary = "${state.audio.activeChannels.coerceAtLeast(0)} CH OUTPUT",
             accent = Cyan,
             onClick = onCycleChannels,
         )
@@ -490,8 +490,8 @@ private fun CarStage(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                "LOOPS DE GIRO / CARGA  •  ${state.audio.sampleLoadedLoops} CAMADAS DE MOTOR  •  " +
-                    "BANCO ATÉ ${state.tuning.engine.maxRpm.roundToInt()} RPM  •  " +
+                "RPM / LOAD LOOPSET  •  ${state.audio.sampleLoadedLoops} ENGINE LAYERS  •  " +
+                    "${state.tuning.engine.maxRpm.roundToInt()} RPM BANK  •  " +
                     "${state.selectedCarIndex + 1}/${state.availableCarCount}",
                 color = CyanSoft,
                 fontSize = 12.sp,
@@ -532,8 +532,8 @@ private fun CarStage(
             )
         }
 
-        CarSelectorArrow("‹", "Carro anterior", onPreviousCar, Modifier.align(Alignment.CenterStart))
-        CarSelectorArrow("›", "Próximo carro", onNextCar, Modifier.align(Alignment.CenterEnd))
+        CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
+        CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
 
         Row(
             modifier = Modifier
@@ -543,7 +543,7 @@ private fun CarStage(
             verticalAlignment = Alignment.Bottom,
         ) {
             PedalControl(
-                label = "FREIO",
+                label = "BRAKE",
                 value = state.brake,
                 accent = Red,
                 width = 92.dp,
@@ -551,7 +551,7 @@ private fun CarStage(
                 onValue = onBrake,
             )
             PedalControl(
-                label = "GÁS",
+                label = "THROTTLE",
                 value = state.throttle,
                 accent = Green,
                 width = 84.dp,
@@ -565,7 +565,7 @@ private fun CarStage(
         }
 
         Text(
-            text = "TOQUE / ARRASTE OS PEDAIS   •   SELETOR P N D   •   W ou ↑ ACELERA   •   S, ↓ ou ESPAÇO FREIA",
+            text = "TOUCH / DRAG PEDALS   •   P N D SHIFTER   •   W or ↑ THROTTLE   •   S, ↓ or SPACE BRAKE",
             color = Muted,
             fontSize = 10.sp,
             letterSpacing = 0.6.sp,
@@ -878,7 +878,7 @@ private fun Tachometer(
                     fontWeight = FontWeight.Black,
                 )
                 Text(
-                    if (transmissionPosition == TransmissionPosition.DRIVE) "MARCHA VIRTUAL" else "POSIÇÃO",
+                    if (transmissionPosition == TransmissionPosition.DRIVE) "VIRTUAL GEAR" else "RANGE",
                     color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
             }
             Column(
@@ -900,7 +900,7 @@ private fun Tachometer(
             }
             if (drivetrain.isShifting) {
                 Text(
-                    text = if (drivetrain.shiftDirection.name == "UP") "TROCA" else "REDUÇÃO",
+                    text = if (drivetrain.shiftDirection.name == "UP") "SHIFT" else "DOWNSHIFT",
                     color = Green,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Black,
@@ -916,10 +916,10 @@ private fun Tachometer(
 private fun DashboardFooter(state: DriveSnapshot, viewport: String) {
     val audio = state.audio
     val audioStatus = when {
-        !state.engineSoundEnabled -> "DESLIGADO"
+        !state.engineSoundEnabled -> "OFF"
         audio.running -> audio.activeLayout
         audio.error != null -> audio.error
-        else -> "INICIANDO"
+        else -> "NEGOTIATING"
     }
     val audioStatusColor = when {
         !state.engineSoundEnabled -> Muted
@@ -937,12 +937,12 @@ private fun DashboardFooter(state: DriveSnapshot, viewport: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        FooterMetric("ÁUDIO", audioStatus, audioStatusColor)
-        FooterMetric("BANCO", statusAudioEmPortugues(audio.sampleStatus), if (audio.sampleStatus == "ACTIVE") Green else Amber)
-        FooterMetric("SAÍDA", audio.routedDevice, CyanSoft, Modifier.weight(1f))
-        FooterMetric("FORMATO", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.steadyStateUnderruns} falhas novas" else "INICIANDO", CyanSoft)
-        FooterMetric("SESSÃO", if (audio.sessionId > 0) audio.sessionId.toString() else "—", CyanSoft)
-        FooterMetric("TELA", "$viewport px", Muted)
+        FooterMetric("AUDIO", audioStatus, audioStatusColor)
+        FooterMetric("SAMPLE BANK", audio.sampleStatus, if (audio.sampleStatus == "ACTIVE") Green else Amber)
+        FooterMetric("ROUTE", audio.routedDevice, CyanSoft, Modifier.weight(1f))
+        FooterMetric("FORMAT", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.steadyStateUnderruns} new underruns" else "NEGOTIATING", CyanSoft)
+        FooterMetric("SESSION", if (audio.sessionId > 0) audio.sessionId.toString() else "—", CyanSoft)
+        FooterMetric("VIEWPORT", "$viewport px", Muted)
     }
 }
 
@@ -973,11 +973,3 @@ private fun polar(
 private fun formatRpm(rpm: Double): String = ((rpm / 10.0).roundToInt() * 10).toString()
 
 private fun formatWhole(value: Double): String = value.roundToInt().toString()
-
-internal fun statusAudioEmPortugues(status: String): String = when (status) {
-    "ACTIVE" -> "ATIVO"
-    "STARTING" -> "INICIANDO"
-    "OFFLINE" -> "FORA DE LINHA"
-    "ERROR" -> "ERRO"
-    else -> status
-}

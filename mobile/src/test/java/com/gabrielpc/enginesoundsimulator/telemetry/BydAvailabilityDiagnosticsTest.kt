@@ -19,7 +19,7 @@ class BydAvailabilityDiagnosticsTest {
 
         assertTrue(report.bydLiveWouldShowUnavailable)
         assertTrue(report.blockers.any { it.contains("UNAVAILABLE") })
-        assertTrue(report.hints.any { it.contains("falhou") || it.contains("firmware") })
+        assertTrue(report.hints.any { it.contains("probe failed") || it.contains("firmware") })
     }
 
     @Test
@@ -34,8 +34,8 @@ class BydAvailabilityDiagnosticsTest {
         )
 
         assertTrue(report.bydLiveWouldShowUnavailable)
-        assertTrue(report.blockers.any { it.contains("Acelerador inválido") })
-        assertTrue(report.hints.any { it.contains("permissão") })
+        assertTrue(report.blockers.any { it.contains("Accelerator invalid") })
+        assertTrue(report.hints.any { it.contains("permission denied") })
     }
 
     @Test

@@ -16,20 +16,20 @@ internal data class SampleEffectControlSpec(
 internal object SampleEffectControls {
     val gearChanges = SampleEffectControlSpec(
         id = "gear_changes",
-        displayName = "Som das trocas",
-        description = "Liga ou desliga o impacto das trocas de marcha",
+        displayName = "Gear changes",
+        description = "Cabin shift impacts from this car's sound bank",
         bit = 1L shl 0,
     )
     val transmission = SampleEffectControlSpec(
         id = "transmission",
-        displayName = "Zumbido da transmissão",
-        description = "Liga ou desliga o zumbido que acompanha os giros",
+        displayName = "Transmission whine",
+        description = "Drivetrain tone that rises with the simulated RPM",
         bit = 1L shl 1,
     )
     val exhaustOverrun = SampleEffectControlSpec(
         id = "exhaust_overrun",
-        displayName = "Estalos na desaceleração",
-        description = "Liga ou desliga estalos ao soltar forte o acelerador",
+        displayName = "Exhaust overrun",
+        description = "Cabin crackle or backfire after a strong throttle lift",
         bit = 1L shl 2,
     )
 }

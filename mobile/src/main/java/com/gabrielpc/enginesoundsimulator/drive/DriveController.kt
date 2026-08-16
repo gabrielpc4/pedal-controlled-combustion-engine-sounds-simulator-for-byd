@@ -32,8 +32,8 @@ import kotlin.math.roundToInt
 
 enum class InputMode(val displayName: String) {
     AUTO("AUTO"),
-    SIMULATOR("SIMULADOR"),
-    VEHICLE("BYD AO VIVO"),
+    SIMULATOR("SIM"),
+    VEHICLE("BYD LIVE"),
 }
 
 data class DriveSnapshot(
@@ -97,7 +97,7 @@ class DriveController(context: Context) {
     private var latest = DriveSnapshot(
         drivetrain = simulation.state,
         inputMode = InputMode.AUTO,
-        activeInput = "SIMULADOR",
+        activeInput = "SIM FALLBACK",
         throttle = 0.0,
         brake = 0.0,
         transmissionPosition = TransmissionPosition.DRIVE,
@@ -625,7 +625,7 @@ internal fun resolveDriveInput(
             throttle = (telemetry.accelerator.value!! / 100.0).coerceIn(0.0, 1.0),
             brake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0),
             externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid },
-            label = "PEDAIS BYD",
+            label = "BYD PEDALS",
             isSimulator = false,
         )
     }
@@ -635,7 +635,7 @@ internal fun resolveDriveInput(
             throttle = 0.0,
             brake = 0.0,
             externalSpeedKmh = null,
-            label = "BYD INDISPONÍVEL",
+            label = "BYD UNAVAILABLE",
             isSimulator = false,
         )
     }
@@ -644,7 +644,7 @@ internal fun resolveDriveInput(
         throttle = simulatorThrottle.coerceIn(0.0, 1.0),
         brake = simulatorBrake.coerceIn(0.0, 1.0),
         externalSpeedKmh = null,
-        label = "PEDAIS DO SIMULADOR",
+        label = "SIM PEDALS",
         isSimulator = true,
     )
 }
