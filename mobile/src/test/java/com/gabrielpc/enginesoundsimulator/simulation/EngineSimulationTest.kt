@@ -104,6 +104,17 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun firstGearLiftOffReachesZeroSpeedWhenTheTachReachesIdle() {
+        val simulation = EngineSimulation()
+        simulation.runFor(0.8, throttle = 0.35, sim = true)
+        val stopped = simulation.runFor(5.0, sim = true)
+
+        assertEquals(simulation.profile.idleRpm, stopped.rpm, 0.001)
+        assertEquals(0.0, stopped.speedKmh, 0.001)
+        assertEquals(1, stopped.gear)
+    }
+
+    @Test
     fun brakeDropsDirectTachFasterThanLiftOff() {
         val coast = EngineSimulation()
         val brake = EngineSimulation()

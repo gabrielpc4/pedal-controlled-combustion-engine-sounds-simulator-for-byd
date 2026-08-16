@@ -231,7 +231,11 @@ class EngineSimulation(
             chooseVirtualShift(pedalReleased)
         }
         if (externalMps == null && input.simulateCoastRegen) {
-            synchronizeSimulatorSpeedToTach(dt, input.transmissionPosition)
+            synchronizeSimulatorSpeedToTach(
+                dt = dt,
+                transmissionPosition = input.transmissionPosition,
+                followTachDown = pedalReleased || input.brake > PEDAL_RELEASE_THRESHOLD,
+            )
         }
 
         return snapshot()
@@ -419,7 +423,11 @@ class EngineSimulation(
     }
 
     /** In SIM, visual speed is intentionally tied to fake RPM so lift-off decelerates both together. */
-    private fun synchronizeSimulatorSpeedToTach(dt: Double, transmissionPosition: TransmissionPosition) {
+    private fun synchronizeSimulatorSpeedToTach(
+        dt: Double,
+        transmissionPosition: TransmissionPosition,
+        followTachDown: Boolean,
+    ) {
         val previousSpeedMps = vehicleSpeedMps
         val rpmMappedSpeedMps = if (transmissionPosition == TransmissionPosition.DRIVE) {
             val rpmSpan = (profile.redlineRpm - profile.idleRpm).coerceAtLeast(1.0)
@@ -428,7 +436,11 @@ class EngineSimulation(
         } else {
             0.0
         }
-        val targetSpeedMps = if (activeShift != null) {
+        val targetSpeedMps = if (followTachDown) {
+            // A released pedal or brake makes SIM speed an exact tach mapping.  This keeps the
+            // two displays together even while the two-stage virtual downshift is animating.
+            rpmMappedSpeedMps
+        } else if (activeShift != null) {
             vehicleSpeedMps
         } else if (filteredThrottle > SPEED_HOLD_THROTTLE_THRESHOLD && filteredBrake < 0.01) {
             max(vehicleSpeedMps, rpmMappedSpeedMps)
