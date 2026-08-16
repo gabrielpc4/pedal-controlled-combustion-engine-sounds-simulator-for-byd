@@ -78,6 +78,7 @@ private val TuneMuted = Color(0xFF8CA7B5)
 private enum class TuningTab(val title: String, val subtitle: String) {
     ENGINE("SIMULATION", "TACH + SHIFT BEHAVIOR"),
     RESPONSE("RESPONSE", "PEDAL + RPM DYNAMICS"),
+    DELAYS("DELAYS", "INPUT, SHIFTS + AUDIO"),
     AUDIO("AUDIO", "SAMPLE BANK"),
 }
 
@@ -117,6 +118,7 @@ internal fun TuningPanel(
             when (TuningTab.entries[tabIndex]) {
                 TuningTab.ENGINE -> EngineTab(config, onConfigChange)
                 TuningTab.RESPONSE -> ResponseTab(state, config, onConfigChange)
+                TuningTab.DELAYS -> DelaysTab(config, onConfigChange)
                 TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
             }
         }
@@ -268,7 +270,22 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("PEDAL DYNAMICS", "Editable input, lift and brake timing", Modifier.weight(0.82f)) {
+        PanelCard("SIM COAST", "How the simulated vehicle loses speed after pedal lift", Modifier.weight(0.82f)) {
+            ParameterSlider("SIM LIFT-OFF DECEL", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
+                onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
+            }
+            Spacer(Modifier.height(12.dp))
+            ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
+    val engine = config.engine
+    val audio = config.audio
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        PanelCard("PEDAL FILTERING", "How quickly pedal input reaches the simulated engine", Modifier.weight(1f)) {
             ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
             }
@@ -278,11 +295,34 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
             ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
-            ParameterSlider("SIM LIFT-OFF DECEL", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
-                onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
+        }
+        PanelCard("VIRTUAL SHIFTS", "Time spent moving between virtual gears", Modifier.weight(1f)) {
+            ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 40.0..900.0, "%.0f ms") {
+                onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
             }
-            Spacer(Modifier.height(12.dp))
-            ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
+            ParameterSlider("DOWNSHIFT TIME", engine.downshiftDurationMs, 60.0..1_000.0, "%.0f ms") {
+                onChange(config.copy(engine = engine.copy(downshiftDurationMs = it)))
+            }
+            ParameterSlider("SHIFT COOLDOWN", engine.shiftDwellMs, 100.0..1_500.0, "%.0f ms") {
+                onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
+            }
+        }
+        PanelCard("AUDIO SMOOTHING", "Small fades that keep the sample-bank output seamless", Modifier.weight(1.15f)) {
+            ParameterSlider("RPM FOLLOW", audio.rpmSmoothingMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(rpmSmoothingMs = it)))
+            }
+            ParameterSlider("THROTTLE FOLLOW", audio.throttleSmoothingMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(throttleSmoothingMs = it)))
+            }
+            ParameterSlider("PROGRAM FADE", audio.programFadeMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(programFadeMs = it)))
+            }
+            ParameterSlider("ENABLE FADE", audio.enabledFadeMs, 1.0..500.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(enabledFadeMs = it)))
+            }
+            ParameterSlider("LAYER CROSSFADE", audio.layerFadeMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(layerFadeMs = it)))
+            }
         }
     }
 }

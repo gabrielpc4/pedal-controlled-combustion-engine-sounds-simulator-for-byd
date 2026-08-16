@@ -56,8 +56,8 @@ internal class SampleEngineRenderer private constructor(
         require(output.size % PROGRAM_CHANNELS == 0) { "Stereo render buffer must contain whole frames" }
         val frameCount = output.size / PROGRAM_CHANNELS
         val blockSeconds = frameCount.toDouble() / outputSampleRate
-        val rpmAlpha = 1.0 - exp(-blockSeconds / RPM_RESPONSE_SECONDS)
-        val throttleAlpha = 1.0 - exp(-blockSeconds / THROTTLE_RESPONSE_SECONDS)
+        val rpmAlpha = 1.0 - exp(-blockSeconds / (target.tuning.rpmSmoothingMs / 1_000.0))
+        val throttleAlpha = 1.0 - exp(-blockSeconds / (target.tuning.throttleSmoothingMs / 1_000.0))
         val requestedRpm = target.rpm.coerceIn(profile.minimumRpm, profile.maximumRpm)
         smoothedRpm += (requestedRpm - smoothedRpm) * rpmAlpha
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
@@ -67,10 +67,11 @@ internal class SampleEngineRenderer private constructor(
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
         val targetProfileOutputGain = profile.outputGainAt(smoothedThrottle)
         val targetEnabled = if (target.enabled) 1.0 else 0.0
-        val masterAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.008))
-        val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.008))
-        val enabledAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.010))
-        val layerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.012))
+        val programFadeSeconds = target.tuning.programFadeMs / 1_000.0
+        val masterAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
+        val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
+        val enabledAlpha = 1.0 - exp(-1.0 / (outputSampleRate * (target.tuning.enabledFadeMs / 1_000.0)))
+        val layerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * (target.tuning.layerFadeMs / 1_000.0)))
         var blockPeak = 0.0
 
         for (frameIndex in 0 until frameCount) {
@@ -363,8 +364,6 @@ internal class SampleEngineRenderer private constructor(
         private const val PROGRAM_CHANNELS = 2
         private const val SILENCE_GAIN = 0.00001
         private const val DIAGNOSTIC_BLOCK_INTERVAL = 10L
-        private const val RPM_RESPONSE_SECONDS = 0.016
-        private const val THROTTLE_RESPONSE_SECONDS = 0.010
         private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
         private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
     }
