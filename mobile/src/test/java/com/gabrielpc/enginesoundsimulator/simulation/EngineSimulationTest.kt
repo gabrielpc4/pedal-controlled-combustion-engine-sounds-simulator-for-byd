@@ -63,6 +63,34 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun liftOffReturnsFromManyVirtualGearsWithAtMostTwoAudibleDownshifts() {
+        val simulation = EngineSimulation()
+        var state = simulation.state
+        repeat((18.0 / STEP).toInt()) {
+            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
+        }
+        assertTrue("setup needs a high virtual gear: $state", state.gear > 7)
+
+        var downshiftStarts = 0
+        var previousShifting = state.isShifting
+        var previousDirection = state.shiftDirection
+        repeat((12.0 / STEP).toInt()) {
+            state = simulation.update(DriverInput(simulateCoastRegen = true), STEP)
+            if (state.isShifting && (!previousShifting || previousDirection != state.shiftDirection) &&
+                state.shiftDirection == ShiftDirection.DOWN
+            ) {
+                downshiftStarts += 1
+            }
+            previousShifting = state.isShifting
+            previousDirection = state.shiftDirection
+        }
+
+        assertEquals("lift-off should finish in first virtual gear", 1, state.gear)
+        assertTrue("a high gear should collapse with no more than two downshift sounds: $downshiftStarts", downshiftStarts <= 2)
+        assertEquals("a high gear needs the two-stage collapse", 2, downshiftStarts)
+    }
+
+    @Test
     fun simulatorSpeedFollowsTheFakeTachOnLiftOff() {
         val simulation = EngineSimulation()
         val launched = simulation.runFor(1.0, throttle = 0.35, sim = true)

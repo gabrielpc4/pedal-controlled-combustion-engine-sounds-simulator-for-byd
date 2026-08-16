@@ -387,13 +387,21 @@ class EngineSimulation(
             return
         }
         if (pedalReleased && virtualGear > 1 && engineRpm <= profile.fullThrottleSweetSpotRpm) {
-            virtualGear -= 1
+            // A long pull can create many presentation gears.  On lift-off, collapse that
+            // history to second first, then first, so there are never more than two audible
+            // downshifts before the virtual transmission is back at rest.
+            virtualGear = nextVirtualDownshiftGear(virtualGear)
             beginVirtualShift(
                 direction = ShiftDirection.DOWN,
                 targetRpm = min(profile.upshiftRpm - DOWNSHIFT_HEADROOM_RPM, profile.limiterRpm - 180.0),
                 durationSeconds = profile.downshiftDurationSeconds,
             )
         }
+    }
+
+    private fun nextVirtualDownshiftGear(currentGear: Int): Int = when {
+        currentGear > 2 -> 2
+        else -> 1
     }
 
     private fun beginVirtualShift(
