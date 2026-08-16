@@ -27,6 +27,7 @@ class DriveControllerInputTest {
         assertEquals(0.0, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
         assertEquals("BYD UNAVAILABLE", result.label)
+        assertEquals(false, result.isSimulator)
     }
 
     @Test
@@ -42,6 +43,7 @@ class DriveControllerInputTest {
         assertEquals(0.0, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
         assertEquals("SIM PEDALS", result.label)
+        assertEquals(true, result.isSimulator)
     }
 
     @Test
@@ -64,6 +66,7 @@ class DriveControllerInputTest {
         assertEquals(0.12, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
         assertEquals("BYD PEDALS", result.label)
+        assertEquals(false, result.isSimulator)
     }
 
     @Test
@@ -86,5 +89,6 @@ class DriveControllerInputTest {
         assertEquals(0.1, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
         assertEquals("SIM PEDALS", result.label)
+        assertEquals(true, result.isSimulator)
     }
 }

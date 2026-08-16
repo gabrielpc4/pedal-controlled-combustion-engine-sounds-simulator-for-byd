@@ -393,7 +393,9 @@ class DriveController(context: Context) {
                 throttle = input.throttle,
                 brake = input.brake,
                 externalSpeedKmh = input.externalSpeedKmh,
-                simulateCoastRegen = mode == InputMode.SIMULATOR,
+                // AUTO falls back to the same SIM pedals when BYD input is unavailable.
+                // Use the resolved source, not just the selected mode, for its speed behavior.
+                simulateCoastRegen = input.isSimulator,
                 transmissionPosition = transmissionPosition.get(),
             ),
             dt,
@@ -606,6 +608,7 @@ internal data class ResolvedDriveInput(
     val brake: Double,
     val externalSpeedKmh: Double?,
     val label: String,
+    val isSimulator: Boolean,
 )
 
 /** Pure input arbitration kept separate so unavailable vehicle data can be fail-safe tested. */
@@ -623,6 +626,7 @@ internal fun resolveDriveInput(
             brake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0),
             externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid },
             label = "BYD PEDALS",
+            isSimulator = false,
         )
     }
 
@@ -632,6 +636,7 @@ internal fun resolveDriveInput(
             brake = 0.0,
             externalSpeedKmh = null,
             label = "BYD UNAVAILABLE",
+            isSimulator = false,
         )
     }
 
@@ -640,5 +645,6 @@ internal fun resolveDriveInput(
         brake = simulatorBrake.coerceIn(0.0, 1.0),
         externalSpeedKmh = null,
         label = "SIM PEDALS",
+        isSimulator = true,
     )
 }
