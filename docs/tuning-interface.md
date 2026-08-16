@@ -1,6 +1,6 @@
 # Live tuning interface
 
-The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the Seal-response and synthetic-sound defaults; **CLOSE** returns to driving without discarding edits.
+The dashboard's **TUNE** button opens a full-screen workstation designed for the head unit's 1920 x 990 safe viewport. Changes are applied to the 200 Hz simulation/audio pipeline immediately and saved automatically in app-private `SharedPreferences`. **RESET** restores the Seal-response and selected sample-profile defaults; **CLOSE** returns to driving without discarding edits.
 
 The interface presents torque in **≈ motor-shaft kgfm** and power in values labeled **HP** that use **metric PS/cv** arithmetic. Every visible readout uses whole numbers; normalized controls use percentages, wheel radius uses millimetres, drag area uses square centimetres, and ratios use an integer `n:100` form. Displayed and edited values are converted at the UI boundary; saved calibration values and drivetrain calculations remain in SI units (Nm, kW), so changing the presentation units does not alter the vehicle model. See [UI display and simulation decisions](ui-display-and-simulation-decisions.md) for the full rationale.
 
@@ -52,7 +52,7 @@ These affect runtime behavior immediately but are **not** persisted in `TuningRe
 | --- | --- | --- |
 | **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; only **D** enables auto-shifts and road-coupled RPM |
 | **INPUT** | Header | Cycles AUTO / SIM / BYD LIVE |
-| **ENGINE AUDIO** | Header | Mutes/unmutes synthesis |
+| **ENGINE AUDIO** | Header | Mutes/unmutes sample playback |
 | **CH OUTPUT** | Header | Cycles logical channel layout |
 
 See [UI display and simulation decisions §3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08) for neutral steady-state and inertia timing.
@@ -60,9 +60,9 @@ See [UI display and simulation decisions §3.2](ui-display-and-simulation-decisi
 ### Audio
 
 - Master gain
-- Exhaust, intake, mechanical, overrun, and shift-impact layers
-- Second through fifth firing-order harmonics
-- Live spectral contribution graph with harmonic X axis and gain-percentage Y axis
+- Selected car-profile identity and native RPM domain
+- Live coverage graph for idle, load, coast, texture, and limiter layers
+- Bank-authored RPM and throttle automation remains fixed in the code profile so it cannot be accidentally desynchronized from the recordings
 
 Values are smoothed inside the real-time renderer, so dragging a slider does not introduce an abrupt block-level volume discontinuity.
 
@@ -70,7 +70,7 @@ Values are smoothed inside the real-time renderer, so dragging a slider does not
 
 `TuningRepository` serializes every scalar, gear ratio, and curve point. Loaded and incoming values are bounded before reaching the simulation or audio thread. The explicit BYD vehicle-input safety behavior is unchanged: unavailable vehicle telemetry resolves to zero pedals rather than a stale touchscreen value.
 
-The controls affect the virtual EV road model and the synthesized engine response. They do not write to any BYD vehicle ECU or alter the real car's throttle, braking, or fixed-ratio drive units.
+The controls affect the virtual EV road model and sample-engine response. They do not write to any BYD vehicle ECU or alter the real car's throttle, braking, or fixed-ratio drive units.
 
 ## Emulator validation
 

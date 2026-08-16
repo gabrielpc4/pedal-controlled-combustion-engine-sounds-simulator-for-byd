@@ -134,16 +134,15 @@ internal fun DebugPanel(
 
             DebugSection(
                 title = "ENGINE SAMPLE AUDIO",
-                accent = if (state.audio.activeSoundMode == "SAMPLE") DbgGreen else DbgAmber,
+                accent = if (state.audio.sampleStatus == "ACTIVE") DbgGreen else DbgAmber,
             ) {
-                DebugLine("Requested source", state.audio.requestedSoundMode.displayName)
-                DebugLine("Active source", state.audio.activeSoundMode)
+                DebugLine("Sample status", state.audio.sampleStatus)
                 DebugLine("Sample profile", state.audio.sampleProfile)
                 DebugLine("Loaded loops", state.audio.sampleLoadedLoops.toString())
                 DebugLine("Decoded memory", "${(state.audio.sampleDecodedBytes / (1024 * 1024.0)).roundToInt()} MiB")
-                DebugLine("Mapped audio RPM", state.audio.sampleMappedRpm.toString())
-                DebugLine("Load track gain", "${state.audio.sampleLoadGainDb.roundToInt()} dB")
-                DebugLine("Coast track gain", "${state.audio.sampleCoastGainDb.roundToInt()} dB")
+                DebugLine("Target sample RPM", state.audio.sampleTargetRpm.toString())
+                DebugLine("Rendered sample RPM", state.audio.sampleRenderRpm.toString())
+                DebugLine("Rendered throttle", "${(state.audio.sampleThrottle * 100.0).roundToInt()}%")
                 DebugLine("Rendered frames", state.audio.sampleFramesRendered.toString())
                 DebugLine("Loop wraps", state.audio.sampleLoopWraps.toString())
                 DebugLine("Output peak", "${(state.audio.samplePeak * 100.0).roundToInt()}%")
@@ -159,7 +158,7 @@ internal fun DebugPanel(
                     modifier = Modifier.padding(top = 6.dp),
                 )
                 state.audio.sampleError?.let { error ->
-                    Text("Fallback reason: $error", color = DbgRed, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Required-bank error: $error", color = DbgRed, fontSize = 11.sp, lineHeight = 16.sp)
                 }
             }
 

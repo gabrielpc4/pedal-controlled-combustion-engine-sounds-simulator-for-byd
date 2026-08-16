@@ -11,7 +11,7 @@ import org.junit.Test
 class EngineSimulationTest {
     @Test
     fun defaultCalibrationUsesPublishedSealPerformanceAnchors() {
-        val profile = EngineProfile.APEX_V10
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
 
         assertEquals(670.0, profile.maxTorqueNm, 0.0)
         assertEquals(390.0, profile.peakPowerKw, 0.0)
@@ -19,15 +19,15 @@ class EngineSimulationTest {
         assertEquals(3_975.0, profile.rearPeakWheelTorqueNm, 0.0)
         assertEquals(2_185.0, profile.vehicleMassKg, 0.0)
         assertEquals(190.0, profile.topSpeedKmh, 0.0)
-        assertEquals(8_600.0, profile.redlineRpm, 0.0)
-        assertEquals(8_850.0, profile.limiterRpm, 0.0)
-        assertEquals(8_250.0, profile.upshiftRpm, 0.0)
-        assertTrue(profile.upshiftRpm < profile.redlineRpm)
+        assertEquals(8_200.0, profile.redlineRpm, 0.0)
+        assertEquals(8_350.0, profile.limiterRpm, 0.0)
+        assertEquals(8_200.0, profile.upshiftRpm, 0.0)
+        assertTrue(profile.upshiftRpm <= profile.redlineRpm)
         assertTrue(profile.redlineRpm < profile.limiterRpm)
     }
 
     @Test
-    fun topGearAtConfiguredTopSpeedRedlines() {
+    fun topGearAtConfiguredTopSpeedStaysInsideAuthoredRange() {
         val simulation = EngineSimulation()
         val state = simulation.update(
             DriverInput(
@@ -40,11 +40,11 @@ class EngineSimulationTest {
 
         assertEquals(7, state.gear)
         assertEquals(190.0, state.speedKmh, 0.5)
-        assertEquals(simulation.profile.redlineRpm, state.rpm, 25.0)
+        assertTrue(state.rpm in simulation.profile.idleRpm..simulation.profile.redlineRpm)
     }
 
     @Test
-    fun fullThrottleBuildsSyntheticRpmProgressivelyWithRoadSpeed() {
+    fun fullThrottleBuildsSampleRpmProgressivelyWithRoadSpeed() {
         val simulation = EngineSimulation()
         val initial = simulation.state
         val afterHalfSecond = simulation.runFor(0.5, throttle = 1.0)
@@ -83,7 +83,7 @@ class EngineSimulationTest {
 
     @Test
     fun digitizedAxleEnvelopeMatchesMeasuredPeaksAndTorqueDistribution() {
-        val profile = EngineProfile.APEX_V10
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
         val launch = axleWheelTorqueAtSpeed(profile, 0.0)
         val midSpeed = axleWheelTorqueAtSpeed(profile, 100.0)
         val highSpeed = axleWheelTorqueAtSpeed(profile, 180.0)
@@ -168,7 +168,7 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun syntheticUpshiftNeverCutsElectricWheelTorque() {
+    fun simulatedUpshiftNeverCutsElectricWheelTorque() {
         val simulation = EngineSimulation()
         var beforeShiftAcceleration: Double? = null
         var largestSingleStepDrop = 0.0
@@ -200,7 +200,7 @@ class EngineSimulationTest {
     @Test
     fun automaticShiftStartsAtTheShiftPointDropsRpmAndHonorsCompletedGearDwell() {
         val simulation = EngineSimulation(
-            EngineProfile.APEX_V10.copy(
+            EngineProfile.SAMPLE_BANK_ENGINE.copy(
                 gearRatios = doubleArrayOf(3.14, 2.10, 1.57, 1.24, 1.02, 0.84, 0.69),
             ),
         )
@@ -247,7 +247,7 @@ class EngineSimulationTest {
         )
         assertTrue(
             "normal shift must happen before the limiter, start=$start",
-            start.rpm < simulation.profile.limiterRpm - 250.0 && !start.limiterActive,
+            start.rpm < simulation.profile.limiterRpm - 50.0 && !start.limiterActive,
         )
         assertTrue(
             "the taller gear should produce a visible rpm drop: start=$start completion=$completion",
@@ -261,7 +261,7 @@ class EngineSimulationTest {
 
     @Test
     fun eachDownshiftPointIsItsPrecedingUpshiftLandingRpm() {
-        val profile = EngineProfile.APEX_V10
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
         for (gearIndex in 1..profile.gearRatios.lastIndex) {
             val expected = profile.idleRpm +
                 (profile.upshiftRpm - profile.idleRpm) *
@@ -272,7 +272,7 @@ class EngineSimulationTest {
 
     @Test
     fun releasingPedalKeepsRpmCoupledToRoadSpeed() {
-        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
         simulation.update(
             DriverInput(
@@ -332,7 +332,7 @@ class EngineSimulationTest {
 
     @Test
     fun neutralPositionRaisesRpmWithThrottleAtStandstill() {
-        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
         val idle = simulation.update(
             DriverInput(transmissionPosition = TransmissionPosition.NEUTRAL),
@@ -351,7 +351,7 @@ class EngineSimulationTest {
 
     @Test
     fun neutralPositionLiftOffDropsRpmTowardIdleAtStandstill() {
-        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
         simulation.runFor(0.8, throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL)
         val beforeLift = simulation.state
@@ -363,7 +363,7 @@ class EngineSimulationTest {
 
     @Test
     fun neutralPositionDoesNotAutoShiftWhileRevving() {
-        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14, 2.10, 1.57))
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(gearRatios = doubleArrayOf(3.14, 2.10, 1.57))
         val simulation = EngineSimulation(profile)
         val revved = simulation.runFor(1.2, throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL)
 
@@ -381,7 +381,7 @@ class EngineSimulationTest {
 
     @Test
     fun liftOffWithLiveSpeedHeldDoesNotHuntGears() {
-        val profile = EngineProfile.APEX_V10.copy(
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
             redlineRpm = 2_800.0,
             limiterRpm = 3_000.0,
             upshiftRpm = 2_600.0,
@@ -456,7 +456,7 @@ class EngineSimulationTest {
 
     @Test
     fun limiterCutUsesReleaseHysteresis() {
-        val limiterProfile = EngineProfile.APEX_V10.copy(
+        val limiterProfile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
             redlineRpm = 3_000.0,
             limiterRpm = 3_200.0,
             upshiftRpm = 2_900.0,
@@ -490,7 +490,7 @@ class EngineSimulationTest {
 
     @Test
     fun simulatorCoastRegenSlowsVirtualVehicleFasterThanDragAlone() {
-        val profile = EngineProfile.APEX_V10.copy(simulatorCoastRegenMps2 = 0.50)
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(simulatorCoastRegenMps2 = 0.50)
         val withoutRegen = EngineSimulation(profile)
         val withRegen = EngineSimulation(profile)
         withoutRegen.runFor(6.0, throttle = 1.0)

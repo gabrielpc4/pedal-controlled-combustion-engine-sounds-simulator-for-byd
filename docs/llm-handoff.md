@@ -9,7 +9,7 @@ linked engineering documents before changing vehicle, audio, or simulator behavi
 - A separate `C:\Users\Gabriel\Documents\ChatGPT\BYDMotorSound` directory may exist as an empty,
   unborn Git repository containing only local `docs/` and `tmp/`. Do **not** implement or commit
   there.
-- Default/source branch: `main`.
+- Current sample-engine development branch: `codex/sample-engine`; confirm whether it has been merged before starting new work.
 - Remote: `origin` -> `git@github.com:gabrielpc4/pedal-controlled-combustion-engine-sounds-simulator-for-byd.git`.
 - Confirm the current state yourself with `git status -sb` and `git log -1 --oneline`; another
   agent may have moved the branch after this handoff was written.
@@ -52,8 +52,8 @@ AAOS media-template shell and are not the BYD application.
 - a full-screen 1920 x 990 dashboard with simulator touch/keyboard pedals and a tuning workstation
   whose curves and parameters are editable in the UI;
 - UI torque in kgf·m and power in values labeled HP (metric PS/cv), with wheel-derived graph values cosmetically scaled to motor ratings — see [UI display decisions](ui-display-and-simulation-decisions.md);
-- procedural synthesized engine audio, audio focus handling, and experimental logical
-  stereo/quad/5.1/7.1 output;
+- profile-based multi-layer sample audio, audio focus handling, and experimental logical
+  stereo/quad/5.1/7.1 output; local recordings under `audio_samples/` are ignored and must never be committed;
 - read-only reflective probing/polling of BYD pedal and speed getters, with simulator fallback;
 - durable app-private diagnostics, including crash retention and shift transitions.
 
@@ -67,7 +67,7 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 | UI | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt`, `TuningPanel.kt` | Compose dashboard, pedals, P/N/D shifter, target viewport, tuning UI |
 | Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, transmission position, simulation/audio coordination, transition/heartbeat logging |
 | Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | EV road force, synthetic RPM/gears, P/N/D behavior, shifts, live-speed handling |
-| Audio | `audio/EngineAudioEngine.kt`, `EngineSynthesizer.kt` | AudioTrack lifecycle, focus, routing diagnostics, PCM synthesis/mirroring |
+| Audio | `audio/EngineAudioEngine.kt`, `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `WavPcmDecoder.kt` | AudioTrack lifecycle, profile automation, loop mixing/resampling, focus, and routing diagnostics |
 | Telemetry | `telemetry/BydSpeedReader.kt`, `telemetry/BydReadOnlyPermissionContext.kt` | reflective BYD capability probe, restricted client-context compatibility, and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
 | UI display | `VehicleDisplayUnits.kt`, `TuningPanel.kt` | cosmetic kgfm/HP conversions and graph annotation; does not alter physics |

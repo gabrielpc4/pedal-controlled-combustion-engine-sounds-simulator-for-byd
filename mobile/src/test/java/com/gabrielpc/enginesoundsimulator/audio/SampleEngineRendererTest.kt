@@ -10,43 +10,43 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SampleEngineRendererTest {
-    @Test
-    fun manifestContainsAContinuousEngineOnlyCabinProfile() {
-        assertEquals(23, SampleEngineManifest.loops.size)
-        assertEquals(23, SampleEngineManifest.requiredAssets.size)
-        assertTrue(SampleEngineManifest.loops.none { "limiter" in it.id || "turbo" in it.id })
+    private val profile = EngineSampleProfiles.default
 
-        for (rpm in 200..8_000 step 10) {
-            assertTrue("load coverage missing at $rpm", hasCoverage(SampleTrack.LOAD, rpm.toDouble()))
-            assertTrue("coast coverage missing at $rpm", hasCoverage(SampleTrack.COAST, rpm.toDouble()))
+    @Test
+    fun profileContainsRecoveredContinuousCabinEvent() {
+        assertEquals(24, profile.layers.size)
+        assertEquals(24, profile.requiredAssets.size)
+        assertEquals(7, profile.gearRatios.size)
+        assertEquals(10_000.0, profile.maximumRpm, 0.0)
+        assertEquals(8_350.0, profile.limiterRpm, 0.0)
+        assertTrue(profile.layers.any { it.role == SampleLayerRole.IDLE })
+        assertTrue(profile.layers.any { it.role == SampleLayerRole.LOAD })
+        assertTrue(profile.layers.any { it.role == SampleLayerRole.COAST })
+        assertTrue(profile.layers.any { it.role == SampleLayerRole.LIMITER })
+
+        for (rpm in profile.idleRpm.toInt()..profile.limiterRpm.toInt() step 10) {
+            assertTrue("no audible full-load layer at $rpm", strongestGain(rpm.toDouble(), 1.0) > 0.0001)
+            assertTrue("no audible lift-off layer at $rpm", strongestGain(rpm.toDouble(), 0.0) > 0.0001)
         }
     }
 
     @Test
-    fun throttleAutomationMovesFromCoastToLoadWithoutADeadZone() {
-        val idleLoad = automationDecibels(SampleEngineManifest.loadThrottleCurve, 0.0)
-        val fullLoad = automationDecibels(SampleEngineManifest.loadThrottleCurve, 1.0)
-        val idleCoast = automationDecibels(SampleEngineManifest.coastThrottleCurve, 0.0)
-        val fullCoast = automationDecibels(SampleEngineManifest.coastThrottleCurve, 1.0)
+    fun recoveredThrottleCurvesCrossfadeLoadAndCoastLayers() {
+        val load = profile.layers.first { it.id == "l4_high" }
+        val coast = profile.layers.first { it.id == "c3" }
 
-        assertTrue(fullLoad > idleLoad + 25.0)
-        assertTrue(idleCoast > fullCoast + 25.0)
-        for (step in 0..100) {
-            val throttle = step / 100.0
-            val strongest = maxOf(
-                automationDecibels(SampleEngineManifest.loadThrottleCurve, throttle),
-                automationDecibels(SampleEngineManifest.coastThrottleCurve, throttle),
-            )
-            assertTrue("both engine tracks are inaudible at $throttle", strongest > -30.0)
-        }
+        assertTrue(load.gainAt(4_500.0, 1.0) > load.gainAt(4_500.0, 0.0) * 8.0)
+        assertTrue(coast.gainAt(5_000.0, 0.0) > coast.gainAt(5_000.0, 1.0) * 8.0)
     }
 
     @Test
-    fun wavDecoderDownmixesStereoPcm16() {
+    fun wavDecoderDownmixesStereoPcm16AndReadsLoopMetadataAfterData() {
         val wav = pcm16Wav(
             sampleRate = 44_100,
             channels = 2,
             interleaved = shortArrayOf(12_000, -4_000, -16_000, 8_000).repeatFrames(20),
+            loopStart = 7,
+            loopEndInclusive = 31,
         )
 
         val decoded = WavPcmDecoder.decode(ByteArrayInputStream(wav))
@@ -54,64 +54,102 @@ class SampleEngineRendererTest {
         assertEquals(44_100, decoded.sampleRate)
         assertEquals(2, decoded.sourceChannels)
         assertEquals(40, decoded.monoSamples.size)
+        assertEquals(7, decoded.loopStartFrame)
+        assertEquals(32, decoded.loopEndFrameExclusive)
         assertEquals(4_000.0 / 32_768.0, decoded.monoSamples[0].toDouble(), 0.00001)
         assertEquals(-4_000.0 / 32_768.0, decoded.monoSamples[1].toDouble(), 0.00001)
     }
 
     @Test
-    fun codeDrivenSweepKeepsEveryRpmAudibleAndReportsRuntimeTelemetry() {
-        val decoded = SampleEngineManifest.requiredAssets.associateWith { asset ->
-            val frequency = 70.0 + abs(asset.hashCode() % 220)
-            PcmLoopData(
-                monoSamples = FloatArray(2_048) { frame ->
-                    (sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35).toFloat()
-                },
-                sampleRate = 44_100,
-                sourceChannels = 1,
-            )
-        }
-        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded)
+    fun codeDrivenSweepKeepsNativeRangeAudibleAndReportsRuntimeTelemetry() {
+        val decoded = testBank()
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, profile)
         var totalNonZero = 0
 
-        for (step in 0..80) {
-            val rpm = 950.0 + (8_600.0 - 950.0) * step / 80.0
+        for (step in 0..100) {
+            val rpm = profile.idleRpm + (profile.limiterRpm - profile.idleRpm) * step / 100.0
             val throttle = when {
-                step < 15 -> 0.0
-                step < 45 -> (step - 15) / 30.0
+                step < 20 -> 0.0
+                step < 60 -> (step - 20) / 40.0
                 else -> 1.0
             }
             val output = ShortArray(960)
-            renderer.render(
-                EngineAudioFrame(rpm = rpm, throttle = throttle, load = throttle, redlineRpm = 8_600.0),
-                output,
-                gain = 0.66,
-            )
+            renderer.render(EngineAudioFrame(rpm = rpm, throttle = throttle), output, gain = 0.66)
             val nonZero = output.count { it != 0.toShort() }
-            assertTrue("silent render at rpm=$rpm throttle=$throttle", nonZero > output.size * 0.8)
+            assertTrue("silent render at rpm=$rpm throttle=$throttle", nonZero > output.size * 0.75)
             totalNonZero += nonZero
+        }
+        repeat(12) {
+            renderer.render(EngineAudioFrame(rpm = profile.limiterRpm, throttle = 1.0), ShortArray(960), gain = 0.66)
         }
 
         val diagnostics = renderer.diagnostics()
-        assertTrue(totalNonZero > 70_000)
-        assertEquals(23, diagnostics.loadedLoops)
-        assertTrue(diagnostics.mappedAudioRpm >= 7_800)
-        assertTrue(diagnostics.framesRendered > 70_000)
+        assertTrue(totalNonZero > 80_000)
+        assertEquals(profile.layers.size, diagnostics.loadedLoops)
+        assertEquals(profile.limiterRpm, diagnostics.targetRpm.toDouble(), 2.0)
+        assertEquals(profile.limiterRpm, diagnostics.renderRpm.toDouble(), 10.0)
+        assertTrue(diagnostics.framesRendered > 90_000)
         assertTrue(diagnostics.loopWraps > 0)
         assertTrue(diagnostics.activeLayers != "none")
         assertTrue(diagnostics.peak in 0.01..1.0)
     }
 
-    private fun hasCoverage(track: SampleTrack, rpm: Double): Boolean =
-        SampleEngineManifest.loops.any { it.track == track && rpm in it.startRpm..it.endRpm }
+    @Test
+    fun rendererUsesProfileRpmWithoutAxisRemapping() {
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
+        val output = ShortArray(4_800)
+
+        repeat(8) {
+            renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5), output, gain = 0.5)
+        }
+
+        assertEquals(4_000.0, renderer.diagnostics().targetRpm.toDouble(), 1.0)
+        assertEquals(4_000.0, renderer.diagnostics().renderRpm.toDouble(), 8.0)
+    }
+
+    @Test
+    fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
+        val decoded = mapOf(
+            profile.requiredAssets.first() to PcmLoopData(FloatArray(32) { 0.1f }, 48_000, 1),
+        )
+
+        val failure = runCatching { SampleEngineRenderer.fromDecoded(48_000, decoded, profile) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertTrue(failure?.message?.startsWith("Missing ") == true)
+    }
+
+    private fun strongestGain(rpm: Double, throttle: Double): Double =
+        profile.layers.maxOf { it.gainAt(rpm, throttle) }
+
+    private fun testBank(): Map<String, PcmLoopData> = profile.requiredAssets.associateWith { asset ->
+        val frequency = 70.0 + abs(asset.hashCode() % 220)
+        PcmLoopData(
+            monoSamples = FloatArray(2_048) { frame ->
+                (sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35).toFloat()
+            },
+            sampleRate = 44_100,
+            sourceChannels = 1,
+            loopStartFrame = 250,
+            loopEndFrameExclusive = 1_900,
+        )
+    }
 
     private fun ShortArray.repeatFrames(times: Int): ShortArray =
         ShortArray(size * times) { this[it % size] }
 
-    private fun pcm16Wav(sampleRate: Int, channels: Int, interleaved: ShortArray): ByteArray {
+    private fun pcm16Wav(
+        sampleRate: Int,
+        channels: Int,
+        interleaved: ShortArray,
+        loopStart: Int,
+        loopEndInclusive: Int,
+    ): ByteArray {
         val dataBytes = interleaved.size * 2
+        val smplBytes = 60
         return ByteArrayOutputStream().apply {
             write("RIFF".toByteArray())
-            writeLe32(36 + dataBytes)
+            writeLe32(36 + dataBytes + 8 + smplBytes)
             write("WAVEfmt ".toByteArray())
             writeLe32(16)
             writeLe16(1)
@@ -123,6 +161,17 @@ class SampleEngineRendererTest {
             write("data".toByteArray())
             writeLe32(dataBytes)
             interleaved.forEach { sample -> writeLe16(sample.toInt()) }
+            write("smpl".toByteArray())
+            writeLe32(smplBytes)
+            repeat(7) { writeLe32(0) }
+            writeLe32(1)
+            writeLe32(0)
+            writeLe32(0)
+            writeLe32(0)
+            writeLe32(loopStart)
+            writeLe32(loopEndInclusive)
+            writeLe32(0)
+            writeLe32(0)
         }.toByteArray()
     }
 

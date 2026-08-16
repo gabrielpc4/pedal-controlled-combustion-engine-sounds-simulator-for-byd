@@ -1,6 +1,6 @@
 # Pedal-Controlled Combustion Engine Sounds Simulator for BYD
 
-**Engine Sounds Simulator** brings responsive, pedal-driven combustion-engine sound to the BYD Seal head unit. The app reads accelerator, brake, and road speed from DiLink in real time, maps them through a calibrated electric drivetrain model, and drives a procedural V10 sound engine whose RPM, shifts, overrun, and limiter follow your right foot — without touching vehicle control.
+**Engine Sounds Simulator** brings responsive, pedal-driven combustion-engine sound to the BYD Seal head unit. The app reads accelerator, brake, and road speed from DiLink in real time, maps them through a calibrated electric drivetrain model, and drives a profile-based sample engine whose RPM, shifts, and limiter follow your right foot — without touching vehicle control.
 
 Built for the rotating BYD tablet on DiLink firmware `13.1.33.2503250.1` (`2503`). Vehicle integration is read-only: no setters, no CAN injection, no rooted firmware.
 
@@ -9,7 +9,7 @@ Built for the rotating BYD tablet on DiLink firmware `13.1.33.2503250.1` (`2503`
 - **Live pedal control** — accelerator and brake depth from `BYDAutoSpeedDevice`, with automatic fallback to touch/keyboard pedals when DiLink telemetry is unavailable
 - **Calibrated Seal Performance response** — a 200 Hz EV road model anchored on BYD's published 390 kW / 670 Nm figures and A2MAC1 measured front/rear wheel-torque curves
 - **Presentation gears that never bog the car** — seven synthetic ratios shape tachometer RPM and sound only; wheel torque stays continuous through every shift
-- **Procedural V10 audio** — original synthesis driven by RPM, load, throttle, shift events, overrun crackle, and limiter state
+- **Profile-based engine audio** — a multi-layer cabin sample event reconstructed from bank-authored RPM, throttle, gain, pitch, and loop controls
 - **Cabin audio routing** — stereo, quad, 5.1, or 7.1 logical output with live route, buffer, and underrun diagnostics
 - **Full-screen dashboard** — landscape tachometer, virtual pedals, **P / N / D** shifter, input-mode controls, and a persistent tuning workstation for curves, ratios, and audio layers
 - **On-device diagnostics** — durable shift, lifecycle, and crash logs for field tuning without a live `logcat` session
@@ -25,7 +25,7 @@ BYD pedals & speed (DiLink)     Touch / keyboard pedals
                      /           \
               Dashboard UI    EngineAudioFrame
                   30 Hz              |
-                              EngineSynthesizer
+                           SampleEngineRenderer
                                      |
                           cabin AudioTrack output
 ```
@@ -46,6 +46,7 @@ The electric model handles mass, drag, rolling resistance, and measured axle tor
 Requirements: Android Studio with SDK 37, embedded JDK as `JAVA_HOME`.
 
 The `mobile` module compiles against SDK 37 and targets SDK 25 for DiLink vendor-framework compatibility.
+Audio builds also require the locally decoded profile WAVs documented in [Profile-based sample engine audio](docs/sample-engine-audio.md). They are intentionally Git-ignored and not redistributable from this repository.
 
 ```powershell
 $env:JAVA_HOME = '<Android Studio JBR path>'

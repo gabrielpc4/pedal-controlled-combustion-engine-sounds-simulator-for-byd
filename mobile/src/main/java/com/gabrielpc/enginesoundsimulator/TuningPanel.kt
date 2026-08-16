@@ -51,8 +51,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
-import com.gabrielpc.enginesoundsimulator.tuning.AudioTuning
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -79,7 +80,7 @@ private enum class TuningTab(val title: String, val subtitle: String) {
     CURVES("AWD CURVES", "FRONT / REAR WHEEL TORQUE"),
     RESPONSE("RESPONSE", "SPORT PEDAL DYNAMICS"),
     TRANSMISSION("GEARING", "RATIOS & SHIFT LOGIC"),
-    AUDIO("AUDIO", "LAYERS & HARMONICS"),
+    AUDIO("AUDIO", "SAMPLE BANK"),
 }
 
 @Composable
@@ -133,7 +134,7 @@ private fun TuningHeader(config: TuningConfig, onReset: () -> Unit, onClose: () 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(10.dp).background(TuneGreen, CircleShape))
                 Text("LIVE TUNING", color = TuneWhite, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                Text("// APEX V10", color = TuneCyan, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.6.sp)
+                Text("// SUPRA MK4 CABIN", color = TuneCyan, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.6.sp)
             }
             Text(
                 "Changes apply immediately and are saved automatically  •  ${newtonMetersToKgfm(config.engine.maxTorqueNm).roundToInt()} kgfm  •  ${kilowattsToHorsepower(config.engine.peakPowerKw).roundToInt()} HP  •  ${config.engine.topSpeedKmh.roundToInt()} km/h",
@@ -174,19 +175,19 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
-            "SYNTHETIC ENGINE",
+            "SAMPLE ENGINE",
             "Tach follows road speed in D; use the P N D shifter beside the pedals for neutral revs",
             Modifier.weight(0.78f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..12_000.0, "%.0f RPM") {
+                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.default.maximumRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
-                        redlineRpm = min(engine.redlineRpm, it - 300.0),
-                        limiterRpm = min(engine.limiterRpm, it - 100.0),
+                        redlineRpm = min(engine.redlineRpm, it - 100.0),
+                        limiterRpm = min(engine.limiterRpm, it),
                     )))
                 }
-                ParameterSlider("REDLINE", engine.redlineRpm, 4_000.0..(engine.maxRpm - 300.0), "%.0f RPM") {
+                ParameterSlider("REDLINE", engine.redlineRpm, 4_000.0..(engine.maxRpm - 100.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         redlineRpm = it,
                         limiterRpm = max(engine.limiterRpm, it),
@@ -202,8 +203,8 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
                 }
-                ParameterSlider("RPM RESPONSE", engine.syntheticRpmResponseMs, 10.0..250.0, "%.0f ms") {
-                    onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
+                ParameterSlider("RPM RESPONSE", engine.sampleRpmResponseMs, 10.0..250.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(sampleRpmResponseMs = it)))
                 }
             }
         }
@@ -383,7 +384,7 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("SOUND SHIFT CONTROL", "Presentation only • wheel torque stays continuous", Modifier.weight(0.76f)) {
-            ParameterSlider("SYNTHETIC FINAL DRIVE", engine.finalDrive * 100.0, 200.0..600.0, "%.0f:100") {
+            ParameterSlider("SOUND FINAL DRIVE", engine.finalDrive * 100.0, 200.0..600.0, "%.0f:100") {
                 onChange(config.copy(engine = engine.copy(finalDrive = it / 100.0)))
             }
             ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
@@ -396,7 +397,7 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
                 onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
             }
         }
-        PanelCard("SYNTHETIC GEAR RATIOS", "Changes RPM and sound, never physical acceleration", Modifier.weight(0.96f)) {
+        PanelCard("SAMPLE GEAR RATIOS", "Changes RPM and sound, never physical acceleration", Modifier.weight(0.96f)) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 engine.gearRatios.forEachIndexed { index, ratio ->
                     val maximum = if (index == 0) 5.0 else engine.gearRatios[index - 1] - 0.05
@@ -422,23 +423,21 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
 @Composable
 private fun AudioTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val audio = config.audio
+    val profile = EngineSampleProfiles.default
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("ENGINE MIX", "Balance the synthesized source layers", Modifier.weight(0.82f)) {
+        PanelCard("SAMPLE OUTPUT", "The recovered bank logic is the only engine source", Modifier.weight(0.72f)) {
             AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
-            AudioSlider("EXHAUST", audio.exhaustLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(exhaustLevel = it))) }
-            AudioSlider("INTAKE", audio.intakeLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(intakeLevel = it))) }
-            AudioSlider("MECHANICAL", audio.mechanicalLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(mechanicalLevel = it))) }
-            AudioSlider("OVERRUN", audio.overrunLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(overrunLevel = it))) }
-            AudioSlider("SHIFT IMPACT", audio.shiftLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(shiftLevel = it))) }
+            Spacer(Modifier.height(20.dp))
+            Text("PROFILE", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text(profile.displayName, color = TuneWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+            Text("NATIVE RPM DOMAIN", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+            Text("${profile.layers.size} continuous layers · bank-authored RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        PanelCard("HARMONIC CHARACTER", "Shape the firing-order spectrum", Modifier.weight(0.78f)) {
-            AudioSlider("2ND HARMONIC", audio.harmonic2, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic2 = it))) }
-            AudioSlider("3RD HARMONIC", audio.harmonic3, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic3 = it))) }
-            AudioSlider("4TH HARMONIC", audio.harmonic4, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic4 = it))) }
-            AudioSlider("5TH HARMONIC", audio.harmonic5, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic5 = it))) }
-        }
-        PanelCard("SPECTRAL PROFILE", "Relative contribution of each editable harmonic", Modifier.weight(1.10f)) {
-            AudioSpectrumGraph(audio, Modifier.fillMaxSize())
+        PanelCard("RPM LAYER COVERAGE", "Recovered FMOD regions on the bank's native parameter axis", Modifier.weight(1.85f)) {
+            SampleBankCoverageGraph(config.engine.redlineRpm, Modifier.fillMaxSize())
         }
     }
 }
@@ -1154,80 +1153,78 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AudioSpectrumGraph(audio: AudioTuning, modifier: Modifier = Modifier) {
-    val values = listOf(1.0, audio.harmonic2, audio.harmonic3, audio.harmonic4, audio.harmonic5)
-    val harmonicLabels = listOf("FUND", "H2", "H3", "H4", "H5")
+private fun SampleBankCoverageGraph(redlineRpm: Double, modifier: Modifier = Modifier) {
+    val profile = EngineSampleProfiles.default
     Canvas(modifier) {
-        val left = 62f
-        val right = size.width - 30f
+        val left = 90f
+        val right = size.width - 26f
         val top = 48f
-        val bottom = size.height - 86f
+        val bottom = size.height - 72f
         val width = right - left
         val height = bottom - top
-        val yTicks = axisTicksFromValues(
-            values = listOf(0.0, 1.0, 1.5) + values,
-            positionOf = { (it / 1.5).toFloat().coerceIn(0f, 1f) },
-            labelOf = { gain -> "${(gain * 100).roundToInt()}" },
-            minSpacing = 0.10f,
-            mergeTolerance = 0.05,
-        )
-        val xTicks = values.indices.map { index ->
-            AxisTick(((index + 0.5f) / values.size), "${index + 1}")
+        val roles = SampleLayerRole.entries
+        val laneHeight = height / roles.size
+
+        for (rpm in 0..profile.maximumRpm.toInt() step 1_000) {
+            val x = left + width * (rpm / profile.maximumRpm).toFloat()
+            drawLine(TuneLine.copy(alpha = 0.75f), Offset(x, top), Offset(x, bottom), 1f)
         }
-        yTicks.forEach { tick ->
-            val y = bottom - height * tick.position
-            drawLine(TuneLine, Offset(left, y), Offset(right, y), 1f)
-        }
-        values.forEachIndexed { index, value ->
-            val slot = width / values.size
-            val x = left + slot * (index + 0.5f)
-            val barWidth = slot * 0.48f
-            val y = bottom - height * (value / 1.5).toFloat().coerceIn(0f, 1f)
-            drawRoundRect(
-                brush = Brush.verticalGradient(listOf(TuneAmber, TuneRed.copy(alpha = 0.55f))),
-                topLeft = Offset(x - barWidth / 2, y),
-                size = androidx.compose.ui.geometry.Size(barWidth, bottom - y),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(9f),
-            )
-            drawIntoCanvas { canvas ->
-                val paint = graphPaint()
-                paint.textAlign = Paint.Align.CENTER
-                paint.color = android.graphics.Color.rgb(255, 196, 86)
-                canvas.nativeCanvas.drawText("${(value * 100).roundToInt()}%", x, y - 12f, paint)
-                paint.color = GRAPH_AXIS_LABEL_COLOR
-                canvas.nativeCanvas.drawText(
-                    harmonicLabels[index],
-                    x,
-                    markerLabelYBelow(y, bottom),
-                    paint,
-                )
+        roles.forEachIndexed { lane, role ->
+            val laneTop = top + lane * laneHeight
+            val color = when (role) {
+                SampleLayerRole.IDLE -> TuneWhite
+                SampleLayerRole.LOAD -> TuneGreen
+                SampleLayerRole.COAST -> TuneCyan
+                SampleLayerRole.TEXTURE -> TuneAmber
+                SampleLayerRole.LIMITER -> TuneRed
             }
+            profile.layers.filter { it.role == role }.forEach { layer ->
+                val x = left + width * (layer.startRpm / profile.maximumRpm).toFloat()
+                val endX = left + width * (layer.endRpm / profile.maximumRpm).toFloat()
+                val y = laneTop + laneHeight * 0.20f
+                val barHeight = laneHeight * 0.60f
+            drawRoundRect(
+                    color = color.copy(alpha = 0.50f),
+                    topLeft = Offset(x, y),
+                    size = androidx.compose.ui.geometry.Size((endX - x).coerceAtLeast(2f), barHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f),
+                )
+                drawLine(color, Offset(x, y), Offset(x, y + barHeight), 2f)
+            }
+            drawLine(TuneLine, Offset(left, laneTop + laneHeight), Offset(right, laneTop + laneHeight), 1f)
         }
+
+        val currentRedline = redlineRpm.coerceIn(
+            profile.minimumRpm,
+            profile.maximumRpm,
+        )
+        val redlineX = left + width * (currentRedline / profile.maximumRpm).toFloat()
+        drawLine(TuneRed, Offset(redlineX, top), Offset(redlineX, bottom), 3f)
+
         drawIntoCanvas { canvas ->
             val paint = graphPaint()
-            paint.textSize = 16f
-            paint.textAlign = Paint.Align.LEFT
+            paint.textSize = 15f
             paint.color = GRAPH_AXIS_LABEL_COLOR
-            canvas.nativeCanvas.drawText("GAIN (%)", left, 20f, paint)
             paint.textAlign = Paint.Align.RIGHT
-            yTicks.forEach { tick ->
+            roles.forEachIndexed { lane, role ->
                 canvas.nativeCanvas.drawText(
-                    tick.label,
-                    left - 10f,
-                    bottom - height * tick.position + 6f,
+                    role.name,
+                    left - 12f,
+                    top + lane * laneHeight + laneHeight * 0.55f,
                     paint,
                 )
             }
             paint.textAlign = Paint.Align.CENTER
-            xTicks.forEach { tick ->
-                canvas.nativeCanvas.drawText(
-                    tick.label,
-                    left + width * tick.position,
-                    bottom + 27f,
-                    paint,
-                )
+            for (rpm in 0..profile.maximumRpm.toInt() step 1_000) {
+                val x = left + width * (rpm / profile.maximumRpm).toFloat()
+                canvas.nativeCanvas.drawText(rpm.toString(), x, bottom + 28f, paint)
             }
-            canvas.nativeCanvas.drawText("HARMONIC", left + width / 2f, bottom + 62f, paint)
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = android.graphics.Color.rgb(255, 70, 92)
+            canvas.nativeCanvas.drawText("REDLINE ${currentRedline.roundToInt()}", redlineX - 122f, top - 15f, paint)
+            paint.textAlign = Paint.Align.CENTER
+            paint.color = GRAPH_AXIS_LABEL_COLOR
+            canvas.nativeCanvas.drawText("NATIVE BANK RPM — DIRECT 1:1", left + width / 2f, bottom + 58f, paint)
         }
     }
 }

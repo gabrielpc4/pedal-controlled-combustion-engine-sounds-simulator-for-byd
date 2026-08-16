@@ -7,7 +7,7 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioChannelMode
 import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
-import com.gabrielpc.enginesoundsimulator.audio.EngineSoundMode
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -218,12 +218,6 @@ class DriveController(context: Context) {
         PersistentDiagnosticLog.event("audio_channel_mode_changed", "from=${current.name} to=${selected.name}")
     }
 
-    fun cycleSoundMode() {
-        val current = audioEngine.state().requestedSoundMode
-        val selected = if (current == EngineSoundMode.SAMPLE) EngineSoundMode.SYNTH else EngineSoundMode.SAMPLE
-        audioEngine.setSoundMode(selected)
-    }
-
     /** Runs a deterministic pedal program for on-device sample-renderer and telemetry validation. */
     fun runSampleAudioValidation() {
         synchronized(lifecycleLock) {
@@ -234,7 +228,6 @@ class DriveController(context: Context) {
             selectedInputMode.set(InputMode.SIMULATOR)
             transmissionPosition.set(TransmissionPosition.DRIVE)
             manualInput.set(ManualInput())
-            audioEngine.setSoundMode(EngineSoundMode.SAMPLE)
             if (!soundEnabled.getAndSet(true) && running.get()) audioEngine.start()
 
             val validation = Thread(
@@ -347,12 +340,6 @@ class DriveController(context: Context) {
             EngineAudioFrame(
                 rpm = drivetrain.rpm,
                 throttle = drivetrain.smoothedThrottle,
-                load = drivetrain.engineLoad,
-                redlineRpm = profile.redlineRpm,
-                cylinders = profile.cylinders,
-                shiftSerial = drivetrain.shiftSerial,
-                shifting = drivetrain.isShifting,
-                limiterActive = drivetrain.limiterActive,
                 enabled = enabled,
                 tuning = tuning.audio,
             ),
@@ -428,10 +415,12 @@ class DriveController(context: Context) {
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
                     "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
                     "source=${input.label} reader=${telemetry.readerState.name} " +
-                    "audio_source=${audio.activeSoundMode.replace(' ', '_')} " +
-                    "audio_rpm=${audio.sampleMappedRpm} sample_loops=${audio.sampleLoadedLoops} " +
-                    "load_db_tenths=${(audio.sampleLoadGainDb * 10.0).roundToInt()} " +
-                    "coast_db_tenths=${(audio.sampleCoastGainDb * 10.0).roundToInt()} " +
+                    "sample_status=${audio.sampleStatus} " +
+                    "simulation_rpm=${drivetrain.rpm.roundToInt()} " +
+                    "sample_target_rpm=${audio.sampleTargetRpm} sample_render_rpm=${audio.sampleRenderRpm} " +
+                    "rpm_delta=${audio.sampleRenderRpm - drivetrain.rpm.roundToInt()} " +
+                    "sample_loops=${audio.sampleLoadedLoops} " +
+                    "sample_throttle_pct=${(audio.sampleThrottle * 100.0).roundToInt()} " +
                     "layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
                     "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
                     "peak_milli=${(audio.samplePeak * 1_000.0).roundToInt()} " +
@@ -463,7 +452,8 @@ class DriveController(context: Context) {
 }
 
 private fun sampleAudioLogDetails(audio: AudioOutputState): String =
-    "audio_source=${audio.activeSoundMode.replace(' ', '_')} audio_rpm=${audio.sampleMappedRpm} " +
+    "sample_status=${audio.sampleStatus} sample_target_rpm=${audio.sampleTargetRpm} " +
+        "sample_render_rpm=${audio.sampleRenderRpm} " +
         "sample_loops=${audio.sampleLoadedLoops} layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
         "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
         "peak_milli=${(audio.samplePeak * 1_000.0).roundToInt()} " +
@@ -473,8 +463,7 @@ private fun sampleAudioLogDetails(audio: AudioOutputState): String =
 private fun TuningConfig.toEngineProfile(): EngineProfile {
     val engine = engine.sanitized()
     return EngineProfile(
-        name = "Apex V10",
-        cylinders = 10,
+        name = EngineSampleProfiles.default.displayName,
         idleRpm = engine.idleRpm,
         redlineRpm = engine.redlineRpm,
         limiterRpm = engine.limiterRpm,
@@ -493,7 +482,7 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
-        syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
+        sampleRpmResponseSeconds = engine.sampleRpmResponseMs / 1_000.0,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
         finalDrive = engine.finalDrive,
         gearRatios = engine.gearRatios.toDoubleArray(),

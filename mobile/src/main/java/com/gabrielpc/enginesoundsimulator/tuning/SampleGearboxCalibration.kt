@@ -1,15 +1,16 @@
 package com.gabrielpc.enginesoundsimulator.tuning
 
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import kotlin.math.PI
 import kotlin.math.pow
 import kotlin.math.round
 
 /**
- * Derives presentation gear ratios so the top gear hits [redlineRpm] exactly at [topSpeedKmh],
- * with roughly even upshift speed spacing between adjacent ratios.
+ * Derives presentation gear ratios so the top gear reaches [redlineRpm] at [topSpeedKmh],
+ * with roughly even sound-RPM drops between adjacent ratios.
  */
-object SyntheticGearboxCalibration {
-    /** Typical step between consecutive synthetic ratios (~15% drop per upshift). */
+object SampleGearboxCalibration {
+    /** Typical step between consecutive simulated ratios (~15% drop per upshift). */
     private const val RATIO_STEP = 0.856
 
     fun wheelRpmForSpeedKmh(speedKmh: Double, wheelRadiusMeters: Double): Double {
@@ -30,10 +31,10 @@ object SyntheticGearboxCalibration {
 
     fun computeGearRatios(
         gearCount: Int = 7,
-        idleRpm: Double = 950.0,
-        redlineRpm: Double = 8_600.0,
+        idleRpm: Double = EngineSampleProfiles.default.idleRpm,
+        redlineRpm: Double = EngineSampleProfiles.default.redlineRpm,
         topSpeedKmh: Double = 190.0,
-        finalDrive: Double = 3.82,
+        finalDrive: Double = EngineSampleProfiles.default.finalDrive,
         wheelRadiusMeters: Double = 0.347,
     ): List<Double> {
         require(gearCount >= 2)
@@ -43,11 +44,7 @@ object SyntheticGearboxCalibration {
         val firstRatio = topRatioExact / RATIO_STEP.pow(gearCount - 1)
 
         return List(gearCount) { index ->
-            if (index == gearCount - 1) {
-                topRatioExact
-            } else {
-                roundRatio(firstRatio * RATIO_STEP.pow(index.toDouble()))
-            }
+            if (index == gearCount - 1) topRatioExact else roundRatio(firstRatio * RATIO_STEP.pow(index.toDouble()))
         }
     }
 

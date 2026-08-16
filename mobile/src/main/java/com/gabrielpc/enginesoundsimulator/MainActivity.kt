@@ -135,7 +135,6 @@ class MainActivity : ComponentActivity() {
                         onCycleInput = controller::cycleInputMode,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
-                        onCycleSoundMode = controller::cycleSoundMode,
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
@@ -194,7 +193,6 @@ private fun MotorSoundDashboard(
     onCycleInput: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
-    onCycleSoundMode: () -> Unit,
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
@@ -272,7 +270,6 @@ private fun MotorSoundDashboard(
                         state = state,
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
-                        onCycleSoundMode = onCycleSoundMode,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
                         onOpenDebug = { debugOpen = true },
@@ -342,7 +339,6 @@ private fun DashboardHeader(
     state: DriveSnapshot,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
-    onCycleSoundMode: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
     onOpenDebug: () -> Unit,
@@ -376,7 +372,7 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             Text(
-                text = "// ${state.audio.activeSoundMode}",
+                text = "// SAMPLE",
                 color = Cyan,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Light,
@@ -401,12 +397,6 @@ private fun DashboardHeader(
             primary = state.inputMode.displayName,
             secondary = "INPUT",
             onClick = onCycleInput,
-        )
-        HeaderButton(
-            primary = state.audio.requestedSoundMode.displayName,
-            secondary = "SOUND PROFILE",
-            accent = if (state.audio.activeSoundMode == "SAMPLE") Green else Amber,
-            onClick = onCycleSoundMode,
         )
         HeaderButton(
             primary = if (state.engineSoundEnabled) "ON" else "MUTED",
@@ -468,7 +458,6 @@ private fun CarStage(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sampleActive = state.audio.activeSoundMode == "SAMPLE"
     Box(modifier = modifier) {
         Canvas(Modifier.fillMaxSize()) {
             val throttleGlow = (0.18f + state.throttle.toFloat() * 0.32f)
@@ -504,19 +493,15 @@ private fun CarStage(
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text(
-                if (sampleActive) "SUPRA MK4 CABIN" else "APEX V10",
+                "SUPRA MK4 CABIN",
                 color = White,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.2.sp,
             )
             Text(
-                if (sampleActive) {
-                    "RPM / LOAD LOOPSET  •  ${state.audio.sampleLoadedLoops} ENGINE LAYERS  •  " +
-                        "${state.tuning.engine.redlineRpm.roundToInt()} REDLINE"
-                } else {
-                    "SEAL AWD RESPONSE  •  10 CYL SOUND  •  ${state.tuning.engine.redlineRpm.roundToInt()} REDLINE"
-                },
+                "RPM / LOAD LOOPSET  •  ${state.audio.sampleLoadedLoops} ENGINE LAYERS  •  " +
+                    "${state.tuning.engine.maxRpm.roundToInt()} RPM BANK",
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -530,7 +515,7 @@ private fun CarStage(
 
         Image(
             painter = painterResource(R.drawable.apex_v10_car),
-            contentDescription = "Original red Apex V10 sports car",
+            contentDescription = "Red sports car",
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxWidth(0.94f)
@@ -931,7 +916,7 @@ private fun DashboardFooter(state: DriveSnapshot, viewport: String) {
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         FooterMetric("AUDIO", audioStatus, audioStatusColor)
-        FooterMetric("SOURCE", audio.activeSoundMode, if (audio.activeSoundMode == "SAMPLE") Green else Amber)
+        FooterMetric("SAMPLE BANK", audio.sampleStatus, if (audio.sampleStatus == "ACTIVE") Green else Amber)
         FooterMetric("ROUTE", audio.routedDevice, CyanSoft, Modifier.weight(1f))
         FooterMetric("FORMAT", if (audio.sampleRate > 0) "${audio.sampleRate / 1000} kHz • ${audio.bufferFrames}f • ${audio.steadyStateUnderruns} new underruns" else "NEGOTIATING", CyanSoft)
         FooterMetric("SESSION", if (audio.sessionId > 0) audio.sessionId.toString() else "—", CyanSoft)

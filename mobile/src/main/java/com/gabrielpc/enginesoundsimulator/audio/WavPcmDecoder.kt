@@ -2,11 +2,15 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import java.io.EOFException
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 internal data class PcmLoopData(
     val monoSamples: FloatArray,
     val sampleRate: Int,
     val sourceChannels: Int,
+    val loopStartFrame: Int = 0,
+    val loopEndFrameExclusive: Int = monoSamples.size,
 )
 
 internal object WavPcmDecoder {
@@ -20,8 +24,10 @@ internal object WavPcmDecoder {
         var sampleRate = 0
         var bitsPerSample = 0
         var pcmBytes: ByteArray? = null
+        var smplLoopStart: Long? = null
+        var smplLoopEndInclusive: Long? = null
 
-        while (pcmBytes == null) {
+        while (true) {
             val chunkId = stream.readAsciiOrNull(4) ?: break
             val chunkSize = stream.readUInt32Le().toInt()
             require(chunkSize >= 0) { "Invalid WAV chunk size" }
@@ -36,6 +42,17 @@ internal object WavPcmDecoder {
                     stream.skipFully(chunkSize - 16)
                 }
                 "data" -> pcmBytes = stream.readExactly(chunkSize)
+                "smpl" -> {
+                    val bytes = stream.readExactly(chunkSize)
+                    if (bytes.size >= 60) {
+                        val values = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                        val loopCount = values.getInt(28).toLong() and 0xffff_ffffL
+                        if (loopCount > 0L) {
+                            smplLoopStart = values.getInt(44).toLong() and 0xffff_ffffL
+                            smplLoopEndInclusive = values.getInt(48).toLong() and 0xffff_ffffL
+                        }
+                    }
+                }
                 else -> stream.skipFully(chunkSize)
             }
             if ((chunkSize and 1) != 0) stream.skipFully(1)
@@ -61,7 +78,14 @@ internal object WavPcmDecoder {
             mono[frame] = sum / channels
         }
         require(mono.size >= 32) { "WAV is too short to loop" }
-        PcmLoopData(mono, sampleRate, channels)
+        val loopStart = smplLoopStart?.toInt()?.coerceIn(0, mono.lastIndex) ?: 0
+        val loopEndExclusive = smplLoopEndInclusive
+            ?.plus(1L)
+            ?.toInt()
+            ?.coerceIn(loopStart + 1, mono.size)
+            ?: mono.size
+        require(loopEndExclusive - loopStart >= 4) { "WAV loop is too short" }
+        PcmLoopData(mono, sampleRate, channels, loopStart, loopEndExclusive)
     }
 }
 
@@ -122,4 +146,3 @@ private fun InputStream.skipFully(count: Int) {
         }
     }
 }
-

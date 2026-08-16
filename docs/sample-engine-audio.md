@@ -1,58 +1,72 @@
-# Sample-based engine audio
+# Profile-based sample engine audio
 
 ## Status
 
-The app has two engine program sources:
+The app is sample-only. The initial profile reconstructs the cabin engine event from `fx_lamborghini_huracan_trofeo_evo2.bank`; there is no procedural renderer or fallback sound. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
-- `SAMPLE` is the default when the complete local cabin loop set is packaged.
-- `SYNTH` is always available and is also the automatic fallback when any required sample cannot be decoded.
+The implementation is designed for additional cars. An `EngineSampleProfile` owns the identity, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. Adding a car means adding a profile and its local assets, not modifying the realtime mixer.
 
-The source selector is in the dashboard header. The diagnostics screen reports requested and active source independently, so `SYNTH FALLBACK` cannot be mistaken for a working sample bank.
+## Local assets and licensing boundary
 
-## Asset handling and licensing boundary
+The original bank and decoded recordings live under the ignored directory:
 
-The source recordings and the extracted FMOD bank are not committed. `audio_samples/` is ignored by Git. A local build copies only the 23 engine-only cabin WAV files from:
+`audio_samples/fx_lamborghini_huracan_trofeo_evo2`
 
-`audio_samples/Toyota_Supra_MK4/converted`
+Twenty-four continuous cabin-engine streams are extracted to its `converted` directory. The build copies only those named files into `assets/sample_engine/lamborghini_huracan_trofeo_evo2/`. Throttle-lift one-shots, alternates, turbo, transmission, ignition, and environmental noises are excluded.
 
-into a generated build asset directory. Limiter, turbo, shift, transmission, fuel-pump, fan, tyre, wind, body, ignition, and shutdown recordings are excluded.
+Extraction uses the official `vgmstream-cli` decoder. Each asset filename begins with its FSB5 subsong index. Preserve the original single-play duration and append available loop metadata with:
 
-The public source tree contains the renderer and numeric playback manifest but no audio payload. The current mod package does not include a standalone-application redistribution license. Do not publish an APK containing these recordings without written permission from the rights holder.
+```powershell
+vgmstream-cli.exe -i -L -s 78 -o converted\s078_hur_idle_low.wav sfx\fx_lamborghini_huracan_trofeo_evo2.bank
+```
 
-## Runtime model
+Repeat for the indices named by `EngineSampleProfile.kt`/`mobile/build.gradle.kts`: `10, 31, 32, 37, 38, 39, 44, 49, 59, 61, 65, 73, 77, 78, 81, 89, 93, 113, 117, 126, 127, 134, 139, 149`. Do not extract with the default two-loop/fade playback duration, because that bakes duplicate audio and a fade into the runtime source.
 
-`SampleEngineRenderer` reconstructs the cabin engine event without linking FMOD:
+Neither the bank nor decoded audio is committed. The supplied mod does not grant a standalone-application redistribution license. Do not publish an APK containing these recordings without permission from the recording/mod rights holder.
 
-1. Twenty-three PCM16 WAV files are decoded before the `AudioTrack` starts. Stereo sources are downmixed to the common mono engine program because the car output path mirrors that program through the negotiated logical channels.
-2. Simulated engine RPM is mapped proportionally to the bank-authored 0–8,000 RPM parameter range.
-3. Each loop has its recovered trigger range, autopitch root, and base pitch offset.
-4. Adjacent RPM instruments overlap with normalized equal-power fades. Normalization prevents a level hole where asymmetric recovered regions overlap or end.
-5. The bank-authored load, coast, and extra-body throttle gain points are interpolated in decibels. Load and coast remain concurrent through the pedal transition.
-6. Each loop owns a persistent fractional cursor. Cubic cyclic interpolation performs both 44.1-to-48 kHz conversion and RPM varispeed without buffer-boundary resets.
-7. Layer, enable, and focus gains are smoothed. The final mix has fixed headroom and a soft limiter.
+## Recovered bank model
 
-Only active/fading voices are sampled. Audio rendering performs no file I/O or logging. Diagnostics snapshots are generated at a bounded cadence; the 200 Hz drive thread persists them once per second.
+The source is an FMOD bank version `0x50` containing 165 streams, 20 events, 198 instruments, 42 parameters, and 382 automation curves. The internal/cabin engine event uses:
+
+- RPM parameter `0..10000`;
+- throttle parameter `0..2` (the app drives its normal `0..1` pedal portion);
+- 29 RPM instruments, of which 24 continuous engine layers are used;
+- independent load, high-load, coast, texture, idle, and limiter routing;
+- per-instrument RPM trigger regions, base levels, pitch offsets, and optional autopitch roots;
+- per-instrument RPM amplitude and decibel automation;
+- route-level throttle-to-decibel automation;
+- embedded WAV `smpl` loop points.
+
+`EngineSampleProfile.kt` is the durable numeric reconstruction. Values were decoded from the bank event/controller graph rather than inferred from WAV filenames. The renderer linearly interpolates recovered control points. FMOD curve tangent/shape metadata is not yet emulated, so transition curvature can still differ slightly from the original middleware.
+
+The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), seven ratios (`3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84`), final drive (`3.96`), and source shift durations (`60 ms` up, `150 ms` down). The bank axis remains `0..10000 RPM`; it is not stretched to the limiter. The normal automatic shift target is `8200 RPM`, ahead of the hard limiter and inside the limiter-layer transition.
+
+## Realtime rendering
+
+1. All 24 PCM16 WAVs decode before `AudioTrack` starts. Stereo sources are downmixed to one engine program, later mirrored to the negotiated logical cabin channels.
+2. Simulation and bank use one RPM axis. There is no redline remapping.
+3. Each layer evaluates its own RPM amplitude curves, RPM decibel curves, throttle route, base gain, pitch root, and base pitch.
+4. Each layer owns a persistent fractional cursor. Cubic interpolation handles varispeed and 44.1-to-48 kHz conversion.
+5. The decoder honors embedded `smpl` start/end points. The pre-loop intro plays once, then only the authored loop segment wraps.
+6. Timelines advance while inaudible, matching an always-running FMOD event and avoiding restarts when a fade reopens.
+7. Layer, enable, focus, and master gains are smoothed. Fixed mix headroom and a final soft clipper protect the output.
+
+The audio thread performs no file I/O or persistent logging. It publishes bounded diagnostics consumed by the 200 Hz drive controller once per second.
 
 ## Persistent telemetry
 
-The ordinary `drive_heartbeat` now includes:
+`drive_heartbeat` includes:
 
-- active audio source;
-- mapped audio RPM;
-- decoded loop count;
-- load and coast gain in tenths of a decibel;
-- active loop IDs with pitch and gain percentages;
-- rendered frame and loop-wrap counters;
-- peak level and pre-limiter over-range counter;
-- startup and subsequent `AudioTrack` underruns separately.
+- profile status and decoded layer count;
+- simulation RPM, requested sample RPM, rendered (smoothed) RPM, and delta;
+- rendered throttle;
+- the strongest active layer IDs with playback-rate and gain percentages;
+- rendered frames, authored loop wraps, peak, and pre-limiter over-range count;
+- startup and steady-state `AudioTrack` underruns.
 
-One-time events include `sample_engine_loaded`, `sample_engine_fallback`, `engine_sound_mode_changed`, and `audio_track_active` with the active program source.
+One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, and `audio_track_active`, including profile ID and native RPM domain.
 
-The log remains at:
-
-`/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log`
-
-Read it from a debuggable installation with:
+The log is `/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log`. For a debug install:
 
 ```powershell
 adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log
@@ -60,31 +74,17 @@ adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-
 
 ## Code-driven on-device validation
 
-The diagnostics screen has `RUN AUDIO TEST`. The same deterministic validation can be started through ADB without touching the UI:
+The diagnostics screen has `RUN AUDIO TEST`. It can also start without UI input:
 
 ```powershell
 adb shell am force-stop com.gabrielpc.enginesoundsimulator
 adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity --ez run_sample_audio_validation true
 ```
 
-The sequence selects simulator input, Drive, the sample source, and engine audio, then applies 25%, 55%, 100%, and released-throttle stages. It records `sample_validation_started`, each stage, ordinary one-second heartbeats, and `sample_validation_finished` with final counters. A valid run must show:
+The sequence selects simulator input, Drive, and sound, then applies 25%, 55%, 100%, and released-throttle stages. A valid run shows `sample_status=ACTIVE`, `sample_loops=24`, increasing frames/wraps, changing target/render RPM and active layers, `steady_underruns=0`, and no renderer exception.
 
-- `audio_source=SAMPLE`;
-- `sample_loops=23`;
-- increasing `sample_frames` and `wraps`;
-- changing `audio_rpm` and active layers;
-- load gain increasing under throttle and coast gain taking over after release;
-- `steady_underruns=0` after the captured startup baseline;
-- no fallback or renderer exception.
+## Automated coverage
 
-## Automated tests
+`SampleEngineRendererTest` checks unique 24-file profile integrity, full-load and lift-off audibility through idle-to-limiter, recovered load/coast throttle direction, stereo downmix, `smpl` metadata after the data chunk, direct profile RPM mapping, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
 
-`SampleEngineRendererTest` verifies:
-
-- unique 23-file engine-only manifest;
-- continuous load and coast coverage through the authored RPM range;
-- no throttle dead zone;
-- PCM16 stereo decoding/downmix;
-- an end-to-end code-driven RPM/throttle sweep with audible output, active-layer telemetry, loop wraps, and bounded output.
-
-The final APK must also be inspected for all 23 generated `assets/sample_engine/*.wav` entries because JVM tests intentionally do not depend on copyrighted local files.
+The APK must also be inspected for all 24 generated profile assets because unit tests deliberately use generated signals rather than copyrighted local recordings.

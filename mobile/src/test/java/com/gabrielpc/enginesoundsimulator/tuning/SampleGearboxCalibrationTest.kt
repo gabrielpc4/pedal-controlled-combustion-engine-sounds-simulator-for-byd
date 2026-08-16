@@ -1,27 +1,29 @@
 package com.gabrielpc.enginesoundsimulator.tuning
 
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class SyntheticGearboxCalibrationTest {
+class SampleGearboxCalibrationTest {
     @Test
     fun topGearHitsRedlineAtConfiguredTopSpeed() {
-        val gears = SyntheticGearboxCalibration.computeGearRatios()
-        val rpm = SyntheticGearboxCalibration.roadCoupledRpm(
+        val profile = EngineSampleProfiles.default
+        val gears = SampleGearboxCalibration.computeGearRatios()
+        val rpm = SampleGearboxCalibration.roadCoupledRpm(
             speedKmh = 190.0,
             gearRatio = gears.last(),
-            idleRpm = 950.0,
-            finalDrive = 3.82,
+            idleRpm = profile.idleRpm,
+            finalDrive = profile.finalDrive,
             wheelRadiusMeters = 0.347,
         )
 
-        assertEquals(8_600.0, rpm, 1.0)
+        assertEquals(profile.redlineRpm, rpm, 1.0)
     }
 
     @Test
     fun gearRatiosDescendGeometrically() {
-        val gears = SyntheticGearboxCalibration.computeGearRatios()
+        val gears = SampleGearboxCalibration.computeGearRatios()
 
         assertEquals(7, gears.size)
         assertTrue(gears.zipWithNext().all { (left, right) -> left > right })

@@ -34,9 +34,9 @@ class TuningConfigTest {
 
         assertEquals(6_000.0, result.maxRpm, 0.0)
         assertTrue(result.idleRpm < result.upshiftRpm)
-        assertTrue(result.upshiftRpm < result.redlineRpm)
+        assertTrue(result.upshiftRpm <= result.redlineRpm)
         assertTrue(result.redlineRpm <= result.limiterRpm)
-        assertTrue(result.limiterRpm < result.maxRpm)
+        assertTrue(result.limiterRpm <= result.maxRpm)
         assertEquals(CurvePoint(0.0, 0.0), result.throttleCurve.first())
         assertEquals(CurvePoint(1.0, 1.0), result.throttleCurve.last())
         assertTrue(result.throttleCurve.zipWithNext().all { (left, right) -> left.x < right.x })
@@ -53,10 +53,8 @@ class TuningConfigTest {
 
     @Test
     fun audioLevelsAreBoundedBeforeReachingRealtimeRenderer() {
-        val clean = AudioTuning(masterGain = -1.0, exhaustLevel = 8.0, harmonic5 = 3.0).sanitized()
+        val clean = AudioTuning(masterGain = -1.0).sanitized()
 
         assertEquals(0.0, clean.masterGain, 0.0)
-        assertEquals(1.5, clean.exhaustLevel, 0.0)
-        assertEquals(1.5, clean.harmonic5, 0.0)
     }
 }

@@ -44,18 +44,37 @@ fun gitShortShaFromFiles(rootDir: File): String {
 val gitSha = gitShortShaFromFiles(rootProject.projectDir)
 val buildTimeUtc: String = Instant.now().toString()
 
-val sampleEngineSourceDir = rootProject.file("audio_samples/Toyota_Supra_MK4/converted")
-val sampleEngineAssetNames = listOf(
-    "010_1.wav", "060_3.wav", "036_6.wav", "097_31.wav", "089_11.wav", "049_21.wav",
-    "088_29.wav", "022_32.wav", "080_33.wav", "090_37.wav", "053_39.wav", "068_45.wav",
-    "077_41.wav", "055_6.1 INT.wav", "046_54.wav", "032_56.wav", "029_idle int 2.wav",
-    "030_decel 9.wav", "056_decel 2.wav", "023_decel 3.wav", "014_decel 6.wav",
-    "086_decel 8.wav", "092_4.2 int.wav",
+data class LocalEngineProfileAssets(
+    val assetDirectory: String,
+    val sourceDirectory: File,
+    val assetNames: List<String>,
+)
+
+val localEngineProfiles = listOf(
+    LocalEngineProfileAssets(
+        assetDirectory = "lamborghini_huracan_trofeo_evo2",
+        sourceDirectory = rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted"),
+        assetNames = listOf(
+            "s010_hur_n1_high.wav", "s031_hur_high_l1.wav", "s032_hur_l2a.wav",
+            "s037_hur_idle_noise.wav", "s038_hur_high_l3.wav", "s039_hur_c1.wav",
+            "s044_hur_l3.wav", "s049_eng_noise9_high.wav", "s059_hur_c2.wav",
+            "s061_hur_n_up.wav", "s065_hur_l5.wav", "s073_hur_lim.wav",
+            "s077_eng_noise7.wav", "s078_hur_idle_low.wav", "s081_hur_high_l2a.wav",
+            "s089_hur_n2.wav", "s093_hur_c4.wav", "s113_hur_l1.wav",
+            "s117_hur_l4h.wav", "s126_amrgt3_sine.wav", "s127_hur_l4.wav",
+            "s134_hur_c3.wav", "s139_hur_l6.wav", "s149_hur_l4l.wav",
+        ),
+    ),
 )
 val generatedSampleEngineAssets = file("build/generated/sampleEngineAssets")
 val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets") {
-    from(sampleEngineSourceDir) { include(sampleEngineAssetNames) }
-    into(generatedSampleEngineAssets.resolve("sample_engine"))
+    localEngineProfiles.forEach { profile ->
+        from(profile.sourceDirectory) {
+            include(profile.assetNames)
+            into("sample_engine/${profile.assetDirectory}")
+        }
+    }
+    into(generatedSampleEngineAssets)
 }
 
 if (isAssembling) {

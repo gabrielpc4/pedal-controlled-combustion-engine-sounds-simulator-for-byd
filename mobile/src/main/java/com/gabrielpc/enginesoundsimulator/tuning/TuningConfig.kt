@@ -1,17 +1,18 @@
 package com.gabrielpc.enginesoundsimulator.tuning
 
 import android.content.Context
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import kotlin.math.max
 import kotlin.math.min
 
 data class CurvePoint(val x: Double, val y: Double)
 
 data class EngineTuning(
-    val idleRpm: Double = 950.0,
-    val maxRpm: Double = 10_000.0,
-    val redlineRpm: Double = 8_600.0,
-    val limiterRpm: Double = 8_850.0,
-    val upshiftRpm: Double = 8_250.0,
+    val idleRpm: Double = EngineSampleProfiles.default.idleRpm,
+    val maxRpm: Double = EngineSampleProfiles.default.maximumRpm,
+    val redlineRpm: Double = EngineSampleProfiles.default.redlineRpm,
+    val limiterRpm: Double = EngineSampleProfiles.default.limiterRpm,
+    val upshiftRpm: Double = EngineSampleProfiles.default.upshiftRpm,
     val maxTorqueNm: Double = 670.0,
     val peakPowerKw: Double = 390.0,
     val motorMaxRpm: Double = 16_000.0,
@@ -26,14 +27,14 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
-    val syntheticRpmResponseMs: Double = 35.0,
+    val sampleRpmResponseMs: Double = 35.0,
     val simulatorCoastRegenMps2: Double = 0.50,
-    val finalDrive: Double = 3.82,
+    val finalDrive: Double = EngineSampleProfiles.default.finalDrive,
     val throttleAttackMs: Double = 120.0,
     val throttleReleaseMs: Double = 90.0,
     val brakeResponseMs: Double = 55.0,
-    val upshiftDurationMs: Double = 270.0,
-    val downshiftDurationMs: Double = 340.0,
+    val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
+    val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
     val shiftDwellMs: Double = 450.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
@@ -44,11 +45,11 @@ data class EngineTuning(
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
 ) {
     fun sanitized(): EngineTuning {
-        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, 12_000.0)
-        val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 300.0)
-        val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm - 100.0)
+        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.default.maximumRpm)
+        val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 100.0)
+        val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm)
         val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
-        val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 1_000.0, cleanRedline - 100.0)
+        val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 1_000.0, cleanRedline)
         return copy(
             idleRpm = cleanIdle,
             maxRpm = cleanMaxRpm,
@@ -69,14 +70,14 @@ data class EngineTuning(
             dragAreaM2 = dragAreaM2.coerceIn(0.30, 1.20),
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
-            syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(10.0, 250.0),
+            sampleRpmResponseMs = sampleRpmResponseMs.coerceIn(10.0, 250.0),
             simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 1.50),
             finalDrive = finalDrive.coerceIn(2.0, 6.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
             brakeResponseMs = brakeResponseMs.coerceIn(15.0, 500.0),
-            upshiftDurationMs = upshiftDurationMs.coerceIn(100.0, 900.0),
-            downshiftDurationMs = downshiftDurationMs.coerceIn(120.0, 1_000.0),
+            upshiftDurationMs = upshiftDurationMs.coerceIn(40.0, 900.0),
+            downshiftDurationMs = downshiftDurationMs.coerceIn(60.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
             gearRatios = sanitizeGears(gearRatios),
             frontWheelTorqueCurve = sanitizeCurve(
@@ -94,7 +95,7 @@ data class EngineTuning(
     }
 
     companion object {
-        val DEFAULT_GEARS = SyntheticGearboxCalibration.computeGearRatios()
+        val DEFAULT_GEARS = EngineSampleProfiles.default.gearRatios
         val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),
             CurvePoint(0.156, 0.989),
@@ -136,27 +137,9 @@ data class EngineTuning(
 
 data class AudioTuning(
     val masterGain: Double = 0.72,
-    val exhaustLevel: Double = 1.00,
-    val intakeLevel: Double = 1.00,
-    val mechanicalLevel: Double = 1.00,
-    val overrunLevel: Double = 1.00,
-    val shiftLevel: Double = 1.00,
-    val harmonic2: Double = 1.00,
-    val harmonic3: Double = 1.00,
-    val harmonic4: Double = 1.00,
-    val harmonic5: Double = 1.00,
 ) {
     fun sanitized(): AudioTuning = copy(
         masterGain = masterGain.coerceIn(0.0, 1.20),
-        exhaustLevel = exhaustLevel.coerceIn(0.0, 1.50),
-        intakeLevel = intakeLevel.coerceIn(0.0, 1.50),
-        mechanicalLevel = mechanicalLevel.coerceIn(0.0, 1.50),
-        overrunLevel = overrunLevel.coerceIn(0.0, 1.50),
-        shiftLevel = shiftLevel.coerceIn(0.0, 1.50),
-        harmonic2 = harmonic2.coerceIn(0.0, 1.50),
-        harmonic3 = harmonic3.coerceIn(0.0, 1.50),
-        harmonic4 = harmonic4.coerceIn(0.0, 1.50),
-        harmonic5 = harmonic5.coerceIn(0.0, 1.50),
     )
 }
 
@@ -197,7 +180,7 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
-            syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
+            sampleRpmResponseMs = number(KEY_SAMPLE_RPM_RESPONSE, defaults.engine.sampleRpmResponseMs),
             simulatorCoastRegenMps2 = number(
                 KEY_SIMULATOR_COAST_REGEN,
                 defaults.engine.simulatorCoastRegenMps2,
@@ -223,15 +206,6 @@ class TuningRepository(context: Context) {
         val engine = if (currentCalibration) storedEngine else defaults.engine
         val audio = defaults.audio.copy(
             masterGain = number(KEY_MASTER_GAIN, defaults.audio.masterGain),
-            exhaustLevel = number(KEY_EXHAUST, defaults.audio.exhaustLevel),
-            intakeLevel = number(KEY_INTAKE, defaults.audio.intakeLevel),
-            mechanicalLevel = number(KEY_MECHANICAL, defaults.audio.mechanicalLevel),
-            overrunLevel = number(KEY_OVERRUN, defaults.audio.overrunLevel),
-            shiftLevel = number(KEY_SHIFT_LEVEL, defaults.audio.shiftLevel),
-            harmonic2 = number(KEY_H2, defaults.audio.harmonic2),
-            harmonic3 = number(KEY_H3, defaults.audio.harmonic3),
-            harmonic4 = number(KEY_H4, defaults.audio.harmonic4),
-            harmonic5 = number(KEY_H5, defaults.audio.harmonic5),
         )
         if (!currentCalibration) {
             preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).apply()
@@ -262,7 +236,7 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
-            .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
+            .putString(KEY_SAMPLE_RPM_RESPONSE, clean.engine.sampleRpmResponseMs.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
             .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
@@ -276,15 +250,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
             .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
             .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
-            .putString(KEY_EXHAUST, clean.audio.exhaustLevel.toString())
-            .putString(KEY_INTAKE, clean.audio.intakeLevel.toString())
-            .putString(KEY_MECHANICAL, clean.audio.mechanicalLevel.toString())
-            .putString(KEY_OVERRUN, clean.audio.overrunLevel.toString())
-            .putString(KEY_SHIFT_LEVEL, clean.audio.shiftLevel.toString())
-            .putString(KEY_H2, clean.audio.harmonic2.toString())
-            .putString(KEY_H3, clean.audio.harmonic3.toString())
-            .putString(KEY_H4, clean.audio.harmonic4.toString())
-            .putString(KEY_H5, clean.audio.harmonic5.toString())
             .apply()
     }
 
@@ -299,7 +264,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 6
+        const val CALIBRATION_REVISION = 7
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
@@ -319,7 +284,7 @@ class TuningRepository(context: Context) {
         const val KEY_DRAG_AREA = "drag_area"
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
-        const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
+        const val KEY_SAMPLE_RPM_RESPONSE = "sample_rpm_response"
         const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"
         const val KEY_FINAL_DRIVE = "final_drive"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"
@@ -333,15 +298,6 @@ class TuningRepository(context: Context) {
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
         const val KEY_THROTTLE_CURVE = "throttle_curve"
         const val KEY_MASTER_GAIN = "master_gain"
-        const val KEY_EXHAUST = "exhaust_level"
-        const val KEY_INTAKE = "intake_level"
-        const val KEY_MECHANICAL = "mechanical_level"
-        const val KEY_OVERRUN = "overrun_level"
-        const val KEY_SHIFT_LEVEL = "shift_level"
-        const val KEY_H2 = "harmonic_2"
-        const val KEY_H3 = "harmonic_3"
-        const val KEY_H4 = "harmonic_4"
-        const val KEY_H5 = "harmonic_5"
     }
 }
 

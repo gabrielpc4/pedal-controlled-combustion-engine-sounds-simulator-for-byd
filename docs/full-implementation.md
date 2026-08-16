@@ -10,9 +10,9 @@ The `mobile` module is now a complete, landscape dashboard application:
 
 - reads accelerator, brake, and road speed from the existing read-only BYD DiLink probe when the corresponding signals are valid;
 - falls back automatically to touch/keyboard simulator pedals when the vendor API is unavailable;
-- advances a Seal Performance-calibrated electric road model and an independent synthetic engine layer at a fixed 200 Hz;
+- advances a Seal Performance-calibrated electric road model and an independent sample-engine layer at a fixed 200 Hz;
 - performs presentation-only automatic upshifts, braking downshifts, safe kickdowns, and ratio swaps without interrupting electric wheel torque;
-- synthesizes a responsive fictional V10 continuously from RPM, load, throttle, shift, overrun, and limiter state;
+- renders the selected sample profile continuously from RPM and throttle using recovered per-layer bank automation;
 - experimentally requests stereo, quad, 5.1, or 7.1 logical PCM output and mirrors the same engine program to every initialized logical channel;
 - exposes live audio route, channel, buffer, sample-rate, session, and underrun diagnostics;
 - renders the requested car-and-tachometer composition against the 1920 x 990 safe-area target measured on the emulator; the actual car dimensions and insets remain unmeasured.
@@ -25,7 +25,9 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | --- | --- |
 | `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, and independent sound-RPM shift controller |
 | `simulation/TransmissionPosition.kt` | `P` / `N` / `D` enum consumed by `DriverInput` |
-| `audio/EngineSynthesizer.kt` | Allocation-free procedural V10 source |
+| `audio/EngineSampleProfile.kt` | Car-profile metadata, gearbox calibration, layers, and recovered control curves |
+| `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and telemetry |
+| `audio/WavPcmDecoder.kt` | PCM16 downmix and embedded loop-point decoding |
 | `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
@@ -34,7 +36,7 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `diagnostics/PersistentDiagnosticLog.kt` | Bounded, synced app-private transition/crash event trail |
 | `EngineSoundsSimulatorApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
 | `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
-| `audio/EngineSynthesizerTest.kt` | PCM signal/RMS behavior and exact channel mirroring tests |
+| `audio/SampleEngineRendererTest.kt` | Profile integrity, decoder, curve, sweep, and runtime-telemetry tests |
 
 ## Runtime architecture
 
@@ -47,7 +49,7 @@ BYD getters (when available)       Simulator touch / W-S keys
                     /           \
              UI snapshot      EngineAudioFrame
                  30 Hz              |
-             Compose UI       EngineSynthesizer
+             Compose UI     SampleEngineRenderer
                                      |
                               mono PCM16 program
                                      |
@@ -63,7 +65,7 @@ Threads have intentionally separate duties:
 - `EngineAudioEngine` owns a high-priority audio writer;
 - the main thread samples immutable state approximately every 33 ms for Compose, while simulation and audio control remain at 200 Hz.
 
-The hot synthesis/write path reuses its PCM arrays and performs no intentional allocation per write. The same thread currently refreshes route/underrun diagnostics every 48 writes, which can allocate framework strings and an immutable diagnostics snapshot; move that sampling off the writer if profiling shows a real-time penalty.
+The hot mix/write path reuses its PCM arrays and performs no file I/O or persistent logging. It refreshes a bounded diagnostic snapshot and route/underrun state periodically; move framework route queries off the writer if profiling shows a real-time penalty.
 
 ## Input policy
 
@@ -118,30 +120,15 @@ Braking therefore slows the real or virtual vehicle first. Pedal lift unloads th
 
 Upshifts begin above the configured sound shift point with meaningful throttle and a higher presentation gear available while in **D**. A projected synthetic over-rev near 97% of redline forces a safe sequential upshift in **D**, including the first externally supplied live-speed sample or an unsafe live-speed change. Every higher gear derives its downshift point from the exact RPM landing of the preceding upshift. Synthetic-RPM and road-speed projections reject an over-rev before any downshift.
 
-The ratio changes at 38% of the configured shift animation. An upshift lasts 270 ms and a downshift 340 ms by default; a 450 ms completed-shift dwell prevents ordinary hunting. An explicit zero-pedal return to the gear's landing threshold can downshift immediately. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. In **D**, synthetic RPM stays road-coupled on lift-off; retention/decay was removed after it caused gear hunting. **N** and **P** free-rev without automatic shifts.
+The ratio changes at 38% of the configured shift animation. The initial sample profile defaults to its source calibration of 60 ms up and 150 ms down; a 450 ms completed-shift dwell prevents ordinary hunting. An explicit zero-pedal return to the gear's landing threshold can downshift immediately. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. In **D**, synthetic RPM stays road-coupled on lift-off; retention/decay was removed after it caused gear hunting. **N** and **P** free-rev without automatic shifts.
 
-## Procedural sound model
+## Profile-based sample model
 
-The repository contains no downloaded or paid engine recordings. The default source is project-written procedural synthesis, which keeps the public project reproducible and avoids redistributing raw commercial samples.
+The public repository contains playback code and profile metadata but no recordings. Local ignored assets are required for a working audio build; redistribution requires permission from their rights holder.
 
-For a four-stroke engine, the firing fundamental is:
+The initial profile reconstructs one FMOD cabin engine event with 24 continuous layers. Each layer has an RPM region, base level/pitch, optional autopitch root, recovered RPM amplitude/decibel envelopes, and a recovered throttle-route curve. WAV `smpl` metadata preserves the authored loop subsection. Persistent fractional cursors and cubic interpolation perform varispeed/resampling without restarting at buffer boundaries. Inaudible timelines continue advancing, layer/control gains are smoothed, and the final mono program uses fixed headroom plus soft clipping before channel duplication.
 
-```text
-firingHz = rpm / 60 * cylinders / 2
-```
-
-The renderer combines:
-
-- the firing fundamental and four RPM/load-dependent harmonics;
-- nonlinear exhaust-pulse saturation and a simple exhaust body state;
-- RPM-dependent crank/mechanical and gear-whine components;
-- filtered intake noise whose intensity follows throttle and RPM;
-- a short low-frequency shift thump;
-- stochastic overrun crackles after a sufficiently large high-RPM lift;
-- a limiter gate and a shift-level dip;
-- final soft clipping.
-
-RPM, load, and throttle are smoothed at audio rate to prevent zipper noise. A deterministic xorshift source supplies noise without allocations. One synthesizer instance renders one mono program, then the audio engine duplicates each sample into the negotiated logical channel count.
+The native bank axis is retained directly; profile redline or limiter values do not stretch its sample regions. Full implementation and validation details are in [Profile-based sample engine audio](sample-engine-audio.md).
 
 ## Audio routing and multichannel truth
 
@@ -175,7 +162,7 @@ The header/footer show the requested mode, active logical channel count/layout, 
 
 The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
 
-The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, synthetic RPM response, SIM coast regen, all seven presentation ratios, shift timing, audio layers, and firing harmonics. Graphs visualize ≈ motor torque/power (UI-scaled), torque distribution, response timing, shift landing/downshift points, and spectrum. Display-unit policy is in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Control inventory: [Live tuning interface](tuning-interface.md).
+The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, sample RPM response, SIM coast regen, all seven presentation ratios, shift timing, master audio level, and the selected profile's layer-coverage graph. Display-unit policy is in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Control inventory: [Live tuning interface](tuning-interface.md).
 
 The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
 
@@ -214,7 +201,7 @@ Tests verify that:
 - the sound limiter uses hysteresis instead of buffer-rate chatter;
 - braking decelerates more strongly than coasting;
 - the stopped engine returns to the configured 950 RPM idle;
-- the synthesizer produces nonzero, varying PCM with greater RMS under load, keeps limiter phase continuous across arbitrary buffer sizes, and ramps state gains; the tests do not establish perceived sound quality or audibility on the car;
+- the sample renderer decodes PCM/loop metadata, evaluates recovered control curves, produces nonzero PCM throughout the operating range, advances loop cursors, reports runtime telemetry, and fails closed on an incomplete bank; tests do not establish perceived quality or cabin audibility;
 - channel duplication writes exactly the same sample to every logical channel;
 - explicit BYD LIVE mode fails safe to zero pedals when telemetry is unavailable, while AUTO alone may use simulator fallback;
 - rapid controller lifecycle transitions cannot revive an obsolete simulation loop.
@@ -253,7 +240,7 @@ adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 - The real-car getters are still polled every 20 ms. Reflection can call the getters, but `AbsBYDAutoSpeedListener` is an abstract vendor class and cannot be instantiated by `java.lang.reflect.Proxy`. Add a trustworthy compile-only BYD SDK/stub or a carefully reviewed runtime subclass mechanism before callback testing.
 - Firmware `13.1.33.2503250.1` confirms the class/getters exist and an ordinary context is denied `BYDAUTO_SPEED_GET`. The restricted speed-read context still needs on-car validation for plausible values and any second server-side check.
 - Live-pedal mode currently falls back to integrating virtual speed if BYD speed is invalid. Require a valid speed signal or fail closed before any moving-car test.
-- The included synthesis is responsive and dependency-free, not a recorded AAA sample bank. See [drivetrain and audio research](drivetrain-audio-research.md) before licensing recordings.
+- The local sample recordings are not licensed for APK redistribution by this repository. Obtain explicit rights before publishing a build containing them.
 - `AUTO` can inspect Android capability metadata, but only actual-car dumpsys and listening can establish physical speaker routing.
 - Full-band LFE mirroring is experimental. Audio-focus handling is implemented, but its interaction with vehicle warnings and other media remains unverified on the BYD audio policy.
 - The 1920 x 990 area is an emulator measurement. Actual-car insets remain unknown; the dashboard now preserves its ratio and letterboxes when the safe area differs.

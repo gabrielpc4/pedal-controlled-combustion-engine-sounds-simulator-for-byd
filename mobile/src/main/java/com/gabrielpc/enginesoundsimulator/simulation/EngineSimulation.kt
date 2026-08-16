@@ -1,8 +1,8 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
-import com.gabrielpc.enginesoundsimulator.tuning.SyntheticGearboxCalibration
 import com.gabrielpc.enginesoundsimulator.tuning.interpolateCurve
 import kotlin.math.PI
 import kotlin.math.max
@@ -11,7 +11,6 @@ import kotlin.math.pow
 
 data class EngineProfile(
     val name: String,
-    val cylinders: Int,
     val idleRpm: Double,
     val redlineRpm: Double,
     val limiterRpm: Double,
@@ -30,10 +29,10 @@ data class EngineProfile(
     val dragAreaM2: Double,
     val rollingResistanceCoefficient: Double,
     val topSpeedKmh: Double,
-    val syntheticRpmResponseSeconds: Double,
+    val sampleRpmResponseSeconds: Double,
     /** Constant deceleration applied on lift-off while integrating virtual speed in SIM mode. */
     val simulatorCoastRegenMps2: Double,
-    /** These ratios shape only the synthetic sound and tachometer. */
+    /** These ratios shape only the sample playback RPM and tachometer. */
     val finalDrive: Double,
     val gearRatios: DoubleArray,
     /** X is normalized road speed; Y is normalized front-axle wheel torque. */
@@ -50,13 +49,13 @@ data class EngineProfile(
     val shiftDwellSeconds: Double = 0.450,
 ) {
     companion object {
-        val APEX_V10 = EngineProfile(
-            name = "Apex V10",
-            cylinders = 10,
-            idleRpm = 950.0,
-            redlineRpm = 8_600.0,
-            limiterRpm = 8_850.0,
-            upshiftRpm = 8_250.0,
+        private val bank = EngineSampleProfiles.default
+        val SAMPLE_BANK_ENGINE = EngineProfile(
+            name = bank.displayName,
+            idleRpm = bank.idleRpm,
+            redlineRpm = bank.redlineRpm,
+            limiterRpm = bank.limiterRpm,
+            upshiftRpm = bank.upshiftRpm,
             maxTorqueNm = 670.0,
             peakPowerKw = 390.0,
             motorMaxRpm = 16_000.0,
@@ -71,10 +70,12 @@ data class EngineProfile(
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 190.0,
-            syntheticRpmResponseSeconds = 0.035,
+            sampleRpmResponseSeconds = 0.035,
             simulatorCoastRegenMps2 = 0.50,
-            finalDrive = 3.82,
-            gearRatios = SyntheticGearboxCalibration.computeGearRatios().toDoubleArray(),
+            finalDrive = bank.finalDrive,
+            gearRatios = bank.gearRatios.toDoubleArray(),
+            upshiftDurationSeconds = bank.upshiftDurationSeconds,
+            downshiftDurationSeconds = bank.downshiftDurationSeconds,
         )
     }
 }
@@ -107,14 +108,14 @@ data class DrivetrainState(
 )
 
 /**
- * Fixed-step Seal Performance longitudinal model with a synthetic multi-gear sound layer.
+ * Fixed-step Seal Performance longitudinal model with simulated gears driving sample-bank RPM.
  *
  * Road acceleration comes from the electric motors' torque/power envelope, fixed reduction,
  * vehicle mass, rolling resistance and aerodynamic drag. The displayed RPM and gears never feed
  * back into wheel torque, so a sound shift cannot add combustion-engine lag or interrupt drive.
  */
 class EngineSimulation(
-    initialProfile: EngineProfile = EngineProfile.APEX_V10,
+    initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK_ENGINE,
 ) {
     var profile: EngineProfile = initialProfile
         private set
@@ -197,7 +198,7 @@ class EngineSimulation(
         if (shift == null) secondsSinceShift += dt
 
         val pedalReleased = requestedThrottle <= PEDAL_RELEASE_THRESHOLD
-        updateSyntheticRpm(dt, input.transmissionPosition)
+        updateSampleRpm(dt, input.transmissionPosition)
         updateLimiterLatch()
 
         if (shift == null && input.transmissionPosition == TransmissionPosition.DRIVE) {
@@ -291,7 +292,7 @@ class EngineSimulation(
         externalSpeedActive = true
     }
 
-    /** A live vehicle can connect while already travelling, so start in a safe synthetic gear. */
+    /** A live vehicle can connect while already travelling, so start in a safe sound gear. */
     private fun synchronizeToExternalSpeed(transmissionPosition: TransmissionPosition) {
         val wheelRpm = wheelRpmForSpeed(vehicleSpeedMps)
         val maximumSynchronizationRpm = profile.redlineRpm * 0.92
@@ -317,7 +318,7 @@ class EngineSimulation(
         secondsSinceShift = 0.0
     }
 
-    private fun updateSyntheticRpm(dt: Double, transmissionPosition: TransmissionPosition) {
+    private fun updateSampleRpm(dt: Double, transmissionPosition: TransmissionPosition) {
         val activeShift = shift
         val shiftRevTransition = activeShift?.gearChanged == true
         val targetRpm = if (shiftRevTransition) {
@@ -328,7 +329,7 @@ class EngineSimulation(
             freeRevRpmTarget()
         }
         val responseSeconds = if (transmissionPosition == TransmissionPosition.DRIVE) {
-            profile.syntheticRpmResponseSeconds
+            profile.sampleRpmResponseSeconds
         } else if (targetRpm >= engineRpm) {
             NEUTRAL_REV_UP_RESPONSE_SECONDS
         } else {
@@ -360,7 +361,9 @@ class EngineSimulation(
         }
         if (currentGearIndex >= profile.gearRatios.lastIndex) return false
 
-        val emergencyThreshold = profile.redlineRpm * EMERGENCY_UPSHIFT_REDLINE_FRACTION
+        // Emergency recovery protects the bank's hard ceiling. It must sit above the normal
+        // upshift point; keying it to the lower redline marker can pre-empt an ordinary shift.
+        val emergencyThreshold = profile.limiterRpm * EMERGENCY_UPSHIFT_LIMITER_FRACTION
         if (engineRpm >= emergencyThreshold) return true
 
         val projectedRpm = profile.idleRpm + wheelRpmForSpeed(vehicleSpeedMps) *
@@ -491,7 +494,7 @@ class EngineSimulation(
         private const val AIR_DENSITY_KG_M3 = 1.225
         private const val GRAVITY_MPS2 = 9.81
         private const val MAX_SERVICE_BRAKE_MPS2 = 11.2
-        private const val EMERGENCY_UPSHIFT_REDLINE_FRACTION = 0.97
+        private const val EMERGENCY_UPSHIFT_LIMITER_FRACTION = 0.99
         private const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0
         private const val MAX_REPORTED_ACCELERATION = 15.0
