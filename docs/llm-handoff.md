@@ -78,17 +78,18 @@ against SDK 37. It requests only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`.
 
 ## Current gear behavior and regression history
 
-Lift-off from third gear previously hunted `3 -> 2 -> 3` when a **lift-off RPM retention** model made displayed RPM lag below road-coupled RPM. That retention layer was **removed** (2026-08). In **D**, synthetic RPM is road-coupled through the presentation gear ratio, filtered by `syntheticRpmResponseSeconds` (default 35 ms).
+Lift-off from third gear previously hunted `3 -> 2 -> 3` when a **lift-off RPM retention** model made displayed RPM lag below road-coupled RPM. That retention layer was **removed** (2026-08). In **D**, synthetic RPM is now a **throttle-driven integrator** scaled by the wheel-power curve, with lift-off fall at the configured coast rate. Tunable in **TUNE → Vehicle → DRIVE RPM**.
 
-A **P / N / D** column shifter beside the pedals (2026-08) replaced an earlier header **RPM MODE** toggle. Only **D** uses road-coupled RPM and automatic shifts. **N** free-revs with throttle (no wheel drive, no auto shifts). **P** matches **N** for RPM but holds SIM speed at zero. Neutral rev-up/down use fixed inertia constants (`0.55 s` / `0.90 s`) — not the 35 ms drive filter. Full detail: [UI display §3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
+A **P / N / D** column shifter beside the pedals (2026-08) replaced an earlier header **RPM MODE** toggle. Only **D** uses throttle-driven RPM and automatic shifts. **N** free-revs with throttle (no wheel drive, no auto shifts). **P** matches **N** for RPM but holds SIM speed at zero. Neutral rev-up/down use fixed inertia constants (`0.55 s` / `0.90 s`). Full detail: [UI display §3.2–3.3](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
 
 Current **D** behavior:
 
-- virtual and live-speed lift-off use the same road-coupled RPM target;
+- WOT rise force follows the power curve at road speed; lift-off falls at `driveCoastFallRpmPerSec` toward idle;
+- braking adds extra tach fall via `driveBrakeExtraFallRpmPerSec`;
 - coasting downshifts settle without upshift hunting when road speed is held constant;
-- regressions in `EngineSimulationTest.kt` cover road-coupled lift-off for virtual and live-speed paths, plus neutral/park shifter cases.
+- regressions in `EngineSimulationTest.kt` cover D-mode throttle/coast/brake paths plus neutral/park shifter cases.
 
-Do not reintroduce lift-off retention without a design that avoids the old display/road mismatch. Full context: [UI display §3.3](ui-display-and-simulation-decisions.md#33-lift-off-rpm-retention-removed-2026-08).
+Do not reintroduce lift-off retention without a design that avoids the old display/road mismatch. Full context: [UI display §3.3](ui-display-and-simulation-decisions.md#33-d-mode-throttle-driven-rpm-2026-08).
 
 `DriveControllerScriptedIntegrationTest` is the preferred no-UI regression test: it drives the
 real controller directly to third gear, releases throttle, verifies it settles in second, then

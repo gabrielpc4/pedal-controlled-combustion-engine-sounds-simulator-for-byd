@@ -8,13 +8,13 @@ The interface presents torque in **≈ motor-shaft kgfm** and power in values la
 
 ### Vehicle
 
-- Synthetic tachometer maximum, idle, redline, sound limiter, automatic upshift, and **RPM RESPONSE** (drive-mode tach tracking only; does not affect **N**/**P** neutral inertia)
-- Official peak motor torque/power plus A2MAC1 front/rear peak wheel torque
-- Motor maximum speed, fixed electric reduction, drivetrain efficiency, and traction ceiling
-- Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
+- Synthetic tachometer maximum, idle, redline, sound limiter, and automatic upshift
+- **DRIVE RPM** sliders: max rise rate, lift-off fall, brake extra fall, launch full-power speed threshold
 - Live combined wheel-torque/power graph with a road-speed cursor, landmark-based axis ticks, per-point value/X labels, and separately labelled ≈ motor kgfm / ≈ motor HP Y axes
 
-The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and presentation-shift logic all use the same live synthetic configuration. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is computed from the electric settings and is independent of the synthetic gears.
+Seal Performance calibration (mass, drag, axle peaks, motor rating, top speed, etc.) remains stored in `TuningRepository` and powers the graph plus EV physics, but is **not** exposed as editable sliders.
+
+The tachometer scale, red zone, perfect-shift band, dashboard label, limiter, and presentation-shift logic all use the same live synthetic configuration. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is computed from the hidden electric settings and is independent of the synthetic gears.
 
 ### AWD curves
 
@@ -42,7 +42,7 @@ Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is
 
 Adjacent gear bounds prevent an invalid inverted ratio stack. The graph updates as either the gear ratios or upshift RPM change. These controls affect sound RPM and shift events only; a ratio edit cannot change electric acceleration.
 
-Synthetic RPM on lift-off in **D** is **road-coupled** (no retention/decay sliders). **N**/**P** use the free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08). Downshifts use per-gear landing RPM only; the old global downshift-floor slider was removed.
+Synthetic RPM in **D** is a throttle-driven force integrator scaled by the wheel-power curve, with lift-off fall at the configured coast rate (see [§3.3](ui-display-and-simulation-decisions.md#33-d-mode-throttle-driven-rpm-2026-08)). **N**/**P** use the free-rev model in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
 
 ## Dashboard controls (outside TUNE)
 
@@ -50,7 +50,7 @@ These affect runtime behavior immediately but are **not** persisted in `TuningRe
 
 | Control | Location | Effect |
 | --- | --- | --- |
-| **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; only **D** enables auto-shifts and road-coupled RPM |
+| **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; only **D** enables auto-shifts and throttle-driven RPM |
 | **INPUT** | Header | Cycles AUTO / SIM / BYD LIVE |
 | **ENGINE AUDIO** | Header | Mutes/unmutes synthesis |
 | **CH OUTPUT** | Header | Cycles logical channel layout |

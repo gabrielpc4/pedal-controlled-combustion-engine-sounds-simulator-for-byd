@@ -63,6 +63,7 @@ class DriveController(context: Context) {
     private val soundEnabled = AtomicBoolean(true)
     private var lastLoggedShiftSerial = simulation.state.shiftSerial
     private var lastShiftWasActive = false
+    private var lastThrottleActive = false
     private var lastInputSignature = ""
     private var nextHeartbeatAtElapsedMs = 0L
 
@@ -350,6 +351,21 @@ class DriveController(context: Context) {
         }
         lastShiftWasActive = drivetrain.isShifting
 
+        val throttleActive = input.throttle > 0.001
+        if (
+            lastThrottleActive &&
+            !throttleActive &&
+            transmissionPosition.get() == TransmissionPosition.DRIVE
+        ) {
+            PersistentDiagnosticLog.event(
+                "lift_off_coast",
+                "rpm=${drivetrain.rpm.roundToInt()} speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
+                    "gear=${drivetrain.gear} coast_fall_rpm_s=${profile.driveCoastFallRpmPerSec.roundToInt()} " +
+                    "source=${input.label}",
+            )
+        }
+        lastThrottleActive = throttleActive
+
         val nowElapsedMs = SystemClock.elapsedRealtime()
         if (nowElapsedMs >= nextHeartbeatAtElapsedMs) {
             nextHeartbeatAtElapsedMs = nowElapsedMs + DIAGNOSTIC_HEARTBEAT_INTERVAL_MS
@@ -399,6 +415,10 @@ private fun TuningConfig.toEngineProfile(): EngineProfile {
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
+        driveMaxRiseRpmPerSec = engine.driveMaxRiseRpmPerSec,
+        driveCoastFallRpmPerSec = engine.driveCoastFallRpmPerSec,
+        driveBrakeExtraFallRpmPerSec = engine.driveBrakeExtraFallRpmPerSec,
+        driveLaunchFullPowerSpeedKmh = engine.driveLaunchFullPowerSpeedKmh,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
         finalDrive = engine.finalDrive,
         gearRatios = engine.gearRatios.toDoubleArray(),

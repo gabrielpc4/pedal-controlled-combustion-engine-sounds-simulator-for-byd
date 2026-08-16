@@ -167,7 +167,7 @@ A column shifter beside the pedals selects **P**, **N**, or **D**. It is runtime
 
 | Position | Behavior |
 |----------|----------|
-| **D** | RPM follows road speed through the presentation gear; automatic upshifts/downshifts; throttle drives the virtual vehicle in SIM mode. Tach filter: editable **RPM RESPONSE** (`syntheticRpmResponseSeconds`, default **35 ms**). |
+| **D** | Throttle-driven synthetic RPM scaled by the wheel-power curve at road speed; rapid lift-off fall toward idle; automatic upshifts/downshifts; throttle drives the virtual vehicle in SIM mode. Tuned in **DRIVE RPM** (Vehicle tab). |
 | **N** | Neutral: RPM free-revs with throttle and falls on lift-off; **no** automatic gear changes; throttle does **not** drive the wheels (coast/brake still affect SIM speed). |
 | **P** | Park: same free-rev RPM model as **N**, but SIM speed is held at zero. |
 
@@ -192,25 +192,38 @@ targetRPM = idleRpm + filteredThrottle × (redlineRpm − idleRpm)
 | Revving up | `NEUTRAL_REV_UP_RESPONSE_SECONDS` | **0.55 s** | Crank/flywheel inertia with no wheel load |
 | Revving down | `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` | **0.90 s** | Slower coast-down toward idle after lift-off |
 
-Implementation uses the same `approachExp()` helper as drive mode; only the time constant changes. **D** lift-off remains road-coupled through the presentation ratio — see §3.3.
+Implementation uses the same `approachExp()` helper as drive mode; only the time constant changes. **D** uses a separate force integrator — see §3.3.
 
-**Tests:** `neutralPositionRaisesRpmWithThrottleAtStandstill`, `neutralPositionLiftOffDropsRpmTowardIdleAtStandstill`, `neutralPositionDoesNotAutoShiftWhileRevving`, `parkPositionKeepsSimulatorSpeedAtZero`, plus existing lift-off hunting guards in **D**.
+**Tests:** `neutralPositionRaisesRpmWithThrottleAtStandstill`, `neutralPositionLiftOffDropsRpmTowardIdleAtStandstill`, `neutralPositionDoesNotAutoShiftWhileRevving`, `parkPositionKeepsSimulatorSpeedAtZero`, plus D-mode lift-off tests in §3.3.
 
-### 3.3 Lift-off RPM retention removed (2026-08)
+### 3.3 D-mode throttle-driven RPM (2026-08)
 
-**Previous behavior:** on pedal release, synthetic RPM could lag above road-coupled RPM via an editable retention fraction and decay time. That made the needle sound “hang” but caused **gear hunting** (`3 → 2 → 3`) because downshift logic saw low displayed RPM while road speed still justified a higher gear.
+**Problem:** in **D**, tying synthetic RPM directly to road speed made the tach feel wrong on BYD Live — the needle followed speed instead of pedal intent.
 
-**Current behavior (D only):** in **D**, synthetic RPM target is **road-coupled** through the current presentation ratio:
+**Current behavior (D only):** synthetic RPM is integrated each 200 Hz step from throttle **force**, not a road-speed target:
 
 ```text
-targetRPM = idle + wheelRPM × gearRatio × finalDrive
+riseRpmPerSec = filteredThrottle × powerFraction(speed) × driveMaxRiseRpmPerSec
+fallRpmPerSec = driveCoastFallRpmPerSec + filteredBrake × driveBrakeExtraFallRpmPerSec
 ```
 
-Filtered toward target with `syntheticRpmResponseSeconds` (default 35 ms). No retention sliders remain in the tuning UI. In **N**/**P**, lift-off lowers RPM via the neutral free-rev model in §3.2 instead.
+- **Power fraction** uses the same axle torque + 390 kW ceiling as EV physics (`wheelPowerFractionAtSpeed`). Below `driveLaunchFullPowerSpeedKmh` (default **5 km/h**), fraction is clamped to **1.0** so standstill launches still rev strongly.
+- **Lift-off** begins on pedal release (requested throttle, not the smoothed filter) and falls at `driveCoastFallRpmPerSec` (plus brake extra fall when braking) until idle.
+- **Shifts:** while a presentation shift is active, RPM still blends toward the ratio-derived `rpmTarget` with `syntheticRpmResponseSeconds` (default **35 ms**).
 
-**Tests:** `liftOffRpmStaysRoadCoupledWhenSpeedHeldConstant`, `liftOffFromThirdDoesNotUpshiftHuntWhileCoasting`, `liftOffWithLiveSpeedHeldDoesNotHuntGears`, `releasingPedalKeepsRpmCoupledToRoadSpeed`.
+**Tuning (Vehicle tab → DRIVE RPM):** `driveMaxRiseRpmPerSec` (default **6000**), `driveCoastFallRpmPerSec` (**5000**), `driveBrakeExtraFallRpmPerSec` (**4000**), `driveLaunchFullPowerSpeedKmh` (**5**).
 
-**Rejected return path:** reintroducing retention without a scoped live-speed safety model. The old scoped emergency-upshift hold existed only to paper over the retention/display mismatch and was removed with retention.
+**Hidden calibration:** Seal Performance fields (mass, drag, axle peaks, etc.) remain stored in `TuningRepository` and feed the power graph + EV physics, but are no longer editable in the UI.
+
+**Tests:** `driveModeWotAtStandstillRevsTowardRedline`, `driveModeLiftOffAtConstantSpeedFallsTowardIdle`, `driveModeBrakeFallsFasterThanCoastOnly`, `releasingPedalAtConstantSpeedDropsRpmTowardIdle`, `topGearAtConfiguredTopSpeedSyncsRoadCoupledRpmOnEntry`, plus existing lift-off hunting guards.
+
+**Rejected return path:** reintroducing lift-off RPM **retention** without a scoped live-speed safety model (see archived §3.3 note below).
+
+#### Archived: lift-off RPM retention removed (2026-08)
+
+**Previous behavior:** on pedal release, synthetic RPM could lag above road-coupled RPM via an editable retention fraction and decay time. That caused **gear hunting** (`3 → 2 → 3`).
+
+**Superseded by:** throttle-driven integrator with configurable lift-off fall (no coast floor).
 
 ### 3.4 Simulator coast regen (2026-08)
 

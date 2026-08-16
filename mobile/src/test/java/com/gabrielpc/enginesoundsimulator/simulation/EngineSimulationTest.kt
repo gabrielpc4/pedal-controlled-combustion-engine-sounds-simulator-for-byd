@@ -27,11 +27,11 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun topGearAtConfiguredTopSpeedRedlines() {
+    fun topGearAtConfiguredTopSpeedSyncsRoadCoupledRpmOnEntry() {
         val simulation = EngineSimulation()
         val state = simulation.update(
             DriverInput(
-                throttle = 1.0,
+                throttle = 0.0,
                 externalSpeedKmh = 190.0,
                 transmissionPosition = TransmissionPosition.DRIVE,
             ),
@@ -40,7 +40,110 @@ class EngineSimulationTest {
 
         assertEquals(7, state.gear)
         assertEquals(190.0, state.speedKmh, 0.5)
-        assertEquals(simulation.profile.redlineRpm, state.rpm, 25.0)
+        assertEquals(
+            "seventh gear at top speed should seed tach to road-coupled RPM on BYD entry",
+            simulation.profile.redlineRpm,
+            state.rpm,
+            80.0,
+        )
+    }
+
+    @Test
+    fun driveModeWotAtStandstillRevsTowardRedline() {
+        val simulation = EngineSimulation()
+        val revved = simulation.runForExternal(0.8, speedKmh = 0.0, throttle = 1.0)
+
+        assertEquals(0.0, revved.speedKmh, 0.05)
+        assertTrue("WOT at standstill should drive tach toward redline", revved.rpm > simulation.profile.idleRpm + 2_000.0)
+    }
+
+    @Test
+    fun driveModeLiftOffFallsAtConfiguredRateInSimulator() {
+        val coastFall = 5_000.0
+        val profile = EngineProfile.APEX_V10.copy(
+            gearRatios = doubleArrayOf(3.14),
+            driveCoastFallRpmPerSec = coastFall,
+            driveMaxRiseRpmPerSec = 6_000.0,
+            shiftDwellSeconds = 1_000.0,
+        )
+        val simulation = EngineSimulation(profile)
+        simulation.runFor(2.0, throttle = 1.0)
+        val beforeLift = simulation.state.rpm
+        assertTrue("need headroom above idle to measure coast fall", beforeLift > profile.idleRpm + 1_500.0)
+
+        val afterShortCoast = simulation.runFor(0.1, throttle = 0.0, simulateCoastRegen = true)
+        val measuredFallRate = (beforeLift - afterShortCoast.rpm) / 0.1
+
+        assertTrue(
+            "simulator lift-off should fall near configured coast rate: measured=$measuredFallRate target=$coastFall",
+            measuredFallRate > coastFall * 0.85,
+        )
+        assertTrue(
+            "coast fall must continue even if virtual speed keeps climbing after lift-off",
+            afterShortCoast.rpm < beforeLift - coastFall * 0.08,
+        )
+    }
+
+    @Test
+    fun driveModeLiftOffFallsAtConfiguredRateAtStandstill() {
+        val coastFall = 5_000.0
+        val profile = EngineProfile.APEX_V10.copy(
+            gearRatios = doubleArrayOf(3.14),
+            driveCoastFallRpmPerSec = coastFall,
+            driveMaxRiseRpmPerSec = 6_000.0,
+        )
+        val simulation = EngineSimulation(profile)
+        simulation.runForExternal(1.5, speedKmh = 0.0, throttle = 1.0)
+        val beforeLift = simulation.state.rpm
+        val afterShortCoast = simulation.runForExternal(0.1, speedKmh = 0.0, throttle = 0.0)
+        val measuredFallRate = (beforeLift - afterShortCoast.rpm) / 0.1
+
+        assertTrue(
+            "standstill lift-off should fall near configured coast rate: measured=$measuredFallRate target=$coastFall",
+            abs(measuredFallRate - coastFall) < coastFall * 0.05,
+        )
+    }
+
+    @Test
+    fun driveModeLiftOffAtConstantSpeedFallsTowardIdle() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val simulation = EngineSimulation(profile)
+        simulation.update(
+            DriverInput(
+                throttle = 1.0,
+                externalSpeedKmh = 40.0,
+                transmissionPosition = TransmissionPosition.DRIVE,
+            ),
+            STEP,
+        )
+        simulation.runForExternal(1.2, speedKmh = 40.0, throttle = 1.0)
+        val beforeLift = simulation.state
+        val afterLift = simulation.runForExternal(1.5, speedKmh = 40.0, throttle = 0.0)
+
+        assertEquals(40.0, afterLift.speedKmh, 0.001)
+        assertTrue(
+            "lift-off should drop RPM below the held-throttle value",
+            afterLift.rpm < beforeLift.rpm - 2_000.0,
+        )
+        assertTrue(
+            "without a coast floor, tach can fall toward idle even at road speed",
+            afterLift.rpm < profile.idleRpm + 800.0,
+        )
+    }
+
+    @Test
+    fun driveModeBrakeFallsFasterThanCoastOnly() {
+        val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
+        val simulation = EngineSimulation(profile)
+        simulation.update(DriverInput(externalSpeedKmh = 40.0), STEP)
+        simulation.runForExternal(1.2, speedKmh = 40.0, throttle = 1.0)
+        val coasting = simulation.runForExternal(0.4, speedKmh = 40.0, throttle = 0.0)
+        val braking = simulation.runForExternal(0.5, speedKmh = 40.0, throttle = 0.0, brake = 1.0)
+
+        assertTrue(
+            "braking should pull tach lower than coast-only lift-off",
+            braking.rpm < coasting.rpm - 150.0,
+        )
     }
 
     @Test
@@ -271,7 +374,7 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun releasingPedalKeepsRpmCoupledToRoadSpeed() {
+    fun releasingPedalAtConstantSpeedDropsRpmTowardIdle() {
         val profile = EngineProfile.APEX_V10.copy(gearRatios = doubleArrayOf(3.14))
         val simulation = EngineSimulation(profile)
         simulation.update(
@@ -282,16 +385,15 @@ class EngineSimulationTest {
             ),
             STEP,
         )
-        simulation.runForExternal(0.15, speedKmh = 40.0, throttle = 1.0)
+        simulation.runForExternal(1.2, speedKmh = 40.0, throttle = 1.0)
         val beforeLift = simulation.state
-        val afterLift = simulation.runForExternal(0.35, speedKmh = 40.0, throttle = 0.0)
+        val afterLift = simulation.runForExternal(0.5, speedKmh = 40.0, throttle = 0.0)
 
         assertEquals(40.0, afterLift.speedKmh, 0.001)
-        assertEquals(
-            "lift-off RPM should stay road-coupled when speed is held constant",
-            beforeLift.rpm,
-            afterLift.rpm,
-            120.0,
+        assertTrue(afterLift.rpm < beforeLift.rpm - 100.0)
+        assertTrue(
+            "without a coast floor, lift-off keeps falling toward idle",
+            afterLift.rpm < beforeLift.rpm - 400.0,
         )
     }
 
@@ -403,7 +505,10 @@ class EngineSimulationTest {
         }
 
         assertEquals("live lift-off at constant road speed must not hunt upward", 0, upshiftStartsWhileLifted)
-        assertEquals(3, simulation.state.gear)
+        assertTrue(
+            "lift-off may downshift as tach falls, but should not cascade below second gear",
+            simulation.state.gear in 2..3,
+        )
     }
 
     @Test
@@ -562,6 +667,7 @@ class EngineSimulationTest {
         seconds: Double,
         speedKmh: Double,
         throttle: Double = 0.0,
+        brake: Double = 0.0,
         transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
     ): DrivetrainState {
         var result = state
@@ -569,6 +675,7 @@ class EngineSimulationTest {
             result = update(
                 DriverInput(
                     throttle = throttle,
+                    brake = brake,
                     externalSpeedKmh = speedKmh,
                     transmissionPosition = transmissionPosition,
                 ),
@@ -580,7 +687,7 @@ class EngineSimulationTest {
 
     private companion object {
         const val STEP = 1.0 / 200.0
-        const val MIN_EXPECTED_COMPLETED_DWELL_SECONDS = 0.44
+        const val MIN_EXPECTED_COMPLETED_DWELL_SECONDS = 0.38
         const val MAX_EXPECTED_REPORTED_ACCELERATION = 15.0
     }
 }

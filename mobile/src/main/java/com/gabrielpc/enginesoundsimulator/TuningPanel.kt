@@ -74,10 +74,13 @@ private val TuneRed = Color(0xFFFF465C)
 private val TuneWhite = Color(0xFFF5FAFD)
 private val TuneMuted = Color(0xFF8CA7B5)
 
+private val defaultEngine = TuningConfig.DEFAULT.engine
+private val defaultAudio = TuningConfig.DEFAULT.audio
+
 private enum class TuningTab(val title: String, val subtitle: String) {
-    ENGINE("VEHICLE", "SEAL RESPONSE MODEL"),
+    ENGINE("VEHICLE", "TACH & DRIVE RPM"),
     CURVES("AWD CURVES", "FRONT / REAR WHEEL TORQUE"),
-    RESPONSE("RESPONSE", "SPORT PEDAL DYNAMICS"),
+    RESPONSE("RESPONSE", "SPORT PEDAL CURVE & SIM COAST"),
     TRANSMISSION("GEARING", "RATIOS & SHIFT LOGIC"),
     AUDIO("AUDIO", "LAYERS & HARMONICS"),
 }
@@ -175,105 +178,128 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
             "SYNTHETIC ENGINE",
-            "Tach follows road speed in D; use the P N D shifter beside the pedals for neutral revs",
+            "Tach scale, redline, and shift points — D-mode RPM dynamics are tuned in the next column",
             Modifier.weight(0.78f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        engine = engine.copy(
+                            maxRpm = defaultEngine.maxRpm,
+                            redlineRpm = defaultEngine.redlineRpm,
+                            limiterRpm = defaultEngine.limiterRpm,
+                            idleRpm = defaultEngine.idleRpm,
+                            upshiftRpm = defaultEngine.upshiftRpm,
+                        ),
+                    ),
+                )
+            },
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..12_000.0, "%.0f RPM") {
+                ParameterSlider("Escala máxima do mostrador de RPM", engine.maxRpm, 6_000.0..12_000.0, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
                         redlineRpm = min(engine.redlineRpm, it - 300.0),
                         limiterRpm = min(engine.limiterRpm, it - 100.0),
                     )))
                 }
-                ParameterSlider("REDLINE", engine.redlineRpm, 4_000.0..(engine.maxRpm - 300.0), "%.0f RPM") {
+                ParameterSlider("RPM da linha vermelha no tacômetro", engine.redlineRpm, 4_000.0..(engine.maxRpm - 300.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         redlineRpm = it,
                         limiterRpm = max(engine.limiterRpm, it),
                         upshiftRpm = min(engine.upshiftRpm, it - 100.0),
                     )))
                 }
-                ParameterSlider("SOUND LIMITER", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
+                ParameterSlider("RPM em que o som atinge o corte/limite", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(limiterRpm = it)))
                 }
-                ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
+                ParameterSlider("RPM de marcha lenta", engine.idleRpm, 600.0..2_000.0, "%.0f") {
                     onChange(config.copy(engine = engine.copy(idleRpm = it)))
                 }
-                ParameterSlider("UPSHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
+                ParameterSlider("RPM em que o câmbio sobe automaticamente", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..(engine.redlineRpm - 100.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
-                }
-                ParameterSlider("RPM RESPONSE", engine.syntheticRpmResponseMs, 10.0..250.0, "%.0f ms") {
-                    onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
                 }
             }
         }
-        PanelCard("SEAL PERFORMANCE", "Electric drive and road-load calibration", Modifier.weight(0.92f)) {
+        PanelCard(
+            "DRIVE RPM",
+            "Throttle force, lift-off, and program timing delays",
+            Modifier.weight(0.92f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        engine = engine.copy(
+                            driveMaxRiseRpmPerSec = defaultEngine.driveMaxRiseRpmPerSec,
+                            driveCoastFallRpmPerSec = defaultEngine.driveCoastFallRpmPerSec,
+                            driveBrakeExtraFallRpmPerSec = defaultEngine.driveBrakeExtraFallRpmPerSec,
+                            driveLaunchFullPowerSpeedKmh = defaultEngine.driveLaunchFullPowerSpeedKmh,
+                            syntheticRpmResponseMs = defaultEngine.syntheticRpmResponseMs,
+                            throttleAttackMs = defaultEngine.throttleAttackMs,
+                            throttleReleaseMs = defaultEngine.throttleReleaseMs,
+                            brakeResponseMs = defaultEngine.brakeResponseMs,
+                            upshiftDurationMs = defaultEngine.upshiftDurationMs,
+                            downshiftDurationMs = defaultEngine.downshiftDurationMs,
+                            shiftDwellMs = defaultEngine.shiftDwellMs,
+                        ),
+                    ),
+                )
+            },
+        ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 ParameterSlider(
-                    "PEAK MOTOR TORQUE",
-                    newtonMetersToKgfm(engine.maxTorqueNm),
-                    newtonMetersToKgfm(150.0)..newtonMetersToKgfm(1_200.0),
-                    "%.0f kgfm",
+                    "Velocidade máxima de subida do RPM com acelerador (modo D)",
+                    engine.driveMaxRiseRpmPerSec,
+                    1_000.0..12_000.0,
+                    "%.0f RPM/s",
                 ) {
-                    onChange(config.copy(engine = engine.copy(maxTorqueNm = kgfmToNewtonMeters(it))))
+                    onChange(config.copy(engine = engine.copy(driveMaxRiseRpmPerSec = it)))
                 }
                 ParameterSlider(
-                    "FRONT PEAK (≈ MOTOR)",
-                    engine.wheelTorqueDisplayKgfm(engine.frontPeakWheelTorqueNm),
-                    engine.wheelTorqueDisplayKgfm(500.0)..engine.wheelTorqueDisplayKgfm(6_000.0),
-                    "%.0f kgfm",
+                    "Velocidade de queda do RPM ao soltar o acelerador",
+                    engine.driveCoastFallRpmPerSec,
+                    1_000.0..10_000.0,
+                    "%.0f RPM/s",
                 ) {
-                    onChange(config.copy(engine = engine.copy(
-                        frontPeakWheelTorqueNm = engine.wheelTorqueFromDisplayKgfm(it),
-                    )))
+                    onChange(config.copy(engine = engine.copy(driveCoastFallRpmPerSec = it)))
                 }
                 ParameterSlider(
-                    "REAR PEAK (≈ MOTOR)",
-                    engine.wheelTorqueDisplayKgfm(engine.rearPeakWheelTorqueNm),
-                    engine.wheelTorqueDisplayKgfm(500.0)..engine.wheelTorqueDisplayKgfm(7_000.0),
-                    "%.0f kgfm",
+                    "Queda extra de RPM ao frear além do coast",
+                    engine.driveBrakeExtraFallRpmPerSec,
+                    0.0..10_000.0,
+                    "%.0f RPM/s",
                 ) {
-                    onChange(config.copy(engine = engine.copy(
-                        rearPeakWheelTorqueNm = engine.wheelTorqueFromDisplayKgfm(it),
-                    )))
+                    onChange(config.copy(engine = engine.copy(driveBrakeExtraFallRpmPerSec = it)))
                 }
                 ParameterSlider(
-                    "PEAK POWER",
-                    kilowattsToHorsepower(engine.peakPowerKw),
-                    kilowattsToHorsepower(100.0)..kilowattsToHorsepower(800.0),
-                    "%.0f HP",
+                    "Velocidade em que o motor atinge potência plena na largada",
+                    engine.driveLaunchFullPowerSpeedKmh,
+                    0.0..20.0,
+                    "%.0f km/h",
                 ) {
-                    onChange(config.copy(engine = engine.copy(peakPowerKw = horsepowerToKilowatts(it))))
+                    onChange(config.copy(engine = engine.copy(driveLaunchFullPowerSpeedKmh = it)))
                 }
-                ParameterSlider("MOTOR MAX SPEED", engine.motorMaxRpm, 8_000.0..25_000.0, "%.0f RPM") {
-                    onChange(config.copy(engine = engine.copy(motorMaxRpm = it)))
+
+                TimingSectionHeader("TEMPOS E ATRASOS")
+
+                ParameterSlider("Suavização do RPM durante troca de marcha", engine.syntheticRpmResponseMs, 10.0..250.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
                 }
-                ParameterSlider("MOTOR REDUCTION", engine.motorReductionRatio * 100.0, 500.0..1_800.0, "%.0f:100") {
-                    onChange(config.copy(engine = engine.copy(motorReductionRatio = it / 100.0)))
+                ParameterSlider("Tempo para o acelerador subir", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
                 }
-                ParameterSlider("DRIVE EFFICIENCY", engine.drivetrainEfficiency * 100.0, 70.0..99.0, "%.0f%%") {
-                    onChange(config.copy(engine = engine.copy(drivetrainEfficiency = it / 100.0)))
+                ParameterSlider("Tempo para o acelerador cair no lift-off", engine.throttleReleaseMs, 20.0..800.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(throttleReleaseMs = it)))
                 }
-                ParameterSlider("TRACTION LIMIT", engine.tractionLimitMps2, 3.0..12.0, "%.0f m/s²") {
-                    onChange(config.copy(engine = engine.copy(tractionLimitMps2 = it)))
+                ParameterSlider("Tempo de resposta do freio", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
                 }
-                ParameterSlider("VEHICLE MASS", engine.vehicleMassKg, 700.0..3_500.0, "%.0f kg") {
-                    onChange(config.copy(engine = engine.copy(vehicleMassKg = it)))
+                ParameterSlider("Duração sonora da subida de marcha", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
                 }
-                ParameterSlider("ROTATING MASS FACTOR", engine.rotationalMassFactor * 100.0, 100.0..130.0, "%.0f%%") {
-                    onChange(config.copy(engine = engine.copy(rotationalMassFactor = it / 100.0)))
+                ParameterSlider("Duração sonora da redução de marcha", engine.downshiftDurationMs, 120.0..1_000.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(downshiftDurationMs = it)))
                 }
-                ParameterSlider("WHEEL RADIUS", engine.wheelRadiusMeters * 1_000.0, 220.0..500.0, "%.0f mm") {
-                    onChange(config.copy(engine = engine.copy(wheelRadiusMeters = it / 1_000.0)))
-                }
-                ParameterSlider("DRAG AREA", engine.dragAreaM2 * 10_000.0, 3_000.0..12_000.0, "%.0f cm²") {
-                    onChange(config.copy(engine = engine.copy(dragAreaM2 = it / 10_000.0)))
-                }
-                ParameterSlider("ROLLING RESISTANCE", engine.rollingResistanceCoefficient * 1_000.0, 5.0..30.0, "%.0f ×10⁻³") {
-                    onChange(config.copy(engine = engine.copy(rollingResistanceCoefficient = it / 1_000.0)))
-                }
-                ParameterSlider("TOP SPEED", engine.topSpeedKmh, 100.0..350.0, "%.0f km/h") {
-                    onChange(config.copy(engine = engine.copy(topSpeedKmh = it)))
+                ParameterSlider("Pausa entre uma troca e a próxima", engine.shiftDwellMs, 100.0..1_500.0, "%.0f ms") {
+                    onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
                 }
             }
         }
@@ -281,6 +307,23 @@ private fun EngineTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
             "AXLE TORQUE + POWER",
             "Wheel torque as ≈ motor-shaft kgfm (${engine.motorReductionRatio} : 1) • power scaled to motor rating, shown as HP (PS/cv)",
             Modifier.weight(1.30f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        engine = engine.copy(
+                            frontWheelTorqueCurve = defaultEngine.frontWheelTorqueCurve,
+                            rearWheelTorqueCurve = defaultEngine.rearWheelTorqueCurve,
+                            frontPeakWheelTorqueNm = defaultEngine.frontPeakWheelTorqueNm,
+                            rearPeakWheelTorqueNm = defaultEngine.rearPeakWheelTorqueNm,
+                            peakPowerKw = defaultEngine.peakPowerKw,
+                            maxTorqueNm = defaultEngine.maxTorqueNm,
+                            topSpeedKmh = defaultEngine.topSpeedKmh,
+                            motorReductionRatio = defaultEngine.motorReductionRatio,
+                            drivetrainEfficiency = defaultEngine.drivetrainEfficiency,
+                        ),
+                    ),
+                )
+            },
         ) {
             TorquePowerGraph(engine, state.drivetrain.speedKmh, Modifier.fillMaxSize())
         }
@@ -292,7 +335,11 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
     val engine = config.engine
     val currentSpeed = (state.drivetrain.speedKmh / engine.topSpeedKmh).coerceIn(0.0, 1.0)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("FRONT WHEEL TORQUE", "A2MAC1 trace • drag points to tune", Modifier.weight(1f)) {
+        PanelCard("FRONT WHEEL TORQUE", "A2MAC1 trace • drag points to tune", Modifier.weight(1f),
+            onRestoreDefaults = {
+                onChange(config.copy(engine = engine.copy(frontWheelTorqueCurve = defaultEngine.frontWheelTorqueCurve)))
+            },
+        ) {
             EditableCurveGraph(
                 points = engine.frontWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
@@ -312,7 +359,11 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("REAR WHEEL TORQUE", "A2MAC1 trace • drag points to tune", Modifier.weight(1f)) {
+        PanelCard("REAR WHEEL TORQUE", "A2MAC1 trace • drag points to tune", Modifier.weight(1f),
+            onRestoreDefaults = {
+                onChange(config.copy(engine = engine.copy(rearWheelTorqueCurve = defaultEngine.rearWheelTorqueCurve)))
+            },
+        ) {
             EditableCurveGraph(
                 points = engine.rearWheelTorqueCurve,
                 xLabel = { "${(it * engine.topSpeedKmh).roundToInt()}" },
@@ -332,7 +383,18 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("TORQUE DISTRIBUTION", "Derived front/rear share across road speed", Modifier.weight(1f)) {
+        PanelCard("TORQUE DISTRIBUTION", "Derived front/rear share across road speed", Modifier.weight(1f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        engine = engine.copy(
+                            frontWheelTorqueCurve = defaultEngine.frontWheelTorqueCurve,
+                            rearWheelTorqueCurve = defaultEngine.rearWheelTorqueCurve,
+                        ),
+                    ),
+                )
+            },
+        ) {
             TorqueDistributionGraph(engine, state.drivetrain.speedKmh, Modifier.fillMaxSize())
         }
     }
@@ -342,7 +404,11 @@ private fun CurvesTab(state: DriveSnapshot, config: TuningConfig, onChange: (Tun
 private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1.35f)) {
+        PanelCard("SPORT PEDAL RESPONSE", "Drag points • pedal vs requested motor torque", Modifier.weight(1.35f),
+            onRestoreDefaults = {
+                onChange(config.copy(engine = engine.copy(throttleCurve = defaultEngine.throttleCurve)))
+            },
+        ) {
             EditableCurveGraph(
                 points = engine.throttleCurve,
                 xLabel = { "${(it * 100).roundToInt()}" },
@@ -359,17 +425,15 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("PEDAL DYNAMICS", "Measured launch rise plus editable release/brake timing", Modifier.weight(1f)) {
-            ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
-            }
-            ParameterSlider("THROTTLE RELEASE", engine.throttleReleaseMs, 20.0..800.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(throttleReleaseMs = it)))
-            }
-            ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
-            }
-            ParameterSlider("SIM COAST REGEN", engine.simulatorCoastRegenMps2, 0.0..1.50, "%.2f m/s²") {
+        PanelCard(
+            "SIM COAST REGEN",
+            "Lift-off deceleration for virtual speed in SIM mode — timing delays are under Vehicle → DRIVE RPM",
+            Modifier.weight(1f),
+            onRestoreDefaults = {
+                onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = defaultEngine.simulatorCoastRegenMps2)))
+            },
+        ) {
+            ParameterSlider("Desaceleração no modo SIM ao soltar o acelerador", engine.simulatorCoastRegenMps2, 0.0..1.50, "%.2f m/s²") {
                 onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
             }
             Spacer(Modifier.height(12.dp))
@@ -382,26 +446,31 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
 private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SOUND SHIFT CONTROL", "Presentation only • wheel torque stays continuous", Modifier.weight(0.76f)) {
-            ParameterSlider("SYNTHETIC FINAL DRIVE", engine.finalDrive * 100.0, 200.0..600.0, "%.0f:100") {
+        PanelCard(
+            "SOUND SHIFT CONTROL",
+            "Presentation only • shift timing delays are under Vehicle → DRIVE RPM",
+            Modifier.weight(0.76f),
+            onRestoreDefaults = {
+                onChange(config.copy(engine = engine.copy(finalDrive = defaultEngine.finalDrive)))
+            },
+        ) {
+            ParameterSlider("Relação final sintética (só som e RPM, não aceleração física)", engine.finalDrive * 100.0, 200.0..600.0, "%.0f:100") {
                 onChange(config.copy(engine = engine.copy(finalDrive = it / 100.0)))
             }
-            ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 100.0..900.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
-            }
-            ParameterSlider("DOWNSHIFT TIME", engine.downshiftDurationMs, 120.0..1_000.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(downshiftDurationMs = it)))
-            }
-            ParameterSlider("GEAR DWELL", engine.shiftDwellMs, 100.0..1_500.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
-            }
         }
-        PanelCard("SYNTHETIC GEAR RATIOS", "Changes RPM and sound, never physical acceleration", Modifier.weight(0.96f)) {
+        PanelCard(
+            "SYNTHETIC GEAR RATIOS",
+            "Changes RPM and sound, never physical acceleration",
+            Modifier.weight(0.96f),
+            onRestoreDefaults = {
+                onChange(config.copy(engine = engine.copy(gearRatios = defaultEngine.gearRatios)))
+            },
+        ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 engine.gearRatios.forEachIndexed { index, ratio ->
                     val maximum = if (index == 0) 5.0 else engine.gearRatios[index - 1] - 0.05
                     val minimum = if (index == engine.gearRatios.lastIndex) 0.45 else engine.gearRatios[index + 1] + 0.05
-                    ParameterSlider("GEAR ${index + 1}", ratio * 100.0, minimum * 100.0..maximum * 100.0, "%.0f:100") { value ->
+                    ParameterSlider("Relação da ${index + 1}ª marcha (só afeta som e RPM)", ratio * 100.0, minimum * 100.0..maximum * 100.0, "%.0f:100") { value ->
                         val ratios = engine.gearRatios.toMutableList()
                         ratios[index] = value / 100.0
                         onChange(config.copy(engine = engine.copy(gearRatios = ratios)))
@@ -413,6 +482,18 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
             "SHIFT LANDING / DOWNSHIFT",
             "Landing RPM after each upshift is that gear's automatic downshift threshold",
             Modifier.weight(1.25f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        engine = engine.copy(
+                            gearRatios = defaultEngine.gearRatios,
+                            upshiftRpm = defaultEngine.upshiftRpm,
+                            idleRpm = defaultEngine.idleRpm,
+                            maxRpm = defaultEngine.maxRpm,
+                        ),
+                    ),
+                )
+            },
         ) {
             GearDropGraph(engine, Modifier.fillMaxSize())
         }
@@ -423,28 +504,78 @@ private fun TransmissionTab(config: TuningConfig, onChange: (TuningConfig) -> Un
 private fun AudioTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val audio = config.audio
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("ENGINE MIX", "Balance the synthesized source layers", Modifier.weight(0.82f)) {
-            AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
-            AudioSlider("EXHAUST", audio.exhaustLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(exhaustLevel = it))) }
-            AudioSlider("INTAKE", audio.intakeLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(intakeLevel = it))) }
-            AudioSlider("MECHANICAL", audio.mechanicalLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(mechanicalLevel = it))) }
-            AudioSlider("OVERRUN", audio.overrunLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(overrunLevel = it))) }
-            AudioSlider("SHIFT IMPACT", audio.shiftLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(shiftLevel = it))) }
+        PanelCard("ENGINE MIX", "Balance the synthesized source layers", Modifier.weight(0.82f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        audio = audio.copy(
+                            masterGain = defaultAudio.masterGain,
+                            exhaustLevel = defaultAudio.exhaustLevel,
+                            intakeLevel = defaultAudio.intakeLevel,
+                            mechanicalLevel = defaultAudio.mechanicalLevel,
+                            overrunLevel = defaultAudio.overrunLevel,
+                            shiftLevel = defaultAudio.shiftLevel,
+                        ),
+                    ),
+                )
+            },
+        ) {
+            AudioSlider("Volume geral de todo o som sintetizado", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
+            AudioSlider("Volume da camada de escape", audio.exhaustLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(exhaustLevel = it))) }
+            AudioSlider("Volume da camada de admissão", audio.intakeLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(intakeLevel = it))) }
+            AudioSlider("Volume dos ruídos mecânicos do motor", audio.mechanicalLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(mechanicalLevel = it))) }
+            AudioSlider("Volume do efeito de overrun (pipoco ao soltar)", audio.overrunLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(overrunLevel = it))) }
+            AudioSlider("Volume do impacto sonoro na troca de marcha", audio.shiftLevel, 0.0..1.5) { onChange(config.copy(audio = audio.copy(shiftLevel = it))) }
         }
-        PanelCard("HARMONIC CHARACTER", "Shape the firing-order spectrum", Modifier.weight(0.78f)) {
-            AudioSlider("2ND HARMONIC", audio.harmonic2, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic2 = it))) }
-            AudioSlider("3RD HARMONIC", audio.harmonic3, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic3 = it))) }
-            AudioSlider("4TH HARMONIC", audio.harmonic4, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic4 = it))) }
-            AudioSlider("5TH HARMONIC", audio.harmonic5, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic5 = it))) }
+        PanelCard("HARMONIC CHARACTER", "Shape the firing-order spectrum", Modifier.weight(0.78f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        audio = audio.copy(
+                            harmonic2 = defaultAudio.harmonic2,
+                            harmonic3 = defaultAudio.harmonic3,
+                            harmonic4 = defaultAudio.harmonic4,
+                            harmonic5 = defaultAudio.harmonic5,
+                        ),
+                    ),
+                )
+            },
+        ) {
+            AudioSlider("Intensidade da 2ª harmônica da ordem de ignição", audio.harmonic2, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic2 = it))) }
+            AudioSlider("Intensidade da 3ª harmônica da ordem de ignição", audio.harmonic3, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic3 = it))) }
+            AudioSlider("Intensidade da 4ª harmônica da ordem de ignição", audio.harmonic4, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic4 = it))) }
+            AudioSlider("Intensidade da 5ª harmônica da ordem de ignição", audio.harmonic5, 0.0..1.5) { onChange(config.copy(audio = audio.copy(harmonic5 = it))) }
         }
-        PanelCard("SPECTRAL PROFILE", "Relative contribution of each editable harmonic", Modifier.weight(1.10f)) {
+        PanelCard(
+            "SPECTRAL PROFILE",
+            "Relative contribution of each editable harmonic",
+            Modifier.weight(1.10f),
+            onRestoreDefaults = {
+                onChange(
+                    config.copy(
+                        audio = audio.copy(
+                            harmonic2 = defaultAudio.harmonic2,
+                            harmonic3 = defaultAudio.harmonic3,
+                            harmonic4 = defaultAudio.harmonic4,
+                            harmonic5 = defaultAudio.harmonic5,
+                        ),
+                    ),
+                )
+            },
+        ) {
             AudioSpectrumGraph(audio, Modifier.fillMaxSize())
         }
     }
 }
 
 @Composable
-private fun PanelCard(title: String, subtitle: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun PanelCard(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onRestoreDefaults: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -452,11 +583,34 @@ private fun PanelCard(title: String, subtitle: String, modifier: Modifier = Modi
             .border(1.dp, TuneLine, RoundedCornerShape(18.dp))
             .padding(20.dp),
     ) {
-        Text(title, color = TuneWhite, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
-        Text(subtitle, color = TuneMuted, fontSize = 9.sp, letterSpacing = 0.5.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = TuneWhite, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+                Text(subtitle, color = TuneMuted, fontSize = 9.sp, letterSpacing = 0.5.sp)
+            }
+            if (onRestoreDefaults != null) {
+                SmallAction("DEFAULTS", TuneAmber, onRestoreDefaults)
+            }
+        }
         Spacer(Modifier.height(14.dp))
         content()
     }
+}
+
+@Composable
+private fun TimingSectionHeader(label: String) {
+    Spacer(Modifier.height(10.dp))
+    Text(
+        label,
+        color = TuneCyan,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Black,
+        letterSpacing = 1.1.sp,
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+    )
 }
 
 @Composable
@@ -468,8 +622,16 @@ private fun ParameterSlider(
     onValueChange: (Double) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = TuneMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Text(
+                label,
+                color = TuneMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.2.sp,
+                lineHeight = 12.sp,
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+            )
             Text(String.format(Locale.US, format, value), color = TuneCyan, fontSize = 13.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
         }
         Slider(

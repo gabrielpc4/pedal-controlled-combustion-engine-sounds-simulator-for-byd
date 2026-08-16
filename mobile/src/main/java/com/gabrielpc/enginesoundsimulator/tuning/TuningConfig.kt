@@ -27,6 +27,10 @@ data class EngineTuning(
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
     val syntheticRpmResponseMs: Double = 35.0,
+    val driveMaxRiseRpmPerSec: Double = 6_000.0,
+    val driveCoastFallRpmPerSec: Double = 5_000.0,
+    val driveBrakeExtraFallRpmPerSec: Double = 4_000.0,
+    val driveLaunchFullPowerSpeedKmh: Double = 5.0,
     val simulatorCoastRegenMps2: Double = 0.50,
     val finalDrive: Double = 3.82,
     val throttleAttackMs: Double = 120.0,
@@ -70,6 +74,10 @@ data class EngineTuning(
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
             syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(10.0, 250.0),
+            driveMaxRiseRpmPerSec = driveMaxRiseRpmPerSec.coerceIn(1_000.0, 12_000.0),
+            driveCoastFallRpmPerSec = driveCoastFallRpmPerSec.coerceIn(1_000.0, 10_000.0),
+            driveBrakeExtraFallRpmPerSec = driveBrakeExtraFallRpmPerSec.coerceIn(0.0, 10_000.0),
+            driveLaunchFullPowerSpeedKmh = driveLaunchFullPowerSpeedKmh.coerceIn(0.0, 20.0),
             simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 1.50),
             finalDrive = finalDrive.coerceIn(2.0, 6.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
@@ -198,6 +206,16 @@ class TuningRepository(context: Context) {
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
+            driveMaxRiseRpmPerSec = number(KEY_DRIVE_MAX_RISE, defaults.engine.driveMaxRiseRpmPerSec),
+            driveCoastFallRpmPerSec = number(KEY_DRIVE_COAST_FALL, defaults.engine.driveCoastFallRpmPerSec),
+            driveBrakeExtraFallRpmPerSec = number(
+                KEY_DRIVE_BRAKE_EXTRA_FALL,
+                defaults.engine.driveBrakeExtraFallRpmPerSec,
+            ),
+            driveLaunchFullPowerSpeedKmh = number(
+                KEY_DRIVE_LAUNCH_FULL_POWER_SPEED,
+                defaults.engine.driveLaunchFullPowerSpeedKmh,
+            ),
             simulatorCoastRegenMps2 = number(
                 KEY_SIMULATOR_COAST_REGEN,
                 defaults.engine.simulatorCoastRegenMps2,
@@ -263,6 +281,13 @@ class TuningRepository(context: Context) {
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
+            .putString(KEY_DRIVE_MAX_RISE, clean.engine.driveMaxRiseRpmPerSec.toString())
+            .putString(KEY_DRIVE_COAST_FALL, clean.engine.driveCoastFallRpmPerSec.toString())
+            .putString(KEY_DRIVE_BRAKE_EXTRA_FALL, clean.engine.driveBrakeExtraFallRpmPerSec.toString())
+            .putString(
+                KEY_DRIVE_LAUNCH_FULL_POWER_SPEED,
+                clean.engine.driveLaunchFullPowerSpeedKmh.toString(),
+            )
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
             .putString(KEY_FINAL_DRIVE, clean.engine.finalDrive.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
@@ -299,7 +324,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 6
+        const val CALIBRATION_REVISION = 7
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
@@ -320,6 +345,10 @@ class TuningRepository(context: Context) {
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
         const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
+        const val KEY_DRIVE_MAX_RISE = "drive_max_rise_rpm_per_sec"
+        const val KEY_DRIVE_COAST_FALL = "drive_coast_fall_rpm_per_sec"
+        const val KEY_DRIVE_BRAKE_EXTRA_FALL = "drive_brake_extra_fall_rpm_per_sec"
+        const val KEY_DRIVE_LAUNCH_FULL_POWER_SPEED = "drive_launch_full_power_speed_kmh"
         const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"
         const val KEY_FINAL_DRIVE = "final_drive"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"

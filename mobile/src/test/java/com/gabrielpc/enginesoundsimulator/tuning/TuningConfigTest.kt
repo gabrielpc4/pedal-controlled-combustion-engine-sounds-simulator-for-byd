@@ -52,6 +52,21 @@ class TuningConfigTest {
     }
 
     @Test
+    fun sanitizerBoundsDriveRpmDynamics() {
+        val result = EngineTuning(
+            driveMaxRiseRpmPerSec = 500.0,
+            driveCoastFallRpmPerSec = 500.0,
+            driveBrakeExtraFallRpmPerSec = -100.0,
+            driveLaunchFullPowerSpeedKmh = 50.0,
+        ).sanitized()
+
+        assertEquals(1_000.0, result.driveMaxRiseRpmPerSec, 0.0)
+        assertEquals(1_000.0, result.driveCoastFallRpmPerSec, 0.0)
+        assertEquals(0.0, result.driveBrakeExtraFallRpmPerSec, 0.0)
+        assertEquals(20.0, result.driveLaunchFullPowerSpeedKmh, 0.0)
+    }
+
+    @Test
     fun audioLevelsAreBoundedBeforeReachingRealtimeRenderer() {
         val clean = AudioTuning(masterGain = -1.0, exhaustLevel = 8.0, harmonic5 = 3.0).sanitized()
 
