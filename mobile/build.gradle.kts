@@ -111,6 +111,13 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
             into("car_previews")
         }
     }
+    // The Huracán bank supplies this explicitly named exterior idle loop separately from the
+    // reconstructed interior event. It replaces only the idle layer; driving layers remain
+    // the recovered cabin program.
+    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted_exterior")) {
+        include("s013_ex_idle.wav")
+        into("sample_engine/lamborghini_huracan_trofeo_evo2")
+    }
     into(generatedSampleEngineAssets)
 }
 

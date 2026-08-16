@@ -34,7 +34,9 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
     ) = SampleLayerSpec(id, asset, role, start, end, root, pitch, gain, throttleCurve, amplitude, rpmGain)
 
     val layers = listOf(
-        layer("idle_low", "s078_hur_idle_low.wav", SampleLayerRole.IDLE, 0.0, 2352.0, 1254.4, throttleCurve = idle,
+        // The decoded exterior event explicitly identifies this as its idle stream. Prefer it
+        // at rest; all moving layers stay on the recovered cabin event.
+        layer("idle_low", "s013_ex_idle.wav", SampleLayerRole.IDLE, 0.0, 2352.0, 1254.4, throttleCurve = idle,
             amplitude = listOf(ampCurve(1372.0 to 1.0, 2352.0 to 0.0))),
         layer("c3", "s134_hur_c3.wav", SampleLayerRole.COAST, 3822.0, 6294.06, 4821.6, throttleCurve = coast,
             amplitude = listOf(ampCurve(3822.0 to 0.0, 4900.0 to 1.0), ampCurve(5235.374 to 1.0, 6294.06 to 0.0))),
