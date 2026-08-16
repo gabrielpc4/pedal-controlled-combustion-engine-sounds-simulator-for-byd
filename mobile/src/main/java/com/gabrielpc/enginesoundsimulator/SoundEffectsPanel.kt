@@ -58,7 +58,7 @@ internal fun SoundEffectsPanel(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("CAR SOUND EFFECTS", color = FxWhite, fontSize = 30.sp, fontWeight = FontWeight.Black)
+                    Text("EFEITOS SONOROS DO CARRO", color = FxWhite, fontSize = 30.sp, fontWeight = FontWeight.Black)
                     Text(
                         state.selectedCarName.uppercase(),
                         color = FxCyan,
@@ -72,14 +72,14 @@ internal fun SoundEffectsPanel(
                     colors = ButtonDefaults.buttonColors(containerColor = FxLine),
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("CLOSE", color = FxCyan, fontWeight = FontWeight.Black)
+                    Text("FECHAR", color = FxCyan, fontWeight = FontWeight.Black)
                 }
             }
 
             Spacer(Modifier.height(26.dp))
             Text(
-                "Only verified powertrain sounds from this car's own sample bank are listed. " +
-                    "Tires, wind, chassis, doors and collision sounds are excluded.",
+                "Aqui aparecem apenas sons confirmados do conjunto mecânico deste carro. " +
+                    "Ruído de pneus, vento, carroceria, portas e batidas ficam de fora.",
                 color = FxMuted,
                 fontSize = 14.sp,
             )
@@ -94,9 +94,9 @@ internal fun SoundEffectsPanel(
                         .padding(28.dp),
                 ) {
                     Column {
-                        Text("ENGINE LOOPSET ONLY", color = FxWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text("SOM CONTÍNUO DO MOTOR", color = FxWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "This bank does not expose additional cabin effects with a trustworthy sample mapping.",
+                            "Este banco não possui efeitos extras de cabine com mapeamento confiável.",
                             color = FxMuted,
                             fontSize = 13.sp,
                         )
@@ -112,7 +112,7 @@ internal fun SoundEffectsPanel(
 
             Spacer(Modifier.weight(1f))
             Text(
-                "Effects are mixed into the same source-rate stereo program and routed through the same AudioTrack as the engine.",
+                "Os efeitos entram na mesma mixagem estéreo do motor e saem pelo mesmo canal de áudio.",
                 color = FxMuted,
                 fontSize = 12.sp,
             )

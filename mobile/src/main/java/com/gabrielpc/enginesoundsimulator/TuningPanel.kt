@@ -76,9 +76,9 @@ private val TuneWhite = Color(0xFFF5FAFD)
 private val TuneMuted = Color(0xFF8CA7B5)
 
 private enum class TuningTab(val title: String, val subtitle: String) {
-    ENGINE("SIMULATION", "TACH + SHIFT BEHAVIOR"),
-    RESPONSE("RESPONSE", "PEDAL + RPM DYNAMICS"),
-    AUDIO("AUDIO", "SAMPLE BANK"),
+    ENGINE("SIMULAÇÃO", "GIROS E TROCAS"),
+    RESPONSE("RESPOSTA", "PEDAL E SUBIDA DE GIROS"),
+    AUDIO("ÁUDIO", "BANCO DE SONS"),
 }
 
 @Composable
@@ -133,7 +133,7 @@ private fun TuningHeader(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(10.dp).background(TuneGreen, CircleShape))
-                Text("LIVE TUNING", color = TuneWhite, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                Text("AJUSTE AO VIVO", color = TuneWhite, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 Text(
                     "// ${selectedCarName.uppercase(Locale.ROOT).take(36)}",
                     color = TuneCyan,
@@ -144,16 +144,16 @@ private fun TuningHeader(
                 )
             }
             Text(
-                "Changes apply immediately and are saved automatically • simulated sound and tach behavior only",
+                "Os ajustes valem na hora e ficam salvos • só som e comportamento simulados",
                 color = TuneMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
                 modifier = Modifier.padding(start = 22.dp, top = 4.dp),
             )
         }
-        SmallAction("RESET", TuneAmber, onReset)
+        SmallAction("REDEFINIR", TuneAmber, onReset)
         Spacer(Modifier.width(10.dp))
-        SmallAction("CLOSE", TuneCyan, onClose)
+        SmallAction("FECHAR", TuneCyan, onClose)
     }
 }
 
@@ -182,46 +182,46 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
-            "SIMULATED ENGINE",
-            "Fake RPM, shift timing, and pedal-to-sound behavior",
+            "MOTOR SIMULADO",
+            "Define os giros, as trocas e a resposta do som ao pedal",
             Modifier.weight(1f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
+                ParameterSlider("AUMENTA O LIMITE DO CONTAGIROS", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
                         redlineRpm = min(engine.redlineRpm, it - 100.0),
                         limiterRpm = min(engine.limiterRpm, it),
                     )))
                 }
-                ParameterSlider("REDLINE", engine.redlineRpm, 4_000.0..(engine.maxRpm - 100.0), "%.0f RPM") {
+                ParameterSlider("MUDA O INÍCIO DA FAIXA VERMELHA", engine.redlineRpm, 4_000.0..(engine.maxRpm - 100.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         redlineRpm = it,
                         limiterRpm = max(engine.limiterRpm, it),
                     )))
                 }
-                ParameterSlider("SOUND LIMITER", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
+                ParameterSlider("MUDA QUANDO O CORTE DE GIRO ATUA", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(limiterRpm = it)))
                 }
-                ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
+                ParameterSlider("MUDA O GIRO DE MARCHA LENTA", engine.idleRpm, 600.0..2_000.0, "%.0f") {
                     onChange(config.copy(engine = engine.copy(idleRpm = it)))
                 }
-                ParameterSlider("MAX RPM FORCE", engine.driveRpmAccelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
+                ParameterSlider("ACELERA A SUBIDA DE GIROS", engine.driveRpmAccelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(driveRpmAccelerationPerSecond = it)))
                 }
-                ParameterSlider("FULL PEDAL SWEET SPOT", engine.fullThrottleSweetSpotRpm, (engine.idleRpm + 800.0)..(engine.redlineRpm - 350.0), "%.0f RPM") {
+                ParameterSlider("MUDA O GIRO FORTE NO PÉ EMBAIXO", engine.fullThrottleSweetSpotRpm, (engine.idleRpm + 800.0)..(engine.redlineRpm - 350.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(fullThrottleSweetSpotRpm = it)))
                 }
-                ParameterSlider("FULL PEDAL KICK", engine.fullThrottleKickRpmPerSecond, 6_000.0..60_000.0, "%.0f RPM/s") {
+                ParameterSlider("AUMENTA O EMPURRÃO NO PÉ EMBAIXO", engine.fullThrottleKickRpmPerSecond, 6_000.0..60_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(fullThrottleKickRpmPerSecond = it)))
                 }
-                ParameterSlider("VIRTUAL SHIFT RPM", engine.upshiftRpm, (engine.fullThrottleSweetSpotRpm.coerceAtMost(engine.redlineRpm - 500.0) + 200.0)..(engine.redlineRpm - 50.0), "%.0f RPM") {
+                ParameterSlider("MUDA O GIRO DA TROCA VIRTUAL", engine.upshiftRpm, (engine.fullThrottleSweetSpotRpm.coerceAtMost(engine.redlineRpm - 500.0) + 200.0)..(engine.redlineRpm - 50.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
                 }
-                ParameterSlider("LIFT-OFF RPM FORCE", engine.liftOffRpmDecelerationPerSecond, 300.0..12_000.0, "%.0f RPM/s") {
+                ParameterSlider("ACELERA A QUEDA AO SOLTAR O PEDAL", engine.liftOffRpmDecelerationPerSecond, 300.0..12_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(liftOffRpmDecelerationPerSecond = it)))
                 }
-                ParameterSlider("BRAKE RPM FORCE", engine.brakeRpmDecelerationPerSecond, 2_500.0..18_000.0, "%.0f RPM/s") {
+                ParameterSlider("ACELERA A QUEDA AO FREAR", engine.brakeRpmDecelerationPerSecond, 2_500.0..18_000.0, "%.0f RPM/s") {
                     onChange(config.copy(engine = engine.copy(brakeRpmDecelerationPerSecond = it)))
                 }
             }
@@ -235,15 +235,15 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
     val currentRpm = ((state.drivetrain.rpm - engine.idleRpm) / (engine.redlineRpm - engine.idleRpm))
         .coerceIn(0.0, 1.0)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SIM PEDAL RESPONSE", "Drag points • pedal vs simulated drive request", Modifier.weight(1.05f)) {
+        PanelCard("FORÇA DO PEDAL", "Arraste os pontos • define quanto cada posição do pedal pede", Modifier.weight(1.05f)) {
             EditableCurveGraph(
                 points = engine.throttleCurve,
                 xLabel = { "${(it * 100).roundToInt()}" },
                 yLabel = { "${(it * 100).roundToInt()}" },
                 xMarkerLabel = { "${(it * 100).roundToInt()}%" },
                 yMarkerLabel = { "${(it * 100).roundToInt()}%" },
-                xAxisTitle = "PEDAL INPUT (%)",
-                yAxisTitle = "SIM DRIVE REQUEST (%)",
+                xAxisTitle = "POSIÇÃO DO PEDAL (%)",
+                yAxisTitle = "FORÇA SIMULADA (%)",
                 currentX = state.throttle,
                 accent = TuneGreen,
                 lockEndpointX = true,
@@ -252,15 +252,15 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("TACH FORCE CURVE", "Drag points • independent from road speed", Modifier.weight(1.05f)) {
+        PanelCard("FORÇA EM CADA GIRO", "Arraste os pontos • muda a rapidez da subida de giro", Modifier.weight(1.05f)) {
             EditableCurveGraph(
                 points = engine.rpmProgressionCurve,
                 xLabel = { "${(engine.idleRpm + it * (engine.redlineRpm - engine.idleRpm)).roundToInt()}" },
                 yLabel = { "${(it * 100).roundToInt()}" },
                 xMarkerLabel = { "${(engine.idleRpm + it * (engine.redlineRpm - engine.idleRpm)).roundToInt()} RPM" },
                 yMarkerLabel = { "${(it * 100).roundToInt()}%" },
-                xAxisTitle = "FAKE ENGINE SPEED (RPM)",
-                yAxisTitle = "POSITIVE FORCE (%)",
+                xAxisTitle = "GIRO SIMULADO (RPM)",
+                yAxisTitle = "FORÇA DE SUBIDA (%)",
                 currentX = currentRpm,
                 accent = TuneCyan,
                 lockEndpointX = true,
@@ -268,17 +268,17 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("PEDAL DYNAMICS", "Editable input, lift and brake timing", Modifier.weight(0.82f)) {
-            ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
+        PanelCard("TEMPO DE RESPOSTA", "Define quanto tempo os comandos levam para agir", Modifier.weight(0.82f)) {
+            ParameterSlider("DEIXA O ACELERADOR MAIS RÁPIDO", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
             }
-            ParameterSlider("THROTTLE RELEASE", engine.throttleReleaseMs, 20.0..800.0, "%.0f ms") {
+            ParameterSlider("DEIXA A SOLTADA MAIS RÁPIDA", engine.throttleReleaseMs, 20.0..800.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleReleaseMs = it)))
             }
-            ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
+            ParameterSlider("DEIXA O FREIO MAIS RÁPIDO", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
-            ParameterSlider("SIM LIFT-OFF DECEL", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
+            ParameterSlider("FREIA MAIS AO SOLTAR O PEDAL", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
                 onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
             }
             Spacer(Modifier.height(12.dp))
@@ -292,18 +292,18 @@ private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (Tun
     val audio = config.audio
     val profile = EngineSampleProfiles.find(selectedCarId)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SAMPLE OUTPUT", "The recovered bank logic is the only engine source", Modifier.weight(0.72f)) {
-            AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
+        PanelCard("SAÍDA DO ÁUDIO", "Usa somente o banco de sons do carro selecionado", Modifier.weight(0.72f)) {
+            AudioSlider("AUMENTA O VOLUME GERAL", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
             Spacer(Modifier.height(20.dp))
-            Text("PROFILE", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text("CARRO SELECIONADO", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
             Text(profile.displayName, color = TuneWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            Text("NATIVE RPM DOMAIN", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
-            Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("FAIXA ORIGINAL DO BANCO", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRETO 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            Text("${profile.layers.size} continuous layers · bank-authored RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("${profile.layers.size} camadas contínuas · mistura de giro e pedal do próprio banco", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        PanelCard("RPM LAYER COVERAGE", "Recovered FMOD regions on the bank's native parameter axis", Modifier.weight(1.85f)) {
+        PanelCard("COBERTURA DAS CAMADAS", "Faixas de giro encontradas no banco de som", Modifier.weight(1.85f)) {
             SampleBankCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
         }
     }
@@ -689,7 +689,7 @@ private fun TorquePowerGraph(engine: EngineTuning, currentSpeedKmh: Double, modi
             }
             paint.textSize = 16f
             paint.color = axisLabelColor
-            canvas.nativeCanvas.drawText("ROAD SPEED (km/h)", left + width / 2f, bottom + 55f, paint)
+            canvas.nativeCanvas.drawText("VELOCIDADE (km/h)", left + width / 2f, bottom + 55f, paint)
         }
     }
 }
@@ -921,7 +921,7 @@ private fun TorqueDistributionGraph(engine: EngineTuning, currentSpeedKmh: Doubl
             }
             paint.textSize = 16f
             paint.color = GRAPH_AXIS_LABEL_COLOR
-            canvas.nativeCanvas.drawText("ROAD SPEED (km/h)", left + width / 2f, bottom + 55f, paint)
+            canvas.nativeCanvas.drawText("VELOCIDADE (km/h)", left + width / 2f, bottom + 55f, paint)
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(255, 196, 86)
             canvas.nativeCanvas.drawText("FRONT  ${((1.0 - liveRearShare) * 100).roundToInt()}%", left, top + 20f, paint)
@@ -1014,7 +1014,7 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
                     paint,
                 )
             }
-            canvas.nativeCanvas.drawText("SHIFT EVENT", left + width / 2f, bottom + 62f, paint)
+            canvas.nativeCanvas.drawText("EVENTO DE TROCA", left + width / 2f, bottom + 62f, paint)
         }
     }
 }
@@ -1091,7 +1091,7 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
             canvas.nativeCanvas.drawText("REDLINE ${currentRedline.roundToInt()}", redlineX - 122f, top - 15f, paint)
             paint.textAlign = Paint.Align.CENTER
             paint.color = GRAPH_AXIS_LABEL_COLOR
-            canvas.nativeCanvas.drawText("NATIVE BANK RPM — DIRECT 1:1", left + width / 2f, bottom + 58f, paint)
+            canvas.nativeCanvas.drawText("RPM ORIGINAL DO BANCO — DIRETO 1:1", left + width / 2f, bottom + 58f, paint)
         }
     }
 }
@@ -1143,9 +1143,9 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
         drawPath(responsePath(engine.throttleReleaseMs), TuneCyan, style = Stroke(3f))
         drawPath(responsePath(engine.brakeResponseMs), TuneRed, style = Stroke(3f))
         val responseCurves = listOf(
-            Triple(engine.throttleAttackMs, android.graphics.Color.rgb(54, 227, 145), "ATTACK"),
-            Triple(engine.throttleReleaseMs, android.graphics.Color.rgb(53, 232, 242), "RELEASE"),
-            Triple(engine.brakeResponseMs, android.graphics.Color.rgb(255, 70, 92), "BRAKE"),
+            Triple(engine.throttleAttackMs, android.graphics.Color.rgb(54, 227, 145), "ACELERA"),
+            Triple(engine.throttleReleaseMs, android.graphics.Color.rgb(53, 232, 242), "SOLTA"),
+            Triple(engine.brakeResponseMs, android.graphics.Color.rgb(255, 70, 92), "FREIO"),
         )
         responseTimesMs.forEach { timeMs ->
             val normalizedTime = (timeMs / 1_000.0).toFloat().coerceIn(0f, 1f)
@@ -1188,11 +1188,11 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
             paint.textSize = 14f
             paint.textAlign = Paint.Align.LEFT
             paint.color = android.graphics.Color.rgb(140, 167, 181)
-            canvas.nativeCanvas.drawText("RESPONSE (%)", left, 16f, paint)
+            canvas.nativeCanvas.drawText("RESPOSTA (%)", left, 16f, paint)
             val legend = listOf(
-                "ATTACK" to android.graphics.Color.rgb(54, 227, 145),
-                "RELEASE" to android.graphics.Color.rgb(53, 232, 242),
-                "BRAKE" to android.graphics.Color.rgb(255, 70, 92),
+                "ACELERA" to android.graphics.Color.rgb(54, 227, 145),
+                "SOLTA" to android.graphics.Color.rgb(53, 232, 242),
+                "FREIO" to android.graphics.Color.rgb(255, 70, 92),
             )
             legend.forEachIndexed { index, (label, color) ->
                 paint.color = color

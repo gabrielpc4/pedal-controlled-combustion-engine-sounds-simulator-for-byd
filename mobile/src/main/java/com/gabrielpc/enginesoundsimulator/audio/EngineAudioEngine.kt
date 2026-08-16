@@ -16,8 +16,8 @@ import kotlin.math.max
 
 enum class AudioChannelMode(val displayName: String) {
     AUTO("AUTO"),
-    STEREO("STEREO"),
-    QUAD("QUAD"),
+    STEREO("ESTÉREO"),
+    QUAD("4 CANAIS"),
     SURROUND_5_1("5.1"),
     SURROUND_7_1("7.1"),
 }
@@ -645,8 +645,8 @@ class EngineAudioEngine(context: Context) {
         const val RENDER_FORCE_RELEASE_JOIN_MS = 250L
         val LAYOUT_7_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, 8, "7.1 MIRROR")
         val LAYOUT_5_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_5POINT1, 6, "5.1 MIRROR")
-        val LAYOUT_QUAD = ChannelLayout(AudioFormat.CHANNEL_OUT_QUAD, 4, "QUAD MIRROR")
-        val LAYOUT_STEREO = ChannelLayout(AudioFormat.CHANNEL_OUT_STEREO, 2, "STEREO / CABIN DSP")
+        val LAYOUT_QUAD = ChannelLayout(AudioFormat.CHANNEL_OUT_QUAD, 4, "4 CANAIS ESPELHADOS")
+        val LAYOUT_STEREO = ChannelLayout(AudioFormat.CHANNEL_OUT_STEREO, 2, "ESTÉREO / DSP DA CABINE")
     }
 }
 

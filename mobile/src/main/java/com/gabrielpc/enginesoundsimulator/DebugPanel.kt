@@ -85,46 +85,46 @@ internal fun DebugPanel(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             DebugSection(
-                title = "BYD LIVE STATUS",
+                title = "STATUS DA BYD AO VIVO",
                 accent = if (report.bydLiveWouldShowUnavailable) DbgRed else DbgGreen,
             ) {
                 Text(report.summary, color = DbgWhite, fontSize = 14.sp, lineHeight = 20.sp)
                 Spacer(Modifier.height(8.dp))
-                DebugLine("Input mode", state.inputMode.displayName)
-                DebugLine("Active input label", state.activeInput)
-                DebugLine("Reader state", state.telemetry.readerState.name)
-                DebugLine("Delivery", state.telemetry.deliveryMode)
+                DebugLine("Modo de controle", state.inputMode.displayName)
+                DebugLine("Controle em uso", state.activeInput)
+                DebugLine("Estado da leitura", state.telemetry.readerState.name)
+                DebugLine("Entrega", state.telemetry.deliveryMode)
                 if (report.blockers.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("Blockers", color = DbgRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("O que está bloqueando", color = DbgRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     report.blockers.forEach { line ->
                         Text("• $line", color = DbgRed.copy(alpha = 0.92f), fontSize = 12.sp, lineHeight = 18.sp)
                     }
                 }
                 if (report.hints.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("Likely causes / next steps", color = DbgAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Possíveis causas / próximos passos", color = DbgAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     report.hints.forEach { line ->
                         Text("• $line", color = DbgAmber.copy(alpha = 0.95f), fontSize = 12.sp, lineHeight = 18.sp)
                     }
                 }
             }
 
-            DebugSection(title = "LIVE SIGNALS", accent = DbgCyan) {
-                SignalRow("Accelerator", state.telemetry.accelerator)
-                SignalRow("Brake", state.telemetry.brake)
-                SignalRow("Speed", state.telemetry.speed)
-                DebugLine("Last poll duration", state.telemetry.lastReadDurationMs?.let { "${formatTelemetryNumber(it)} ms" } ?: "—")
-                DebugLine("Poll rate", state.telemetry.cadence.rateHz?.let { "${formatTelemetryNumber(it)} Hz" } ?: "—")
-                DebugLine("Samples", state.telemetry.cadence.sampleCount.toString())
+            DebugSection(title = "SINAIS AO VIVO", accent = DbgCyan) {
+                SignalRow("Acelerador", state.telemetry.accelerator)
+                SignalRow("Freio", state.telemetry.brake)
+                SignalRow("Velocidade", state.telemetry.speed)
+                DebugLine("Tempo da última leitura", state.telemetry.lastReadDurationMs?.let { "${formatTelemetryNumber(it)} ms" } ?: "—")
+                DebugLine("Leituras por segundo", state.telemetry.cadence.rateHz?.let { "${formatTelemetryNumber(it)} Hz" } ?: "—")
+                DebugLine("Amostras", state.telemetry.cadence.sampleCount.toString())
                 state.telemetry.lastError?.let { error ->
-                    DebugLine("Last poll error", error)
+                    DebugLine("Erro na última leitura", error)
                 }
             }
 
-            DebugSection(title = "PROBE DIAGNOSTICS", accent = DbgCyan) {
+            DebugSection(title = "DIAGNÓSTICO DA CONEXÃO", accent = DbgCyan) {
                 if (state.telemetry.diagnostics.isEmpty()) {
-                    Text("(no probe diagnostics yet)", color = DbgMuted, fontSize = 12.sp)
+                    Text("(ainda não há diagnóstico da conexão)", color = DbgMuted, fontSize = 12.sp)
                 } else {
                     state.telemetry.diagnostics.forEach { line ->
                         Text(line, color = DbgMuted, fontSize = 12.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace)
@@ -133,28 +133,28 @@ internal fun DebugPanel(
             }
 
             DebugSection(
-                title = "ENGINE SAMPLE AUDIO",
+                title = "ÁUDIO DO BANCO DE SONS",
                 accent = if (state.audio.sampleStatus == "ACTIVE") DbgGreen else DbgAmber,
             ) {
-                DebugLine("Sample status", state.audio.sampleStatus)
-                DebugLine("Sample profile", state.audio.sampleProfile)
-                DebugLine("Program format", "TRUE STEREO")
-                DebugLine("Loaded loops", state.audio.sampleLoadedLoops.toString())
-                DebugLine("Loaded effects", state.audio.sampleLoadedEffects.toString())
-                DebugLine("Effect triggers", state.audio.sampleEffectTriggers.toString())
-                DebugLine("Active effects", state.audio.sampleActiveEffects)
-                DebugLine("Decoded memory", "${(state.audio.sampleDecodedBytes / (1024 * 1024.0)).roundToInt()} MiB")
-                DebugLine("Target sample RPM", state.audio.sampleTargetRpm.toString())
-                DebugLine("Rendered sample RPM", state.audio.sampleRenderRpm.toString())
-                DebugLine("Rendered throttle", "${(state.audio.sampleThrottle * 100.0).roundToInt()}%")
-                DebugLine("Rendered frames", state.audio.sampleFramesRendered.toString())
-                DebugLine("Loop wraps", state.audio.sampleLoopWraps.toString())
-                DebugLine("Output peak", "${(state.audio.samplePeak * 100.0).roundToInt()}%")
-                DebugLine("Over-range before limiter", state.audio.sampleOverRangeSamples.toString())
-                DebugLine("Startup underruns", state.audio.startupUnderruns.toString())
-                DebugLine("New underruns", state.audio.steadyStateUnderruns.toString())
+                DebugLine("Estado do banco", statusAudioEmPortugues(state.audio.sampleStatus))
+                DebugLine("Perfil de som", state.audio.sampleProfile)
+                DebugLine("Formato", "ESTÉREO REAL")
+                DebugLine("Loops carregados", state.audio.sampleLoadedLoops.toString())
+                DebugLine("Efeitos carregados", state.audio.sampleLoadedEffects.toString())
+                DebugLine("Efeitos disparados", state.audio.sampleEffectTriggers.toString())
+                DebugLine("Efeitos ativos", state.audio.sampleActiveEffects)
+                DebugLine("Memória decodificada", "${(state.audio.sampleDecodedBytes / (1024 * 1024.0)).roundToInt()} MiB")
+                DebugLine("RPM alvo", state.audio.sampleTargetRpm.toString())
+                DebugLine("RPM tocado", state.audio.sampleRenderRpm.toString())
+                DebugLine("Acelerador no áudio", "${(state.audio.sampleThrottle * 100.0).roundToInt()}%")
+                DebugLine("Quadros tocados", state.audio.sampleFramesRendered.toString())
+                DebugLine("Voltas dos loops", state.audio.sampleLoopWraps.toString())
+                DebugLine("Pico de saída", "${(state.audio.samplePeak * 100.0).roundToInt()}%")
+                DebugLine("Acima do limite", state.audio.sampleOverRangeSamples.toString())
+                DebugLine("Falhas ao iniciar", state.audio.startupUnderruns.toString())
+                DebugLine("Falhas novas", state.audio.steadyStateUnderruns.toString())
                 Text(
-                    "Active layers: ${state.audio.sampleActiveLayers}",
+                    "Camadas ativas: ${state.audio.sampleActiveLayers}",
                     color = DbgWhite,
                     fontSize = 11.sp,
                     lineHeight = 16.sp,
@@ -162,11 +162,11 @@ internal fun DebugPanel(
                     modifier = Modifier.padding(top = 6.dp),
                 )
                 state.audio.sampleError?.let { error ->
-                    Text("Required-bank error: $error", color = DbgRed, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Erro no banco necessário: $error", color = DbgRed, fontSize = 11.sp, lineHeight = 16.sp)
                 }
             }
 
-            DebugSection(title = "PERSISTED EVENT LOG", accent = DbgCyan) {
+            DebugSection(title = "REGISTRO DE EVENTOS SALVO", accent = DbgCyan) {
                 Text(
                     text = "Path: ${PersistentDiagnosticLog.activeLogPath(context)}",
                     color = DbgMuted,
@@ -196,7 +196,7 @@ private fun DebugHeader(
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("DIAGNOSTICS", color = DbgWhite, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                Text("DIAGNÓSTICO", color = DbgWhite, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 Text(
                     text = " ${AppBuildInfo.diagnosticTitleSuffix}",
                     color = DbgCyan,
@@ -207,18 +207,18 @@ private fun DebugHeader(
                 )
             }
             Text(
-                "BYD telemetry probe, live signal validity, and persisted event log · built ${AppBuildInfo.builtAtUtc}",
+                "Conexão BYD, validade dos sinais e registro salvo · compilado em ${AppBuildInfo.builtAtUtc}",
                 color = DbgMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        DebugAction("RUN AUDIO TEST", DbgGreen, onRunSampleValidation)
+        DebugAction("TESTAR ÁUDIO", DbgGreen, onRunSampleValidation)
         Spacer(Modifier.width(10.dp))
-        DebugAction("RETRY BYD", DbgAmber, onRestartBydReader)
+        DebugAction("TENTAR BYD", DbgAmber, onRestartBydReader)
         Spacer(Modifier.width(10.dp))
-        DebugAction("CLOSE", DbgCyan, onClose)
+        DebugAction("FECHAR", DbgCyan, onClose)
     }
 }
 
@@ -254,7 +254,7 @@ private fun SignalRow(label: String, signal: SignalValue) {
     val status = if (signal.isValid) {
         "OK"
     } else {
-        "INVALID"
+        "INVÁLIDO"
     }
     val statusColor = if (signal.isValid) {
         DbgGreen
@@ -268,9 +268,9 @@ private fun SignalRow(label: String, signal: SignalValue) {
         }
         val raw = signal.raw?.let { formatTelemetryNumber(it) } ?: "—"
         val value = signal.value?.let { formatTelemetryNumber(it) } ?: "—"
-        val issue = signal.issue ?: "none"
+        val issue = signal.issue ?: "nenhum"
         Text(
-            "raw=$raw  value=$value  issue=$issue",
+            "bruto=$raw  valor=$value  problema=$issue",
             color = DbgMuted,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
