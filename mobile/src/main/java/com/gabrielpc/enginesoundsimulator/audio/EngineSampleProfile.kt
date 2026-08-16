@@ -146,7 +146,6 @@ internal object EngineSampleProfiles {
         lamborghiniAventadorSvProfile(),
     )
     val maximumSupportedRpm = all.maxOf { it.maximumRpm }
-    private val exteriorVariants = mapOf(default.id to huracanTrofeoEvo2ExteriorProfile())
 
     fun find(id: String?): EngineSampleProfile = all.firstOrNull { it.id == id } ?: default
 
@@ -154,11 +153,6 @@ internal object EngineSampleProfiles {
         val current = all.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
         return all[(current + offset).mod(all.size)]
     }
-
-    fun hasExteriorVariant(profile: EngineSampleProfile): Boolean = exteriorVariants.containsKey(profile.id)
-
-    fun playbackProfile(profile: EngineSampleProfile, exteriorEnabled: Boolean): EngineSampleProfile =
-        if (exteriorEnabled) exteriorVariants[profile.id] ?: profile else profile
 
     fun specificationsFor(id: String): CarSpecifications = specifications[id] ?: unavailableSpecifications
 

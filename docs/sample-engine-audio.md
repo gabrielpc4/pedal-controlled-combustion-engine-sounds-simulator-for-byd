@@ -2,7 +2,7 @@
 
 ## Status
 
-The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán header additionally exposes a persisted `CABIN`/`EXTERIOR` toggle. `EXTERIOR` restarts the renderer against the source bank's separately decoded `engine_ext` loopset (including its explicitly named exterior idle loop); `CABIN` returns to the reconstructed interior event. The other supplied banks do not have an equally verified exterior loopset packaged by this build, so they remain cabin-only. There is no procedural renderer, fallback sound, or preview player. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
+The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán alone uses its explicitly named exterior idle loop while stationary; all of its moving layers, and every layer of the other profiles, remain cabin material. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
 An `EngineSampleProfile` owns the identity, preview, authored output sample rate, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. The arrows beside the dashboard car select the adjacent profile, persist its ID, apply its gearbox/RPM defaults, and restart the audio renderer against only that bank. Selection and loading are recorded as `car_profile_changed`, `audio_profile_selected`, and `sample_engine_loaded` events.
 
@@ -42,7 +42,7 @@ Transmission voices loop continuously, follow the simulated RPM axis, and fade i
 
 ### Profile reconstruction confidence
 
-The Huracán cabin profile is the exact recovered FMOD control graph described below. Its optional exterior profile uses explicitly labelled exterior streams, contiguous RPM coverage, and adjacent-band crossfades; the original exterior event's automation was not fully recoverable. The F430, BMW, and Aventador profiles use recovered continuous interior stream names/root RPMs plus their source-car RPM/gear data, then use a generic adjacent-band crossfade where the original route automation was not recoverable. The 812 bank strips stream names; its continuous roots are recovered, but load/coast roles cannot be proven, so those voices use a neutral throttle blend rather than invented coast assignments. These distinctions are deliberate and remain visible in source rather than being presented as equally exact bank reconstructions.
+The Huracán profile is the exact recovered FMOD control graph described below. The F430, BMW, and Aventador profiles use recovered continuous interior stream names/root RPMs plus their source-car RPM/gear data, then use a generic adjacent-band crossfade where the original route automation was not recoverable. The 812 bank strips stream names; its continuous roots are recovered, but load/coast roles cannot be proven, so those voices use a neutral throttle blend rather than invented coast assignments. These distinctions are deliberate and remain visible in source rather than being presented as equally exact bank reconstructions.
 
 ## Recovered bank model
 

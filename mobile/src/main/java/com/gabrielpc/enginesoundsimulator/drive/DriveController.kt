@@ -9,7 +9,6 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
-import com.gabrielpc.enginesoundsimulator.audio.SoundPerspectiveRepository
 import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
@@ -53,8 +52,6 @@ data class DriveSnapshot(
     val selectedCarPreviewAsset: String,
     val selectedCarIndex: Int,
     val availableCarCount: Int,
-    val exteriorSoundAvailable: Boolean,
-    val exteriorSoundEnabled: Boolean,
     val soundEffects: List<SoundEffectOption>,
 )
 
@@ -69,10 +66,8 @@ data class SoundEffectOption(
 class DriveController(context: Context) {
     private val tuningRepository = TuningRepository(context.applicationContext)
     private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
-    private val soundPerspectiveRepository = SoundPerspectiveRepository(context.applicationContext)
     private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
-    private val exteriorSoundEnabled = AtomicBoolean(soundPerspectiveRepository.exteriorEnabled(selectedSampleProfile.get()))
     private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private var appliedTuning = tuningConfig.get()
@@ -115,13 +110,11 @@ class DriveController(context: Context) {
         selectedCarPreviewAsset = selectedSampleProfile.get().previewAssetName,
         selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
         availableCarCount = EngineSampleProfiles.all.size,
-        exteriorSoundAvailable = EngineSampleProfiles.hasExteriorVariant(selectedSampleProfile.get()),
-        exteriorSoundEnabled = exteriorSoundEnabled.get() && EngineSampleProfiles.hasExteriorVariant(selectedSampleProfile.get()),
-        soundEffects = soundEffectOptions(activeAudioProfile(), enabledEffectMask.get()),
+        soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
     )
 
     init {
-        audioEngine.setSampleProfile(activeAudioProfile())
+        audioEngine.setSampleProfile(selectedSampleProfile.get())
         PersistentDiagnosticLog.event(
             "drive_controller_created",
             "profile=${profile.name} redline_rpm=${profile.redlineRpm.roundToInt()} " +
@@ -230,31 +223,17 @@ class DriveController(context: Context) {
         )
     }
 
-    fun toggleExteriorSound() {
-        val selected = selectedSampleProfile.get()
-        if (!EngineSampleProfiles.hasExteriorVariant(selected)) return
-        val enabled = !exteriorSoundEnabled.get()
-        exteriorSoundEnabled.set(enabled)
-        soundPerspectiveRepository.setExteriorEnabled(selected, enabled)
-        audioEngine.setSampleProfile(activeAudioProfile())
-        PersistentDiagnosticLog.event(
-            "sound_perspective_changed",
-            "profile=${selected.id} perspective=${if (enabled) "EXTERIOR" else "CABIN"}",
-        )
-    }
-
     private fun selectAdjacentCar(offset: Int) {
         val previous = selectedSampleProfile.get()
         val selected = EngineSampleProfiles.adjacent(previous.id, offset)
         if (selected.id == previous.id) return
         selectedSampleProfile.set(selected)
-        exteriorSoundEnabled.set(soundPerspectiveRepository.exteriorEnabled(selected))
         enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(selected))
         selectedCarRepository.save(selected)
         val tuning = tuningConfig.get().withSampleProfile(selected)
         tuningConfig.set(tuning)
         tuningRepository.save(tuning)
-        audioEngine.setSampleProfile(activeAudioProfile())
+        audioEngine.setSampleProfile(selected)
         PersistentDiagnosticLog.event(
             "car_profile_changed",
             "from=${previous.id} to=${selected.id} layers=${selected.layers.size} " +
@@ -455,16 +434,9 @@ class DriveController(context: Context) {
             selectedCarPreviewAsset = selectedCar.previewAssetName,
             selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
             availableCarCount = EngineSampleProfiles.all.size,
-            exteriorSoundAvailable = EngineSampleProfiles.hasExteriorVariant(selectedCar),
-            exteriorSoundEnabled = exteriorSoundEnabled.get() && EngineSampleProfiles.hasExteriorVariant(selectedCar),
-            soundEffects = soundEffectOptions(activeAudioProfile(), enabledEffectMask.get()),
+            soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
         )
     }
-
-    private fun activeAudioProfile() = EngineSampleProfiles.playbackProfile(
-        profile = selectedSampleProfile.get(),
-        exteriorEnabled = exteriorSoundEnabled.get(),
-    )
 
     /**
      * Persists only state transitions plus a one-second heartbeat. The logger fsyncs entries, so
