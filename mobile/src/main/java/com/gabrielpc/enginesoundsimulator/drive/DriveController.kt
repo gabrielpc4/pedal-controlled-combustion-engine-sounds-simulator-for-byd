@@ -9,6 +9,7 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
+import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -51,13 +52,23 @@ data class DriveSnapshot(
     val selectedCarPreviewAsset: String,
     val selectedCarIndex: Int,
     val availableCarCount: Int,
+    val soundEffects: List<SoundEffectOption>,
+)
+
+data class SoundEffectOption(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val enabled: Boolean,
 )
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
 class DriveController(context: Context) {
     private val tuningRepository = TuningRepository(context.applicationContext)
     private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
+    private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
+    private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
@@ -75,6 +86,8 @@ class DriveController(context: Context) {
     private var lastShiftWasActive = false
     private var lastInputSignature = ""
     private var nextHeartbeatAtElapsedMs = 0L
+    private var lastEffectTelemetryProfile = ""
+    private var lastEffectTriggerCount = 0L
     private val validationThread = AtomicReference<Thread?>(null)
 
     @Volatile
@@ -97,6 +110,7 @@ class DriveController(context: Context) {
         selectedCarPreviewAsset = selectedSampleProfile.get().previewAssetName,
         selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
         availableCarCount = EngineSampleProfiles.all.size,
+        soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
     )
 
     init {
@@ -198,11 +212,22 @@ class DriveController(context: Context) {
 
     fun selectNextCar() = selectAdjacentCar(1)
 
+    fun setSoundEffectEnabled(controlId: String, enabled: Boolean) {
+        val selected = selectedSampleProfile.get()
+        val updatedMask = soundEffectsRepository.setEnabled(selected, controlId, enabled)
+        enabledEffectMask.set(updatedMask)
+        PersistentDiagnosticLog.event(
+            "sound_effect_toggled",
+            "profile=${selected.id} effect=$controlId enabled=$enabled mask=$updatedMask",
+        )
+    }
+
     private fun selectAdjacentCar(offset: Int) {
         val previous = selectedSampleProfile.get()
         val selected = EngineSampleProfiles.adjacent(previous.id, offset)
         if (selected.id == previous.id) return
         selectedSampleProfile.set(selected)
+        enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(selected))
         selectedCarRepository.save(selected)
         val tuning = tuningConfig.get().withSampleProfile(selected)
         tuningConfig.set(tuning)
@@ -379,6 +404,13 @@ class DriveController(context: Context) {
                 rpm = drivetrain.rpm,
                 throttle = drivetrain.smoothedThrottle,
                 enabled = enabled,
+                enabledEffectMask = enabledEffectMask.get(),
+                shiftSerial = drivetrain.shiftSerial,
+                shiftDirection = when (drivetrain.shiftDirection) {
+                    ShiftDirection.UP -> 1
+                    ShiftDirection.DOWN -> -1
+                    ShiftDirection.NONE -> 0
+                },
                 tuning = tuning.audio,
             ),
         )
@@ -399,6 +431,7 @@ class DriveController(context: Context) {
             selectedCarPreviewAsset = selectedCar.previewAssetName,
             selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
             availableCarCount = EngineSampleProfiles.all.size,
+            soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
         )
     }
 
@@ -451,6 +484,18 @@ class DriveController(context: Context) {
         if (nowElapsedMs >= nextHeartbeatAtElapsedMs) {
             nextHeartbeatAtElapsedMs = nowElapsedMs + DIAGNOSTIC_HEARTBEAT_INTERVAL_MS
             val audio = audioEngine.state()
+            if (audio.sampleProfile != lastEffectTelemetryProfile) {
+                lastEffectTelemetryProfile = audio.sampleProfile
+                lastEffectTriggerCount = audio.sampleEffectTriggers
+            } else if (audio.sampleEffectTriggers > lastEffectTriggerCount) {
+                PersistentDiagnosticLog.event(
+                    "sample_effect_triggered",
+                    "profile=${audio.sampleProfile} count=${audio.sampleEffectTriggers} " +
+                        "delta=${audio.sampleEffectTriggers - lastEffectTriggerCount} " +
+                        "active=${audio.sampleActiveEffects.replace(' ', '_')}",
+                )
+                lastEffectTriggerCount = audio.sampleEffectTriggers
+            }
             PersistentDiagnosticLog.event(
                 "drive_heartbeat",
                 "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
@@ -467,6 +512,8 @@ class DriveController(context: Context) {
                     "sample_target_rpm=${audio.sampleTargetRpm} sample_render_rpm=${audio.sampleRenderRpm} " +
                     "rpm_delta=${audio.sampleRenderRpm - drivetrain.rpm.roundToInt()} " +
                     "sample_loops=${audio.sampleLoadedLoops} " +
+                    "sample_effects=${audio.sampleLoadedEffects} effect_mask=${enabledEffectMask.get()} " +
+                    "effect_triggers=${audio.sampleEffectTriggers} active_effects=${audio.sampleActiveEffects} " +
                     "sample_throttle_pct=${(audio.sampleThrottle * 100.0).roundToInt()} " +
                     "layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
                     "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
@@ -496,6 +543,18 @@ class DriveController(context: Context) {
     }
 
     private data class ValidationStage(val throttle: Double, val durationMs: Long)
+}
+
+private fun soundEffectOptions(
+    profile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile,
+    mask: Long,
+): List<SoundEffectOption> = profile.effectControls.map { control ->
+    SoundEffectOption(
+        id = control.id,
+        displayName = control.displayName,
+        description = control.description,
+        enabled = mask and control.bit != 0L,
+    )
 }
 
 private fun sampleAudioLogDetails(audio: AudioOutputState): String =

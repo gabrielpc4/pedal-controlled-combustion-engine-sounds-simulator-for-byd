@@ -40,6 +40,7 @@ data class AudioOutputState(
     val focusGranted: Boolean = false,
     val sampleProfile: String = "none",
     val sampleLoadedLoops: Int = 0,
+    val sampleLoadedEffects: Int = 0,
     val sampleDecodedBytes: Long = 0L,
     val sampleTargetRpm: Int = 0,
     val sampleRenderRpm: Int = 0,
@@ -49,6 +50,8 @@ data class AudioOutputState(
     val sampleLoopWraps: Long = 0L,
     val samplePeak: Double = 0.0,
     val sampleOverRangeSamples: Long = 0L,
+    val sampleEffectTriggers: Long = 0L,
+    val sampleActiveEffects: String = "none",
     val sampleError: String? = null,
     val error: String? = null,
 )
@@ -313,6 +316,7 @@ class EngineAudioEngine(context: Context) {
             PersistentDiagnosticLog.event(
                 "sample_engine_loaded",
                 "profile=${initialDiagnostics.profileId} loops=${initialDiagnostics.loadedLoops} " +
+                    "effects=${initialDiagnostics.loadedEffects} " +
                     "decoded_bytes=${initialDiagnostics.decodedBytes} output_rate=$sampleRate " +
                     "device_native_rate=${nativeSampleRate()} quality=SOURCE_RATE_TRANSPARENT " +
                     "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
@@ -408,6 +412,7 @@ class EngineAudioEngine(context: Context) {
                     focusGranted = previous.focusGranted,
                     sampleProfile = sampleProfile.id,
                     sampleLoadedLoops = initialDiagnostics.loadedLoops,
+                    sampleLoadedEffects = initialDiagnostics.loadedEffects,
                     sampleDecodedBytes = initialDiagnostics.decodedBytes,
                 )
             }
@@ -445,6 +450,8 @@ class EngineAudioEngine(context: Context) {
                             sampleLoopWraps = sampleDiagnostics.loopWraps,
                             samplePeak = sampleDiagnostics.peak,
                             sampleOverRangeSamples = sampleDiagnostics.overRangeSamples,
+                            sampleEffectTriggers = sampleDiagnostics.effectTriggers,
+                            sampleActiveEffects = sampleDiagnostics.activeEffects,
                         )
                     }
                 }

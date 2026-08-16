@@ -101,6 +101,29 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
         upshiftDurationSeconds = 0.060,
         downshiftDurationSeconds = 0.150,
         layers = layers,
+        effects = listOf(
+            SampleEffectSpec(
+                id = "transmission_loop",
+                control = SampleEffectControls.transmission,
+                assetName = "fx_transmission.wav",
+                trigger = SampleEffectTrigger.TRANSMISSION_LOOP,
+                baseGainDb = -17.0,
+            ),
+            SampleEffectSpec(
+                id = "shift_up",
+                control = SampleEffectControls.gearChanges,
+                assetName = "fx_shift_up.wav",
+                trigger = SampleEffectTrigger.SHIFT_UP,
+                baseGainDb = -7.0,
+            ),
+            SampleEffectSpec(
+                id = "shift_down",
+                control = SampleEffectControls.gearChanges,
+                assetName = "fx_shift_down.wav",
+                trigger = SampleEffectTrigger.SHIFT_DOWN,
+                baseGainDb = -7.0,
+            ),
+        ),
         throttleOutputGainDb = throttleOutputGain,
     )
 }

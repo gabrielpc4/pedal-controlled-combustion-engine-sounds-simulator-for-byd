@@ -25,6 +25,12 @@ internal fun ferrariF430Gt2Profile() = bandProfile(
         RootedSample("s011.wav", 2_400.0), RootedSample("s059.wav", 4_900.0),
         RootedSample("s047.wav", 7_500.0),
     ),
+    effects = listOf(
+        SampleEffectSpec("transmission_loop", SampleEffectControls.transmission, "fx_transmission.wav", SampleEffectTrigger.TRANSMISSION_LOOP, -18.0),
+        SampleEffectSpec("shift_up", SampleEffectControls.gearChanges, "fx_shift.wav", SampleEffectTrigger.SHIFT_UP, -5.0),
+        SampleEffectSpec("shift_down", SampleEffectControls.gearChanges, "fx_shift.wav", SampleEffectTrigger.SHIFT_DOWN, -7.0),
+        SampleEffectSpec("overrun", SampleEffectControls.exhaustOverrun, "fx_overrun.wav", SampleEffectTrigger.THROTTLE_LIFT, -10.0, 2_500.0),
+    ),
 )
 
 internal fun bmwM8CoupeProfile() = bandProfile(
@@ -52,6 +58,11 @@ internal fun bmwM8CoupeProfile() = bandProfile(
         RootedSample("s015.wav", 6_964.0, -4.0), RootedSample("s044.wav", 7_136.0, -2.5),
     ),
     textures = listOf(RootedSample("s025.wav", 6_823.0, -6.0)),
+    effects = listOf(
+        SampleEffectSpec("transmission_loop", SampleEffectControls.transmission, "fx_transmission.wav", SampleEffectTrigger.TRANSMISSION_LOOP, -19.0),
+        SampleEffectSpec("shift_up", SampleEffectControls.gearChanges, "fx_shift_up.wav", SampleEffectTrigger.SHIFT_UP, -5.0),
+        SampleEffectSpec("shift_down", SampleEffectControls.gearChanges, "fx_shift_down.wav", SampleEffectTrigger.SHIFT_DOWN, -5.0),
+    ),
 )
 
 internal fun lamborghiniAventadorSvProfile() = bandProfile(
@@ -80,6 +91,12 @@ internal fun lamborghiniAventadorSvProfile() = bandProfile(
         RootedSample("s063.wav", 3_350.0), RootedSample("s046.wav", 4_570.0),
         RootedSample("s117.wav", 6_220.0), RootedSample("s048.wav", 6_720.0),
         RootedSample("s118.wav", 7_600.0), RootedSample("s082.wav", 8_850.0),
+    ),
+    effects = listOf(
+        SampleEffectSpec("transmission_loop", SampleEffectControls.transmission, "fx_transmission.wav", SampleEffectTrigger.TRANSMISSION_LOOP, -17.0),
+        SampleEffectSpec("shift_up", SampleEffectControls.gearChanges, "fx_shift.wav", SampleEffectTrigger.SHIFT_UP, -8.0),
+        SampleEffectSpec("shift_down", SampleEffectControls.gearChanges, "fx_shift.wav", SampleEffectTrigger.SHIFT_DOWN, -10.0),
+        SampleEffectSpec("overrun", SampleEffectControls.exhaustOverrun, "fx_overrun.wav", SampleEffectTrigger.THROTTLE_LIFT, -11.0, 2_800.0),
     ),
 )
 
@@ -134,6 +151,7 @@ private fun bandProfile(
     load: List<RootedSample>,
     coast: List<RootedSample>,
     textures: List<RootedSample> = emptyList(),
+    effects: List<SampleEffectSpec> = emptyList(),
     neutralBlend: Boolean = false,
 ): EngineSampleProfile {
     val loadCurve = if (neutralBlend) dbCurve(0.0 to -5.0, 0.35 to -2.5, 1.0 to 0.0)
@@ -158,7 +176,7 @@ private fun bandProfile(
         redlineRpm = redlineRpm, limiterRpm = limiterRpm, upshiftRpm = upshiftRpm,
         gearRatios = gears,
         upshiftDurationSeconds = upshiftSeconds, downshiftDurationSeconds = downshiftSeconds,
-        layers = layers, throttleOutputGainDb = dbCurve(0.0 to 0.0, 1.0 to 0.0),
+        layers = layers, effects = effects, throttleOutputGainDb = dbCurve(0.0 to 0.0, 1.0 to 0.0),
     )
 }
 

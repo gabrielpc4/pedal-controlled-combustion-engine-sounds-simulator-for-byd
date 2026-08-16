@@ -54,6 +54,8 @@ AAOS media-template shell and are not the BYD application.
 - UI torque in kgf·m and power in values labeled HP (metric PS/cv), with wheel-derived graph values cosmetically scaled to motor ratings — see [UI display decisions](ui-display-and-simulation-decisions.md);
 - profile-based multi-layer sample audio, audio focus handling, and experimental logical
   stereo/quad/5.1/7.1 output; local recordings under `audio_samples/` are ignored and must never be committed;
+- profile-specific optional cabin powertrain effects (gear changes, transmission, and verified
+  exhaust overrun) mixed in the same renderer, with persisted per-car checkboxes in `CAR EFFECTS`;
 - read-only reflective probing/polling of BYD pedal and speed getters, with simulator fallback;
 - durable app-private diagnostics, including crash retention and shift transitions.
 
@@ -64,10 +66,10 @@ combustion-engine clutch bog, torque interruption, or launch lag into the vehicl
 
 | Area | Key files | Responsibility |
 | --- | --- | --- |
-| UI | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt`, `TuningPanel.kt` | Compose dashboard, pedals, P/N/D shifter, target viewport, tuning UI |
+| UI | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt`, `TuningPanel.kt`, `SoundEffectsPanel.kt` | Compose dashboard, pedals, P/N/D shifter, target viewport, tuning and effect controls |
 | Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, transmission position, simulation/audio coordination, transition/heartbeat logging |
 | Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | EV road force, synthetic RPM/gears, P/N/D behavior, shifts, live-speed handling |
-| Audio | `audio/EngineAudioEngine.kt`, `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `WavPcmDecoder.kt` | AudioTrack lifecycle, profile automation, loop mixing/resampling, focus, and routing diagnostics |
+| Audio | `audio/EngineAudioEngine.kt`, `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `SoundEffectsRepository.kt`, `WavPcmDecoder.kt` | AudioTrack lifecycle, profile automation, engine/effect mixing, per-car persistence, resampling, focus, and diagnostics |
 | Telemetry | `telemetry/BydSpeedReader.kt`, `telemetry/BydReadOnlyPermissionContext.kt` | reflective BYD capability probe, restricted client-context compatibility, and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
 | UI display | `VehicleDisplayUnits.kt`, `TuningPanel.kt` | cosmetic kgfm/HP conversions and graph annotation; does not alter physics |

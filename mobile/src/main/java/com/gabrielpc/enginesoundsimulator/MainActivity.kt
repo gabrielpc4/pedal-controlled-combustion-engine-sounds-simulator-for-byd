@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
                         onRunSampleValidation = controller::runSampleAudioValidation,
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
+                        onSoundEffectChange = controller::setSoundEffectEnabled,
                     )
                 }
             }
@@ -208,9 +209,11 @@ private fun MotorSoundDashboard(
     onRunSampleValidation: () -> Unit,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
+    onSoundEffectChange: (String, Boolean) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
+    var effectsOpen by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
@@ -219,7 +222,7 @@ private fun MotorSoundDashboard(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (tuningOpen || debugOpen) return@onPreviewKeyEvent false
+                if (tuningOpen || debugOpen || effectsOpen) return@onPreviewKeyEvent false
                 val pressed = event.type == KeyEventType.KeyDown
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
@@ -268,6 +271,7 @@ private fun MotorSoundDashboard(
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
                         onOpenDebug = { debugOpen = true },
+                        onOpenEffects = { effectsOpen = true },
                     )
 
                     Row(
@@ -324,6 +328,14 @@ private fun MotorSoundDashboard(
                         onClose = { debugOpen = false },
                     )
                 }
+
+                if (effectsOpen) {
+                    SoundEffectsPanel(
+                        state = state,
+                        onEffectChange = onSoundEffectChange,
+                        onClose = { effectsOpen = false },
+                    )
+                }
             }
         }
     }
@@ -339,6 +351,7 @@ private fun DashboardHeader(
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
     onOpenDebug: () -> Unit,
+    onOpenEffects: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -383,6 +396,12 @@ private fun DashboardHeader(
             secondary = "BYD / LOGS",
             accent = if (state.activeInput == "BYD UNAVAILABLE") Red else Cyan,
             onClick = onOpenDebug,
+        )
+        HeaderButton(
+            primary = if (state.soundEffects.isEmpty()) "ENGINE" else "${state.soundEffects.count { it.enabled }}/${state.soundEffects.size} ON",
+            secondary = "CAR EFFECTS",
+            accent = if (state.soundEffects.any { it.enabled }) Green else Muted,
+            onClick = onOpenEffects,
         )
         HeaderButton(
             primary = "TUNE",

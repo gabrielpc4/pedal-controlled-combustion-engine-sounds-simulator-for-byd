@@ -20,7 +20,8 @@ class SampleEngineRendererTest {
 
         EngineSampleProfiles.all.forEach { candidate ->
             assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())
-            assertEquals(candidate.layers.size, candidate.requiredAssets.size)
+            assertTrue(candidate.requiredAssets.containsAll(candidate.layers.map { it.assetName }))
+            assertTrue(candidate.requiredAssets.containsAll(candidate.effects.map { it.assetName }))
             assertTrue(candidate.outputSampleRate == 44_100 || candidate.outputSampleRate == 48_000)
             for (rpm in candidate.idleRpm.toInt()..candidate.limiterRpm.toInt() step 25) {
                 val onLoad = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0) }
@@ -34,7 +35,8 @@ class SampleEngineRendererTest {
     @Test
     fun profileContainsRecoveredContinuousEngineEvent() {
         assertEquals(24, profile.layers.size)
-        assertEquals(24, profile.requiredAssets.size)
+        assertEquals(27, profile.requiredAssets.size)
+        assertEquals(3, profile.effects.size)
         assertEquals(7, profile.gearRatios.size)
         assertEquals(10_000.0, profile.maximumRpm, 0.0)
         assertEquals(8_350.0, profile.limiterRpm, 0.0)
@@ -145,6 +147,62 @@ class SampleEngineRendererTest {
         }
 
         assertTrue((output.indices step 2).any { output[it] != output[it + 1] })
+    }
+
+    @Test
+    fun effectMaskControlsTransmissionAndShiftEventsWithoutASecondAudioPath() {
+        val enabled = SampleEffectControls.transmission.bit or SampleEffectControls.gearChanges.bit
+        val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
+        val output = ShortArray(1_920)
+
+        repeat(10) {
+            renderer.render(
+                EngineAudioFrame(rpm = 4_500.0, throttle = 0.6, enabledEffectMask = enabled),
+                output,
+                gain = 0.6,
+            )
+        }
+        renderer.render(
+            EngineAudioFrame(
+                rpm = 7_800.0,
+                throttle = 1.0,
+                enabledEffectMask = enabled,
+                shiftSerial = 1,
+                shiftDirection = 1,
+            ),
+            output,
+            gain = 0.6,
+        )
+        repeat(9) {
+            renderer.render(
+                EngineAudioFrame(
+                    rpm = 6_000.0,
+                    throttle = 0.7,
+                    enabledEffectMask = enabled,
+                    shiftSerial = 1,
+                    shiftDirection = 1,
+                ),
+                output,
+                gain = 0.6,
+            )
+        }
+
+        val diagnostics = renderer.diagnostics()
+        assertEquals(profile.effects.size, diagnostics.loadedEffects)
+        assertEquals(1L, diagnostics.effectTriggers)
+        assertTrue(diagnostics.activeEffects.contains("transmission_loop"))
+    }
+
+    @Test
+    fun disabledEffectDoesNotTriggerOnShift() {
+        val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
+        val output = ShortArray(1_920)
+        renderer.render(EngineAudioFrame(shiftSerial = 0), output, gain = 0.5)
+        renderer.render(EngineAudioFrame(shiftSerial = 1, shiftDirection = 1), output, gain = 0.5)
+        repeat(8) { renderer.render(EngineAudioFrame(shiftSerial = 1), output, gain = 0.5) }
+
+        assertEquals(0L, renderer.diagnostics().effectTriggers)
+        assertEquals("none", renderer.diagnostics().activeEffects)
     }
 
     @Test

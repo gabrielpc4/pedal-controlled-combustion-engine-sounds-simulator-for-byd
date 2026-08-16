@@ -4,10 +4,12 @@ import android.content.res.AssetManager
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
+import kotlin.math.pow
 
 internal data class SampleRendererDiagnostics(
     val profileId: String = EngineSampleProfiles.default.id,
     val loadedLoops: Int = 0,
+    val loadedEffects: Int = 0,
     val decodedBytes: Long = 0,
     val targetRpm: Int = 0,
     val renderRpm: Int = 0,
@@ -17,6 +19,8 @@ internal data class SampleRendererDiagnostics(
     val loopWraps: Long = 0,
     val peak: Double = 0.0,
     val overRangeSamples: Long = 0,
+    val effectTriggers: Long = 0,
+    val activeEffects: String = "none",
 )
 
 /** A profile-driven reconstruction of one FMOD engine event. */
@@ -24,6 +28,7 @@ internal class SampleEngineRenderer private constructor(
     private val outputSampleRate: Int,
     private val profile: EngineSampleProfile,
     private val voices: List<LoopVoice>,
+    private val effectVoices: List<EffectVoice>,
     private val decodedBytes: Long,
 ) {
     private var smoothedRpm = profile.idleRpm
@@ -35,9 +40,13 @@ internal class SampleEngineRenderer private constructor(
     private var loopWraps = 0L
     private var overRangeSamples = 0L
     private var renderedBlocks = 0L
+    private var effectTriggers = 0L
+    private var lastShiftSerial: Long? = null
+    private var throttleLiftArmed = false
     private var diagnostics = SampleRendererDiagnostics(
         profileId = profile.id,
         loadedLoops = voices.size,
+        loadedEffects = effectVoices.size,
         decodedBytes = decodedBytes,
     )
 
@@ -54,6 +63,7 @@ internal class SampleEngineRenderer private constructor(
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
 
         updateVoiceTargets(smoothedRpm, smoothedThrottle)
+        updateEffectTargetsAndTriggers(target)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
         val targetProfileOutputGain = profile.outputGainAt(smoothedThrottle)
         val targetEnabled = if (target.enabled) 1.0 else 0.0
@@ -74,6 +84,14 @@ internal class SampleEngineRenderer private constructor(
                 }
                 // FMOD timelines keep running even while a layer is inaudible. Doing the same
                 // prevents an audible sample restart when an RPM or throttle fade opens again.
+                if (voice.advance()) loopWraps += 1
+            }
+            for (voice in effectVoices) {
+                voice.gain += (voice.targetGain - voice.gain) * layerAlpha
+                if (voice.isAudible) {
+                    mixedLeft += voice.readCubic(0) * voice.gain
+                    mixedRight += voice.readCubic(1) * voice.gain
+                }
                 if (voice.advance()) loopWraps += 1
             }
             masterGain += (targetMaster - masterGain) * masterAlpha
@@ -108,6 +126,7 @@ internal class SampleEngineRenderer private constructor(
             diagnostics = SampleRendererDiagnostics(
                 profileId = profile.id,
                 loadedLoops = voices.size,
+                loadedEffects = effectVoices.size,
                 decodedBytes = decodedBytes,
                 targetRpm = requestedRpm.toInt(),
                 renderRpm = smoothedRpm.toInt(),
@@ -117,7 +136,54 @@ internal class SampleEngineRenderer private constructor(
                 loopWraps = loopWraps,
                 peak = blockPeak,
                 overRangeSamples = overRangeSamples,
+                effectTriggers = effectTriggers,
+                activeEffects = effectVoices.filter { it.isAudible || it.targetGain > SILENCE_GAIN }
+                    .joinToString(",") { it.spec.id }
+                    .ifBlank { "none" },
             )
+        }
+    }
+
+    private fun updateEffectTargetsAndTriggers(target: EngineAudioFrame) {
+        val mask = target.enabledEffectMask
+        val normalizedRpm = ((smoothedRpm - profile.idleRpm) / (profile.limiterRpm - profile.idleRpm))
+            .coerceIn(0.0, 1.0)
+        effectVoices.filter { it.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP }.forEach { voice ->
+            val enabled = mask and voice.spec.control.bit != 0L
+            voice.targetGain = if (enabled) {
+                voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+            } else {
+                0.0
+            }
+            voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
+                (0.55 + normalizedRpm * 1.25)
+        }
+
+        val previousShift = lastShiftSerial
+        if (previousShift == null) {
+            lastShiftSerial = target.shiftSerial
+        } else if (target.shiftSerial != previousShift) {
+            lastShiftSerial = target.shiftSerial
+            triggerOneShots(
+                if (target.shiftDirection > 0) SampleEffectTrigger.SHIFT_UP else SampleEffectTrigger.SHIFT_DOWN,
+                mask,
+                smoothedRpm,
+            )
+        }
+
+        if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
+        if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
+            throttleLiftArmed = false
+            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm)
+        }
+    }
+
+    private fun triggerOneShots(trigger: SampleEffectTrigger, mask: Long, rpm: Double) {
+        effectVoices.filter {
+            it.spec.trigger == trigger && mask and it.spec.control.bit != 0L && rpm >= it.spec.minimumRpm
+        }.forEach {
+            it.trigger()
+            effectTriggers += 1
         }
     }
 
@@ -173,21 +239,97 @@ internal class SampleEngineRenderer private constructor(
         }
     }
 
+    private class EffectVoice(
+        val spec: SampleEffectSpec,
+        val data: PcmLoopData,
+        private val outputSampleRate: Int,
+    ) {
+        var phase = 0.0
+        var phaseIncrement = 1.0
+        var gain = 0.0
+        var targetGain = 0.0
+        private var active = spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP
+        private var hasLooped = false
+        val baseGain = 10.0.pow(spec.baseGainDb / 20.0)
+        val isAudible: Boolean get() = active && gain > SILENCE_GAIN
+
+        fun trigger() {
+            phase = 0.0
+            phaseIncrement = data.sampleRate.toDouble() / outputSampleRate
+            gain = baseGain
+            targetGain = baseGain
+            active = true
+            hasLooped = false
+        }
+
+        fun readCubic(outputChannel: Int): Double {
+            val sourceChannel = outputChannel.coerceAtMost(data.sourceChannels - 1)
+            val frame = phase.toInt()
+            val fraction = phase - frame
+            val y0 = sampleAt(sourceChannel, frame - 1).toDouble()
+            val y1 = sampleAt(sourceChannel, frame).toDouble()
+            val y2 = sampleAt(sourceChannel, frame + 1).toDouble()
+            val y3 = sampleAt(sourceChannel, frame + 2).toDouble()
+            val a0 = y3 - y2 - y0 + y1
+            val a1 = y0 - y1 - a0
+            val a2 = y2 - y0
+            return a0 * fraction * fraction * fraction + a1 * fraction * fraction + a2 * fraction + y1
+        }
+
+        fun advance(): Boolean {
+            if (!active) return false
+            phase += phaseIncrement
+            if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
+                if (phase >= data.frameCount - 1) {
+                    active = false
+                    gain = 0.0
+                    targetGain = 0.0
+                }
+                return false
+            }
+            if (phase < data.loopEndFrameExclusive) return false
+            val loopLength = data.loopEndFrameExclusive - data.loopStartFrame
+            phase = data.loopStartFrame + (phase - data.loopEndFrameExclusive) % loopLength
+            hasLooped = true
+            return true
+        }
+
+        private fun sampleAt(channel: Int, index: Int): Float {
+            if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
+                return data.channelSamples[channel][index.coerceIn(0, data.frameCount - 1)]
+            }
+            val start = data.loopStartFrame
+            val end = data.loopEndFrameExclusive
+            val length = end - start
+            val resolved = when {
+                index >= end -> start + (index - end) % length
+                hasLooped && index < start -> end - 1 - ((start - 1 - index) % length)
+                else -> index.coerceIn(0, data.frameCount - 1)
+            }
+            return data.channelSamples[channel][resolved]
+        }
+    }
+
     companion object {
         fun load(
             assetManager: AssetManager,
             outputSampleRate: Int,
             profile: EngineSampleProfile = EngineSampleProfiles.default,
         ): SampleEngineRenderer {
+            val decoded = profile.requiredAssets.associateWith { assetName ->
+                val path = "sample_engine/${profile.assetDirectory}/$assetName"
+                assetManager.open(path, AssetManager.ACCESS_STREAMING).use(WavPcmDecoder::decode)
+            }
             val voices = profile.layers.map { spec ->
-                val path = "sample_engine/${profile.assetDirectory}/${spec.assetName}"
-                val data = assetManager.open(path, AssetManager.ACCESS_STREAMING).use(WavPcmDecoder::decode)
-                LoopVoice(spec, data)
+                LoopVoice(spec, requireNotNull(decoded[spec.assetName]))
             }
-            val decodedBytes = voices.sumOf {
-                it.data.frameCount.toLong() * it.data.sourceChannels * Float.SIZE_BYTES
+            val effects = profile.effects.map { spec ->
+                EffectVoice(spec, requireNotNull(decoded[spec.assetName]), outputSampleRate)
             }
-            return SampleEngineRenderer(outputSampleRate, profile, voices, decodedBytes)
+            val decodedBytes = decoded.values.sumOf {
+                it.frameCount.toLong() * it.sourceChannels * Float.SIZE_BYTES
+            }
+            return SampleEngineRenderer(outputSampleRate, profile, voices, effects, decodedBytes)
         }
 
         internal fun fromDecoded(
@@ -198,11 +340,22 @@ internal class SampleEngineRenderer private constructor(
             val voices = profile.layers.map { spec ->
                 LoopVoice(spec, requireNotNull(decoded[spec.assetName]) { "Missing ${spec.assetName}" })
             }
+            val effects = profile.effects.map { spec ->
+                EffectVoice(
+                    spec,
+                    requireNotNull(decoded[spec.assetName]) { "Missing ${spec.assetName}" },
+                    outputSampleRate,
+                )
+            }
             return SampleEngineRenderer(
                 outputSampleRate,
                 profile,
                 voices,
-                voices.sumOf { it.data.frameCount.toLong() * it.data.sourceChannels * Float.SIZE_BYTES },
+                effects,
+                profile.requiredAssets.sumOf { asset ->
+                    val data = requireNotNull(decoded[asset]) { "Missing $asset" }
+                    data.frameCount.toLong() * data.sourceChannels * Float.SIZE_BYTES
+                },
             )
         }
 
@@ -212,6 +365,8 @@ internal class SampleEngineRenderer private constructor(
         private const val DIAGNOSTIC_BLOCK_INTERVAL = 10L
         private const val RPM_RESPONSE_SECONDS = 0.016
         private const val THROTTLE_RESPONSE_SECONDS = 0.010
+        private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
+        private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
     }
 }
 

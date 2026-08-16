@@ -4,6 +4,45 @@ import kotlin.math.pow
 
 internal enum class SampleLayerRole { IDLE, LOAD, COAST, TEXTURE, LIMITER }
 
+internal enum class SampleEffectTrigger { TRANSMISSION_LOOP, SHIFT_UP, SHIFT_DOWN, THROTTLE_LIFT }
+
+internal data class SampleEffectControlSpec(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val bit: Long,
+)
+
+internal object SampleEffectControls {
+    val gearChanges = SampleEffectControlSpec(
+        id = "gear_changes",
+        displayName = "Gear changes",
+        description = "Cabin shift impacts from this car's sound bank",
+        bit = 1L shl 0,
+    )
+    val transmission = SampleEffectControlSpec(
+        id = "transmission",
+        displayName = "Transmission whine",
+        description = "Drivetrain tone that rises with the simulated RPM",
+        bit = 1L shl 1,
+    )
+    val exhaustOverrun = SampleEffectControlSpec(
+        id = "exhaust_overrun",
+        displayName = "Exhaust overrun",
+        description = "Cabin crackle or backfire after a strong throttle lift",
+        bit = 1L shl 2,
+    )
+}
+
+internal data class SampleEffectSpec(
+    val id: String,
+    val control: SampleEffectControlSpec,
+    val assetName: String,
+    val trigger: SampleEffectTrigger,
+    val baseGainDb: Double = 0.0,
+    val minimumRpm: Double = 0.0,
+)
+
 internal data class CurvePoint(val input: Double, val output: Double)
 
 internal data class AutomationCurve(val points: List<CurvePoint>) {
@@ -67,9 +106,15 @@ internal data class EngineSampleProfile(
     val upshiftDurationSeconds: Double,
     val downshiftDurationSeconds: Double,
     val layers: List<SampleLayerSpec>,
+    val effects: List<SampleEffectSpec> = emptyList(),
     val throttleOutputGainDb: AutomationCurve? = null,
 ) {
-    val requiredAssets: Set<String> = layers.mapTo(linkedSetOf()) { it.assetName }
+    val requiredAssets: Set<String> = linkedSetOf<String>().apply {
+        layers.mapTo(this) { it.assetName }
+        effects.mapTo(this) { it.assetName }
+    }
+    val effectControls: List<SampleEffectControlSpec> = effects.map { it.control }.distinctBy { it.id }
+    val defaultEffectMask: Long = effectControls.fold(0L) { mask, control -> mask or control.bit }
 
     fun outputGainAt(throttle: Double): Double =
         10.0.pow((throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0)

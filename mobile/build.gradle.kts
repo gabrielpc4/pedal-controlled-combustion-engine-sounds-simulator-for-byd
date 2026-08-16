@@ -65,6 +65,7 @@ val localEngineProfiles = listOf(
             "s089_hur_n2.wav", "s093_hur_c4.wav", "s113_hur_l1.wav",
             "s117_hur_l4h.wav", "s126_amrgt3_sine.wav", "s127_hur_l4.wav",
             "s134_hur_c3.wav", "s139_hur_l6.wav", "s149_hur_l4l.wav",
+            "fx_transmission.wav", "fx_shift_up.wav", "fx_shift_down.wav",
         ),
         previewSource = rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/preview1.jpg"),
         previewAssetName = "lamborghini_huracan_trofeo_evo2.jpg",
@@ -72,7 +73,7 @@ val localEngineProfiles = listOf(
     LocalEngineProfileAssets(
         assetDirectory = "ferrari_f430_gt2",
         sourceDirectory = rootProject.file("audio_samples/ferrari_f430_gt_F430_GT2_06/converted"),
-        assetNames = listOf("s007.wav", "s010.wav", "s011.wav", "s024.wav", "s029.wav", "s034.wav", "s040.wav", "s047.wav", "s048.wav", "s059.wav"),
+        assetNames = listOf("s007.wav", "s010.wav", "s011.wav", "s024.wav", "s029.wav", "s034.wav", "s040.wav", "s047.wav", "s048.wav", "s059.wav", "fx_transmission.wav", "fx_shift.wav", "fx_overrun.wav"),
         previewSource = rootProject.file("audio_samples/ferrari_f430_gt_F430_GT2_06/preview1.jpg"),
         previewAssetName = "ferrari_f430_gt2.jpg",
     ),
@@ -86,14 +87,14 @@ val localEngineProfiles = listOf(
     LocalEngineProfileAssets(
         assetDirectory = "bmw_m8_coupe",
         sourceDirectory = rootProject.file("audio_samples/rtm_bmw_m8_coupe2020/converted"),
-        assetNames = listOf("s002.wav", "s003.wav", "s010.wav", "s015.wav", "s024.wav", "s025.wav", "s028.wav", "s036.wav", "s037.wav", "s044.wav", "s048.wav", "s057.wav"),
+        assetNames = listOf("s002.wav", "s003.wav", "s010.wav", "s015.wav", "s024.wav", "s025.wav", "s028.wav", "s036.wav", "s037.wav", "s044.wav", "s048.wav", "s057.wav", "fx_transmission.wav", "fx_shift_up.wav", "fx_shift_down.wav"),
         previewSource = rootProject.file("audio_samples/rtm_bmw_m8_coupe2020/preview1.jpg"),
         previewAssetName = "bmw_m8_coupe.jpg",
     ),
     LocalEngineProfileAssets(
         assetDirectory = "lamborghini_aventador_sv",
         sourceDirectory = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted"),
-        assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav"),
+        assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav", "fx_transmission.wav", "fx_shift.wav", "fx_overrun.wav"),
         previewSource = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/preview1.jpg"),
         previewAssetName = "lamborghini_aventador_sv.jpg",
     ),

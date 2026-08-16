@@ -12,7 +12,7 @@ The original bank and decoded recordings live under the ignored directory:
 
 `audio_samples/<source-car-folder>`
 
-Each supported folder has a local `converted` directory. The build copies only the continuous engine streams named in `mobile/build.gradle.kts` into the corresponding generated `assets/sample_engine/<profile>/` directory. It also copies `preview1.jpg` to `assets/car_previews/`; the 812 pack has no root `preview1.jpg`, so its skin preview is the explicit fallback. Throttle-lift/FOT one-shots, turbo, transmission, ignition, tire, wind, and other environmental noises are excluded. The older Supra experiment is intentionally not in the selectable catalog.
+Each supported folder has a local `converted` directory. The build copies only the continuous engine streams and verified optional powertrain effects named in `mobile/build.gradle.kts` into the corresponding generated `assets/sample_engine/<profile>/` directory. It also copies `preview1.jpg` to `assets/car_previews/`; the 812 pack has no root `preview1.jpg`, so its skin preview is the explicit fallback. Tires, wind, body/chassis, doors, horns, collisions, surfaces, and other environmental noises remain excluded. The older Supra experiment is intentionally not in the selectable catalog.
 
 Extraction uses the official `vgmstream-cli` decoder. Each asset filename begins with its FSB5 subsong index. Preserve the original single-play duration and append available loop metadata with:
 
@@ -23,6 +23,22 @@ vgmstream-cli.exe -i -L -s 39 -o converted\s039_hur_c1.wav sfx\fx_lamborghini_hu
 Repeat for the indices named by `EngineSampleProfile.kt`/`mobile/build.gradle.kts`: `10, 31, 32, 37, 38, 39, 44, 49, 59, 61, 65, 73, 77, 78, 81, 89, 93, 113, 117, 126, 127, 134, 139, 149`. Do not extract with the default two-loop/fade playback duration, because that bakes duplicate audio and a fade into the runtime source.
 
 Neither banks, decoded audio, nor source preview images are committed. The supplied mods do not grant a standalone-application redistribution license. Do not publish an APK containing these recordings or images without permission from their rights holders.
+
+## Optional per-car powertrain effects
+
+The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose cabin-appropriate source mapping was verified for the selected bank. All enabled effects are decoded with the engine bank and mixed into the same source-rate stereo render buffer and the same `AudioTrack`; there is no `SoundPool`, media player, or secondary output path.
+
+| Profile | Gear changes | Transmission | Exhaust overrun |
+| --- | --- | --- | --- |
+| Huracán Trofeo EVO2 | FSB subsongs 120 up / 27 down | 76 | — |
+| Ferrari F430 GT2 | 18 for both directions | 13 | 27 |
+| BMW M8 Coupé | 50 up / 14 down | 40 | — |
+| Lamborghini Aventador SV | 139 cabin shift | 131 | 11 cabin crackle |
+| Ferrari 812 N-Largo | — | — | — |
+
+The 812 stream names are stripped, so no optional effect is exposed rather than guessing. Turbo assets embedded in the naturally aspirated Huracán/Aventador mods are also rejected as source-car-inappropriate. External-only BMW backfires are not used in the cabin profile. Limiter recordings already participate in the continuous engine loopsets where mapped, so they are not duplicated as one-shots.
+
+Transmission voices loop continuously, follow the simulated RPM axis, and fade immediately when disabled. Shift one-shots key off `shiftSerial`, so one sound is launched per simulated shift. Overrun is armed above 35% throttle and fires below 8% only above the profile's minimum event RPM. Effect choices are stored per profile in `sample_sound_effects` preferences and default to enabled after a clean install.
 
 ### Profile reconstruction confidence
 
@@ -71,8 +87,9 @@ The audio thread performs no file I/O or persistent logging. It publishes bounde
 - the strongest active layer IDs with playback-rate and gain percentages;
 - rendered frames, authored loop wraps, peak, and pre-limiter over-range count;
 - startup and steady-state `AudioTrack` underruns.
+- enabled effect mask, loaded effect count, active effect voices, and cumulative one-shot trigger count.
 
-One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, and `audio_track_active`, including profile ID, source format, and native RPM domain.
+One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, `audio_track_active`, `sound_effect_toggled`, and `sample_effect_triggered`, including profile ID, source format, native RPM domain, and effect trigger deltas.
 
 The log is `/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log`. For a debug install:
 
@@ -93,6 +110,6 @@ The sequence selects simulator input, Drive, and sound, then applies 25%, 55%, 1
 
 ## Automated coverage
 
-`SampleEngineRendererTest` checks all selectable profile IDs/previews/rates and full-load/lift-off audibility every 25 RPM from idle to limiter. It additionally checks the fully reconstructed interior profile, recovered load/coast throttle direction, lossless stereo preservation, `smpl` metadata after the data chunk, direct profile RPM mapping, logical multichannel mapping, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
+`SampleEngineRendererTest` checks all selectable profile IDs/previews/rates, required continuous/effect assets, and full-load/lift-off audibility every 25 RPM from idle to limiter. It additionally checks the fully reconstructed interior profile, recovered load/coast throttle direction, lossless stereo preservation, `smpl` metadata after the data chunk, direct profile RPM mapping, logical multichannel mapping, effect-mask gating, one-shot shift triggering, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
 
-The APK must also be inspected for every generated profile asset because unit tests deliberately use generated signals rather than copyrighted local recordings.
+The connected-device asset test opens every packaged required WAV and fully decodes each optional effect, while JVM renderer tests deliberately use generated signals rather than copyrighted local recordings.
