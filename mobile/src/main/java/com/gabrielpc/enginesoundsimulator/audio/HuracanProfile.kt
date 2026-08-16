@@ -12,6 +12,7 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
     val tonalCoast = dbCurve(0.24935648 to 0.0, 0.5758819 to -10.0, 0.8728466 to -9.0)
     val coastNoise = dbCurve(0.01640689 to -4.0, 0.12797375 to -38.1)
     val idle = dbCurve(0.0024834438 to -14.5, 1.0 to -10.5)
+    val throttleOutputGain = dbCurve(0.0 to 0.0, 0.25 to 0.3, 0.55 to 0.55, 1.0 to 0.75)
 
     val l1Gain = dbCurve(6554.5728 to -42.0, 6953.308 to -15.638, 7644.906 to 0.0, 8114.469 to 0.0, 8133.7495 to -12.643)
     val l2Gain = dbCurve(5030.8154 to -42.0, 5447.599 to -17.436, 6231.4775 to 0.0, 6953.0293 to 0.0, 7645.216 to -18.035, 7931.093 to -42.0)
@@ -100,6 +101,7 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
         upshiftDurationSeconds = 0.060,
         downshiftDurationSeconds = 0.150,
         layers = layers,
+        throttleOutputGainDb = throttleOutputGain,
     )
 }
 

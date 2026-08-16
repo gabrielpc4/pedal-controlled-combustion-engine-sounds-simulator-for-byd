@@ -305,6 +305,7 @@ class EngineAudioEngine(context: Context) {
                     "decoded_bytes=${initialDiagnostics.decodedBytes} output_rate=$sampleRate " +
                     "device_native_rate=${nativeSampleRate()} quality=SOURCE_RATE_TRANSPARENT " +
                     "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
+                    "full_throttle_trim_db=${sampleProfile.throttleOutputGainDb?.valueAt(1.0) ?: 0.0} " +
                     "program_channels=2",
             )
             // Exercise decode/mix/resampling code before AudioTrack starts so first-use class

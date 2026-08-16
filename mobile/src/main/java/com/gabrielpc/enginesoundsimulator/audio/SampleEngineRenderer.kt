@@ -29,6 +29,7 @@ internal class SampleEngineRenderer private constructor(
     private var smoothedRpm = profile.idleRpm
     private var smoothedThrottle = 0.0
     private var masterGain = 0.0
+    private var profileOutputGain = profile.outputGainAt(0.0)
     private var enabledGain = 0.0
     private var framesRendered = 0L
     private var loopWraps = 0L
@@ -54,8 +55,10 @@ internal class SampleEngineRenderer private constructor(
 
         updateVoiceTargets(smoothedRpm, smoothedThrottle)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
+        val targetProfileOutputGain = profile.outputGainAt(smoothedThrottle)
         val targetEnabled = if (target.enabled) 1.0 else 0.0
         val masterAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.008))
+        val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.008))
         val enabledAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.010))
         val layerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * 0.012))
         var blockPeak = 0.0
@@ -74,8 +77,9 @@ internal class SampleEngineRenderer private constructor(
                 if (voice.advance()) loopWraps += 1
             }
             masterGain += (targetMaster - masterGain) * masterAlpha
+            profileOutputGain += (targetProfileOutputGain - profileOutputGain) * profileGainAlpha
             enabledGain += (targetEnabled - enabledGain) * enabledAlpha
-            val commonGain = SAMPLE_HEADROOM * masterGain * enabledGain
+            val commonGain = SAMPLE_HEADROOM * masterGain * profileOutputGain * enabledGain
             val preLimitedLeft = mixedLeft * commonGain
             val preLimitedRight = mixedRight * commonGain
             if (abs(preLimitedLeft) > 1.0) overRangeSamples += 1

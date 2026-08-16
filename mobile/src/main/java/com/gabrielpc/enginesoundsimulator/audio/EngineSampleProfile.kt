@@ -67,8 +67,12 @@ internal data class EngineSampleProfile(
     val upshiftDurationSeconds: Double,
     val downshiftDurationSeconds: Double,
     val layers: List<SampleLayerSpec>,
+    val throttleOutputGainDb: AutomationCurve? = null,
 ) {
     val requiredAssets: Set<String> = layers.mapTo(linkedSetOf()) { it.assetName }
+
+    fun outputGainAt(throttle: Double): Double =
+        10.0.pow((throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0)
 }
 
 internal object EngineSampleProfiles {
