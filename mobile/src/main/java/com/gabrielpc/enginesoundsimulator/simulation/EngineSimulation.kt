@@ -78,7 +78,7 @@ data class EngineProfile(
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 190.0,
             driveRpmAccelerationPerSecond = 6_500.0,
-            liftOffRpmDecelerationPerSecond = 3_000.0,
+            liftOffRpmDecelerationPerSecond = 1_000.0,
             brakeRpmDecelerationPerSecond = 8_500.0,
             simulatorCoastRegenMps2 = 2.50,
             gearRatios = bank.gearRatios.toDoubleArray(),

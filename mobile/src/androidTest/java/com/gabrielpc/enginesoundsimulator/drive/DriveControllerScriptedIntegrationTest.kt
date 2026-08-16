@@ -39,20 +39,25 @@ class DriveControllerScriptedIntegrationTest {
             )
             assertTrue(
                 "scripted full throttle did not create a virtual upshift",
-                waitUntil(timeoutMs = 3_000L) { controller.snapshot().drivetrain.gear >= 2 },
+                waitUntil(timeoutMs = 3_000L) {
+                    val state = controller.snapshot().drivetrain
+                    state.gear >= 2 && !state.isShifting
+                },
             )
 
             val beforeLift = controller.snapshot().drivetrain
             controller.setManualThrottle(0.0)
             PersistentDiagnosticLog.event("scripted_lift_off_started")
             assertTrue(
-                "scripted lift-off did not rapidly reduce direct RPM and SIM speed",
+                "scripted lift-off did not apply direct-tach negative force",
                 waitUntil(timeoutMs = 1_500L) {
                     val state = controller.snapshot().drivetrain
-                    state.rpm < beforeLift.rpm - 2_000.0 &&
-                        state.speedKmh < beforeLift.speedKmh - 40.0 &&
-                        state.gear < beforeLift.gear
+                    state.rpm < beforeLift.rpm && state.rpmNegativeForcePerSecond > 0.0
                 },
+            )
+            assertTrue(
+                "scripted lift-off did not eventually create a virtual downshift",
+                waitUntil(timeoutMs = 5_000L) { controller.snapshot().drivetrain.gear < beforeLift.gear },
             )
         } finally {
             controller.stop()

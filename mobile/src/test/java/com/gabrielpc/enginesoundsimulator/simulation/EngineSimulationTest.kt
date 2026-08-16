@@ -66,7 +66,7 @@ class EngineSimulationTest {
     fun simulatorSpeedFollowsTheFakeTachOnLiftOff() {
         val simulation = EngineSimulation()
         val launched = simulation.runFor(1.0, throttle = 0.35, sim = true)
-        val lifted = simulation.runFor(0.35, sim = true)
+        val lifted = simulation.runFor(0.80, sim = true)
         val rpmSpan = simulation.profile.redlineRpm - simulation.profile.idleRpm
         val expectedSpeed = simulation.profile.topSpeedKmh *
             ((lifted.rpm - simulation.profile.idleRpm) / rpmSpan).coerceIn(0.0, 1.0)

@@ -214,7 +214,7 @@ negativeForce = liftOffForce(if pedal is released) + brakeForce × brake + limit
 rpm = clamp(rpm + (positiveForce − negativeForce) × dt, idle, limiter)
 ```
 
-`rpmProgressionCurve` is a separate editable fake-engine curve indexed only by normalized RPM. Its default starts strong, then tapers toward redline so the sweet spot does not surge too quickly. Sanitization enforces a 35% minimum, so held positive throttle cannot stall because of the curve. Road speed, Seal wheel power, and physical motor torque do not participate in tach movement. The editable defaults are **6500 RPM/s** maximum positive force, **3000 RPM/s** lift-off force, and **8500 RPM/s** additional full-brake force.
+`rpmProgressionCurve` is a separate editable fake-engine curve indexed only by normalized RPM. Its default starts strong, then tapers toward redline so the sweet spot does not surge too quickly. Sanitization enforces a 35% minimum, so held positive throttle cannot stall because of the curve. Road speed, Seal wheel power, and physical motor torque do not participate in tach movement. The editable defaults are **6500 RPM/s** maximum positive force, **1000 RPM/s** lift-off force, and **8500 RPM/s** additional full-brake force.
 
 Upshifts happen at the profile shift point and drop the independent RPM state by the adjacent ratio. Released-pedal downshifts occur when RPM falls to the preceding upshift's landing RPM. Road-speed over-rev projections, live-speed gear synchronization, and emergency road-speed upshifts do not exist.
 
