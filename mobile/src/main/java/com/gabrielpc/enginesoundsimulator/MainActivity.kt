@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity() {
                         onCycleInput = controller::cycleInputMode,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
+                        onPreviewC1 = controller::previewC1Sample,
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
@@ -154,9 +155,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun maybeScheduleSampleValidation(intent: Intent?) {
-        if (!BuildConfig.DEBUG || intent?.getBooleanExtra(EXTRA_RUN_SAMPLE_VALIDATION, false) != true) return
-        intent.removeExtra(EXTRA_RUN_SAMPLE_VALIDATION)
-        uiHandler.postDelayed(controller::runSampleAudioValidation, 1_500L)
+        if (!BuildConfig.DEBUG || intent == null) return
+        if (intent.getBooleanExtra(EXTRA_RUN_SAMPLE_VALIDATION, false)) {
+            intent.removeExtra(EXTRA_RUN_SAMPLE_VALIDATION)
+            uiHandler.postDelayed(controller::runSampleAudioValidation, 1_500L)
+        }
+        if (intent.getBooleanExtra(EXTRA_RUN_C1_PREVIEW, false)) {
+            intent.removeExtra(EXTRA_RUN_C1_PREVIEW)
+            uiHandler.postDelayed(controller::previewC1Sample, 1_500L)
+        }
     }
 
     override fun onStart() {
@@ -193,6 +200,7 @@ private fun MotorSoundDashboard(
     onCycleInput: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
+    onPreviewC1: () -> Unit,
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
@@ -270,6 +278,7 @@ private fun MotorSoundDashboard(
                         state = state,
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
+                        onPreviewC1 = onPreviewC1,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
                         onOpenDebug = { debugOpen = true },
@@ -333,12 +342,14 @@ private fun MotorSoundDashboard(
 }
 
 private const val EXTRA_RUN_SAMPLE_VALIDATION = "run_sample_audio_validation"
+private const val EXTRA_RUN_C1_PREVIEW = "run_c1_preview"
 
 @Composable
 private fun DashboardHeader(
     state: DriveSnapshot,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
+    onPreviewC1: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
     onOpenDebug: () -> Unit,
@@ -403,6 +414,12 @@ private fun DashboardHeader(
             secondary = "ENGINE AUDIO",
             accent = if (state.engineSoundEnabled) Green else Red,
             onClick = onToggleSound,
+        )
+        HeaderButton(
+            primary = "C1 SAMPLE",
+            secondary = "EXACT INTERIOR WAV",
+            accent = Amber,
+            onClick = onPreviewC1,
         )
         HeaderButton(
             primary = state.audio.requestedMode.displayName,
@@ -493,7 +510,7 @@ private fun CarStage(
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text(
-                "SUPRA MK4 CABIN",
+                "HURACÁN EVO2 INTERIOR",
                 color = White,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Black,

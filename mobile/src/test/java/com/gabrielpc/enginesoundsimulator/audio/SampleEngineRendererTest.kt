@@ -13,10 +13,10 @@ class SampleEngineRendererTest {
     private val profile = EngineSampleProfiles.default
 
     @Test
-    fun profileContainsRecoveredContinuousExteriorEvent() {
-        assertEquals(47, profile.layers.size)
-        assertEquals(47, profile.requiredAssets.size)
-        assertEquals("EXTERIOR / NEAR CAR", profile.perspective)
+    fun defaultProfileContainsRecoveredContinuousInteriorEvent() {
+        assertEquals(24, profile.layers.size)
+        assertEquals(24, profile.requiredAssets.size)
+        assertEquals("INTERIOR / CABIN", profile.perspective)
         assertEquals(7, profile.gearRatios.size)
         assertEquals(10_000.0, profile.maximumRpm, 0.0)
         assertEquals(8_350.0, profile.limiterRpm, 0.0)
@@ -32,9 +32,27 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun perspectiveSelectorExposesCompleteExteriorAndInteriorEvents() {
+        val exterior = EngineSampleProfiles.forPerspective(EngineSoundPerspective.EXTERIOR)
+        val interior = EngineSampleProfiles.forPerspective(EngineSoundPerspective.INTERIOR)
+
+        assertEquals(47, exterior.layers.size)
+        assertEquals("EXTERIOR / NEAR CAR", exterior.perspective)
+        assertEquals(24, interior.layers.size)
+        assertEquals(24, interior.requiredAssets.size)
+        assertEquals("INTERIOR / CABIN", interior.perspective)
+        assertEquals(exterior.maximumRpm, interior.maximumRpm, 0.0)
+        assertEquals(exterior.idleRpm, interior.idleRpm, 0.0)
+        assertTrue(interior.layers.any { it.role == SampleLayerRole.IDLE })
+        assertTrue(interior.layers.any { it.role == SampleLayerRole.LOAD })
+        assertTrue(interior.layers.any { it.role == SampleLayerRole.COAST })
+        assertTrue(interior.layers.any { it.role == SampleLayerRole.LIMITER })
+    }
+
+    @Test
     fun recoveredThrottleCurvesCrossfadeLoadAndCoastLayers() {
-        val load = profile.layers.first { it.id == "rear_l1" }
-        val coast = profile.layers.first { it.id == "ex_c2" }
+        val load = profile.layers.first { it.id == "l1" }
+        val coast = profile.layers.first { it.id == "c2" }
 
         assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0) * 8.0)
         assertTrue(coast.gainAt(7_000.0, 0.0) > coast.gainAt(7_000.0, 1.0) * 8.0)

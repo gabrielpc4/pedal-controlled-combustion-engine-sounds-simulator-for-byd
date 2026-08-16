@@ -8,6 +8,7 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -48,13 +49,21 @@ data class DriveSnapshot(
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
 class DriveController(context: Context) {
+    private val preferences = context.applicationContext.getSharedPreferences(
+        PREFERENCES_NAME,
+        Context.MODE_PRIVATE,
+    )
+    private val selectedSoundPerspective = AtomicReference(loadSoundPerspective())
     private val tuningRepository = TuningRepository(context.applicationContext)
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile()
     private val simulation = EngineSimulation(profile)
     private val vehicleReader = BydSpeedReader(context.applicationContext)
-    private val audioEngine = EngineAudioEngine(context.applicationContext)
+    private val audioEngine = EngineAudioEngine(
+        context.applicationContext,
+        selectedSoundPerspective.get(),
+    )
     private val lifecycleLock = Any()
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
@@ -216,6 +225,38 @@ class DriveController(context: Context) {
         val selected = order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size]
         audioEngine.setChannelMode(selected)
         PersistentDiagnosticLog.event("audio_channel_mode_changed", "from=${current.name} to=${selected.name}")
+    }
+
+    fun toggleSoundPerspective() {
+        val previous = selectedSoundPerspective.get()
+        val selected = when (previous) {
+            EngineSoundPerspective.EXTERIOR -> EngineSoundPerspective.INTERIOR
+            EngineSoundPerspective.INTERIOR -> EngineSoundPerspective.EXTERIOR
+        }
+        setSoundPerspective(selected)
+    }
+
+    fun previewC1Sample() {
+        audioEngine.playExactInteriorC1Sample()
+        PersistentDiagnosticLog.event("interior_c1_preview_requested")
+    }
+
+    fun setSoundPerspective(selected: EngineSoundPerspective) {
+        val previous = selectedSoundPerspective.getAndSet(selected)
+        if (previous == selected) return
+        preferences.edit().putString(PREFERENCE_SOUND_PERSPECTIVE, selected.name).apply()
+        audioEngine.setSoundPerspective(selected)
+        PersistentDiagnosticLog.event(
+            "sound_perspective_changed",
+            "from=${previous.name} to=${selected.name} " +
+                "profile=${EngineSampleProfiles.forPerspective(selected).id}",
+        )
+    }
+
+    private fun loadSoundPerspective(): EngineSoundPerspective {
+        val stored = preferences.getString(PREFERENCE_SOUND_PERSPECTIVE, null)
+        return runCatching { EngineSoundPerspective.valueOf(stored.orEmpty()) }
+            .getOrDefault(EngineSoundPerspective.INTERIOR)
     }
 
     /** Runs a deterministic pedal program for on-device sample-renderer and telemetry validation. */
@@ -434,6 +475,8 @@ class DriveController(context: Context) {
     private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
     private companion object {
+        const val PREFERENCES_NAME = "engine_sound_preferences"
+        const val PREFERENCE_SOUND_PERSPECTIVE = "sound_perspective"
         const val FIXED_STEP_SECONDS = 1.0 / 200.0
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L

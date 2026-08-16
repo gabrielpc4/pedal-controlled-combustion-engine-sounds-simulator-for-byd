@@ -72,7 +72,19 @@ internal data class EngineSampleProfile(
     val requiredAssets: Set<String> = layers.mapTo(linkedSetOf()) { it.assetName }
 }
 
+enum class EngineSoundPerspective(val displayName: String) {
+    EXTERIOR("EXTERIOR"),
+    INTERIOR("INTERIOR"),
+}
+
 internal object EngineSampleProfiles {
-    val default = huracanTrofeoEvo2ExteriorProfile()
-    val all = listOf(default)
+    val exterior = huracanTrofeoEvo2ExteriorProfile()
+    val interior = huracanTrofeoEvo2InteriorProfile()
+    val default = interior
+    val all = listOf(exterior, interior)
+
+    fun forPerspective(perspective: EngineSoundPerspective): EngineSampleProfile = when (perspective) {
+        EngineSoundPerspective.EXTERIOR -> exterior
+        EngineSoundPerspective.INTERIOR -> interior
+    }
 }

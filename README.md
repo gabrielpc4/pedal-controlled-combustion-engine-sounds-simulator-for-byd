@@ -9,7 +9,7 @@ Built for the rotating BYD tablet on DiLink firmware `13.1.33.2503250.1` (`2503`
 - **Live pedal control** — accelerator and brake depth from `BYDAutoSpeedDevice`, with automatic fallback to touch/keyboard pedals when DiLink telemetry is unavailable
 - **Calibrated Seal Performance response** — a 200 Hz EV road model anchored on BYD's published 390 kW / 670 Nm figures and A2MAC1 measured front/rear wheel-torque curves
 - **Presentation gears that never bog the car** — seven synthetic ratios shape tachometer RPM and sound only; wheel torque stays continuous through every shift
-- **Profile-based engine audio** — a true-stereo near-car exterior event reconstructed from bank-authored RPM, throttle, gain, pitch, and loop controls
+- **Interior sample engine audio** — the true-stereo cabin event reconstructed from bank-authored RPM, throttle, gain, pitch, and loop controls, with an exact C1 WAV preview
 - **Cabin audio routing** — stereo, quad, 5.1, or 7.1 logical output with live route, buffer, and underrun diagnostics
 - **Full-screen dashboard** — landscape tachometer, virtual pedals, **P / N / D** shifter, input-mode controls, and a persistent tuning workstation for curves, ratios, and audio layers
 - **On-device diagnostics** — durable shift, lifecycle, and crash logs for field tuning without a live `logcat` session
