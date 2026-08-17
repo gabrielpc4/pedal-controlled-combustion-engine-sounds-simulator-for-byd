@@ -2,8 +2,8 @@
 
 > **Current behavior:** **D** mode derives sample RPM from a continuous estimate of road speed and
 > the selected profile's ratio stack. Whole-number BYD speed readings are reconstructed before
-> reaching the tach/audio. SHORT, ORIGINAL, and HYBRID strategies control presentation shift
-> spacing; none of them changes real or simulated EV wheel force.
+> reaching the tach/audio. The sample bank's ratio stack controls presentation shift spacing and
+> does not change real or simulated EV wheel force.
 
 Last updated: 2026-08-16
 
@@ -218,24 +218,18 @@ and falling road speed move the RPM/audio without one-km/h steps. The default re
 a second 55 ms tach follow removes residual control-rate edges. Both values are editable under
 **DELAYS** and the 1 Hz diagnostic heartbeat records raw speed, continuous speed, and their delta.
 
-The persisted shift strategy is selected in **TUNE → SIMULATION**:
-
-- **SHORT:** upshifts at 13, 26, 40, 56, and 74 km/h, ensuring five shifts below 80 km/h.
-- **ORIGINAL:** uses the sample bank's ratios and normal shift RPM.
-- **HYBRID:** defaults to SHORT at moderate demand, then continuously blends toward ORIGINAL from
-  58% through 92% filtered throttle so hard acceleration is not chopped into unnaturally brief gears.
+The sound gearbox uses the selected sample bank's ratios and normal shift RPM.
 
 Each upshift remembers the road-speed boundary that actually selected its new gear. Downshifts use
-that remembered boundary with 4 km/h hysteresis, so lifting after a throttle-dependent HYBRID shift
-cannot silently replace its long threshold with the short schedule. A road-speed near-redline guard
+that remembered boundary with 4 km/h hysteresis. A road-speed near-redline guard
 can upshift without throttle so coasting or externally driven speed cannot strand the sound engine
 on its limiter. Presentation gears never feed back into the physical EV acceleration model.
 
 **Tests:** `quantizedSpeedEstimatorMakesIntegerStepsContinuousInBothDirections`,
 `driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce`,
-`shortStrategyCompletesAtLeastFiveShiftsByEightyKmh`,
-`originalStrategyPreservesNormalLongGearProgression`, and
-`hybridUsesShortGearsAtModerateThrottleAndNormalGearsAtFullThrottle`.
+`ratioBasedGearboxPreservesNormalProgression`,
+`downshiftUsesTheBoundaryThatSelectedTheGear`, and
+`integerNoiseNearThresholdDoesNotCauseShiftHunting`.
 
 ### 3.4 Simulator coast regen (2026-08)
 

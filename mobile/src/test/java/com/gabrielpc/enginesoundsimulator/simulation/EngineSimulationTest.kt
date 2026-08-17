@@ -35,7 +35,7 @@ class EngineSimulationTest {
 
     @Test
     fun driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce() {
-        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.ORIGINAL)
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
         val light = EngineSimulation(profile)
         val heavy = EngineSimulation(profile)
         val lightState = light.runForExternal(2.0, 48.0, 0.15)
@@ -47,54 +47,30 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun shortStrategyCompletesAtLeastFiveShiftsByEightyKmh() {
-        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.SHORT))
-        val state = simulation.followIntegerSpeedRamp(0.0, 80.0, 10.0, 0.45)
-        assertTrue("SHORT should reach sixth gear by 80 km/h: $state", state.gear >= 6)
-        assertTrue(state.shiftSerial >= 5L)
-    }
-
-    @Test
-    fun originalStrategyPreservesNormalLongGearProgression() {
-        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.ORIGINAL))
+    fun ratioBasedGearboxPreservesNormalProgression() {
+        val simulation = EngineSimulation()
         val state = simulation.followIntegerSpeedRamp(0.0, 80.0, 10.0, 1.0)
         assertTrue("normal ratios should use fewer than five shifts below 80 km/h: $state", state.gear < 6)
         assertTrue(state.gear >= 2)
     }
 
     @Test
-    fun hybridUsesShortGearsAtModerateThrottleAndNormalGearsAtFullThrottle() {
-        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.HYBRID)
-        val moderate = EngineSimulation(profile)
-        val hard = EngineSimulation(profile)
-        val moderateState = moderate.followIntegerSpeedRamp(0.0, 80.0, 10.0, 0.45)
-        val hardState = hard.followIntegerSpeedRamp(0.0, 80.0, 10.0, 1.0)
-        assertTrue("moderate demand should favor the short schedule: $moderateState", moderateState.gear >= 6)
-        assertTrue("hard demand should preserve the long schedule: $hardState", hardState.gear < 6)
-        assertTrue(moderateState.gear > hardState.gear)
-    }
-
-    @Test
-    fun hybridDownshiftUsesTheBoundaryThatActuallySelectedTheGear() {
-        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.HYBRID))
+    fun downshiftUsesTheBoundaryThatSelectedTheGear() {
+        val simulation = EngineSimulation()
         val launched = simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 1.0)
-        assertEquals("full throttle should enter second on the normal schedule", 2, launched.gear)
+        assertEquals("the normal ratio schedule should enter second", 2, launched.gear)
 
         val lifted = simulation.followIntegerSpeedRamp(65.0, 54.0, 2.0, 0.0)
-        assertEquals(
-            "pedal release must not replace the remembered long-gear boundary with the short schedule",
-            1,
-            lifted.gear,
-        )
+        assertEquals("the remembered boundary must produce a stable downshift", 1, lifted.gear)
     }
 
     @Test
     fun integerNoiseNearThresholdDoesNotCauseShiftHunting() {
-        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.SHORT))
-        simulation.followIntegerSpeedRamp(0.0, 15.0, 3.0, 0.45)
+        val simulation = EngineSimulation()
+        simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 0.45)
         val serialBeforeNoise = simulation.state.shiftSerial
         repeat(1_000) { frame ->
-            val raw = if ((frame / 20) % 2 == 0) 12.0 else 13.0
+            val raw = if ((frame / 20) % 2 == 0) 58.0 else 59.0
             simulation.update(DriverInput(throttle = 0.45, externalSpeedKmh = raw), STEP)
         }
         assertTrue(simulation.state.gear >= 2)
@@ -111,7 +87,7 @@ class EngineSimulationTest {
         val regenCoast = withRegen.runFor(0.8, sim = true)
         val dragCoast = dragOnly.runFor(0.8)
         assertTrue(regenCoast.speedKmh < dragCoast.speedKmh - 6.0)
-        assertTrue(regenCoast.rpm < launchedWithRegen.rpm - 500.0)
+        assertTrue("lower coast speed must produce lower coupled RPM", regenCoast.rpm < dragCoast.rpm)
     }
 
     @Test

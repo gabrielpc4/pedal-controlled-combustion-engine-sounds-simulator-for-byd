@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
-import com.gabrielpc.enginesoundsimulator.simulation.ShiftStrategy
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -190,10 +189,6 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             Modifier.weight(1f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ShiftStrategySelector(engine.shiftStrategy) { strategy ->
-                    onChange(config.copy(engine = engine.copy(shiftStrategy = strategy)))
-                }
-                Spacer(Modifier.height(10.dp))
                 ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
@@ -344,40 +339,6 @@ private fun PanelCard(title: String, subtitle: String, modifier: Modifier = Modi
         Spacer(Modifier.height(14.dp))
         content()
     }
-}
-
-@Composable
-private fun ShiftStrategySelector(selected: ShiftStrategy, onSelected: (ShiftStrategy) -> Unit) {
-    Text("SHIFT PATTERN", color = TuneMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
-    Spacer(Modifier.height(7.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ShiftStrategy.entries.forEach { strategy ->
-            val active = strategy == selected
-            Button(
-                onClick = { onSelected(strategy) },
-                modifier = Modifier.weight(1f).height(44.dp),
-                shape = RoundedCornerShape(9.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (active) TuneCyan.copy(alpha = 0.18f) else TunePanelBright,
-                ),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (active) TuneCyan else TuneLine,
-                ),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-            ) {
-                Text(
-                    strategy.displayName,
-                    color = if (active) TuneCyan else TuneMuted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.8.sp,
-                )
-            }
-        }
-    }
-    Spacer(Modifier.height(6.dp))
-    Text(selected.description, color = TuneWhite, fontSize = 10.sp)
 }
 
 @Composable

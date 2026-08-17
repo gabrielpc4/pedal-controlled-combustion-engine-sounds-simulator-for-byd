@@ -149,9 +149,8 @@ The real Seal uses fixed-ratio single-speed electric drive units. In this app:
 - displayed RPM in **D** is derived from continuous road speed through the active presentation ratio and sound final drive;
 - the whole-number BYD reading is smoothed before it can move the tach or sample playback.
 
-Each selectable sound profile supplies its presentation ratios. SHORT uses five deliberately close
-low-speed thresholds, ORIGINAL derives its thresholds from those ratios and normal shift RPM, and
-HYBRID continuously blends the schedules according to throttle demand. The sound final drive affects
+Each selectable sound profile supplies its presentation ratios. Shift thresholds are derived from
+those ratios and the normal shift RPM. The sound final drive affects
 only presentation RPM; it does not feed torque back into the Seal road model.
 
 Axle torque curves remain digitized against a **180 km/h** chart reference (`TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH`); raising the vehicle top-speed slider to 190 does not rescale measured wheel torque.

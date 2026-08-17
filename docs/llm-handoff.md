@@ -47,7 +47,7 @@ AAOS media-template shell and are not the BYD application.
 
 - a 200 Hz EV longitudinal model calibrated from public Seal Performance anchors and digitized
   A2MAC1 wheel-torque measurements;
-- a speed-coupled sound tach with predictive whole-km/h reconstruction and SHORT, ORIGINAL, and HYBRID shift strategies;
+- a speed-coupled sound tach with predictive whole-km/h reconstruction and a ratio-based sound gearbox;
 - a full-screen 1920 x 990 dashboard with simulator touch/keyboard pedals and a tuning workstation
   whose curves and parameters are editable in the UI;
 - UI torque in kgf·m and power in values labeled HP (metric PS/cv), with wheel-derived graph values cosmetically scaled to motor ratings — see [UI display decisions](ui-display-and-simulation-decisions.md);
@@ -67,7 +67,7 @@ reintroduce combustion-engine clutch bog, torque interruption, or launch lag int
 | --- | --- | --- |
 | UI | `mobile/src/main/java/com/gabrielpc/enginesoundsimulator/MainActivity.kt`, `TuningPanel.kt`, `SoundEffectsPanel.kt` | Compose dashboard, pedals, P/N/D shifter, target viewport, tuning and effect controls |
 | Controller | `drive/DriveController.kt` | 200 Hz worker, input arbitration, transmission position, simulation/audio coordination, transition/heartbeat logging |
-| Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | Speed-coupled D RPM, P/N behavior, SIM road physics, live integer-speed reconstruction, and shift strategies |
+| Simulation | `simulation/EngineSimulation.kt`, `simulation/TransmissionPosition.kt` | Speed-coupled D RPM, P/N behavior, SIM road physics, live integer-speed reconstruction, and ratio-based shifts |
 | Audio | `audio/EngineAudioEngine.kt`, `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `SoundEffectsRepository.kt`, `WavPcmDecoder.kt` | AudioTrack lifecycle, profile automation, engine/effect mixing, per-car persistence, resampling, focus, and diagnostics |
 | Telemetry | `telemetry/BydSpeedReader.kt`, `telemetry/BydReadOnlyPermissionContext.kt` | reflective BYD capability probe, restricted client-context compatibility, and 20 ms getter polling |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | editable/persisted engine, curve, vehicle, timing, and audio parameters |
@@ -85,7 +85,7 @@ Current **D** behavior:
 
 - Raw integer BYD speed enters a predictive critically damped estimator. Its continuous estimate, not the integer sample, drives the gauge and sample renderer in both acceleration and deceleration.
 - RPM is `idle + wheelRPM × gearRatio × soundFinalDrive`, bounded by the selected sample profile.
-- **SHORT** schedules five upshifts at 13/26/40/56/74 km/h. **ORIGINAL** uses the bank ratios and configured shift RPM. **HYBRID** is the default and smoothly blends toward ORIGINAL only as filtered throttle rises from 58% to 92%.
+- The sound gearbox uses the selected bank's ratios and configured shift RPM. Downshift hysteresis is measured from the actual boundary that selected each gear.
 - Downshift thresholds retain 4 km/h hysteresis; near-redline road projection can always request a safety upshift.
 - SIM still uses the Seal-calibrated longitudinal model and strong editable coast regen; tach RPM follows that virtual road speed exactly as BYD Live RPM follows measured road speed.
 - The obsolete D-mode pedal-force, sweet-spot kick, RPM progression curve, and independent lift/brake RPM-force settings were removed rather than retained as a compatibility path.

@@ -118,7 +118,7 @@ class DriveController(context: Context) {
         PersistentDiagnosticLog.event(
             "drive_controller_created",
             "profile=${profile.name} redline_rpm=${profile.redlineRpm.roundToInt()} " +
-                "mode=SPEED_COUPLED strategy=${profile.shiftStrategy.name} " +
+                "mode=SPEED_COUPLED " +
                 "speed_filter_ms=${(profile.externalSpeedSmoothingSeconds * 1_000.0).roundToInt()}",
         )
     }
@@ -461,7 +461,7 @@ class DriveController(context: Context) {
                 "virtual_shift_started",
                 "serial=${drivetrain.shiftSerial} direction=${drivetrain.shiftDirection.name} " +
                     "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
-                    "speed_kmh=${drivetrain.speedKmh.roundToInt()} strategy=${drivetrain.shiftStrategy.name} " +
+                    "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} source=${input.label}",
             )
             lastLoggedShiftSerial = drivetrain.shiftSerial
@@ -493,7 +493,7 @@ class DriveController(context: Context) {
             }
             PersistentDiagnosticLog.event(
                 "drive_heartbeat",
-                "mode=SPEED_COUPLED strategy=${drivetrain.shiftStrategy.name} " +
+                "mode=SPEED_COUPLED " +
                     "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
                     "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
                     "raw_speed_kmh=${drivetrain.rawSpeedKmh.roundToInt()} " +
@@ -583,7 +583,6 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
-        shiftStrategy = engine.shiftStrategy,
         soundFinalDrive = engine.soundFinalDrive,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
         externalSpeedSmoothingSeconds = engine.externalSpeedSmoothingMs / 1_000.0,

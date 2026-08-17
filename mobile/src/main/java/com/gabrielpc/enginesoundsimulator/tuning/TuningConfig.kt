@@ -3,7 +3,6 @@ package com.gabrielpc.enginesoundsimulator.tuning
 import android.content.Context
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
-import com.gabrielpc.enginesoundsimulator.simulation.ShiftStrategy
 import kotlin.math.max
 import kotlin.math.min
 
@@ -29,7 +28,6 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
-    val shiftStrategy: ShiftStrategy = ShiftStrategy.HYBRID,
     val soundFinalDrive: Double = 3.96,
     /** Tach response after the continuous road-speed estimate changes. */
     val syntheticRpmResponseMs: Double = 55.0,
@@ -217,9 +215,6 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
-            shiftStrategy = preferences.getString(KEY_SHIFT_STRATEGY, null)
-                ?.let { stored -> ShiftStrategy.entries.firstOrNull { it.name == stored } }
-                ?: defaults.engine.shiftStrategy,
             soundFinalDrive = number(KEY_SOUND_FINAL_DRIVE, defaults.engine.soundFinalDrive),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
             externalSpeedSmoothingMs = number(KEY_EXTERNAL_SPEED_SMOOTHING, defaults.engine.externalSpeedSmoothingMs),
@@ -290,7 +285,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
-            .putString(KEY_SHIFT_STRATEGY, clean.engine.shiftStrategy.name)
             .putString(KEY_SOUND_FINAL_DRIVE, clean.engine.soundFinalDrive.toString())
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
             .putString(KEY_EXTERNAL_SPEED_SMOOTHING, clean.engine.externalSpeedSmoothingMs.toString())
@@ -347,7 +341,6 @@ class TuningRepository(context: Context) {
         const val KEY_DRAG_AREA = "drag_area"
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
-        const val KEY_SHIFT_STRATEGY = "shift_strategy"
         const val KEY_SOUND_FINAL_DRIVE = "sound_final_drive"
         const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
         const val KEY_EXTERNAL_SPEED_SMOOTHING = "external_speed_smoothing"

@@ -9,12 +9,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-enum class ShiftStrategy(val displayName: String, val description: String) {
-    SHORT("SHORT", "Five quick shifts before 80 km/h"),
-    ORIGINAL("ORIGINAL", "Bank ratios and normal shift RPM"),
-    HYBRID("HYBRID", "Short gears unless throttle demand is high"),
-}
-
 data class EngineProfile(
     val name: String,
     val idleRpm: Double,
@@ -35,7 +29,6 @@ data class EngineProfile(
     val dragAreaM2: Double,
     val rollingResistanceCoefficient: Double,
     val topSpeedKmh: Double,
-    val shiftStrategy: ShiftStrategy,
     val soundFinalDrive: Double,
     val syntheticRpmResponseSeconds: Double,
     val externalSpeedSmoothingSeconds: Double,
@@ -76,7 +69,6 @@ data class EngineProfile(
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 190.0,
-            shiftStrategy = ShiftStrategy.HYBRID,
             soundFinalDrive = 3.96,
             syntheticRpmResponseSeconds = 0.055,
             externalSpeedSmoothingSeconds = 0.12,
@@ -114,7 +106,6 @@ data class DrivetrainState(
     val limiterActive: Boolean,
     val accelerationMps2: Double,
     val rawSpeedKmh: Double,
-    val shiftStrategy: ShiftStrategy,
 )
 
 /**
@@ -143,15 +134,13 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     val state: DrivetrainState get() = snapshot()
 
     fun updateProfile(updated: EngineProfile) {
-        val strategyChanged = profile.shiftStrategy != updated.shiftStrategy
         profile = updated
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
-        if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size || strategyChanged) {
+        if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size) {
             downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
         }
         engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
         vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
-        if (strategyChanged) secondsSinceShift = profile.shiftDwellSeconds
     }
 
     fun reset() {
@@ -362,31 +351,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun upshiftSpeedKmh(gearIndex: Int): Double {
-        val original = originalUpshiftSpeedKmh(gearIndex)
-        val short = shortUpshiftSpeedKmh(gearIndex)
-        return when (profile.shiftStrategy) {
-            ShiftStrategy.SHORT -> short
-            ShiftStrategy.ORIGINAL -> original
-            ShiftStrategy.HYBRID -> {
-                val demand = smoothStep(HYBRID_BLEND_START, HYBRID_BLEND_END, filteredThrottle)
-                short + (original - short) * demand
-            }
-        }
-    }
-
-    private fun originalUpshiftSpeedKmh(gearIndex: Int): Double {
         val coupledRpm = (profile.upshiftRpm - profile.idleRpm).coerceAtLeast(1.0)
         val wheelRpm = coupledRpm / (profile.gearRatios[gearIndex] * profile.soundFinalDrive)
         return wheelRpm * (2.0 * PI * profile.wheelRadiusMeters) / 60.0 * 3.6
-    }
-
-    private fun shortUpshiftSpeedKmh(gearIndex: Int): Double = when (gearIndex) {
-        0 -> 13.0
-        1 -> 26.0
-        2 -> 40.0
-        3 -> 56.0
-        4 -> 74.0
-        else -> originalUpshiftSpeedKmh(gearIndex)
     }
 
     private fun beginShift(targetGearIndex: Int, direction: ShiftDirection) {
@@ -457,7 +424,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             limiterActive = limiterLatched,
             accelerationMps2 = lastAcceleration,
             rawSpeedKmh = rawExternalSpeedKmh,
-            shiftStrategy = profile.shiftStrategy,
         )
     }
 
@@ -474,8 +440,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val EMERGENCY_UPSHIFT_RPM_FRACTION = 0.98
         private const val DOWNSHIFT_SPEED_HYSTERESIS_KMH = 4.0
         private const val KICKDOWN_SPEED_MARGIN_KMH = 10.0
-        private const val HYBRID_BLEND_START = 0.58
-        private const val HYBRID_BLEND_END = 0.92
         /** Neutral/Park rev-up: engine inertia spooling with no wheel load. */
         private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
         /** Neutral/Park rev-down: coasting back toward idle after lift-off. */
@@ -579,11 +543,6 @@ internal class QuantizedSpeedEstimator {
         }
         return estimateKmh
     }
-}
-
-private fun smoothStep(edge0: Double, edge1: Double, value: Double): Double {
-    val x = ((value - edge0) / (edge1 - edge0)).coerceIn(0.0, 1.0)
-    return x * x * (3.0 - 2.0 * x)
 }
 
 private fun approachExp(current: Double, target: Double, timeConstant: Double, dt: Double): Double {

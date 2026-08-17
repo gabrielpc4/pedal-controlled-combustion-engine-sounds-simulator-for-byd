@@ -65,7 +65,6 @@ class DriveControllerScriptedIntegrationTest {
         val log = File(context.filesDir, "diagnostics/drive-events.log").readText()
         val liftOffSession = log.substringAfterLast("event=scripted_lift_off_started", missingDelimiterValue = "")
         assertTrue("scripted session did not persist speed-coupled telemetry", log.contains("mode=SPEED_COUPLED"))
-        assertTrue("scripted session did not persist a shift strategy", log.contains("strategy=HYBRID"))
         assertTrue("scripted session did not persist an upshift", log.contains("event=virtual_shift_started") && log.contains("direction=UP"))
         assertTrue("scripted lift-off did not persist a virtual downshift", liftOffSession.contains("event=virtual_shift_started") && liftOffSession.contains("direction=DOWN"))
     }

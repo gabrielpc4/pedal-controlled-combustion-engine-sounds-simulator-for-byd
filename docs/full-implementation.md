@@ -2,8 +2,8 @@
 
 > **Current behavior:** D mode derives sound RPM from continuous road speed and the selected
 > sample bank's ratio stack. Integer BYD speed readings pass through a predictive, critically
-> damped estimator before moving the tach or audio. The selectable SHORT, ORIGINAL, and HYBRID
-> shift strategies change presentation gear spacing without changing electric wheel force.
+> damped estimator before moving the tach or audio. The sound gearbox derives its shifts from each
+> selected car's ratio stack and configured shift RPM without changing electric wheel force.
 
 Last verified: 2026-08-16
 
@@ -123,7 +123,7 @@ In BYD Live mode, lift-off and braking affect sound RPM only through the measure
 
 ### Synthetic automatic shifts
 
-The gearbox supports three persisted strategies. **SHORT** uses shift thresholds at 13, 26, 40, 56, and 74 km/h, producing at least five shifts below 80 km/h. **ORIGINAL** derives thresholds from the selected bank's ratios, shift RPM, tire radius, and sound final drive. **HYBRID** continuously blends from SHORT at moderate pedal demand toward ORIGINAL from 58% to 92% filtered throttle, avoiding an abrupt policy switch during hard acceleration. Each upshift remembers the actual road-speed boundary that selected the new gear; its downshift uses that remembered boundary with 4 km/h hysteresis even if pedal demand later changes. An independent near-redline safety upshift prevents a low gear from remaining pinned during an externally driven speed increase.
+The gearbox derives its thresholds from the selected bank's ratios, shift RPM, tire radius, and sound final drive. Each upshift remembers the actual road-speed boundary that selected the new gear; its downshift uses that remembered boundary with 4 km/h hysteresis. An independent near-redline safety upshift prevents a low gear from remaining pinned during an externally driven speed increase.
 
 The ratio changes at 38% of the configured shift animation. The initial sample profile defaults to its source calibration of 60 ms up and 150 ms down; a 150 ms completed-shift dwell and speed hysteresis reject duplicate requests. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. **N** and **P** free-rev without automatic shifts.
 
