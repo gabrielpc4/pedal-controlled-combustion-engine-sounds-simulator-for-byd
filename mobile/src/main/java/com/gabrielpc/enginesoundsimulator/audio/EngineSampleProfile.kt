@@ -99,7 +99,10 @@ internal data class EngineSampleProfile(
     val displayName: String,
     val assetDirectory: String,
     val previewAssetName: String,
+    /** Authored WAV rate used to validate the recovered source bank. */
     val outputSampleRate: Int,
+    /** Rate requested from AudioTrack; may differ when a car needs app-side resampling. */
+    val playbackSampleRate: Int = outputSampleRate,
     val minimumRpm: Double,
     val maximumRpm: Double,
     val idleRpm: Double,

@@ -2,7 +2,7 @@
 
 ## Status
 
-The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán uses its explicitly named exterior idle loop while stationary, and the Aventador uses its explicitly named exterior exhaust-overrun one-shot; continuous moving engine layers remain cabin material. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
+The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán uses its explicitly named exterior idle loop while stationary, and the Aventador uses its explicitly named exterior exhaust-overrun one-shot; continuous moving engine layers remain cabin material. Huracán's authored 44.1 kHz bank is resampled by the app into a 48 kHz playback stream for the BYD route; Aventador remains direct 48 kHz playback. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
 An `EngineSampleProfile` owns the identity, preview, authored output sample rate, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. The arrows beside the dashboard car select the adjacent profile, persist its ID, apply its gearbox/RPM defaults, and restart the audio renderer against only that bank. Selection and loading are recorded as `car_profile_changed`, `audio_profile_selected`, and `sample_engine_loaded` events.
 
@@ -63,7 +63,7 @@ The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), se
 
 ## Realtime rendering
 
-1. All WAVs required by the selected profile decode before `AudioTrack` starts. Both source channels are preserved and rendered as a true-stereo engine program at that profile's authored 44.1 or 48 kHz rate.
+1. All WAVs required by the selected profile decode before `AudioTrack` starts. Both source channels are preserved as a true-stereo engine program. Profiles normally play at their authored rate; Huracán alone uses the renderer's continuous cubic 44.1-to-48 kHz conversion before `AudioTrack`.
 2. Simulation and bank use one RPM axis. There is no redline remapping.
 3. Each layer evaluates its own RPM amplitude curves, RPM decibel curves, throttle route, base gain, pitch root, and base pitch.
 4. Each layer owns a persistent fractional cursor. Cubic interpolation handles varispeed and 44.1-to-48 kHz conversion.
@@ -89,7 +89,7 @@ The audio thread performs no file I/O or persistent logging. It publishes bounde
 - startup and steady-state `AudioTrack` underruns.
 - enabled effect mask, loaded effect count, active effect voices, and cumulative one-shot trigger count.
 
-One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, `audio_track_active`, `sound_effect_toggled`, and `sample_effect_triggered`, including profile ID, source format, native RPM domain, and effect trigger deltas.
+One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, `audio_track_active`, `sound_effect_toggled`, and `sample_effect_triggered`, including profile ID, separate authored source/playback rates, native RPM domain, and effect trigger deltas.
 
 The log is `/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log`. For a debug install:
 

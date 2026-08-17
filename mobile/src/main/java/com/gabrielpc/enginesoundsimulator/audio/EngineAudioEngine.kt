@@ -295,9 +295,9 @@ class EngineAudioEngine(context: Context) {
         var failure: String? = null
 
         try {
-            // Match the authored source rate. Unity-pitch voices remain sample-aligned and
-            // Android performs at most one final device conversion.
-            val sampleRate = sampleProfile.outputSampleRate
+            // Profiles normally match their authored rate. Huracan is rendered app-side to the
+            // BYD route's native 48 kHz so its 44.1 kHz bank never enters the vendor resampler.
+            val sampleRate = sampleProfile.playbackSampleRate
             val sampleRenderer = try {
                 SampleEngineRenderer.load(appContext.assets, sampleRate, sampleProfile)
             } catch (throwable: Throwable) {
@@ -317,8 +317,10 @@ class EngineAudioEngine(context: Context) {
                 "sample_engine_loaded",
                 "profile=${initialDiagnostics.profileId} loops=${initialDiagnostics.loadedLoops} " +
                     "effects=${initialDiagnostics.loadedEffects} " +
-                    "decoded_bytes=${initialDiagnostics.decodedBytes} output_rate=$sampleRate " +
-                    "device_native_rate=${nativeSampleRate()} quality=SOURCE_RATE_TRANSPARENT " +
+                    "decoded_bytes=${initialDiagnostics.decodedBytes} source_rate=${sampleProfile.outputSampleRate} " +
+                    "output_rate=$sampleRate " +
+                    "device_native_rate=${nativeSampleRate()} quality=" +
+                    "${if (sampleRate == sampleProfile.outputSampleRate) "DIRECT_RATE" else "APP_CUBIC_SRC"} " +
                     "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
                     "full_throttle_trim_db=${sampleProfile.throttleOutputGainDb?.valueAt(1.0) ?: 0.0} " +
                     "program_channels=2",

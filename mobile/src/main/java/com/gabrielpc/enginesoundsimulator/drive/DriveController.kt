@@ -237,7 +237,8 @@ class DriveController(context: Context) {
         PersistentDiagnosticLog.event(
             "car_profile_changed",
             "from=${previous.id} to=${selected.id} layers=${selected.layers.size} " +
-                "sample_rate=${selected.outputSampleRate} rpm_domain=${selected.minimumRpm.toInt()}-${selected.maximumRpm.toInt()}",
+                "source_rate=${selected.outputSampleRate} playback_rate=${selected.playbackSampleRate} " +
+                    "rpm_domain=${selected.minimumRpm.toInt()}-${selected.maximumRpm.toInt()}",
         )
     }
 

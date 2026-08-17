@@ -30,6 +30,15 @@ class SampleEngineRendererTest {
                 assertTrue("${candidate.id} has no lift-off voice at $rpm", lifted > 0.0001)
             }
         }
+        val huracan = EngineSampleProfiles.find("lamborghini_huracan_trofeo_evo2_cabin")
+        val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
+        assertEquals(44_100, huracan.outputSampleRate)
+        assertEquals(48_000, huracan.playbackSampleRate)
+        assertEquals(48_000, aventador.outputSampleRate)
+        assertEquals(48_000, aventador.playbackSampleRate)
+        EngineSampleProfiles.all.filterNot { it.id == huracan.id }.forEach { candidate ->
+            assertEquals("${candidate.id} playback rate changed", candidate.outputSampleRate, candidate.playbackSampleRate)
+        }
     }
 
     @Test
