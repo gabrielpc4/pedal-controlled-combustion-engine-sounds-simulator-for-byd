@@ -71,27 +71,6 @@ val localEngineProfiles = listOf(
         previewAssetName = "lamborghini_huracan_trofeo_evo2.jpg",
     ),
     LocalEngineProfileAssets(
-        assetDirectory = "ferrari_f430_gt2",
-        sourceDirectory = rootProject.file("audio_samples/ferrari_f430_gt_F430_GT2_06/converted"),
-        assetNames = listOf("s007.wav", "s010.wav", "s011.wav", "s024.wav", "s029.wav", "s034.wav", "s040.wav", "s047.wav", "s048.wav", "s059.wav", "fx_transmission.wav", "fx_shift.wav", "fx_overrun.wav"),
-        previewSource = rootProject.file("audio_samples/ferrari_f430_gt_F430_GT2_06/preview1.jpg"),
-        previewAssetName = "ferrari_f430_gt2.jpg",
-    ),
-    LocalEngineProfileAssets(
-        assetDirectory = "ferrari_812_nlargo",
-        sourceDirectory = rootProject.file("audio_samples/nohesi_ferrari_812_nlargo/converted"),
-        assetNames = listOf("s021.wav", "s027.wav", "s035.wav", "s040.wav", "s064.wav", "s075.wav", "s078.wav", "s096.wav", "s131.wav", "s134.wav", "s137.wav", "s138.wav", "s161.wav", "s182.wav", "s207.wav", "s208.wav"),
-        previewSource = rootProject.file("audio_samples/nohesi_ferrari_812_nlargo/skins/123/preview.jpg"),
-        previewAssetName = "ferrari_812_nlargo.jpg",
-    ),
-    LocalEngineProfileAssets(
-        assetDirectory = "bmw_m8_coupe",
-        sourceDirectory = rootProject.file("audio_samples/rtm_bmw_m8_coupe2020/converted"),
-        assetNames = listOf("s002.wav", "s003.wav", "s010.wav", "s015.wav", "s024.wav", "s025.wav", "s028.wav", "s036.wav", "s037.wav", "s044.wav", "s048.wav", "s057.wav", "fx_transmission.wav", "fx_shift_up.wav", "fx_shift_down.wav"),
-        previewSource = rootProject.file("audio_samples/rtm_bmw_m8_coupe2020/preview1.jpg"),
-        previewAssetName = "bmw_m8_coupe.jpg",
-    ),
-    LocalEngineProfileAssets(
         assetDirectory = "lamborghini_aventador_sv",
         sourceDirectory = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted"),
         assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav", "fx_transmission.wav", "fx_shift.wav", "fx_overrun.wav"),

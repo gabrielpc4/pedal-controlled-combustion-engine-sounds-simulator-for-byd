@@ -2,7 +2,7 @@
 
 ## Status
 
-The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán uses its explicitly named exterior idle loop while stationary, and the Aventador uses its explicitly named exterior exhaust-overrun one-shot; continuous moving engine layers remain cabin material. Huracán's authored 44.1 kHz bank is resampled by the app into a 48 kHz playback stream for the BYD route; Aventador remains direct 48 kHz playback. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
+The app is sample-only and offers two selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2 and Lamborghini Aventador SV. The Huracán uses its explicitly named exterior idle loop while stationary, and the Aventador uses its explicitly named exterior exhaust-overrun one-shot; continuous moving engine layers remain cabin material. Huracán's authored 44.1 kHz bank is resampled by the app into a 48 kHz playback stream for the BYD route; Aventador remains direct 48 kHz playback. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
 An `EngineSampleProfile` owns the identity, preview, authored output sample rate, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. The arrows beside the dashboard car select the adjacent profile, persist its ID, apply its gearbox/RPM defaults, and restart the audio renderer against only that bank. Selection and loading are recorded as `car_profile_changed`, `audio_profile_selected`, and `sample_engine_loaded` events.
 
@@ -12,7 +12,7 @@ The original bank and decoded recordings live under the ignored directory:
 
 `audio_samples/<source-car-folder>`
 
-Each supported folder has a local `converted` directory. The build copies only the continuous engine streams and verified optional powertrain effects named in `mobile/build.gradle.kts` into the corresponding generated `assets/sample_engine/<profile>/` directory. It also copies `preview1.jpg` to `assets/car_previews/`; the 812 pack has no root `preview1.jpg`, so its skin preview is the explicit fallback. Tires, wind, body/chassis, doors, horns, collisions, surfaces, and other environmental noises remain excluded. The older Supra experiment is intentionally not in the selectable catalog.
+Each supported folder has a local `converted` directory. The build copies only the continuous engine streams and verified optional powertrain effects named in `mobile/build.gradle.kts` into the corresponding generated `assets/sample_engine/<profile>/` directory. It also copies each `preview1.jpg` to `assets/car_previews/`. Tires, wind, body/chassis, doors, horns, collisions, surfaces, and other environmental noises remain excluded. The older Supra experiment is intentionally not in the selectable catalog.
 
 Extraction uses the official `vgmstream-cli` decoder. Each asset filename begins with its FSB5 subsong index. Preserve the original single-play duration and append available loop metadata with:
 
@@ -31,18 +31,15 @@ The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose source 
 | Profile | Gear changes | Transmission | Exhaust overrun |
 | --- | --- | --- | --- |
 | Huracán Trofeo EVO2 | FSB subsongs 120 up / 27 down | 76 | — |
-| Ferrari F430 GT2 | 18 for both directions | 13 | 27 |
-| BMW M8 Coupé | 50 up / 14 down | 40 | — |
 | Lamborghini Aventador SV | 139 cabin shift | 131 | 44 `aventadorcrackleextoff` exterior crackle |
-| Ferrari 812 N-Largo | — | — | — |
 
-The 812 stream names are stripped, so no optional effect is exposed rather than guessing. Turbo assets embedded in the naturally aspirated Huracán/Aventador mods are also rejected as source-car-inappropriate. External-only BMW backfires are not used in the cabin profile. Limiter recordings already participate in the continuous engine loopsets where mapped, so they are not duplicated as one-shots.
+Turbo assets embedded in the naturally aspirated Huracán/Aventador mods are rejected as source-car-inappropriate. Limiter recordings already participate in the continuous engine loopsets where mapped, so they are not duplicated as one-shots.
 
 Transmission voices loop continuously, follow the simulated RPM axis, and fade immediately when disabled. Shift one-shots key off `shiftSerial`, so one sound is launched per simulated shift. Overrun is armed above 35% throttle and fires below 8% only above the profile's minimum event RPM. Effect choices and solo state are stored per profile in `sample_sound_effects` preferences. Effects default to enabled and solo defaults off after a clean install.
 
 ### Profile reconstruction confidence
 
-The Huracán profile is the exact recovered FMOD control graph described below. The F430, BMW, and Aventador profiles use recovered continuous interior stream names/root RPMs plus their source-car RPM/gear data, then use a generic adjacent-band crossfade where the original route automation was not recoverable. The 812 bank strips stream names; its continuous roots are recovered, but load/coast roles cannot be proven, so those voices use a neutral throttle blend rather than invented coast assignments. These distinctions are deliberate and remain visible in source rather than being presented as equally exact bank reconstructions.
+The Huracán profile is the exact recovered FMOD control graph described below. The Aventador profile uses recovered continuous interior stream names/root RPMs plus its source-car RPM/gear data, then uses a generic adjacent-band crossfade where the original route automation was not recoverable. These distinctions are deliberate and remain visible in source rather than being presented as equally exact bank reconstructions.
 
 ## Recovered bank model
 
