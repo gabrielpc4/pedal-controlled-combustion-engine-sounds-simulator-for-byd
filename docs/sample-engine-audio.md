@@ -2,7 +2,7 @@
 
 ## Status
 
-The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán alone uses its explicitly named exterior idle loop while stationary; all of its moving layers, and every layer of the other profiles, remain cabin material. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
+The app is sample-only and offers five selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2, Ferrari F430 GT2, Ferrari 812 N-Largo, BMW M8 Coupé, and Lamborghini Aventador SV. The Huracán uses its explicitly named exterior idle loop while stationary, and the Aventador uses its explicitly named exterior exhaust-overrun one-shot; continuous moving engine layers remain cabin material. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.
 
 An `EngineSampleProfile` owns the identity, preview, authored output sample rate, native RPM domain, idle/redline/limiter, simulated gearbox calibration, asset directory, and every sample layer. The arrows beside the dashboard car select the adjacent profile, persist its ID, apply its gearbox/RPM defaults, and restart the audio renderer against only that bank. Selection and loading are recorded as `car_profile_changed`, `audio_profile_selected`, and `sample_engine_loaded` events.
 
@@ -26,14 +26,14 @@ Neither banks, decoded audio, nor source preview images are committed. The suppl
 
 ## Optional per-car powertrain effects
 
-The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose cabin-appropriate source mapping was verified for the selected bank. All enabled effects are decoded with the engine bank and mixed into the same source-rate stereo render buffer and the same `AudioTrack`; there is no `SoundPool`, media player, or secondary output path.
+The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose source mapping was verified for the selected bank. All enabled effects are decoded with the engine bank and mixed into the same source-rate stereo render buffer and the same `AudioTrack`; there is no `SoundPool`, media player, or secondary output path.
 
 | Profile | Gear changes | Transmission | Exhaust overrun |
 | --- | --- | --- | --- |
 | Huracán Trofeo EVO2 | FSB subsongs 120 up / 27 down | 76 | — |
 | Ferrari F430 GT2 | 18 for both directions | 13 | 27 |
 | BMW M8 Coupé | 50 up / 14 down | 40 | — |
-| Lamborghini Aventador SV | 139 cabin shift | 131 | 11 cabin crackle |
+| Lamborghini Aventador SV | 139 cabin shift | 131 | 44 `aventadorcrackleextoff` exterior crackle |
 | Ferrari 812 N-Largo | — | — | — |
 
 The 812 stream names are stripped, so no optional effect is exposed rather than guessing. Turbo assets embedded in the naturally aspirated Huracán/Aventador mods are also rejected as source-car-inappropriate. External-only BMW backfires are not used in the cabin profile. Limiter recordings already participate in the continuous engine loopsets where mapped, so they are not duplicated as one-shots.

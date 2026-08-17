@@ -32,7 +32,7 @@ internal object SampleEffectControls {
     val exhaustOverrun = SampleEffectControlSpec(
         id = "exhaust_overrun",
         displayName = "Exhaust overrun",
-        description = "Cabin crackle or backfire after a strong throttle lift",
+        description = "Crackle or backfire after a strong throttle lift",
         bit = 1L shl 2,
     )
 }
