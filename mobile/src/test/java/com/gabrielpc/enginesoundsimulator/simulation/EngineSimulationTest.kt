@@ -4,10 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.floor
 
 class EngineSimulationTest {
     @Test
-    fun sampleProfileStartsAtItsOwnIdleInFirstVirtualGear() {
+    fun sampleProfileStartsAtItsOwnIdleInFirstGear() {
         val simulation = EngineSimulation()
         assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 0.0)
         assertEquals(1, simulation.state.gear)
@@ -16,78 +17,88 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun fullPedalRapidlyReachesTheSweetSpot() {
-        val simulation = EngineSimulation()
-        val reached = simulation.runFor(0.25, throttle = 1.0, sim = true)
-        assertTrue(reached.rpm >= simulation.profile.fullThrottleSweetSpotRpm - 120.0)
+    fun quantizedSpeedEstimatorMakesIntegerStepsContinuousInBothDirections() {
+        val estimator = QuantizedSpeedEstimator()
+        estimator.update(20.0, STEP, 0.12)
+        val rising = mutableListOf<Double>()
+        repeat(80) { rising += estimator.update(21.0, STEP, 0.12) }
+        assertTrue("one integer step must not reach the tach in one frame", rising.first() in 20.0..20.20)
+        assertTrue("speed must move continuously upward", rising.zipWithNext().all { it.second >= it.first })
+        assertTrue(rising.last() > 20.85)
+
+        val falling = mutableListOf<Double>()
+        repeat(80) { falling += estimator.update(20.0, STEP, 0.12) }
+        assertTrue("one integer step must not reach the tach in one frame", falling.first() > 20.75)
+        assertTrue("speed must move continuously downward", falling.zipWithNext().all { it.second <= it.first })
+        assertTrue("falling estimate=${falling.last()}", falling.last() < 20.20)
     }
 
     @Test
-    fun tachClimbsMoreGentlyAfterTheSweetSpot() {
-        val simulation = EngineSimulation()
-        val early = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
-        var state = early
-        repeat((0.35 / STEP).toInt()) {
-            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
-        }
-        assertTrue(state.rpm >= simulation.profile.fullThrottleSweetSpotRpm - 120.0)
-        assertTrue(state.rpmPositiveForcePerSecond < early.rpmPositiveForcePerSecond * 0.30)
+    fun driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.ORIGINAL)
+        val light = EngineSimulation(profile)
+        val heavy = EngineSimulation(profile)
+        val lightState = light.runForExternal(2.0, 48.0, 0.15)
+        val heavyState = heavy.runForExternal(2.0, 48.0, 0.85)
+        assertEquals(lightState.gear, heavyState.gear)
+        assertEquals(lightState.speedKmh, heavyState.speedKmh, 0.01)
+        assertEquals(lightState.rpm, heavyState.rpm, 1.0)
+        assertTrue(lightState.rpm > profile.idleRpm + 2_000.0)
     }
 
     @Test
-    fun virtualGearsContinueUpshiftingWithoutAFixedTopGear() {
-        val simulation = EngineSimulation()
-        var state = simulation.state
-        repeat((18.0 / STEP).toInt()) {
-            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
-        }
-        assertTrue("full throttle should pass the old seven-gear ceiling: $state", state.gear > 7)
-        assertTrue("every virtual upshift needs an event serial", state.shiftSerial >= 7L)
+    fun shortStrategyCompletesAtLeastFiveShiftsByEightyKmh() {
+        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.SHORT))
+        val state = simulation.followIntegerSpeedRamp(0.0, 80.0, 10.0, 0.45)
+        assertTrue("SHORT should reach sixth gear by 80 km/h: $state", state.gear >= 6)
+        assertTrue(state.shiftSerial >= 5L)
     }
 
     @Test
-    fun liftOffDownshiftsThroughVirtualGearsAtTheLandingRpm() {
-        val simulation = EngineSimulation()
-        var state = simulation.state
-        repeat((5.0 / STEP).toInt()) {
-            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
-        }
-        val gearBeforeLift = state.gear
-        repeat((1.5 / STEP).toInt()) {
-            state = simulation.update(DriverInput(simulateCoastRegen = true), STEP)
-        }
-
-        assertTrue(gearBeforeLift > 1)
-        assertTrue("lift-off should step back down through virtual gears: $state", state.gear < gearBeforeLift)
-        assertTrue(state.shiftSerial > 0L)
+    fun originalStrategyPreservesNormalLongGearProgression() {
+        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.ORIGINAL))
+        val state = simulation.followIntegerSpeedRamp(0.0, 80.0, 10.0, 1.0)
+        assertTrue("normal ratios should use fewer than five shifts below 80 km/h: $state", state.gear < 6)
+        assertTrue(state.gear >= 2)
     }
 
     @Test
-    fun liftOffReturnsFromManyVirtualGearsWithAtMostTwoAudibleDownshifts() {
-        val simulation = EngineSimulation()
-        var state = simulation.state
-        repeat((18.0 / STEP).toInt()) {
-            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
-        }
-        assertTrue("setup needs a high virtual gear: $state", state.gear > 7)
+    fun hybridUsesShortGearsAtModerateThrottleAndNormalGearsAtFullThrottle() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.HYBRID)
+        val moderate = EngineSimulation(profile)
+        val hard = EngineSimulation(profile)
+        val moderateState = moderate.followIntegerSpeedRamp(0.0, 80.0, 10.0, 0.45)
+        val hardState = hard.followIntegerSpeedRamp(0.0, 80.0, 10.0, 1.0)
+        assertTrue("moderate demand should favor the short schedule: $moderateState", moderateState.gear >= 6)
+        assertTrue("hard demand should preserve the long schedule: $hardState", hardState.gear < 6)
+        assertTrue(moderateState.gear > hardState.gear)
+    }
 
-        var downshiftStarts = 0
-        var previousShifting = state.isShifting
-        var previousDirection = state.shiftDirection
-        repeat((12.0 / STEP).toInt()) {
-            state = simulation.update(DriverInput(simulateCoastRegen = true), STEP)
-            if (state.isShifting && (!previousShifting || previousDirection != state.shiftDirection) &&
-                state.shiftDirection == ShiftDirection.DOWN
-            ) {
-                downshiftStarts += 1
-            }
-            previousShifting = state.isShifting
-            previousDirection = state.shiftDirection
-        }
+    @Test
+    fun hybridDownshiftUsesTheBoundaryThatActuallySelectedTheGear() {
+        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.HYBRID))
+        val launched = simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 1.0)
+        assertEquals("full throttle should enter second on the normal schedule", 2, launched.gear)
 
-        assertEquals("lift-off should finish in first virtual gear", 1, state.gear)
-        assertTrue("a high gear should collapse with no more than two downshift sounds: $downshiftStarts", downshiftStarts <= 2)
-        assertEquals("a high gear needs the two-stage collapse", 2, downshiftStarts)
+        val lifted = simulation.followIntegerSpeedRamp(65.0, 54.0, 2.0, 0.0)
+        assertEquals(
+            "pedal release must not replace the remembered long-gear boundary with the short schedule",
+            1,
+            lifted.gear,
+        )
+    }
+
+    @Test
+    fun integerNoiseNearThresholdDoesNotCauseShiftHunting() {
+        val simulation = EngineSimulation(EngineProfile.SAMPLE_BANK_ENGINE.copy(shiftStrategy = ShiftStrategy.SHORT))
+        simulation.followIntegerSpeedRamp(0.0, 15.0, 3.0, 0.45)
+        val serialBeforeNoise = simulation.state.shiftSerial
+        repeat(1_000) { frame ->
+            val raw = if ((frame / 20) % 2 == 0) 12.0 else 13.0
+            simulation.update(DriverInput(throttle = 0.45, externalSpeedKmh = raw), STEP)
+        }
+        assertTrue(simulation.state.gear >= 2)
+        assertEquals("4 km/h hysteresis must prevent a shift loop", serialBeforeNoise, simulation.state.shiftSerial)
     }
 
     @Test
@@ -97,15 +108,14 @@ class EngineSimulationTest {
         val launchedWithRegen = withRegen.runFor(2.0, throttle = 1.0, sim = true)
         val launchedDragOnly = dragOnly.runFor(2.0, throttle = 1.0)
         assertEquals(launchedDragOnly.speedKmh, launchedWithRegen.speedKmh, 0.01)
-
         val regenCoast = withRegen.runFor(0.8, sim = true)
         val dragCoast = dragOnly.runFor(0.8)
         assertTrue(regenCoast.speedKmh < dragCoast.speedKmh - 6.0)
-        assertTrue(regenCoast.rpm < launchedWithRegen.rpm - 600.0)
+        assertTrue(regenCoast.rpm < launchedWithRegen.rpm - 500.0)
     }
 
     @Test
-    fun fullThrottleAccelerationTargetsTheClaimedZeroToHundredWindow() {
+    fun fullThrottleAccelerationTargetsClaimedZeroToHundredWindow() {
         val simulation = EngineSimulation()
         var elapsedSeconds = 0.0
         var state = simulation.state
@@ -113,55 +123,18 @@ class EngineSimulationTest {
             state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
             elapsedSeconds += STEP
         }
-        assertTrue("0-100 km/h should remain near the 3.8-second target: $elapsedSeconds", elapsedSeconds in 3.4..4.2)
+        assertTrue("0-100 km/h should remain near 3.8 seconds: $elapsedSeconds", elapsedSeconds in 3.4..4.2)
     }
 
     @Test
-    fun brakeDropsDirectTachFasterThanLiftOff() {
+    fun serviceBrakeReducesRoadSpeedFasterThanCoasting() {
         val coast = EngineSimulation()
         val brake = EngineSimulation()
-        coast.runFor(1.0, throttle = 0.75, sim = true)
-        brake.runFor(1.0, throttle = 0.75, sim = true)
-        val coastState = coast.runFor(0.25, sim = true)
-        val brakeState = brake.runFor(0.25, brake = 1.0, sim = true)
-        assertTrue(brakeState.rpm < coastState.rpm - 400.0)
-        assertTrue(brakeState.speedKmh < coastState.speedKmh - 8.0)
-    }
-
-    @Test
-    fun externalRoadSpeedNeverMovesTheFakeTach() {
-        val simulation = EngineSimulation()
-        simulation.update(DriverInput(externalSpeedKmh = 180.0), STEP)
-        simulation.runForExternal(1.0, speedKmh = 20.0)
-        assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 0.01)
-        assertEquals(1, simulation.state.gear)
-    }
-
-    @Test
-    fun directTachProgressionIsIndependentFromExternalRoadSpeed() {
-        val slow = EngineSimulation()
-        val fast = EngineSimulation()
-        val slowState = slow.runForExternal(0.8, speedKmh = 0.0, throttle = 0.55)
-        val fastState = fast.runForExternal(0.8, speedKmh = 180.0, throttle = 0.55)
-        assertEquals(slowState.rpm, fastState.rpm, 0.01)
-        assertEquals(slowState.rpmPositiveForcePerSecond, fastState.rpmPositiveForcePerSecond, 0.01)
-    }
-
-    @Test
-    fun limiterStillUsesHysteresisWithoutAForcedShift() {
-        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
-            redlineRpm = 3_000.0,
-            limiterRpm = 3_200.0,
-            fullThrottleSweetSpotRpm = 2_300.0,
-        )
-        val simulation = EngineSimulation(profile)
-        var state = simulation.state
-        repeat((3.0 / STEP).toInt()) {
-            state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
-        }
-        assertTrue(state.limiterActive)
-        assertEquals(0L, state.shiftSerial)
-        assertFalse(state.isShifting)
+        coast.runFor(2.0, throttle = 0.75, sim = true)
+        brake.runFor(2.0, throttle = 0.75, sim = true)
+        val coastState = coast.runFor(0.40, sim = true)
+        val brakeState = brake.runFor(0.40, brake = 1.0, sim = true)
+        assertTrue(brakeState.speedKmh < coastState.speedKmh - 10.0)
     }
 
     @Test
@@ -180,22 +153,31 @@ class EngineSimulationTest {
     ): DrivetrainState {
         var result = state
         repeat((seconds / STEP).toInt()) {
-            result = update(
-                DriverInput(throttle, brake, simulateCoastRegen = sim, transmissionPosition = position),
-                STEP,
-            )
+            result = update(DriverInput(throttle, brake, simulateCoastRegen = sim, transmissionPosition = position), STEP)
         }
         return result
     }
 
-    private fun EngineSimulation.runForExternal(
-        seconds: Double,
-        speedKmh: Double,
-        throttle: Double = 0.0,
-    ): DrivetrainState {
+    private fun EngineSimulation.runForExternal(seconds: Double, speedKmh: Double, throttle: Double): DrivetrainState {
         var result = state
         repeat((seconds / STEP).toInt()) {
             result = update(DriverInput(throttle = throttle, externalSpeedKmh = speedKmh), STEP)
+        }
+        return result
+    }
+
+    private fun EngineSimulation.followIntegerSpeedRamp(
+        fromKmh: Double,
+        toKmh: Double,
+        seconds: Double,
+        throttle: Double,
+    ): DrivetrainState {
+        var result = state
+        val frames = (seconds / STEP).toInt()
+        repeat(frames) { frame ->
+            val fraction = frame.toDouble() / (frames - 1).coerceAtLeast(1)
+            val continuous = fromKmh + (toKmh - fromKmh) * fraction
+            result = update(DriverInput(throttle = throttle, externalSpeedKmh = floor(continuous)), STEP)
         }
         return result
     }

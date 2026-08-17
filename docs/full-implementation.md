@@ -1,12 +1,11 @@
 # Full engine-sound implementation
 
-> **Current behavior override:** D mode is a direct, playful fake-tach controller with unlimited
-> virtual gears. There is no ratio stack or top gear: each shift lands at the editable sweet spot
-> (default 5,200 RPM), then the editable tach-force curve slows the upper-range climb. Virtual
-> shifts still emit audio/log events and lift-off steps back down. In explicit SIM mode, displayed
-> speed follows normalized fake RPM on lift-off/braking but is held through a virtual shift.
+> **Current behavior:** D mode derives sound RPM from continuous road speed and the selected
+> sample bank's ratio stack. Integer BYD speed readings pass through a predictive, critically
+> damped estimator before moving the tach or audio. The selectable SHORT, ORIGINAL, and HYBRID
+> shift strategies change presentation gear spacing without changing electric wheel force.
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 
 This document is the durable implementation handoff for the interactive motor-sound application that followed the original pedal-telemetry POC. Read this together with [the BYD telemetry notes](research-findings.md), not instead of them.
 
@@ -29,7 +28,7 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 
 | File | Responsibility |
 | --- | --- |
-| `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, and independent sound-RPM shift controller |
+| `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, continuous BYD-speed estimation, and speed-coupled sound gearbox |
 | `simulation/TransmissionPosition.kt` | `P` / `N` / `D` enum consumed by `DriverInput` |
 | `audio/EngineSampleProfile.kt` | Car-profile metadata, gearbox calibration, layers, and recovered control curves |
 | `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and telemetry |
@@ -117,16 +116,16 @@ At every 5 ms fixed step:
 5. Wheel torque divided by tire radius produces drive force; the non-binding configurable traction ceiling remains available for tuning.
 6. In simulator mode only, lift-off applies a strong constant coast deceleration (`simulatorCoastRegenMps2`, default 2.50 m/s²) so virtual speed and synthetic RPM fall promptly. The value is independently editable from 0–4 m/s² and never affects BYD Live input.
 7. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
-8. The independent sound RPM behavior follows the **P / N / D** shifter: **D** integrates an editable positive pedal force through a separate draggable RPM-progression curve plus independent lift-off/brake forces; road speed never scales the tach. **N** and **P** free-rev toward a throttle-position target using fixed neutral inertia constants (`NEUTRAL_REV_UP_RESPONSE_SECONDS` = 0.55 s, `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` = 0.90 s).
+8. The sound RPM behavior follows the **P / N / D** shifter: **D** maps continuous road speed through the active presentation gear ratio and sound final drive. **N** and **P** free-rev toward a throttle-position target using fixed neutral inertia constants (`NEUTRAL_REV_UP_RESPONSE_SECONDS` = 0.55 s, `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` = 0.90 s).
 9. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
 
-Braking slows the real or virtual vehicle and independently applies stronger negative fake-RPM force. Pedal lift applies a constant negative fake-RPM force without modifying BYD Live road speed. There is no simulated clutch feeding torque back into the vehicle.
+In BYD Live mode, lift-off and braking affect sound RPM only through the measured road-speed decrease. In SIM mode, service braking and the configured lift-off regen reduce virtual road speed, so coupled RPM follows naturally. There is no simulated clutch feeding torque back into the vehicle.
 
 ### Synthetic automatic shifts
 
-Upshifts begin above the configured sound shift point with meaningful throttle and a higher presentation gear available while in **D**. Every higher gear derives its released-pedal downshift point from the exact RPM landing of the preceding upshift. Only the independent RPM state participates; live-speed synchronization, road-speed over-rev projections, and speed-driven emergency shifts do not exist.
+The gearbox supports three persisted strategies. **SHORT** uses shift thresholds at 13, 26, 40, 56, and 74 km/h, producing at least five shifts below 80 km/h. **ORIGINAL** derives thresholds from the selected bank's ratios, shift RPM, tire radius, and sound final drive. **HYBRID** continuously blends from SHORT at moderate pedal demand toward ORIGINAL from 58% to 92% filtered throttle, avoiding an abrupt policy switch during hard acceleration. Each upshift remembers the actual road-speed boundary that selected the new gear; its downshift uses that remembered boundary with 4 km/h hysteresis even if pedal demand later changes. An independent near-redline safety upshift prevents a low gear from remaining pinned during an externally driven speed increase.
 
-The ratio changes at 38% of the configured shift animation. The initial sample profile defaults to its source calibration of 60 ms up and 150 ms down; a 150 ms completed-shift dwell rejects duplicate requests without holding the force-driven needle at the limiter. An explicit zero-pedal return to the gear's landing threshold can downshift immediately. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. **N** and **P** free-rev without automatic shifts.
+The ratio changes at 38% of the configured shift animation. The initial sample profile defaults to its source calibration of 60 ms up and 150 ms down; a 150 ms completed-shift dwell and speed hysteresis reject duplicate requests. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. **N** and **P** free-rev without automatic shifts.
 
 ## Profile-based sample model
 

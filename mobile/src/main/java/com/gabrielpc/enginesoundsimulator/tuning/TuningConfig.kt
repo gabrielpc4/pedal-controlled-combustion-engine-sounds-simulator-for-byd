@@ -3,6 +3,7 @@ package com.gabrielpc.enginesoundsimulator.tuning
 import android.content.Context
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
+import com.gabrielpc.enginesoundsimulator.simulation.ShiftStrategy
 import kotlin.math.max
 import kotlin.math.min
 
@@ -28,16 +29,12 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
-    /** Maximum positive fake-tach acceleration at full pedal and the peak progression multiplier. */
-    val driveRpmAccelerationPerSecond: Double = 6_500.0,
-    /** Full pedal quickly reaches this engaging part of the selected car's RPM range. */
-    val fullThrottleSweetSpotRpm: Double = 5_200.0,
-    /** Fast initial RPM force used only below the full-pedal sweet spot. */
-    val fullThrottleKickRpmPerSecond: Double = 30_000.0,
-    /** Constant negative fake-tach acceleration as soon as the accelerator is released. */
-    val liftOffRpmDecelerationPerSecond: Double = 1_000.0,
-    /** Additional negative fake-tach acceleration at full brake. */
-    val brakeRpmDecelerationPerSecond: Double = 8_500.0,
+    val shiftStrategy: ShiftStrategy = ShiftStrategy.HYBRID,
+    val soundFinalDrive: Double = 3.96,
+    /** Tach response after the continuous road-speed estimate changes. */
+    val syntheticRpmResponseMs: Double = 55.0,
+    /** Reconstructs continuous speed from the integer BYD reading. */
+    val externalSpeedSmoothingMs: Double = 120.0,
     val simulatorCoastRegenMps2: Double = 2.50,
     val throttleAttackMs: Double = 120.0,
     val throttleReleaseMs: Double = 90.0,
@@ -52,8 +49,6 @@ data class EngineTuning(
     val rearWheelTorqueCurve: List<CurvePoint> = DEFAULT_REAR_WHEEL_TORQUE_CURVE,
     /** X is physical pedal position, Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
-    /** X is normalized fake RPM, Y is the positive tach-force multiplier. */
-    val rpmProgressionCurve: List<CurvePoint> = DEFAULT_RPM_PROGRESSION_CURVE,
 ) {
     fun sanitized(): EngineTuning {
         val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.maximumSupportedRpm)
@@ -81,11 +76,9 @@ data class EngineTuning(
             dragAreaM2 = dragAreaM2.coerceIn(0.30, 1.20),
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
-            driveRpmAccelerationPerSecond = driveRpmAccelerationPerSecond.coerceIn(1_500.0, 12_000.0),
-            fullThrottleSweetSpotRpm = fullThrottleSweetSpotRpm.coerceIn(cleanIdle + 800.0, cleanRedline - 350.0),
-            fullThrottleKickRpmPerSecond = fullThrottleKickRpmPerSecond.coerceIn(6_000.0, 60_000.0),
-            liftOffRpmDecelerationPerSecond = liftOffRpmDecelerationPerSecond.coerceIn(300.0, 12_000.0),
-            brakeRpmDecelerationPerSecond = brakeRpmDecelerationPerSecond.coerceIn(2_500.0, 18_000.0),
+            soundFinalDrive = soundFinalDrive.coerceIn(2.0, 6.0),
+            syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(20.0, 300.0),
+            externalSpeedSmoothingMs = externalSpeedSmoothingMs.coerceIn(60.0, 500.0),
             simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 4.00),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
@@ -105,12 +98,6 @@ data class EngineTuning(
                 lockEndpoints = false,
             ),
             throttleCurve = sanitizeCurve(throttleCurve, DEFAULT_THROTTLE_CURVE, lockEndpoints = true),
-            rpmProgressionCurve = sanitizeCurve(
-                rpmProgressionCurve,
-                DEFAULT_RPM_PROGRESSION_CURVE,
-                lockEndpoints = false,
-                minimumY = 0.35,
-            ),
         )
     }
 
@@ -151,13 +138,6 @@ data class EngineTuning(
             CurvePoint(0.50, 0.60),
             CurvePoint(0.75, 0.84),
             CurvePoint(1.0, 1.0),
-        )
-        val DEFAULT_RPM_PROGRESSION_CURVE = listOf(
-            CurvePoint(0.000, 0.90),
-            CurvePoint(0.250, 0.95),
-            CurvePoint(0.560, 0.72),
-            CurvePoint(0.720, 0.64),
-            CurvePoint(1.000, 0.56),
         )
     }
 }
@@ -237,11 +217,12 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
-            driveRpmAccelerationPerSecond = number(KEY_DRIVE_RPM_ACCELERATION, defaults.engine.driveRpmAccelerationPerSecond),
-            fullThrottleSweetSpotRpm = number(KEY_FULL_THROTTLE_SWEET_SPOT, defaults.engine.fullThrottleSweetSpotRpm),
-            fullThrottleKickRpmPerSecond = number(KEY_FULL_THROTTLE_KICK, defaults.engine.fullThrottleKickRpmPerSecond),
-            liftOffRpmDecelerationPerSecond = number(KEY_LIFT_OFF_RPM_DECELERATION, defaults.engine.liftOffRpmDecelerationPerSecond),
-            brakeRpmDecelerationPerSecond = number(KEY_BRAKE_RPM_DECELERATION, defaults.engine.brakeRpmDecelerationPerSecond),
+            shiftStrategy = preferences.getString(KEY_SHIFT_STRATEGY, null)
+                ?.let { stored -> ShiftStrategy.entries.firstOrNull { it.name == stored } }
+                ?: defaults.engine.shiftStrategy,
+            soundFinalDrive = number(KEY_SOUND_FINAL_DRIVE, defaults.engine.soundFinalDrive),
+            syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
+            externalSpeedSmoothingMs = number(KEY_EXTERNAL_SPEED_SMOOTHING, defaults.engine.externalSpeedSmoothingMs),
             simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
                 number(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2)
             } else {
@@ -263,10 +244,6 @@ class TuningRepository(context: Context) {
                 defaults.engine.rearWheelTorqueCurve,
             ),
             throttleCurve = decodeCurve(preferences.getString(KEY_THROTTLE_CURVE, null), defaults.engine.throttleCurve),
-            rpmProgressionCurve = decodeCurve(
-                preferences.getString(KEY_RPM_PROGRESSION_CURVE, null),
-                defaults.engine.rpmProgressionCurve,
-            ),
         )
         val engine = if (currentCalibration) storedEngine else defaults.engine
         val audio = defaults.audio.copy(
@@ -313,11 +290,10 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
-            .putString(KEY_DRIVE_RPM_ACCELERATION, clean.engine.driveRpmAccelerationPerSecond.toString())
-            .putString(KEY_FULL_THROTTLE_SWEET_SPOT, clean.engine.fullThrottleSweetSpotRpm.toString())
-            .putString(KEY_FULL_THROTTLE_KICK, clean.engine.fullThrottleKickRpmPerSecond.toString())
-            .putString(KEY_LIFT_OFF_RPM_DECELERATION, clean.engine.liftOffRpmDecelerationPerSecond.toString())
-            .putString(KEY_BRAKE_RPM_DECELERATION, clean.engine.brakeRpmDecelerationPerSecond.toString())
+            .putString(KEY_SHIFT_STRATEGY, clean.engine.shiftStrategy.name)
+            .putString(KEY_SOUND_FINAL_DRIVE, clean.engine.soundFinalDrive.toString())
+            .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
+            .putString(KEY_EXTERNAL_SPEED_SMOOTHING, clean.engine.externalSpeedSmoothingMs.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
             .putString(KEY_THROTTLE_RELEASE, clean.engine.throttleReleaseMs.toString())
@@ -329,7 +305,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_FRONT_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.frontWheelTorqueCurve))
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
             .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
-            .putString(KEY_RPM_PROGRESSION_CURVE, encodeCurve(clean.engine.rpmProgressionCurve))
             .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
             .putString(KEY_AUDIO_RPM_SMOOTHING, clean.audio.rpmSmoothingMs.toString())
             .putString(KEY_AUDIO_THROTTLE_SMOOTHING, clean.audio.throttleSmoothingMs.toString())
@@ -350,7 +325,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 10
+        const val CALIBRATION_REVISION = 11
         const val KEY_COAST_DECELERATION_REVISION = "coast_deceleration_revision"
         const val COAST_DECELERATION_REVISION = 1
         const val KEY_IDLE = "idle_rpm"
@@ -372,11 +347,10 @@ class TuningRepository(context: Context) {
         const val KEY_DRAG_AREA = "drag_area"
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
-        const val KEY_DRIVE_RPM_ACCELERATION = "drive_rpm_acceleration"
-        const val KEY_FULL_THROTTLE_SWEET_SPOT = "full_throttle_sweet_spot_rpm"
-        const val KEY_FULL_THROTTLE_KICK = "full_throttle_kick_rpm_per_second"
-        const val KEY_LIFT_OFF_RPM_DECELERATION = "lift_off_rpm_deceleration"
-        const val KEY_BRAKE_RPM_DECELERATION = "brake_rpm_deceleration"
+        const val KEY_SHIFT_STRATEGY = "shift_strategy"
+        const val KEY_SOUND_FINAL_DRIVE = "sound_final_drive"
+        const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
+        const val KEY_EXTERNAL_SPEED_SMOOTHING = "external_speed_smoothing"
         const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"
         const val KEY_THROTTLE_RELEASE = "throttle_release"
@@ -388,7 +362,6 @@ class TuningRepository(context: Context) {
         const val KEY_FRONT_WHEEL_TORQUE_CURVE = "front_wheel_torque_curve"
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
         const val KEY_THROTTLE_CURVE = "throttle_curve"
-        const val KEY_RPM_PROGRESSION_CURVE = "rpm_progression_curve"
         const val KEY_MASTER_GAIN = "master_gain"
         const val KEY_AUDIO_RPM_SMOOTHING = "audio_rpm_smoothing"
         const val KEY_AUDIO_THROTTLE_SMOOTHING = "audio_throttle_smoothing"

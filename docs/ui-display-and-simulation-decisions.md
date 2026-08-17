@@ -1,14 +1,11 @@
 # UI display and simulation presentation decisions
 
-> **Current direct-tach override:** Historical synthetic-gear material below is retained only as
-> research context. Current **D** mode has unlimited virtual gears but no ratios or top gear.
-> Full pedal rapidly kicks to the editable sweet spot (default 5,200 RPM), then the editable
-> RPM-force curve intentionally climbs more gently. Virtual shifts emit audio/log events and
-> lift-off can step back down. In explicit SIM mode, displayed speed falls with RPM on lift-off
-> or braking but is held during a virtual shift. BYD LIVE speed remains read-only telemetry and
-> never moves the tach.
+> **Current behavior:** **D** mode derives sample RPM from a continuous estimate of road speed and
+> the selected profile's ratio stack. Whole-number BYD speed readings are reconstructed before
+> reaching the tach/audio. SHORT, ORIGINAL, and HYBRID strategies control presentation shift
+> spacing; none of them changes real or simulated EV wheel force.
 
-Last updated: 2026-08-15
+Last updated: 2026-08-16
 
 This document records **product and presentation decisions** that are easy to misread as physics bugs. It complements the calibration evidence in [BYD Seal Performance calibration](byd-seal-performance-calibration.md) and the control inventory in [Live tuning interface](tuning-interface.md).
 
@@ -200,33 +197,51 @@ targetRPM = idleRpm + filteredThrottle × (redlineRpm − idleRpm)
 | Revving up | `NEUTRAL_REV_UP_RESPONSE_SECONDS` | **0.55 s** | Crank/flywheel inertia with no wheel load |
 | Revving down | `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` | **0.90 s** | Slower coast-down toward idle after lift-off |
 
-This target-seeking model is intentionally separate from the force-integrated **D** model in §3.3.
+This target-seeking model is intentionally separate from the road-speed-coupled **D** model in §3.3.
 
 **Tests:** `neutralPositionRaisesRpmWithThrottleAtStandstill`, `neutralPositionLiftOffDropsRpmTowardIdleAtStandstill`, `neutralPositionDoesNotAutoShiftWhileRevving`, `parkPositionKeepsSimulatorSpeedAtZero`, plus existing lift-off hunting guards in **D**.
 
-### 3.3 Independent Drive RPM force model
+### 3.3 Speed-coupled Drive RPM model
 
-In **D**, RPM is integrated directly and has no speed-derived target or soft floor:
+In **D**, continuous road speed is converted through the selected sample profile's presentation
+ratio stack:
 
 ```text
-positiveForce = maxRpmForce × filteredRawPedal × rpmProgressionCurve(rpm) × (1 − brake)
-negativeForce = liftOffForce(if pedal is released) + brakeForce × brake + limiterCutForce
-rpm = clamp(rpm + (positiveForce − negativeForce) × dt, idle, limiter)
+wheelRPM = roadSpeed / tireCircumference
+targetRPM = idleRPM + wheelRPM × gearRatio × soundFinalDrive
+rpm = exponentialFollow(rpm, targetRPM)
 ```
 
-`rpmProgressionCurve` is a separate editable fake-engine curve indexed only by normalized RPM. Its default starts strong, then tapers toward redline so the sweet spot does not surge too quickly. Sanitization enforces a 35% minimum, so held positive throttle cannot stall because of the curve. Road speed, Seal wheel power, and physical motor torque do not participate in tach movement. The editable defaults are **6500 RPM/s** maximum positive force, **1000 RPM/s** lift-off force, and **8500 RPM/s** additional full-brake force.
+The BYD framework reports whole-number speed. A predictive critically damped estimator maintains
+a continuous speed value between integer changes and tracks the observed direction, so both rising
+and falling road speed move the RPM/audio without one-km/h steps. The default response is 120 ms;
+a second 55 ms tach follow removes residual control-rate edges. Both values are editable under
+**DELAYS** and the 1 Hz diagnostic heartbeat records raw speed, continuous speed, and their delta.
 
-Upshifts happen at the profile shift point and drop the independent RPM state by the adjacent ratio. Released-pedal downshifts occur when RPM falls to the preceding upshift's landing RPM. Road-speed over-rev projections, live-speed gear synchronization, and emergency road-speed upshifts do not exist.
+The persisted shift strategy is selected in **TUNE → SIMULATION**:
 
-The **RESPONSE** tab exposes the progression curve as `FAKE ENGINE SPEED (RPM)` versus `POSITIVE FORCE (%)`; all points can be dragged and persist with the rest of the tuning profile.
+- **SHORT:** upshifts at 13, 26, 40, 56, and 74 km/h, ensuring five shifts below 80 km/h.
+- **ORIGINAL:** uses the sample bank's ratios and normal shift RPM.
+- **HYBRID:** defaults to SHORT at moderate demand, then continuously blends toward ORIGINAL from
+  58% through 92% filtered throttle so hard acceleration is not chopped into unnaturally brief gears.
 
-**Tests:** `roadSpeedAloneNeverMovesTheFakeRpmOrGear`, `driveRpmForceScalesWithPedalPercentage`, `driveRpmProgressionIsSmoothPositiveAndIndependentFromRoadSpeed`, `releasingPedalDropsRpmRapidlyEvenWhenRoadSpeedIsHeld`, and `brakeAddsSubstantiallyMoreNegativeRpmForceThanLiftOff`.
+Each upshift remembers the road-speed boundary that actually selected its new gear. Downshifts use
+that remembered boundary with 4 km/h hysteresis, so lifting after a throttle-dependent HYBRID shift
+cannot silently replace its long threshold with the short schedule. A road-speed near-redline guard
+can upshift without throttle so coasting or externally driven speed cannot strand the sound engine
+on its limiter. Presentation gears never feed back into the physical EV acceleration model.
+
+**Tests:** `quantizedSpeedEstimatorMakesIntegerStepsContinuousInBothDirections`,
+`driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce`,
+`shortStrategyCompletesAtLeastFiveShiftsByEightyKmh`,
+`originalStrategyPreservesNormalLongGearProgression`, and
+`hybridUsesShortGearsAtModerateThrottleAndNormalGearsAtFullThrottle`.
 
 ### 3.4 Simulator coast regen (2026-08)
 
 **Problem:** in **SIM** mode, releasing the accelerator slowed the virtual car only through aero drag and rolling resistance — much slower than a real Seal’s mild lift-off regen.
 
-**Decision:** when `InputMode.SIMULATOR`, `DriverInput.simulateCoastRegen = true` applies a constant deceleration `simulatorCoastRegenMps2` (default **2.50 m/s²**) during lift-off integration only. This deliberately strong simulator setting makes virtual road speed fall promptly when the touchscreen pedal is released. Fake RPM has its own lift-off force. The speed setting is not applied in BYD LIVE mode and is not a factory regen map.
+**Decision:** when `InputMode.SIMULATOR`, `DriverInput.simulateCoastRegen = true` applies a constant deceleration `simulatorCoastRegenMps2` (default **2.50 m/s²**) during lift-off integration only. This deliberately strong simulator setting makes virtual road speed and its coupled sound RPM fall promptly when the touchscreen pedal is released. The speed setting is not applied in BYD LIVE mode and is not a factory regen map.
 
 **Tuning:** **SIM COAST REGEN** slider in the Response tab (0–4.00 m/s²). A dedicated preference revision migrates existing installations to the stronger default without resetting unrelated tuning.
 

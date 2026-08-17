@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.simulation.ShiftStrategy
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -77,7 +78,7 @@ private val TuneMuted = Color(0xFF8CA7B5)
 
 private enum class TuningTab(val title: String, val subtitle: String) {
     ENGINE("SIMULATION", "TACH + SHIFT BEHAVIOR"),
-    RESPONSE("RESPONSE", "PEDAL + RPM DYNAMICS"),
+    RESPONSE("RESPONSE", "PEDAL + SIM COAST"),
     DELAYS("DELAYS", "INPUT, SHIFTS + AUDIO"),
     AUDIO("AUDIO", "SAMPLE BANK"),
 }
@@ -185,10 +186,14 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
             "SIMULATED ENGINE",
-            "Fake RPM, shift timing, and pedal-to-sound behavior",
+            "Road-speed-driven RPM and automatic sound gearbox",
             Modifier.weight(1f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                ShiftStrategySelector(engine.shiftStrategy) { strategy ->
+                    onChange(config.copy(engine = engine.copy(shiftStrategy = strategy)))
+                }
+                Spacer(Modifier.height(10.dp))
                 ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
@@ -208,23 +213,11 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
                 ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
                     onChange(config.copy(engine = engine.copy(idleRpm = it)))
                 }
-                ParameterSlider("MAX RPM FORCE", engine.driveRpmAccelerationPerSecond, 1_500.0..12_000.0, "%.0f RPM/s") {
-                    onChange(config.copy(engine = engine.copy(driveRpmAccelerationPerSecond = it)))
-                }
-                ParameterSlider("FULL PEDAL SWEET SPOT", engine.fullThrottleSweetSpotRpm, (engine.idleRpm + 800.0)..(engine.redlineRpm - 350.0), "%.0f RPM") {
-                    onChange(config.copy(engine = engine.copy(fullThrottleSweetSpotRpm = it)))
-                }
-                ParameterSlider("FULL PEDAL KICK", engine.fullThrottleKickRpmPerSecond, 6_000.0..60_000.0, "%.0f RPM/s") {
-                    onChange(config.copy(engine = engine.copy(fullThrottleKickRpmPerSecond = it)))
-                }
-                ParameterSlider("VIRTUAL SHIFT RPM", engine.upshiftRpm, (engine.fullThrottleSweetSpotRpm.coerceAtMost(engine.redlineRpm - 500.0) + 200.0)..(engine.redlineRpm - 50.0), "%.0f RPM") {
+                ParameterSlider("NORMAL SHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..engine.redlineRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
                 }
-                ParameterSlider("LIFT-OFF RPM FORCE", engine.liftOffRpmDecelerationPerSecond, 300.0..12_000.0, "%.0f RPM/s") {
-                    onChange(config.copy(engine = engine.copy(liftOffRpmDecelerationPerSecond = it)))
-                }
-                ParameterSlider("BRAKE RPM FORCE", engine.brakeRpmDecelerationPerSecond, 2_500.0..18_000.0, "%.0f RPM/s") {
-                    onChange(config.copy(engine = engine.copy(brakeRpmDecelerationPerSecond = it)))
+                ParameterSlider("RPM PER ROAD SPEED", engine.soundFinalDrive / 3.96 * 100.0, 50.0..150.0, "%.0f%%") {
+                    onChange(config.copy(engine = engine.copy(soundFinalDrive = it / 100.0 * 3.96)))
                 }
             }
         }
@@ -234,8 +227,6 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 @Composable
 private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
-    val currentRpm = ((state.drivetrain.rpm - engine.idleRpm) / (engine.redlineRpm - engine.idleRpm))
-        .coerceIn(0.0, 1.0)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("SIM PEDAL RESPONSE", "Drag points • pedal vs simulated drive request", Modifier.weight(1.05f)) {
             EditableCurveGraph(
@@ -254,23 +245,7 @@ private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (T
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        PanelCard("TACH FORCE CURVE", "Drag points • independent from road speed", Modifier.weight(1.05f)) {
-            EditableCurveGraph(
-                points = engine.rpmProgressionCurve,
-                xLabel = { "${(engine.idleRpm + it * (engine.redlineRpm - engine.idleRpm)).roundToInt()}" },
-                yLabel = { "${(it * 100).roundToInt()}" },
-                xMarkerLabel = { "${(engine.idleRpm + it * (engine.redlineRpm - engine.idleRpm)).roundToInt()} RPM" },
-                yMarkerLabel = { "${(it * 100).roundToInt()}%" },
-                xAxisTitle = "FAKE ENGINE SPEED (RPM)",
-                yAxisTitle = "POSITIVE FORCE (%)",
-                currentX = currentRpm,
-                accent = TuneCyan,
-                lockEndpointX = true,
-                onPointsChange = { onChange(config.copy(engine = engine.copy(rpmProgressionCurve = it))) },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        PanelCard("SIM COAST", "How the simulated vehicle loses speed after pedal lift", Modifier.weight(0.82f)) {
+        PanelCard("SIM COAST", "How the simulated vehicle loses speed after pedal lift", Modifier.weight(0.95f)) {
             ParameterSlider("SIM LIFT-OFF DECEL", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
                 onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
             }
@@ -294,6 +269,12 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             }
             ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
+            }
+            ParameterSlider("BYD SPEED SMOOTHING", engine.externalSpeedSmoothingMs, 60.0..500.0, "%.0f ms") {
+                onChange(config.copy(engine = engine.copy(externalSpeedSmoothingMs = it)))
+            }
+            ParameterSlider("TACH FOLLOWS SPEED", engine.syntheticRpmResponseMs, 20.0..300.0, "%.0f ms") {
+                onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
             }
         }
         PanelCard("VIRTUAL SHIFTS", "Time spent moving between virtual gears", Modifier.weight(1f)) {
@@ -363,6 +344,40 @@ private fun PanelCard(title: String, subtitle: String, modifier: Modifier = Modi
         Spacer(Modifier.height(14.dp))
         content()
     }
+}
+
+@Composable
+private fun ShiftStrategySelector(selected: ShiftStrategy, onSelected: (ShiftStrategy) -> Unit) {
+    Text("SHIFT PATTERN", color = TuneMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+    Spacer(Modifier.height(7.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ShiftStrategy.entries.forEach { strategy ->
+            val active = strategy == selected
+            Button(
+                onClick = { onSelected(strategy) },
+                modifier = Modifier.weight(1f).height(44.dp),
+                shape = RoundedCornerShape(9.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (active) TuneCyan.copy(alpha = 0.18f) else TunePanelBright,
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (active) TuneCyan else TuneLine,
+                ),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                Text(
+                    strategy.displayName,
+                    color = if (active) TuneCyan else TuneMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.8.sp,
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(selected.description, color = TuneWhite, fontSize = 10.sp)
 }
 
 @Composable

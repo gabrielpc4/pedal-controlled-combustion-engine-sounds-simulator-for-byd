@@ -118,8 +118,8 @@ class DriveController(context: Context) {
         PersistentDiagnosticLog.event(
             "drive_controller_created",
             "profile=${profile.name} redline_rpm=${profile.redlineRpm.roundToInt()} " +
-                "mode=DIRECT_TACH sweet_spot_rpm=${profile.fullThrottleSweetSpotRpm.roundToInt()} " +
-                "full_pedal_kick_rpm_per_s=${profile.fullThrottleKickRpmPerSecond.roundToInt()}",
+                "mode=SPEED_COUPLED strategy=${profile.shiftStrategy.name} " +
+                "speed_filter_ms=${(profile.externalSpeedSmoothingSeconds * 1_000.0).roundToInt()}",
         )
     }
 
@@ -461,7 +461,7 @@ class DriveController(context: Context) {
                 "virtual_shift_started",
                 "serial=${drivetrain.shiftSerial} direction=${drivetrain.shiftDirection.name} " +
                     "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
-                    "landing_rpm=${profile.fullThrottleSweetSpotRpm.roundToInt()} " +
+                    "speed_kmh=${drivetrain.speedKmh.roundToInt()} strategy=${drivetrain.shiftStrategy.name} " +
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} source=${input.label}",
             )
             lastLoggedShiftSerial = drivetrain.shiftSerial
@@ -493,13 +493,13 @@ class DriveController(context: Context) {
             }
             PersistentDiagnosticLog.event(
                 "drive_heartbeat",
-                "mode=DIRECT_TACH gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
+                "mode=SPEED_COUPLED strategy=${drivetrain.shiftStrategy.name} " +
+                    "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
                     "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
+                    "raw_speed_kmh=${drivetrain.rawSpeedKmh.roundToInt()} " +
+                    "speed_filter_delta_milli_kmh=${((drivetrain.speedKmh - drivetrain.rawSpeedKmh) * 1_000.0).roundToInt()} " +
                     "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
                     "brake_pct=${(input.brake * 100.0).roundToInt()} " +
-                    "rpm_curve_permille=${(drivetrain.rpmProgressionFraction * 1_000.0).roundToInt()} " +
-                    "rpm_push_per_s=${drivetrain.rpmPositiveForcePerSecond.roundToInt()} " +
-                    "rpm_drag_per_s=${drivetrain.rpmNegativeForcePerSecond.roundToInt()} " +
                     "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
                     "source=${input.label} reader=${telemetry.readerState.name} " +
                     "car_profile=${selectedSampleProfile.get().id} sample_status=${audio.sampleStatus} " +
@@ -583,17 +583,15 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
-        driveRpmAccelerationPerSecond = engine.driveRpmAccelerationPerSecond,
-        fullThrottleSweetSpotRpm = engine.fullThrottleSweetSpotRpm,
-        fullThrottleKickRpmPerSecond = engine.fullThrottleKickRpmPerSecond,
-        liftOffRpmDecelerationPerSecond = engine.liftOffRpmDecelerationPerSecond,
-        brakeRpmDecelerationPerSecond = engine.brakeRpmDecelerationPerSecond,
+        shiftStrategy = engine.shiftStrategy,
+        soundFinalDrive = engine.soundFinalDrive,
+        syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
+        externalSpeedSmoothingSeconds = engine.externalSpeedSmoothingMs / 1_000.0,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,
         gearRatios = engine.gearRatios.toDoubleArray(),
         frontWheelTorqueCurve = engine.frontWheelTorqueCurve,
         rearWheelTorqueCurve = engine.rearWheelTorqueCurve,
         throttleCurve = engine.throttleCurve,
-        rpmProgressionCurve = engine.rpmProgressionCurve,
         throttleAttackSeconds = engine.throttleAttackMs / 1_000.0,
         throttleReleaseSeconds = engine.throttleReleaseMs / 1_000.0,
         brakeResponseSeconds = engine.brakeResponseMs / 1_000.0,
