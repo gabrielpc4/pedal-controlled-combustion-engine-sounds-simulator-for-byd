@@ -137,7 +137,7 @@ Set-Location $project
 
 .\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:assembleDebugAndroidTest :mobile:lintDebug --no-daemon
 
-& $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\mobile-debug.apk
+& $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\engine-sounds-simulator-build-<build>-debug.apk
 & $adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\androidTest\debug\mobile-debug-androidTest.apk
 & $adb shell am instrument -w -r com.gabrielpc.enginesoundsimulator.test/androidx.test.runner.AndroidJUnitRunner
 & $adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity

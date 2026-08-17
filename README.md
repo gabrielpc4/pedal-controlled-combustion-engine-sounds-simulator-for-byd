@@ -53,14 +53,14 @@ $env:JAVA_HOME = '<Android Studio JBR path>'
 .\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:lintDebug
 ```
 
-Output: `mobile/build/outputs/apk/debug/mobile-debug.apk`
+Output: `mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<build>-debug.apk`
 
 ## Install
 
 Sideload the debug APK on the BYD tablet or a matching emulator. On Android versions that block legacy target-SDK apps, use `adb install --bypass-low-target-sdk-block -r ...` on a dedicated test device only.
 
 ```powershell
-adb install -r mobile\build\outputs\apk\debug\mobile-debug.apk
+adb install -r mobile\build\outputs\apk\debug\engine-sounds-simulator-build-<build>-debug.apk
 adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
 ```
 
