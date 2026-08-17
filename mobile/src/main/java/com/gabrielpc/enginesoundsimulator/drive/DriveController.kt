@@ -129,8 +129,7 @@ class DriveController(context: Context) {
                     sampleStatus = liveAudio.sampleStatus,
                     sampleError = liveAudio.sampleError,
                     error = liveAudio.error,
-                    samplePlayingLoops = liveAudio.samplePlayingLoops,
-                    samplePlayingEffects = liveAudio.samplePlayingEffects,
+                    samplePlaying = liveAudio.samplePlaying,
                 ),
             )
         }

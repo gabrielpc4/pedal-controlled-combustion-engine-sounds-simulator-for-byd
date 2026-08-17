@@ -15,8 +15,7 @@ internal data class SampleRendererDiagnostics(
     val renderRpm: Int = 0,
     val throttle: Double = 0.0,
     val activeLayers: String = "none",
-    val playingLoopAssets: List<String> = emptyList(),
-    val playingEffectAssets: List<String> = emptyList(),
+    val playingSamples: List<PlayingSampleLabel> = emptyList(),
     val framesRendered: Long = 0,
     val loopWraps: Long = 0,
     val peak: Double = 0.0,
@@ -124,8 +123,7 @@ internal class SampleEngineRenderer private constructor(
 
         framesRendered += frameCount
         renderedBlocks += 1
-        val playingLoopAssets = audibleLoopAssets(target)
-        val playingEffectAssets = audibleEffectAssets(target)
+        val playingSamples = audiblePlayingSamples(target)
         if (renderedBlocks % DIAGNOSTIC_BLOCK_INTERVAL == 0L || diagnostics.framesRendered == 0L) {
             val active = if (target.soloEffects) "none (effects solo)" else voices.asSequence()
                 .filter { it.targetGain > 0.006 }
@@ -144,8 +142,7 @@ internal class SampleEngineRenderer private constructor(
                 renderRpm = smoothedRpm.toInt(),
                 throttle = smoothedThrottle,
                 activeLayers = active,
-                playingLoopAssets = playingLoopAssets,
-                playingEffectAssets = playingEffectAssets,
+                playingSamples = playingSamples,
                 framesRendered = framesRendered,
                 loopWraps = loopWraps,
                 peak = blockPeak,
@@ -157,8 +154,7 @@ internal class SampleEngineRenderer private constructor(
             )
         } else {
             diagnostics = diagnostics.copy(
-                playingLoopAssets = playingLoopAssets,
-                playingEffectAssets = playingEffectAssets,
+                playingSamples = playingSamples,
                 targetRpm = requestedRpm.toInt(),
                 renderRpm = smoothedRpm.toInt(),
                 throttle = smoothedThrottle,
@@ -170,25 +166,26 @@ internal class SampleEngineRenderer private constructor(
         }
     }
 
-    /** WAV assets whose current gain is audibly contributing to the mixed output right now. */
-    private fun audibleLoopAssets(target: EngineAudioFrame): List<String> {
-        if (!isProgramAudible(target) || target.soloEffects || continuousProgramGain <= SILENCE_GAIN) return emptyList()
-        return voices.asSequence()
-            .filter { it.gain > SILENCE_GAIN }
-            .sortedByDescending { it.gain }
-            .map { it.spec.assetName }
-            .distinct()
-            .toList()
-    }
-
-    private fun audibleEffectAssets(target: EngineAudioFrame): List<String> {
-        if (!isProgramAudible(target)) return emptyList()
-        return effectVoices.asSequence()
-            .filter { it.isAudible && it.gain > SILENCE_GAIN }
-            .sortedByDescending { it.gain }
-            .map { it.spec.assetName }
-            .distinct()
-            .toList()
+    /** Loop and effect WAV assets audibly contributing to the mixed output right now. */
+    private fun audiblePlayingSamples(target: EngineAudioFrame): List<PlayingSampleLabel> = buildList {
+        if (isProgramAudible(target) && !target.soloEffects && continuousProgramGain > SILENCE_GAIN) {
+            voices.asSequence()
+                .filter { it.gain > SILENCE_GAIN }
+                .sortedByDescending { it.gain }
+                .map { voice ->
+                    PlayingSampleLabel(voice.spec.role.playingRoleLabel(), voice.spec.assetName)
+                }
+                .forEach(::add)
+        }
+        if (isProgramAudible(target)) {
+            effectVoices.asSequence()
+                .filter { it.isAudible && it.gain > SILENCE_GAIN }
+                .sortedByDescending { it.gain }
+                .map { voice ->
+                    PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName)
+                }
+                .forEach(::add)
+        }
     }
 
     private fun isProgramAudible(target: EngineAudioFrame): Boolean =

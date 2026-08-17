@@ -160,11 +160,8 @@ internal fun DebugPanel(
                 DebugLine("Target sample RPM", state.audio.sampleTargetRpm.toString())
                 DebugLine("Rendered sample RPM", state.audio.sampleRenderRpm.toString())
                 DebugLine("Rendered throttle", "${(state.audio.sampleThrottle * 100.0).roundToInt()}%")
-                if (state.audio.samplePlayingLoops.isNotEmpty()) {
-                    DebugLine("Playing loops", state.audio.samplePlayingLoops.joinToString(", "))
-                }
-                if (state.audio.samplePlayingEffects.isNotEmpty()) {
-                    DebugLine("Playing effects", state.audio.samplePlayingEffects.joinToString(", "))
+                if (state.audio.samplePlaying.isNotEmpty()) {
+                    DebugLine("Playing now", state.audio.samplePlaying.joinToString(", ") { it.displayText() })
                 }
                 DebugLine("Rendered frames", state.audio.sampleFramesRendered.toString())
                 DebugLine("Loop wraps", state.audio.sampleLoopWraps.toString())

@@ -129,8 +129,10 @@ class SampleEngineRendererTest {
         assertTrue(diagnostics.framesRendered > 90_000)
         assertTrue(diagnostics.loopWraps > 0)
         assertTrue(diagnostics.activeLayers != "none")
-        assertTrue(diagnostics.playingLoopAssets.isNotEmpty())
-        assertTrue(diagnostics.playingLoopAssets.all { it.endsWith(".wav") })
+        assertTrue(diagnostics.playingSamples.isNotEmpty())
+        assertTrue(diagnostics.playingSamples.all { it.assetName.endsWith(".wav") })
+        assertTrue(diagnostics.playingSamples.all { it.role.isNotBlank() })
+        assertTrue(diagnostics.playingSamples.any { it.displayText().contains('(') })
         assertTrue(diagnostics.peak in 0.01..1.0)
         assertEquals(0L, diagnostics.overRangeSamples)
     }

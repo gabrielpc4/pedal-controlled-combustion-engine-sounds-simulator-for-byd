@@ -82,6 +82,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.PlayingSampleLabel
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -302,8 +303,7 @@ private fun MotorSoundDashboard(
                             maxRpm = state.tuning.engine.maxRpm,
                             redlineRpm = state.tuning.engine.redlineRpm,
                             upshiftRpm = state.tuning.engine.upshiftRpm,
-                            playingLoopAssets = state.audio.samplePlayingLoops,
-                            playingEffectAssets = state.audio.samplePlayingEffects,
+                            playingSamples = state.audio.samplePlaying,
                             engineSoundEnabled = state.engineSoundEnabled,
                             modifier = Modifier
                                 .weight(0.88f)
@@ -733,8 +733,7 @@ private fun Tachometer(
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
-    playingLoopAssets: List<String>,
-    playingEffectAssets: List<String>,
+    playingSamples: List<PlayingSampleLabel>,
     engineSoundEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -750,8 +749,7 @@ private fun Tachometer(
                 .fillMaxWidth(),
         )
         PlayingSamplesPanel(
-            loopAssets = playingLoopAssets,
-            effectAssets = playingEffectAssets,
+            playingSamples = playingSamples,
             engineSoundEnabled = engineSoundEnabled,
             modifier = Modifier
                 .fillMaxWidth()
@@ -936,19 +934,10 @@ private fun TachometerGauge(
 
 @Composable
 private fun PlayingSamplesPanel(
-    loopAssets: List<String>,
-    effectAssets: List<String>,
+    playingSamples: List<PlayingSampleLabel>,
     engineSoundEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val playingAssets = remember(loopAssets, effectAssets) {
-        buildList {
-            addAll(loopAssets)
-            effectAssets.forEach { asset ->
-                if (asset !in loopAssets) add(asset)
-            }
-        }
-    }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -968,13 +957,13 @@ private fun PlayingSamplesPanel(
             !engineSoundEnabled -> {
                 Text("Engine audio muted", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             }
-            playingAssets.isEmpty() -> {
+            playingSamples.isEmpty() -> {
                 Text("No audible samples", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             }
             else -> {
-                playingAssets.forEach { asset ->
+                playingSamples.forEach { sample ->
                     Text(
-                        text = asset,
+                        text = sample.displayText(),
                         color = White,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,
