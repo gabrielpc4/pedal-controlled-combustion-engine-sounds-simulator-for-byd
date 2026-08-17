@@ -147,6 +147,8 @@ class MainActivity : ComponentActivity() {
                         onNextCar = controller::selectNextCar,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
                         onSoloSoundEffectsChange = controller::setSoloSoundEffects,
+                        onRequestSnapshot = controller::snapshot,
+                        onDebugPanelVisible = controller::setDebugPanelVisible,
                     )
                 }
             }
@@ -211,11 +213,16 @@ private fun MotorSoundDashboard(
     onNextCar: () -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
     onSoloSoundEffectsChange: (Boolean) -> Unit,
+    onRequestSnapshot: () -> DriveSnapshot,
+    onDebugPanelVisible: (Boolean) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
     var effectsOpen by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(debugOpen) {
+        onDebugPanelVisible(debugOpen)
+    }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
         modifier = Modifier
@@ -295,6 +302,9 @@ private fun MotorSoundDashboard(
                             maxRpm = state.tuning.engine.maxRpm,
                             redlineRpm = state.tuning.engine.redlineRpm,
                             upshiftRpm = state.tuning.engine.upshiftRpm,
+                            playingLoopAssets = state.audio.samplePlayingLoops,
+                            playingEffectAssets = state.audio.samplePlayingEffects,
+                            engineSoundEnabled = state.engineSoundEnabled,
                             modifier = Modifier
                                 .weight(0.88f)
                                 .fillMaxHeight()
@@ -314,7 +324,7 @@ private fun MotorSoundDashboard(
 
                 if (debugOpen) {
                     DebugPanel(
-                        state = state,
+                        requestSnapshot = onRequestSnapshot,
                         onRestartBydReader = onRestartBydReader,
                         onRunSampleValidation = onRunSampleValidation,
                         onClose = { debugOpen = false },
@@ -723,6 +733,40 @@ private fun Tachometer(
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
+    playingLoopAssets: List<String>,
+    playingEffectAssets: List<String>,
+    engineSoundEnabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        TachometerGauge(
+            drivetrain = drivetrain,
+            transmissionPosition = transmissionPosition,
+            maxRpm = maxRpm,
+            redlineRpm = redlineRpm,
+            upshiftRpm = upshiftRpm,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        )
+        PlayingSamplesPanel(
+            loopAssets = playingLoopAssets,
+            effectAssets = playingEffectAssets,
+            engineSoundEnabled = engineSoundEnabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun TachometerGauge(
+    drivetrain: DrivetrainState,
+    transmissionPosition: TransmissionPosition,
+    maxRpm: Double,
+    redlineRpm: Double,
+    upshiftRpm: Double,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -885,6 +929,59 @@ private fun Tachometer(
                     letterSpacing = 1.4.sp,
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = gaugeSize * 0.08f),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayingSamplesPanel(
+    loopAssets: List<String>,
+    effectAssets: List<String>,
+    engineSoundEnabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val playingAssets = remember(loopAssets, effectAssets) {
+        buildList {
+            addAll(loopAssets)
+            effectAssets.forEach { asset ->
+                if (asset !in loopAssets) add(asset)
+            }
+        }
+    }
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Panel.copy(alpha = 0.92f))
+            .border(1.dp, Line.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = "NOW PLAYING",
+            color = Cyan,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.4.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        when {
+            !engineSoundEnabled -> {
+                Text("Engine audio muted", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+            playingAssets.isEmpty() -> {
+                Text("No audible samples", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+            else -> {
+                playingAssets.forEach { asset ->
+                    Text(
+                        text = asset,
+                        color = White,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

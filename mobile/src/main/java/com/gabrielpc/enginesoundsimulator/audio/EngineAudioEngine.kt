@@ -8,7 +8,7 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
 import android.os.Process
-import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
+import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -46,6 +46,8 @@ data class AudioOutputState(
     val sampleRenderRpm: Int = 0,
     val sampleThrottle: Double = 0.0,
     val sampleActiveLayers: String = "none",
+    val samplePlayingLoops: List<String> = emptyList(),
+    val samplePlayingEffects: List<String> = emptyList(),
     val sampleFramesRendered: Long = 0L,
     val sampleLoopWraps: Long = 0L,
     val samplePeak: Double = 0.0,
@@ -80,27 +82,26 @@ class EngineAudioEngine(context: Context) {
                 if (focusHeld.get() && running.get()) {
                     focusMultiplier.set(1.0)
                     outputState.updateAndGet { it.copy(focusGranted = true) }
-                    PersistentDiagnosticLog.event("audio_focus_gained")
                 }
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 focusMultiplier.set(0.20)
                 outputState.updateAndGet { it.copy(focusGranted = false) }
-                PersistentDiagnosticLog.warning("audio_focus_duck")
+                DebugEventLog.warning("audio_focus_duck")
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 focusMultiplier.set(0.0)
                 outputState.updateAndGet { it.copy(focusGranted = false) }
-                PersistentDiagnosticLog.warning("audio_focus_transient_loss")
+                DebugEventLog.warning("audio_focus_transient_loss")
             }
 
             AudioManager.AUDIOFOCUS_LOSS -> {
                 focusMultiplier.set(0.0)
                 focusHeld.set(false)
                 outputState.updateAndGet { it.copy(focusGranted = false) }
-                PersistentDiagnosticLog.warning("audio_focus_lost")
+                DebugEventLog.warning("audio_focus_lost")
                 synchronized(lifecycleLock) {
                     if (running.get() || renderThread.get() != null) {
                         stopLocked(error = "Audio focus lost")
@@ -149,7 +150,6 @@ class EngineAudioEngine(context: Context) {
             outputState.updateAndGet { it.copy(sampleProfile = profile.id) }
             if (!changed) return
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
-            PersistentDiagnosticLog.event("audio_profile_selected", "profile=${profile.id}")
             if (shouldRestart && stopLocked()) startLocked()
         }
     }
@@ -165,21 +165,17 @@ class EngineAudioEngine(context: Context) {
         }
 
         val sampleProfile = selectedProfile.get()
-        PersistentDiagnosticLog.event(
-            "audio_start_requested",
-            "mode=${requestedMode.get().name} profile=${sampleProfile.id}",
-        )
         focusMultiplier.set(0.0)
         val focusResult = runCatching { requestFocus() }
         val focusGranted = focusResult.getOrDefault(false)
         if (!focusGranted) {
             focusResult.exceptionOrNull()?.let { failure ->
-                PersistentDiagnosticLog.recordThrowable(
+                DebugEventLog.recordThrowable(
                     "audio_focus_request_failed",
                     failure,
                     "mode=${requestedMode.get().name}",
                 )
-            } ?: PersistentDiagnosticLog.warning("audio_focus_denied", "mode=${requestedMode.get().name}")
+            } ?: DebugEventLog.warning("audio_focus_denied", "mode=${requestedMode.get().name}")
             running.set(false)
             outputState.updateAndGet {
                 it.copy(
@@ -230,7 +226,7 @@ class EngineAudioEngine(context: Context) {
                     error = "Audio renderer start failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty()}",
                 )
             }
-            PersistentDiagnosticLog.recordThrowable("audio_renderer_start_failed", throwable)
+            DebugEventLog.recordThrowable("audio_renderer_start_failed", throwable)
         }
     }
 
@@ -282,10 +278,6 @@ class EngineAudioEngine(context: Context) {
                 },
             )
         }
-        PersistentDiagnosticLog.event(
-            "audio_stopped",
-            "clean=$stopped reason=${error ?: "requested"}",
-        )
         return stopped
     }
 
@@ -305,7 +297,7 @@ class EngineAudioEngine(context: Context) {
                 outputState.updateAndGet {
                     it.copy(sampleStatus = "ERROR", sampleError = failure, error = failure)
                 }
-                PersistentDiagnosticLog.recordThrowable(
+                DebugEventLog.recordThrowable(
                     "sample_engine_load_failed",
                     throwable,
                     "profile=${sampleProfile.id}",
@@ -313,18 +305,6 @@ class EngineAudioEngine(context: Context) {
                 return
             }
             val initialDiagnostics = sampleRenderer.diagnostics()
-            PersistentDiagnosticLog.event(
-                "sample_engine_loaded",
-                "profile=${initialDiagnostics.profileId} loops=${initialDiagnostics.loadedLoops} " +
-                    "effects=${initialDiagnostics.loadedEffects} " +
-                    "decoded_bytes=${initialDiagnostics.decodedBytes} source_rate=${sampleProfile.outputSampleRate} " +
-                    "output_rate=$sampleRate " +
-                    "device_native_rate=${nativeSampleRate()} quality=" +
-                    "${if (sampleRate == sampleProfile.outputSampleRate) "DIRECT_RATE" else "APP_CUBIC_SRC"} " +
-                    "rpm_domain=${sampleProfile.minimumRpm.toInt()}-${sampleProfile.maximumRpm.toInt()} " +
-                    "full_throttle_trim_db=${sampleProfile.throttleOutputGainDb?.valueAt(1.0) ?: 0.0} " +
-                    "program_channels=2",
-            )
             // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
             // loading and JIT work cannot starve the newly opened output buffer.
             val warmup = ShortArray(512)
@@ -382,7 +362,7 @@ class EngineAudioEngine(context: Context) {
                         error = failure,
                     )
                 }
-                PersistentDiagnosticLog.warning("audio_track_open_failed", "mode=${mode.name} error=$failure")
+                DebugEventLog.warning("audio_track_open_failed", "mode=${mode.name} error=$failure")
                 return
             }
 
@@ -418,15 +398,6 @@ class EngineAudioEngine(context: Context) {
                     sampleDecodedBytes = initialDiagnostics.decodedBytes,
                 )
             }
-            PersistentDiagnosticLog.event(
-                "audio_track_active",
-                "mode=${mode.name} profile=${sampleProfile.id} layout=${active.layout.label} " +
-                    "logical_channels=${track.channelCount} program_channels=2 " +
-                    "sample_rate=${track.sampleRate} buffer_frames=" +
-                    "${if (Build.VERSION.SDK_INT >= 24) track.bufferSizeInFrames else active.capacityFrames} " +
-                    "route=${routedDeviceName(track)} session=${track.audioSessionId}",
-            )
-
             while (isCurrent(runId)) {
                 val frame = parameters.get()
                 val renderGain = duplicationGain * focusMultiplier.get()
@@ -448,6 +419,8 @@ class EngineAudioEngine(context: Context) {
                             sampleRenderRpm = sampleDiagnostics.renderRpm,
                             sampleThrottle = sampleDiagnostics.throttle,
                             sampleActiveLayers = sampleDiagnostics.activeLayers,
+                            samplePlayingLoops = sampleDiagnostics.playingLoopAssets,
+                            samplePlayingEffects = sampleDiagnostics.playingEffectAssets,
                             sampleFramesRendered = sampleDiagnostics.framesRendered,
                             sampleLoopWraps = sampleDiagnostics.loopWraps,
                             samplePeak = sampleDiagnostics.peak,
@@ -461,7 +434,7 @@ class EngineAudioEngine(context: Context) {
         } catch (throwable: Throwable) {
             if (isCurrent(runId)) {
                 failure = "${throwable.javaClass.simpleName}: ${throwable.message.orEmpty()}"
-                PersistentDiagnosticLog.recordThrowable("audio_renderer_failed", throwable, "mode=${mode.name}")
+                DebugEventLog.recordThrowable("audio_renderer_failed", throwable, "mode=${mode.name}")
             }
         } finally {
             opened?.track?.let { track ->
@@ -483,10 +456,12 @@ class EngineAudioEngine(context: Context) {
                         error = failure ?: it.error ?: "Audio renderer stopped unexpectedly",
                     )
                 }
-                PersistentDiagnosticLog.warning(
-                    "audio_renderer_stopped",
-                    "mode=${mode.name} error=${failure ?: "unexpected_stop"}",
-                )
+                if (failure != null) {
+                    DebugEventLog.warning(
+                        "audio_renderer_stopped",
+                        "mode=${mode.name} error=$failure",
+                    )
+                }
             }
         }
     }

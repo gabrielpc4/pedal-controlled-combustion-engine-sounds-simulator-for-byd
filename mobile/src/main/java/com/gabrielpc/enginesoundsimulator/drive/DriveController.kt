@@ -10,7 +10,7 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
-import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
+import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
@@ -18,7 +18,6 @@ import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
-import com.gabrielpc.enginesoundsimulator.telemetry.ReaderState
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -28,7 +27,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
-import kotlin.math.roundToInt
 
 enum class InputMode(val displayName: String) {
     AUTO("AUTO"),
@@ -84,12 +82,7 @@ class DriveController(context: Context) {
     private val selectedInputMode = AtomicReference(InputMode.AUTO)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val soundEnabled = AtomicBoolean(true)
-    private var lastLoggedShiftSerial = simulation.state.shiftSerial
-    private var lastShiftWasActive = false
-    private var lastInputSignature = ""
-    private var nextHeartbeatAtElapsedMs = 0L
-    private var lastEffectTelemetryProfile = ""
-    private var lastEffectTriggerCount = 0L
+    private val debugPanelVisible = AtomicBoolean(false)
     private val validationThread = AtomicReference<Thread?>(null)
 
     @Volatile
@@ -118,15 +111,34 @@ class DriveController(context: Context) {
 
     init {
         audioEngine.setSampleProfile(selectedSampleProfile.get())
-        PersistentDiagnosticLog.event(
-            "drive_controller_created",
-            "profile=${profile.name} redline_rpm=${profile.redlineRpm.roundToInt()} " +
-                "mode=SPEED_COUPLED " +
-                "speed_filter_ms=${(profile.externalSpeedSmoothingSeconds * 1_000.0).roundToInt()}",
-        )
     }
 
-    fun snapshot(): DriveSnapshot = latest.copy(audio = audioEngine.state())
+    fun setDebugPanelVisible(visible: Boolean) {
+        debugPanelVisible.set(visible)
+    }
+
+    fun snapshot(): DriveSnapshot {
+        val base = latest
+        val liveAudio = audioEngine.state()
+        if (!debugPanelVisible.get()) {
+            return base.copy(
+                audio = base.audio.copy(
+                    requestedMode = liveAudio.requestedMode,
+                    activeChannels = liveAudio.activeChannels,
+                    running = liveAudio.running,
+                    sampleStatus = liveAudio.sampleStatus,
+                    sampleError = liveAudio.sampleError,
+                    error = liveAudio.error,
+                    samplePlayingLoops = liveAudio.samplePlayingLoops,
+                    samplePlayingEffects = liveAudio.samplePlayingEffects,
+                ),
+            )
+        }
+        return base.copy(
+            telemetry = vehicleReader.snapshot(),
+            audio = liveAudio,
+        )
+    }
 
     fun start() {
         synchronized(lifecycleLock) {
@@ -138,9 +150,6 @@ class DriveController(context: Context) {
             }
 
             // Start each visible/controller session with a fresh source line and heartbeat.
-            lastInputSignature = ""
-            lastShiftWasActive = false
-            nextHeartbeatAtElapsedMs = 0L
             val runId = generation.incrementAndGet()
             running.set(true)
             val thread = Thread({ runLoop(runId) }, "drivetrain-simulation").apply { isDaemon = true }
@@ -149,17 +158,13 @@ class DriveController(context: Context) {
                 vehicleReader.start()
                 if (soundEnabled.get()) audioEngine.start()
                 thread.start()
-                PersistentDiagnosticLog.event(
-                    "drive_controller_started",
-                    "mode=${selectedInputMode.get().name} sound_enabled=${soundEnabled.get()}",
-                )
             } catch (throwable: Throwable) {
                 running.set(false)
                 generation.incrementAndGet()
                 loopThread = null
                 vehicleReader.stop()
                 audioEngine.stop()
-                PersistentDiagnosticLog.recordThrowable("drive_controller_start_failed", throwable)
+                DebugEventLog.recordThrowable("drive_controller_start_failed", throwable)
                 throw throwable
             }
         }
@@ -167,7 +172,6 @@ class DriveController(context: Context) {
 
     fun stop() {
         synchronized(lifecycleLock) {
-            PersistentDiagnosticLog.event("drive_controller_stopping")
             running.set(false)
             generation.incrementAndGet()
             val thread = loopThread
@@ -180,7 +184,6 @@ class DriveController(context: Context) {
             vehicleReader.stop()
             audioEngine.stop()
             manualInput.set(ManualInput())
-            PersistentDiagnosticLog.event("drive_controller_stopped")
         }
     }
 
@@ -193,10 +196,7 @@ class DriveController(context: Context) {
     }
 
     fun setInputMode(mode: InputMode) {
-        val previous = selectedInputMode.getAndSet(mode)
-        if (previous != mode) {
-            PersistentDiagnosticLog.event("input_mode_changed", "from=${previous.name} to=${mode.name}")
-        }
+        selectedInputMode.set(mode)
     }
 
     fun setTuning(config: TuningConfig) {
@@ -209,7 +209,6 @@ class DriveController(context: Context) {
         val clean = tuningRepository.reset().withSampleProfile(selectedSampleProfile.get())
         tuningConfig.set(clean)
         tuningRepository.save(clean)
-        PersistentDiagnosticLog.event("tuning_reset")
     }
 
     fun selectPreviousCar() = selectAdjacentCar(-1)
@@ -220,20 +219,12 @@ class DriveController(context: Context) {
         val selected = selectedSampleProfile.get()
         val updatedMask = soundEffectsRepository.setEnabled(selected, controlId, enabled)
         enabledEffectMask.set(updatedMask)
-        PersistentDiagnosticLog.event(
-            "sound_effect_toggled",
-            "profile=${selected.id} effect=$controlId enabled=$enabled mask=$updatedMask",
-        )
     }
 
     fun setSoloSoundEffects(enabled: Boolean) {
         val selected = selectedSampleProfile.get()
         soundEffectsRepository.setSoloEffects(selected, enabled)
         soloEffects.set(enabled)
-        PersistentDiagnosticLog.event(
-            "sound_effect_solo_toggled",
-            "profile=${selected.id} enabled=$enabled mask=${enabledEffectMask.get()}",
-        )
     }
 
     private fun selectAdjacentCar(offset: Int) {
@@ -248,12 +239,6 @@ class DriveController(context: Context) {
         tuningConfig.set(tuning)
         tuningRepository.save(tuning)
         audioEngine.setSampleProfile(selected)
-        PersistentDiagnosticLog.event(
-            "car_profile_changed",
-            "from=${previous.id} to=${selected.id} layers=${selected.layers.size} " +
-                "source_rate=${selected.outputSampleRate} playback_rate=${selected.playbackSampleRate} " +
-                    "rpm_domain=${selected.minimumRpm.toInt()}-${selected.maximumRpm.toInt()}",
-        )
     }
 
     fun cycleInputMode() {
@@ -263,15 +248,11 @@ class DriveController(context: Context) {
     }
 
     fun setTransmissionPosition(position: TransmissionPosition) {
-        val previous = transmissionPosition.getAndSet(position)
-        if (previous != position) {
-            PersistentDiagnosticLog.event("transmission_position_changed", "from=${previous.name} to=${position.name}")
-        }
+        transmissionPosition.set(position)
     }
 
     fun restartVehicleReader() {
         vehicleReader.restart()
-        PersistentDiagnosticLog.event("byd_reader_restart_requested")
     }
 
     fun toggleSound() {
@@ -279,7 +260,6 @@ class DriveController(context: Context) {
             val enable = !soundEnabled.get()
             soundEnabled.set(enable)
             if (enable && running.get()) audioEngine.start() else audioEngine.stop()
-            PersistentDiagnosticLog.event("sound_toggled", "enabled=$enable")
         }
     }
 
@@ -294,14 +274,13 @@ class DriveController(context: Context) {
         val current = audioEngine.state().requestedMode
         val selected = order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size]
         audioEngine.setChannelMode(selected)
-        PersistentDiagnosticLog.event("audio_channel_mode_changed", "from=${current.name} to=${selected.name}")
     }
 
     /** Runs a deterministic pedal program for on-device sample-renderer and telemetry validation. */
     fun runSampleAudioValidation() {
         synchronized(lifecycleLock) {
             if (validationThread.get()?.isAlive == true) {
-                PersistentDiagnosticLog.warning("sample_validation_already_running")
+                DebugEventLog.warning("sample_validation_already_running")
                 return
             }
             selectedInputMode.set(InputMode.SIMULATOR)
@@ -313,14 +292,8 @@ class DriveController(context: Context) {
                 {
                     var completed = false
                     try {
-                        PersistentDiagnosticLog.event("sample_validation_started")
                         var previousThrottle = 0.0
-                        VALIDATION_STAGES.forEachIndexed { index, stage ->
-                            PersistentDiagnosticLog.event(
-                                "sample_validation_stage",
-                                "index=$index throttle_pct=${(stage.throttle * 100.0).roundToInt()} " +
-                                    "duration_ms=${stage.durationMs}",
-                            )
+                        VALIDATION_STAGES.forEach { stage ->
                             val stageStarted = SystemClock.elapsedRealtime()
                             while (SystemClock.elapsedRealtime() - stageStarted < stage.durationMs) {
                                 val elapsed = SystemClock.elapsedRealtime() - stageStarted
@@ -331,15 +304,10 @@ class DriveController(context: Context) {
                             }
                             previousThrottle = stage.throttle
                         }
-                        completed = true
                     } catch (_: InterruptedException) {
                         Thread.currentThread().interrupt()
                     } finally {
                         manualInput.set(ManualInput())
-                        PersistentDiagnosticLog.event(
-                            "sample_validation_finished",
-                            "completed=$completed ${sampleAudioLogDetails(audioEngine.state())}",
-                        )
                         validationThread.compareAndSet(Thread.currentThread(), null)
                     }
                 },
@@ -353,7 +321,6 @@ class DriveController(context: Context) {
     private fun runLoop(runId: Long) {
         try {
             Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
-            PersistentDiagnosticLog.event("drive_loop_started", "generation=$runId")
             var previousNanos = SystemClock.elapsedRealtimeNanos()
             var accumulatorSeconds = 0.0
 
@@ -372,10 +339,8 @@ class DriveController(context: Context) {
                 if (remaining > 0L) LockSupport.parkNanos(remaining)
             }
         } catch (throwable: Throwable) {
-            PersistentDiagnosticLog.recordThrowable("drive_loop_failed", throwable, "generation=$runId")
+            DebugEventLog.recordThrowable("drive_loop_failed", throwable, "generation=$runId")
             throw throwable
-        } finally {
-            PersistentDiagnosticLog.event("drive_loop_stopped", "generation=$runId")
         }
     }
 
@@ -415,7 +380,6 @@ class DriveController(context: Context) {
             ),
             dt,
         )
-        recordDriveDiagnostics(drivetrain, input, mode, telemetry)
         val enabled = soundEnabled.get()
         audioEngine.update(
             EngineAudioFrame(
@@ -434,6 +398,7 @@ class DriveController(context: Context) {
             ),
         )
         val selectedCar = selectedSampleProfile.get()
+        val debugVisible = debugPanelVisible.get()
         latest = DriveSnapshot(
             drivetrain = drivetrain,
             inputMode = mode,
@@ -442,8 +407,8 @@ class DriveController(context: Context) {
             brake = input.brake,
             transmissionPosition = transmissionPosition.get(),
             engineSoundEnabled = enabled,
-            audio = audioEngine.state(),
-            telemetry = telemetry,
+            audio = if (debugVisible) audioEngine.state() else latest.audio,
+            telemetry = if (debugVisible) telemetry else latest.telemetry,
             tuning = tuning,
             selectedCarId = selectedCar.id,
             selectedCarName = selectedCar.displayName,
@@ -455,96 +420,12 @@ class DriveController(context: Context) {
         )
     }
 
-    /**
-     * Persists only state transitions plus a one-second heartbeat. The logger fsyncs entries, so
-     * keeping this out of the 200 Hz hot path prevents diagnostic I/O from affecting audio or
-     * simulation timing.
-     */
-    private fun recordDriveDiagnostics(
-        drivetrain: DrivetrainState,
-        input: ResolvedDriveInput,
-        mode: InputMode,
-        telemetry: TelemetrySnapshot,
-    ) {
-        val inputSignature = "${mode.name}|${input.label}|${telemetry.readerState.name}|" +
-            "accelerator_valid=${telemetry.accelerator.isValid}|brake_valid=${telemetry.brake.isValid}|" +
-            "speed_valid=${telemetry.speed.isValid}"
-        if (inputSignature != lastInputSignature) {
-            lastInputSignature = inputSignature
-            PersistentDiagnosticLog.event("input_source_changed", inputSignature)
-        }
-        if (drivetrain.shiftSerial != lastLoggedShiftSerial) {
-            PersistentDiagnosticLog.event(
-                "virtual_shift_started",
-                "serial=${drivetrain.shiftSerial} direction=${drivetrain.shiftDirection.name} " +
-                    "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
-                    "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
-                    "throttle_pct=${(input.throttle * 100.0).roundToInt()} source=${input.label}",
-            )
-            lastLoggedShiftSerial = drivetrain.shiftSerial
-        }
-        if (lastShiftWasActive && !drivetrain.isShifting) {
-            PersistentDiagnosticLog.event(
-                "virtual_shift_completed",
-                "serial=${drivetrain.shiftSerial} gear=${drivetrain.gear} " +
-                    "rpm=${drivetrain.rpm.roundToInt()} speed_kmh=${drivetrain.speedKmh.roundToInt()}",
-            )
-        }
-        lastShiftWasActive = drivetrain.isShifting
-
-        val nowElapsedMs = SystemClock.elapsedRealtime()
-        if (nowElapsedMs >= nextHeartbeatAtElapsedMs) {
-            nextHeartbeatAtElapsedMs = nowElapsedMs + DIAGNOSTIC_HEARTBEAT_INTERVAL_MS
-            val audio = audioEngine.state()
-            if (audio.sampleProfile != lastEffectTelemetryProfile) {
-                lastEffectTelemetryProfile = audio.sampleProfile
-                lastEffectTriggerCount = audio.sampleEffectTriggers
-            } else if (audio.sampleEffectTriggers > lastEffectTriggerCount) {
-                PersistentDiagnosticLog.event(
-                    "sample_effect_triggered",
-                    "profile=${audio.sampleProfile} count=${audio.sampleEffectTriggers} " +
-                        "delta=${audio.sampleEffectTriggers - lastEffectTriggerCount} " +
-                        "active=${audio.sampleActiveEffects.replace(' ', '_')}",
-                )
-                lastEffectTriggerCount = audio.sampleEffectTriggers
-            }
-            PersistentDiagnosticLog.event(
-                "drive_heartbeat",
-                "mode=SPEED_COUPLED " +
-                    "gear=${drivetrain.gear} rpm=${drivetrain.rpm.roundToInt()} " +
-                    "speed_kmh=${drivetrain.speedKmh.roundToInt()} " +
-                    "raw_speed_kmh=${drivetrain.rawSpeedKmh.roundToInt()} " +
-                    "speed_filter_delta_milli_kmh=${((drivetrain.speedKmh - drivetrain.rawSpeedKmh) * 1_000.0).roundToInt()} " +
-                    "throttle_pct=${(input.throttle * 100.0).roundToInt()} " +
-                    "brake_pct=${(input.brake * 100.0).roundToInt()} " +
-                    "shifting=${drivetrain.isShifting} shift_serial=${drivetrain.shiftSerial} " +
-                    "source=${input.label} reader=${telemetry.readerState.name} " +
-                    "car_profile=${selectedSampleProfile.get().id} sample_status=${audio.sampleStatus} " +
-                    "simulation_rpm=${drivetrain.rpm.roundToInt()} " +
-                    "sample_target_rpm=${audio.sampleTargetRpm} sample_render_rpm=${audio.sampleRenderRpm} " +
-                    "rpm_delta=${audio.sampleRenderRpm - drivetrain.rpm.roundToInt()} " +
-                    "sample_loops=${audio.sampleLoadedLoops} " +
-                    "sample_effects=${audio.sampleLoadedEffects} effect_mask=${enabledEffectMask.get()} " +
-                    "effects_solo=${soloEffects.get()} " +
-                    "effect_triggers=${audio.sampleEffectTriggers} active_effects=${audio.sampleActiveEffects} " +
-                    "sample_throttle_pct=${(audio.sampleThrottle * 100.0).roundToInt()} " +
-                    "layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
-                    "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
-                    "peak_milli=${(audio.samplePeak * 1_000.0).roundToInt()} " +
-                    "over_range=${audio.sampleOverRangeSamples} underruns=${audio.underruns} " +
-                    "startup_underruns=${audio.startupUnderruns} " +
-                    "steady_underruns=${audio.steadyStateUnderruns}",
-            )
-        }
-    }
-
     private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
     private companion object {
         const val FIXED_STEP_SECONDS = 1.0 / 200.0
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
-        const val DIAGNOSTIC_HEARTBEAT_INTERVAL_MS = 1_000L
         const val VALIDATION_RAMP_MS = 500L
         const val VALIDATION_UPDATE_MS = 50L
         val VALIDATION_STAGES = listOf(
@@ -569,15 +450,6 @@ private fun soundEffectOptions(
         enabled = mask and control.bit != 0L,
     )
 }
-
-private fun sampleAudioLogDetails(audio: AudioOutputState): String =
-    "sample_status=${audio.sampleStatus} sample_target_rpm=${audio.sampleTargetRpm} " +
-        "sample_render_rpm=${audio.sampleRenderRpm} " +
-        "sample_loops=${audio.sampleLoadedLoops} layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
-        "sample_frames=${audio.sampleFramesRendered} wraps=${audio.sampleLoopWraps} " +
-        "peak_milli=${(audio.samplePeak * 1_000.0).roundToInt()} " +
-        "over_range=${audio.sampleOverRangeSamples} underruns=${audio.underruns} " +
-        "startup_underruns=${audio.startupUnderruns} steady_underruns=${audio.steadyStateUnderruns}"
 
 private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile): EngineProfile {
     val engine = engine.sanitized()

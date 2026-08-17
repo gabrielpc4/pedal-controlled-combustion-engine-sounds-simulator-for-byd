@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
 import android.os.Build
 import android.os.SystemClock
-import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
+import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -179,10 +179,6 @@ class BydSpeedReader(
                 diagnostics = diagnostics,
                 lastError = null,
             )
-            PersistentDiagnosticLog.event(
-                "byd_telemetry_probe_succeeded",
-                "delivery=poll interval_ms=$pollIntervalMs compatibility_context=read_only_speed runtime=${runtimeType.name}",
-            )
 
             try {
                 worker.scheduleWithFixedDelay(
@@ -198,14 +194,14 @@ class BydSpeedReader(
             if (!isCurrent(runId)) return
             val error = describeThrowable(throwable)
             diagnostics += "Probe failure: $error"
-            PersistentDiagnosticLog.recordThrowable("byd_telemetry_probe_failed", throwable)
+            DebugEventLog.recordThrowable("byd_telemetry_probe_failed", throwable)
             latestSnapshot = latestSnapshot.copy(
                 readerState = ReaderState.UNAVAILABLE,
                 deliveryMode = "NONE",
                 diagnostics = diagnostics,
                 lastError = error,
             )
-            PersistentDiagnosticLog.warning("byd_reader_unavailable", error)
+            DebugEventLog.warning("byd_reader_unavailable", error)
         }
     }
 
@@ -232,10 +228,8 @@ class BydSpeedReader(
         if (!isCurrent(runId)) return
         val currentError = errors.takeIf { it.isNotEmpty() }?.joinToString(" | ")
         if (currentError != previous.lastError) {
-            if (currentError == null) {
-                PersistentDiagnosticLog.event("byd_telemetry_reads_recovered")
-            } else {
-                PersistentDiagnosticLog.warning("byd_telemetry_read_failed", currentError)
+            if (currentError != null) {
+                DebugEventLog.warning("byd_telemetry_read_failed", currentError)
             }
         }
 

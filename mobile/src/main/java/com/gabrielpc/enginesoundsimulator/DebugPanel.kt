@@ -3,7 +3,6 @@ package com.gabrielpc.enginesoundsimulator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,22 +18,26 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.diagnostics.PersistentDiagnosticLog
+import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.SignalValue
 import com.gabrielpc.enginesoundsimulator.telemetry.buildBydAvailabilityReport
 import com.gabrielpc.enginesoundsimulator.telemetry.formatTelemetryNumber
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private val DbgBackground = Color(0xFA03080E)
 private val DbgPanel = Color(0xFF091721)
@@ -46,19 +49,29 @@ private val DbgRed = Color(0xFFFF465C)
 private val DbgWhite = Color(0xFFF5FAFD)
 private val DbgMuted = Color(0xFF8CA7B5)
 
+private const val DEBUG_REFRESH_MS = 200L
+
 @Composable
 internal fun DebugPanel(
-    state: DriveSnapshot,
+    requestSnapshot: () -> DriveSnapshot,
     onRestartBydReader: () -> Unit,
     onRunSampleValidation: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val context = LocalContext.current
+    var state by remember { mutableStateOf(requestSnapshot()) }
+    val scroll = rememberScrollState()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            state = requestSnapshot()
+            delay(DEBUG_REFRESH_MS)
+        }
+    }
+
     val report = remember(state.inputMode, state.telemetry) {
         buildBydAvailabilityReport(state.inputMode, state.telemetry)
     }
-    val logText = PersistentDiagnosticLog.readRecentLogText(context)
-    val scroll = rememberScrollState()
+    val logText = remember(state) { DebugEventLog.readRecentLogText() }
 
     Column(
         modifier = Modifier
@@ -147,6 +160,12 @@ internal fun DebugPanel(
                 DebugLine("Target sample RPM", state.audio.sampleTargetRpm.toString())
                 DebugLine("Rendered sample RPM", state.audio.sampleRenderRpm.toString())
                 DebugLine("Rendered throttle", "${(state.audio.sampleThrottle * 100.0).roundToInt()}%")
+                if (state.audio.samplePlayingLoops.isNotEmpty()) {
+                    DebugLine("Playing loops", state.audio.samplePlayingLoops.joinToString(", "))
+                }
+                if (state.audio.samplePlayingEffects.isNotEmpty()) {
+                    DebugLine("Playing effects", state.audio.samplePlayingEffects.joinToString(", "))
+                }
                 DebugLine("Rendered frames", state.audio.sampleFramesRendered.toString())
                 DebugLine("Loop wraps", state.audio.sampleLoopWraps.toString())
                 DebugLine("Output peak", "${(state.audio.samplePeak * 100.0).roundToInt()}%")
@@ -166,15 +185,7 @@ internal fun DebugPanel(
                 }
             }
 
-            DebugSection(title = "PERSISTED EVENT LOG", accent = DbgCyan) {
-                Text(
-                    text = "Path: ${PersistentDiagnosticLog.activeLogPath(context)}",
-                    color = DbgMuted,
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-                Spacer(Modifier.height(8.dp))
+            DebugSection(title = "WARNINGS & ERRORS", accent = DbgAmber) {
                 Text(
                     text = logText,
                     color = DbgWhite,
@@ -207,7 +218,7 @@ private fun DebugHeader(
                 )
             }
             Text(
-                "BYD telemetry probe, live signal validity, and persisted event log · built ${AppBuildInfo.builtAtUtc}",
+                "BYD telemetry probe, live signals, and sample audio · built ${AppBuildInfo.builtAtUtc}",
                 color = DbgMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
