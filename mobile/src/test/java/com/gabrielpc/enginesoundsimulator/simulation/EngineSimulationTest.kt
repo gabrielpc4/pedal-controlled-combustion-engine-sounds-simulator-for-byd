@@ -73,13 +73,32 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun soundGearsDivideTopSpeedIntoEqualBands() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
+        val expectedBandKmh = profile.topSpeedKmh / profile.gearRatios.size
+        profile.gearRatios.indices.forEach { gearIndex ->
+            assertEquals(
+                expectedBandKmh * (gearIndex + 1),
+                evenlySpacedUpshiftSpeedKmh(profile, gearIndex),
+                0.0001,
+            )
+            val boundaryWheelRpm = (evenlySpacedUpshiftSpeedKmh(profile, gearIndex) / 3.6) /
+                (2.0 * Math.PI * profile.wheelRadiusMeters) * 60.0
+            val boundaryRpm = profile.idleRpm + boundaryWheelRpm *
+                evenlySpacedGearRatio(profile, gearIndex)
+            assertEquals(profile.upshiftRpm, boundaryRpm, 0.001)
+        }
+        assertEquals(190.0 / 7.0, expectedBandKmh, 0.0001)
+    }
+
+    @Test
     fun downshiftUsesTheBoundaryThatSelectedTheGear() {
         val simulation = EngineSimulation()
         val launched = simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 1.0)
-        assertEquals("the normal ratio schedule should enter second", 2, launched.gear)
+        assertEquals("65 km/h should be in the third equal-width band", 3, launched.gear)
 
-        val lifted = simulation.followIntegerSpeedRamp(65.0, 54.0, 2.0, 0.0)
-        assertEquals("the remembered boundary must produce a stable downshift", 1, lifted.gear)
+        val lifted = simulation.followIntegerSpeedRamp(65.0, 45.0, 3.0, 0.0)
+        assertEquals("the remembered boundary must produce one stable downshift", 2, lifted.gear)
     }
 
     @Test

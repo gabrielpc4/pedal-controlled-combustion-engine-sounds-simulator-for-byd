@@ -1,9 +1,9 @@
 # Full engine-sound implementation
 
 > **Current behavior:** D mode derives sound RPM from continuous road speed and the selected
-> sample bank's ratio stack. Integer BYD speed readings pass through a predictive, critically
+> sample bank's gear count. Integer BYD speed readings pass through a predictive, critically
 > damped estimator before moving the tach or audio. The sound gearbox derives its shifts from each
-> selected car's ratio stack and configured shift RPM without changing electric wheel force.
+> equal-width road-speed bands and configured shift RPM without changing electric wheel force.
 
 Last verified: 2026-08-16
 
@@ -117,13 +117,13 @@ At every 5 ms fixed step:
 6. In simulator mode only, lift-off applies a strong constant coast deceleration (`simulatorCoastRegenMps2`, default 2.50 m/s²) so virtual speed and synthetic RPM fall promptly. The value is independently editable from 0–4 m/s² and never affects BYD Live input.
 7. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
 8. The sound RPM behavior follows the **P / N / D** shifter: **D** maps continuous road speed through the active presentation gear ratio and sound final drive. **N** and **P** free-rev toward a throttle-position target using fixed neutral inertia constants (`NEUTRAL_REV_UP_RESPONSE_SECONDS` = 0.55 s, `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` = 0.90 s).
-9. The sound gearbox can swap ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
+9. The sound gearbox can swap derived presentation ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
 
 In BYD Live mode, lift-off and braking affect sound RPM only through the measured road-speed decrease. In SIM mode, service braking and the configured lift-off regen reduce virtual road speed, so coupled RPM follows naturally. There is no simulated clutch feeding torque back into the vehicle.
 
 ### Synthetic automatic shifts
 
-The gearbox derives its thresholds from the selected bank's ratios, shift RPM, tire radius, and sound final drive. Each upshift remembers the actual road-speed boundary that selected the new gear; its downshift uses that remembered boundary with 4 km/h hysteresis. An independent near-redline safety upshift prevents a low gear from remaining pinned during an externally driven speed increase.
+The gearbox divides configured top speed evenly by the selected bank's gear count. Each derived ratio reaches normal shift RPM at the upper edge of its speed band. Each upshift remembers the actual road-speed boundary that selected the new gear; its downshift uses that remembered boundary with 4 km/h hysteresis. An independent near-redline safety upshift prevents a low gear from remaining pinned during an externally driven speed increase.
 
 The ratio changes at 38% of the configured shift animation. The initial sample profile defaults to its source calibration of 60 ms up and 150 ms down; a 150 ms completed-shift dwell and speed hysteresis reject duplicate requests. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. **N** and **P** free-rev without automatic shifts.
 
@@ -167,7 +167,7 @@ The header/footer show the requested mode, active logical channel count/layout, 
 
 The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
 
-The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, Drive RPM/lift-off/brake forces, SIM coast regen, all presentation ratios, shift timing, master audio level, and the selected profile's layer-coverage graph. Display-unit policy is in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Control inventory: [Live tuning interface](tuning-interface.md).
+The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, SIM coast regen, shift timing, master audio level, and the selected profile's layer-coverage graph. Display-unit policy is in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Control inventory: [Live tuning interface](tuning-interface.md).
 
 The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
 

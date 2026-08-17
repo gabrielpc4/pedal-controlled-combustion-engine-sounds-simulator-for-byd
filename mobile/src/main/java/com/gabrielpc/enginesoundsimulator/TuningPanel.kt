@@ -211,9 +211,6 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
                 ParameterSlider("NORMAL SHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..engine.redlineRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(upshiftRpm = it)))
                 }
-                ParameterSlider("RPM PER ROAD SPEED", engine.soundFinalDrive / 3.96 * 100.0, 50.0..150.0, "%.0f%%") {
-                    onChange(config.copy(engine = engine.copy(soundFinalDrive = it / 100.0 * 3.96)))
-                }
             }
         }
     }

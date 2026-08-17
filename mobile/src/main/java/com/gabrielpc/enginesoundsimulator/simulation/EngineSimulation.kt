@@ -30,7 +30,6 @@ data class EngineProfile(
     val dragAreaM2: Double,
     val rollingResistanceCoefficient: Double,
     val topSpeedKmh: Double,
-    val soundFinalDrive: Double,
     val syntheticRpmResponseSeconds: Double,
     val externalSpeedSmoothingSeconds: Double,
     val simulatorCoastRegenMps2: Double,
@@ -70,7 +69,6 @@ data class EngineProfile(
             dragAreaM2 = 0.504,
             rollingResistanceCoefficient = 0.010,
             topSpeedKmh = 190.0,
-            soundFinalDrive = 3.96,
             syntheticRpmResponseSeconds = 0.055,
             externalSpeedSmoothingSeconds = 0.12,
             simulatorCoastRegenMps2 = 2.50,
@@ -369,9 +367,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun upshiftSpeedKmh(gearIndex: Int): Double {
-        val coupledRpm = (profile.upshiftRpm - profile.idleRpm).coerceAtLeast(1.0)
-        val wheelRpm = coupledRpm / (profile.gearRatios[gearIndex] * profile.soundFinalDrive)
-        return wheelRpm * (2.0 * PI * profile.wheelRadiusMeters) / 60.0 * 3.6
+        return evenlySpacedUpshiftSpeedKmh(profile, gearIndex)
     }
 
     private fun beginShift(targetGearIndex: Int, direction: ShiftDirection) {
@@ -419,7 +415,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     private fun rpmForSpeed(gearIndex: Int): Double {
         val wheelRpm = vehicleSpeedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
-        return (profile.idleRpm + wheelRpm * profile.gearRatios[gearIndex] * profile.soundFinalDrive)
+        return (profile.idleRpm + wheelRpm * evenlySpacedGearRatio(profile, gearIndex))
             .coerceIn(profile.idleRpm, profile.limiterRpm)
     }
 
@@ -481,6 +477,20 @@ internal data class AxleWheelTorque(val frontNm: Double, val rearNm: Double) {
 
 /** Digitized A2MAC1 axle curves were sampled against a 180 km/h chart; keep that reference for physics. */
 internal const val TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH = 180.0
+
+/** Divides the configured road-speed range into one equal-width band per sound gear. */
+internal fun evenlySpacedUpshiftSpeedKmh(profile: EngineProfile, gearIndex: Int): Double {
+    val gearCount = profile.gearRatios.size.coerceAtLeast(1)
+    return profile.topSpeedKmh * (gearIndex + 1).coerceIn(1, gearCount) / gearCount
+}
+
+/** Makes each gear reach the normal shift RPM at the end of its equal-width speed band. */
+internal fun evenlySpacedGearRatio(profile: EngineProfile, gearIndex: Int): Double {
+    val boundaryKmh = evenlySpacedUpshiftSpeedKmh(profile, gearIndex)
+    val boundaryWheelRpm = (boundaryKmh / 3.6) / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
+    val coupledRpm = (profile.upshiftRpm - profile.idleRpm).coerceAtLeast(1.0)
+    return coupledRpm / boundaryWheelRpm.coerceAtLeast(0.001)
+}
 
 /** Digitized axle-output envelope, evaluated against normalized road speed. */
 internal fun axleWheelTorqueAtSpeed(profile: EngineProfile, speedKmh: Double): AxleWheelTorque {

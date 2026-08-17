@@ -583,7 +583,6 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         dragAreaM2 = engine.dragAreaM2,
         rollingResistanceCoefficient = engine.rollingResistanceCoefficient,
         topSpeedKmh = engine.topSpeedKmh,
-        soundFinalDrive = engine.soundFinalDrive,
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
         externalSpeedSmoothingSeconds = engine.externalSpeedSmoothingMs / 1_000.0,
         simulatorCoastRegenMps2 = engine.simulatorCoastRegenMps2,

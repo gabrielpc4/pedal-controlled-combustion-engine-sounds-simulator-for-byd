@@ -84,8 +84,8 @@ A **P / N / D** column shifter passes the selected position into the 200 Hz simu
 Current **D** behavior:
 
 - Raw integer BYD speed enters a predictive critically damped estimator. Its continuous estimate, not the integer sample, drives the gauge and sample renderer in both acceleration and deceleration.
-- RPM is `idle + wheelRPM × gearRatio × soundFinalDrive`, bounded by the selected sample profile.
-- The sound gearbox uses the selected bank's ratios and configured shift RPM. Downshift hysteresis is measured from the actual boundary that selected each gear.
+- Each sound gear spans an equal fraction of configured top speed; its derived ratio reaches normal shift RPM at that band's upper boundary.
+- The sound gearbox divides configured top speed evenly across the selected bank's gear count and derives each ratio to meet configured shift RPM. Downshift hysteresis is measured from the actual boundary that selected each gear.
 - Downshift thresholds retain 4 km/h hysteresis; near-redline road projection can always request a safety upshift.
 - SIM still uses the Seal-calibrated longitudinal model and strong editable coast regen; tach RPM follows that virtual road speed exactly as BYD Live RPM follows measured road speed.
 - The obsolete D-mode pedal-force, sweet-spot kick, RPM progression curve, and independent lift/brake RPM-force settings were removed rather than retained as a compatibility path.

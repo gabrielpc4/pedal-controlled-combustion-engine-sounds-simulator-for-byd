@@ -28,7 +28,6 @@ data class EngineTuning(
     val dragAreaM2: Double = 0.504,
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
-    val soundFinalDrive: Double = 3.96,
     /** Tach response after the continuous road-speed estimate changes. */
     val syntheticRpmResponseMs: Double = 55.0,
     /** Reconstructs continuous speed from the integer BYD reading. */
@@ -74,7 +73,6 @@ data class EngineTuning(
             dragAreaM2 = dragAreaM2.coerceIn(0.30, 1.20),
             rollingResistanceCoefficient = rollingResistanceCoefficient.coerceIn(0.005, 0.030),
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
-            soundFinalDrive = soundFinalDrive.coerceIn(2.0, 6.0),
             syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(20.0, 300.0),
             externalSpeedSmoothingMs = externalSpeedSmoothingMs.coerceIn(60.0, 500.0),
             simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 4.00),
@@ -215,7 +213,6 @@ class TuningRepository(context: Context) {
             dragAreaM2 = number(KEY_DRAG_AREA, defaults.engine.dragAreaM2),
             rollingResistanceCoefficient = number(KEY_ROLLING_RESISTANCE, defaults.engine.rollingResistanceCoefficient),
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
-            soundFinalDrive = number(KEY_SOUND_FINAL_DRIVE, defaults.engine.soundFinalDrive),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
             externalSpeedSmoothingMs = number(KEY_EXTERNAL_SPEED_SMOOTHING, defaults.engine.externalSpeedSmoothingMs),
             simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
@@ -285,7 +282,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_DRAG_AREA, clean.engine.dragAreaM2.toString())
             .putString(KEY_ROLLING_RESISTANCE, clean.engine.rollingResistanceCoefficient.toString())
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
-            .putString(KEY_SOUND_FINAL_DRIVE, clean.engine.soundFinalDrive.toString())
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
             .putString(KEY_EXTERNAL_SPEED_SMOOTHING, clean.engine.externalSpeedSmoothingMs.toString())
             .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
@@ -341,7 +337,6 @@ class TuningRepository(context: Context) {
         const val KEY_DRAG_AREA = "drag_area"
         const val KEY_ROLLING_RESISTANCE = "rolling_resistance"
         const val KEY_TOP_SPEED = "top_speed"
-        const val KEY_SOUND_FINAL_DRIVE = "sound_final_drive"
         const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
         const val KEY_EXTERNAL_SPEED_SMOOTHING = "external_speed_smoothing"
         const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"

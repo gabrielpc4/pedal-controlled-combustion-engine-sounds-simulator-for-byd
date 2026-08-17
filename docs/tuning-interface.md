@@ -34,7 +34,7 @@ Curve points are edited directly by dragging them. Their horizontal order is con
 
 Throttle endpoints remain fixed at 0/0 and 100/100. The 120 ms default attack is informed by the full-request torque rise visible in A2MAC1's acceleration chart, but the pedal map itself remains an approximation because BYD does not publish it.
 
-Synthetic RPM in **D** is road-speed-coupled. Whole-number BYD readings are reconstructed into a continuous signal before they reach the tach or audio. Shifts follow the selected sample bank's ratio stack and normal shift RPM. **N**/**P** retain the target-based free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
+Synthetic RPM in **D** is road-speed-coupled. Whole-number BYD readings are reconstructed into a continuous signal before they reach the tach or audio. The selected bank's gear count divides configured top speed into equal bands, with ratios derived to reach normal shift RPM at each boundary. **N**/**P** retain the target-based free-rev model documented in [§3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08).
 
 ## Dashboard controls (outside TUNE)
 

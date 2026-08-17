@@ -144,13 +144,13 @@ This deliberately gives useful response early in the pedal while remaining monot
 The real Seal uses fixed-ratio single-speed electric drive units. In this app:
 
 - motor torque, road force, acceleration, drag, and braking are calculated without the synthetic gear ratio;
-- the seven editable ratios affect only the fictional engine RPM, sound, gauge, and shift event;
+- the seven sound gears affect only fictional engine RPM, sound, gauge, and shift events;
 - a synthetic shift never cuts wheel torque, opens a clutch, adds rev-match torque, or changes vehicle acceleration;
 - displayed RPM in **D** is derived from continuous road speed through the active presentation ratio and sound final drive;
 - the whole-number BYD reading is smoothed before it can move the tach or sample playback.
 
-Each selectable sound profile supplies its presentation ratios. Shift thresholds are derived from
-those ratios and the normal shift RPM. The sound final drive affects
+Each selectable sound profile supplies its gear count. The configured top speed is divided evenly
+across those gears, and each presentation ratio is derived so normal shift RPM lands at its boundary.
 only presentation RPM; it does not feed torque back into the Seal road model.
 
 Axle torque curves remain digitized against a **180 km/h** chart reference (`TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH`); raising the vehicle top-speed slider to 190 does not rescale measured wheel torque.

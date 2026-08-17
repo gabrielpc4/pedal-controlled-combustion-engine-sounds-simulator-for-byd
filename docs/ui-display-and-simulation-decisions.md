@@ -1,8 +1,8 @@
 # UI display and simulation presentation decisions
 
 > **Current behavior:** **D** mode derives sample RPM from a continuous estimate of road speed and
-> the selected profile's ratio stack. Whole-number BYD speed readings are reconstructed before
-> reaching the tach/audio. The sample bank's ratio stack controls presentation shift spacing and
+> the selected profile's evenly divided speed bands. Whole-number BYD speed readings are reconstructed before
+> reaching the tach/audio. The sample bank's gear count controls presentation shift spacing and
 > does not change real or simulated EV wheel force.
 
 Last updated: 2026-08-16
@@ -160,7 +160,7 @@ These affect **behavior**, not just labels. They are documented here because the
 The Seal uses fixed-ratio single-speed drive units. In this app:
 
 - **Real:** wheel torque, acceleration, drag, braking — from electric model + A2MAC1 curves.
-- **Fictional:** seven presentation gear ratios, tachometer RPM, shift sounds, gauge band.
+- **Fictional:** equal-width presentation gears, tachometer RPM, shift sounds, gauge band.
 
 A synthetic upshift **must not** cut, delay, or multiply wheel torque. Regression: `EngineSimulationTest` asserts no torque discontinuity at shift.
 
@@ -203,12 +203,12 @@ This target-seeking model is intentionally separate from the road-speed-coupled 
 
 ### 3.3 Speed-coupled Drive RPM model
 
-In **D**, continuous road speed is converted through the selected sample profile's presentation
-ratio stack:
+In **D**, continuous road speed is converted through the selected sample profile's derived
+equal-band ratio:
 
 ```text
 wheelRPM = roadSpeed / tireCircumference
-targetRPM = idleRPM + wheelRPM × gearRatio × soundFinalDrive
+targetRPM = idleRPM + wheelRPM × equalBandGearRatio
 rpm = exponentialFollow(rpm, targetRPM)
 ```
 
@@ -221,7 +221,8 @@ SIM passes its physical speed through the same whole-km/h reporting boundary bef
 making its audio-control path representative of BYD Live. The gauge's large digital readout displays
 the raw whole-number speed while the analog needle continues to display the reconstructed RPM.
 
-The sound gearbox uses the selected sample bank's ratios and normal shift RPM.
+The sound gearbox divides configured top speed evenly by the selected sample bank's gear count and
+derives each ratio so the band ends at normal shift RPM.
 
 Each upshift remembers the road-speed boundary that actually selected its new gear. Downshifts use
 that remembered boundary with 4 km/h hysteresis. A road-speed near-redline guard
