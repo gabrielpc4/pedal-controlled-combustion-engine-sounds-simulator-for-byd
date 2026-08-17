@@ -217,6 +217,9 @@ a continuous speed value between integer changes and tracks the observed directi
 and falling road speed move the RPM/audio without one-km/h steps. The default response is 120 ms;
 a second 55 ms tach follow removes residual control-rate edges. Both values are editable under
 **DELAYS** and the 1 Hz diagnostic heartbeat records raw speed, continuous speed, and their delta.
+SIM passes its physical speed through the same whole-km/h reporting boundary before that estimator,
+making its audio-control path representative of BYD Live. The gauge's large digital readout displays
+the raw whole-number speed while the analog needle continues to display the reconstructed RPM.
 
 The sound gearbox uses the selected sample bank's ratios and normal shift RPM.
 

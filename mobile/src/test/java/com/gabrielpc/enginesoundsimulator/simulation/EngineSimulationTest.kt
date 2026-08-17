@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 class EngineSimulationTest {
     @Test
@@ -31,6 +32,23 @@ class EngineSimulationTest {
         assertTrue("one integer step must not reach the tach in one frame", falling.first() > 20.75)
         assertTrue("speed must move continuously downward", falling.zipWithNext().all { it.second <= it.first })
         assertTrue("falling estimate=${falling.last()}", falling.last() < 20.20)
+    }
+
+    @Test
+    fun simulatorReportsWholeKmhWhileDrivingAudioFromContinuousEstimate() {
+        val simulation = EngineSimulation()
+        var observedInterpolatedFrame = false
+        repeat((1.5 / STEP).toInt()) {
+            val state = simulation.update(
+                DriverInput(throttle = 0.55, simulateCoastRegen = true),
+                STEP,
+            )
+            assertEquals(state.rawSpeedKmh.roundToInt().toDouble(), state.rawSpeedKmh, 0.0)
+            if (kotlin.math.abs(state.speedKmh - state.rawSpeedKmh) > 0.01) {
+                observedInterpolatedFrame = true
+            }
+        }
+        assertTrue("SIM must reconstruct motion between whole-km/h reports", observedInterpolatedFrame)
     }
 
     @Test

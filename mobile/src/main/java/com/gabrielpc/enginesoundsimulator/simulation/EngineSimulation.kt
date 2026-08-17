@@ -8,6 +8,7 @@ import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 data class EngineProfile(
     val name: String,
@@ -118,6 +119,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private set
     private var engineRpm = profile.idleRpm
     private var vehicleSpeedMps = 0.0
+    private var simulatedPhysicalSpeedMps = 0.0
     private var rawExternalSpeedKmh = 0.0
     private var currentGearIndex = 0
     private var filteredThrottle = 0.0
@@ -141,11 +143,13 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
         engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
         vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
+        simulatedPhysicalSpeedMps = simulatedPhysicalSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
     }
 
     fun reset() {
         engineRpm = profile.idleRpm
         vehicleSpeedMps = 0.0
+        simulatedPhysicalSpeedMps = 0.0
         rawExternalSpeedKmh = 0.0
         currentGearIndex = 0
         filteredThrottle = 0.0
@@ -181,18 +185,22 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (externalKmh != null) {
             applyExternalSpeed(externalKmh, dt)
         } else {
+            if (externalSpeedActive) {
+                simulatedPhysicalSpeedMps = vehicleSpeedMps
+                externalSpeedEstimator.reset()
+            }
             externalSpeedActive = false
-            externalSpeedEstimator.reset()
             integrateElectricVehicle(
                 dt,
                 input.transmissionPosition,
                 input.simulateCoastRegen && rawThrottle <= PEDAL_RELEASE_THRESHOLD,
             )
             if (input.transmissionPosition == TransmissionPosition.PARK) {
+                simulatedPhysicalSpeedMps = 0.0
                 vehicleSpeedMps = 0.0
                 lastAcceleration = 0.0
             }
-            rawExternalSpeedKmh = vehicleSpeedMps * 3.6
+            applyQuantizedSimulatorSpeed(dt)
         }
 
         activeShift?.let { updateShift(it, dt) }
@@ -211,8 +219,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         transmissionPosition: TransmissionPosition,
         applySimulatorRegen: Boolean,
     ) {
-        val previousSpeedMps = vehicleSpeedMps
-        val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
+        val previousSpeedMps = simulatedPhysicalSpeedMps
+        val axleTorque = axleWheelTorqueAtSpeed(profile, simulatedPhysicalSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
         val throttleConnected = transmissionPosition == TransmissionPosition.DRIVE
         val requestedWheelTorque = if (throttleConnected) {
@@ -220,7 +228,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         } else {
             0.0
         }
-        val wheelOmega = vehicleSpeedMps / profile.wheelRadiusMeters
+        val wheelOmega = simulatedPhysicalSpeedMps / profile.wheelRadiusMeters
         val powerLimitedWheelTorque = if (wheelOmega < 1.0) {
             requestedWheelTorque
         } else {
@@ -234,27 +242,37 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         )
         val serviceBrakeForce = filteredBrake * profile.vehicleMassKg * MAX_SERVICE_BRAKE_MPS2
         val regenerativeCoastForce = if (
-            applySimulatorRegen && transmissionPosition == TransmissionPosition.DRIVE && vehicleSpeedMps > 0.05
+            applySimulatorRegen && transmissionPosition == TransmissionPosition.DRIVE && simulatedPhysicalSpeedMps > 0.05
         ) {
             profile.vehicleMassKg * profile.simulatorCoastRegenMps2
         } else {
             0.0
         }
-        val aerodynamicDrag = 0.5 * AIR_DENSITY_KG_M3 * profile.dragAreaM2 * vehicleSpeedMps.pow(2)
-        val rollingResistance = if (vehicleSpeedMps > 0.05 || driveForce > 0.0) {
+        val aerodynamicDrag = 0.5 * AIR_DENSITY_KG_M3 * profile.dragAreaM2 * simulatedPhysicalSpeedMps.pow(2)
+        val rollingResistance = if (simulatedPhysicalSpeedMps > 0.05 || driveForce > 0.0) {
             profile.vehicleMassKg * GRAVITY_MPS2 * profile.rollingResistanceCoefficient
         } else {
             0.0
         }
         val acceleration = (driveForce - serviceBrakeForce - regenerativeCoastForce - aerodynamicDrag - rollingResistance) /
             (profile.vehicleMassKg * profile.rotationalMassFactor)
-        vehicleSpeedMps = (vehicleSpeedMps + acceleration * dt)
+        simulatedPhysicalSpeedMps = (simulatedPhysicalSpeedMps + acceleration * dt)
             .coerceIn(0.0, maximumVehicleSpeedMps())
-        if (vehicleSpeedMps < 0.04 && driveForce <= rollingResistance + serviceBrakeForce) {
-            vehicleSpeedMps = 0.0
+        if (simulatedPhysicalSpeedMps < 0.04 && driveForce <= rollingResistance + serviceBrakeForce) {
+            simulatedPhysicalSpeedMps = 0.0
         }
-        lastAcceleration = ((vehicleSpeedMps - previousSpeedMps) / max(dt, 0.001))
+        lastAcceleration = ((simulatedPhysicalSpeedMps - previousSpeedMps) / max(dt, 0.001))
             .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
+    }
+
+    /** Feeds SIM through the same whole-km/h boundary exposed by the BYD framework. */
+    private fun applyQuantizedSimulatorSpeed(dt: Double) {
+        rawExternalSpeedKmh = (simulatedPhysicalSpeedMps * 3.6).roundToInt().toDouble()
+        vehicleSpeedMps = externalSpeedEstimator.update(
+            measurementKmh = rawExternalSpeedKmh,
+            dt = dt,
+            responseSeconds = profile.externalSpeedSmoothingSeconds,
+        ) / 3.6
     }
 
     private fun applyExternalSpeed(externalSpeedKmh: Double, dt: Double) {

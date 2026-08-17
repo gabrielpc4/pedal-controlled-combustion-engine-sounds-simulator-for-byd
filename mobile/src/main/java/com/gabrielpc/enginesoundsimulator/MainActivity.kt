@@ -487,7 +487,6 @@ private fun CarStage(
             )
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusTag("${formatWhole(state.drivetrain.speedKmh)} KM/H", Cyan)
                 StatusTag("${formatWhole(state.drivetrain.accelerationMps2 / 9.81)} G", Amber)
             }
         }
@@ -864,7 +863,7 @@ private fun Tachometer(
                     .padding(bottom = gaugeSize * 0.12f),
             ) {
                 Text(
-                    text = formatRpm(drivetrain.rpm),
+                    text = formatWhole(drivetrain.rawSpeedKmh),
                     color = if (drivetrain.limiterActive) Red else Cyan,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 46.sp,
@@ -872,7 +871,7 @@ private fun Tachometer(
                     fontWeight = FontWeight.Light,
                     letterSpacing = 2.sp,
                 )
-                Text("RPM", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                Text("KM/H", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
             }
             if (drivetrain.isShifting) {
                 Text(
@@ -899,7 +898,5 @@ private fun polar(
         center.y + (sin(radians) * radius).toFloat(),
     )
 }
-
-private fun formatRpm(rpm: Double): String = ((rpm / 10.0).roundToInt() * 10).toString()
 
 private fun formatWhole(value: Double): String = value.roundToInt().toString()

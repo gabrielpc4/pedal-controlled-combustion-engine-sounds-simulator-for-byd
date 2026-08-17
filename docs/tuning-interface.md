@@ -15,7 +15,7 @@ The interface presents torque in **≈ motor-shaft kgfm** and power in values la
 - Vehicle mass, rotating-mass factor, wheel radius, drag area, rolling resistance, and top speed
 - Live combined wheel-torque/power graph with a road-speed cursor, landmark-based axis ticks, per-point value/X labels, and separately labelled ≈ motor kgfm / ≈ motor HP Y axes
 
-The tachometer scale, red zone, dashboard label, and limiter use the same live synthetic configuration. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is independent of the presentation gearbox; road speed is converted to sample RPM through the active ratio and strategy.
+The tachometer scale, red zone, and limiter use the same live synthetic configuration. The large digital readout inside the gauge shows whole-number road speed. Tachometer maximum, redline, and limiter remain separate values. Physical wheel torque is independent of the presentation gearbox; road speed is converted to sample RPM through the active ratio.
 
 ### AWD curves
 
