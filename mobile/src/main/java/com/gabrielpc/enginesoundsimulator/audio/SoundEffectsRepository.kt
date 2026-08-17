@@ -16,7 +16,15 @@ internal class SoundEffectsRepository(context: Context) {
         return loadEnabledMask(profile)
     }
 
+    fun loadSoloEffects(profile: EngineSampleProfile): Boolean =
+        preferences.getBoolean(soloKey(profile.id), false)
+
+    fun setSoloEffects(profile: EngineSampleProfile, enabled: Boolean) {
+        preferences.edit().putBoolean(soloKey(profile.id), enabled).apply()
+    }
+
     private fun key(profileId: String, controlId: String): String = "$profileId.$controlId"
+    private fun soloKey(profileId: String): String = "$profileId.solo_checked_effects"
 
     private companion object {
         const val PREFERENCES_NAME = "sample_sound_effects"

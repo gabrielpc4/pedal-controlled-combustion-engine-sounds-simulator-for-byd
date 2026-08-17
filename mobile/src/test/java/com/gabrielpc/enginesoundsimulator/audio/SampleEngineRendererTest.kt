@@ -215,6 +215,36 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun soloEffectsMutesEngineLoopsetAndKeepsCheckedEffectAudible() {
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
+        val output = ShortArray(1_920)
+        repeat(30) {
+            renderer.render(
+                EngineAudioFrame(rpm = 4_500.0, throttle = 0.6, soloEffects = true),
+                output,
+                gain = 0.7,
+            )
+        }
+        assertTrue("unchecked solo must mute the continuous engine", output.maxOf { abs(it.toInt()) } <= 1)
+
+        repeat(30) {
+            renderer.render(
+                EngineAudioFrame(
+                    rpm = 4_500.0,
+                    throttle = 0.6,
+                    enabledEffectMask = SampleEffectControls.transmission.bit,
+                    soloEffects = true,
+                ),
+                output,
+                gain = 0.7,
+            )
+        }
+        assertTrue("checked transmission effect must remain audible in solo", output.maxOf { abs(it.toInt()) } > 20)
+        assertTrue(renderer.diagnostics().activeEffects.contains("transmission_loop"))
+        assertTrue(renderer.diagnostics().activeLayers.contains("effects solo"))
+    }
+
+    @Test
     fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
         val decoded = mapOf(
             profile.requiredAssets.first() to PcmLoopData(arrayOf(FloatArray(32) { 0.1f }), 48_000, 1),

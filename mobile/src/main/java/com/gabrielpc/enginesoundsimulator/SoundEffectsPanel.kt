@@ -41,6 +41,7 @@ private val FxMuted = Color(0xFF88A2B2)
 internal fun SoundEffectsPanel(
     state: DriveSnapshot,
     onEffectChange: (String, Boolean) -> Unit,
+    onSoloChange: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     Box(
@@ -104,6 +105,7 @@ internal fun SoundEffectsPanel(
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SoloEffectsCheckbox(state.soloSoundEffects, onSoloChange)
                     state.soundEffects.forEach { effect ->
                         EffectCheckbox(effect, onEffectChange)
                     }
@@ -116,6 +118,35 @@ internal fun SoundEffectsPanel(
                 color = FxMuted,
                 fontSize = 12.sp,
             )
+        }
+    }
+}
+
+@Composable
+private fun SoloEffectsCheckbox(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(78.dp)
+            .background(FxCyan.copy(alpha = if (enabled) 0.13f else 0.05f), RoundedCornerShape(16.dp))
+            .border(1.dp, if (enabled) FxCyan else FxLine, RoundedCornerShape(16.dp))
+            .clickable { onChange(!enabled) }
+            .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = enabled,
+            onCheckedChange = onChange,
+            colors = CheckboxDefaults.colors(
+                checkedColor = FxCyan,
+                checkmarkColor = Color.Black,
+                uncheckedColor = FxMuted,
+            ),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text("SOLO CHECKED EFFECTS", color = FxWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Mute the engine loopset and hear only the effects checked below", color = FxMuted, fontSize = 12.sp)
         }
     }
 }

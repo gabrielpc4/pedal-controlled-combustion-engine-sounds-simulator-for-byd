@@ -26,7 +26,7 @@ Neither banks, decoded audio, nor source preview images are committed. The suppl
 
 ## Optional per-car powertrain effects
 
-The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose source mapping was verified for the selected bank. All enabled effects are decoded with the engine bank and mixed into the same source-rate stereo render buffer and the same `AudioTrack`; there is no `SoundPool`, media player, or secondary output path.
+The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose source mapping was verified for the selected bank. Its per-car **SOLO CHECKED EFFECTS** option fades out the continuous engine loopset while leaving only checked effect voices audible; an empty selection produces silence. All enabled effects are decoded with the engine bank and mixed into the same source-rate stereo render buffer and the same `AudioTrack`; there is no `SoundPool`, media player, or secondary output path.
 
 | Profile | Gear changes | Transmission | Exhaust overrun |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ The `CAR EFFECTS` menu shows persisted checkboxes only for effects whose source 
 
 The 812 stream names are stripped, so no optional effect is exposed rather than guessing. Turbo assets embedded in the naturally aspirated Huracán/Aventador mods are also rejected as source-car-inappropriate. External-only BMW backfires are not used in the cabin profile. Limiter recordings already participate in the continuous engine loopsets where mapped, so they are not duplicated as one-shots.
 
-Transmission voices loop continuously, follow the simulated RPM axis, and fade immediately when disabled. Shift one-shots key off `shiftSerial`, so one sound is launched per simulated shift. Overrun is armed above 35% throttle and fires below 8% only above the profile's minimum event RPM. Effect choices are stored per profile in `sample_sound_effects` preferences and default to enabled after a clean install.
+Transmission voices loop continuously, follow the simulated RPM axis, and fade immediately when disabled. Shift one-shots key off `shiftSerial`, so one sound is launched per simulated shift. Overrun is armed above 35% throttle and fires below 8% only above the profile's minimum event RPM. Effect choices and solo state are stored per profile in `sample_sound_effects` preferences. Effects default to enabled and solo defaults off after a clean install.
 
 ### Profile reconstruction confidence
 

@@ -36,6 +36,7 @@ internal class SampleEngineRenderer private constructor(
     private var masterGain = 0.0
     private var profileOutputGain = profile.outputGainAt(0.0)
     private var enabledGain = 0.0
+    private var continuousProgramGain = 1.0
     private var framesRendered = 0L
     private var loopWraps = 0L
     private var overRangeSamples = 0L
@@ -67,6 +68,7 @@ internal class SampleEngineRenderer private constructor(
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
         val targetProfileOutputGain = profile.outputGainAt(smoothedThrottle)
         val targetEnabled = if (target.enabled) 1.0 else 0.0
+        val targetContinuousProgram = if (target.soloEffects) 0.0 else 1.0
         val programFadeSeconds = target.tuning.programFadeMs / 1_000.0
         val masterAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
         val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
@@ -75,23 +77,26 @@ internal class SampleEngineRenderer private constructor(
         var blockPeak = 0.0
 
         for (frameIndex in 0 until frameCount) {
-            var mixedLeft = 0.0
-            var mixedRight = 0.0
+            continuousProgramGain += (targetContinuousProgram - continuousProgramGain) * masterAlpha
+            var loopLeft = 0.0
+            var loopRight = 0.0
             for (voice in voices) {
                 voice.gain += (voice.targetGain - voice.gain) * layerAlpha
                 if (voice.gain > SILENCE_GAIN || voice.targetGain > SILENCE_GAIN) {
-                    mixedLeft += voice.readCubic(0) * voice.gain
-                    mixedRight += voice.readCubic(1) * voice.gain
+                    loopLeft += voice.readCubic(0) * voice.gain
+                    loopRight += voice.readCubic(1) * voice.gain
                 }
                 // FMOD timelines keep running even while a layer is inaudible. Doing the same
                 // prevents an audible sample restart when an RPM or throttle fade opens again.
                 if (voice.advance()) loopWraps += 1
             }
+            var effectLeft = 0.0
+            var effectRight = 0.0
             for (voice in effectVoices) {
                 voice.gain += (voice.targetGain - voice.gain) * layerAlpha
                 if (voice.isAudible) {
-                    mixedLeft += voice.readCubic(0) * voice.gain
-                    mixedRight += voice.readCubic(1) * voice.gain
+                    effectLeft += voice.readCubic(0) * voice.gain
+                    effectRight += voice.readCubic(1) * voice.gain
                 }
                 if (voice.advance()) loopWraps += 1
             }
@@ -99,6 +104,8 @@ internal class SampleEngineRenderer private constructor(
             profileOutputGain += (targetProfileOutputGain - profileOutputGain) * profileGainAlpha
             enabledGain += (targetEnabled - enabledGain) * enabledAlpha
             val commonGain = SAMPLE_HEADROOM * masterGain * profileOutputGain * enabledGain
+            val mixedLeft = loopLeft * continuousProgramGain + effectLeft
+            val mixedRight = loopRight * continuousProgramGain + effectRight
             val preLimitedLeft = mixedLeft * commonGain
             val preLimitedRight = mixedRight * commonGain
             if (abs(preLimitedLeft) > 1.0) overRangeSamples += 1
@@ -116,7 +123,7 @@ internal class SampleEngineRenderer private constructor(
         framesRendered += frameCount
         renderedBlocks += 1
         if (renderedBlocks % DIAGNOSTIC_BLOCK_INTERVAL == 0L || diagnostics.framesRendered == 0L) {
-            val active = voices.asSequence()
+            val active = if (target.soloEffects) "none (effects solo)" else voices.asSequence()
                 .filter { it.targetGain > 0.006 }
                 .sortedByDescending { it.targetGain }
                 .take(8)

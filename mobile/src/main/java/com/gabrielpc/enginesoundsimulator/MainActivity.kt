@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
+                        onSoloSoundEffectsChange = controller::setSoloSoundEffects,
                     )
                 }
             }
@@ -209,6 +210,7 @@ private fun MotorSoundDashboard(
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
+    onSoloSoundEffectsChange: (Boolean) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -323,6 +325,7 @@ private fun MotorSoundDashboard(
                     SoundEffectsPanel(
                         state = state,
                         onEffectChange = onSoundEffectChange,
+                        onSoloChange = onSoloSoundEffectsChange,
                         onClose = { effectsOpen = false },
                     )
                 }

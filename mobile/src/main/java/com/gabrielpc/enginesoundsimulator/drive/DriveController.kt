@@ -53,6 +53,7 @@ data class DriveSnapshot(
     val selectedCarIndex: Int,
     val availableCarCount: Int,
     val soundEffects: List<SoundEffectOption>,
+    val soloSoundEffects: Boolean,
 )
 
 data class SoundEffectOption(
@@ -69,6 +70,7 @@ class DriveController(context: Context) {
     private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
+    private val soloEffects = AtomicBoolean(soundEffectsRepository.loadSoloEffects(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
@@ -111,6 +113,7 @@ class DriveController(context: Context) {
         selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
         availableCarCount = EngineSampleProfiles.all.size,
         soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
+        soloSoundEffects = soloEffects.get(),
     )
 
     init {
@@ -223,12 +226,23 @@ class DriveController(context: Context) {
         )
     }
 
+    fun setSoloSoundEffects(enabled: Boolean) {
+        val selected = selectedSampleProfile.get()
+        soundEffectsRepository.setSoloEffects(selected, enabled)
+        soloEffects.set(enabled)
+        PersistentDiagnosticLog.event(
+            "sound_effect_solo_toggled",
+            "profile=${selected.id} enabled=$enabled mask=${enabledEffectMask.get()}",
+        )
+    }
+
     private fun selectAdjacentCar(offset: Int) {
         val previous = selectedSampleProfile.get()
         val selected = EngineSampleProfiles.adjacent(previous.id, offset)
         if (selected.id == previous.id) return
         selectedSampleProfile.set(selected)
         enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(selected))
+        soloEffects.set(soundEffectsRepository.loadSoloEffects(selected))
         selectedCarRepository.save(selected)
         val tuning = tuningConfig.get().withSampleProfile(selected)
         tuningConfig.set(tuning)
@@ -409,6 +423,7 @@ class DriveController(context: Context) {
                 throttle = drivetrain.smoothedThrottle,
                 enabled = enabled,
                 enabledEffectMask = enabledEffectMask.get(),
+                soloEffects = soloEffects.get(),
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
                     ShiftDirection.UP -> 1
@@ -436,6 +451,7 @@ class DriveController(context: Context) {
             selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
             availableCarCount = EngineSampleProfiles.all.size,
             soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
+            soloSoundEffects = soloEffects.get(),
         )
     }
 
@@ -509,6 +525,7 @@ class DriveController(context: Context) {
                     "rpm_delta=${audio.sampleRenderRpm - drivetrain.rpm.roundToInt()} " +
                     "sample_loops=${audio.sampleLoadedLoops} " +
                     "sample_effects=${audio.sampleLoadedEffects} effect_mask=${enabledEffectMask.get()} " +
+                    "effects_solo=${soloEffects.get()} " +
                     "effect_triggers=${audio.sampleEffectTriggers} active_effects=${audio.sampleActiveEffects} " +
                     "sample_throttle_pct=${(audio.sampleThrottle * 100.0).roundToInt()} " +
                     "layers=${audio.sampleActiveLayers.replace(' ', '_')} " +
