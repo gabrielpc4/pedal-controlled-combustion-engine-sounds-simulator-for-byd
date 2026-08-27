@@ -31,12 +31,12 @@ data class EngineTuning(
     /** Tach response after the continuous road-speed estimate changes. */
     val syntheticRpmResponseMs: Double = 20.0,
     /** Reconstructs continuous speed from the integer BYD reading. */
-    val externalSpeedSmoothingMs: Double = 60.0,
+    val externalSpeedSmoothingMs: Double = 120.0,
     val throttleAttackMs: Double = 15.0,
     val throttleReleaseMs: Double = 20.0,
-    val upshiftDurationMs: Double = 40.0,
-    val downshiftDurationMs: Double = 60.0,
-    val shiftDwellMs: Double = 100.0,
+    val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
+    val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
+    val shiftDwellMs: Double = 150.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -137,15 +137,15 @@ data class EngineTuning(
 data class AudioTuning(
     val masterGain: Double = 0.72,
     /** Smooths dashboard RPM changes before they move the audio sample positions. */
-    val rpmSmoothingMs: Double = 1.0,
+    val rpmSmoothingMs: Double = 16.0,
     /** Smooths throttle changes before they alter the sample-bank load blend. */
-    val throttleSmoothingMs: Double = 1.0,
+    val throttleSmoothingMs: Double = 10.0,
     /** Smooths the main program level and load-dependent output level. */
-    val programFadeMs: Double = 1.0,
+    val programFadeMs: Double = 8.0,
     /** Smooths enable/disable so starting or stopping playback never clicks. */
-    val enabledFadeMs: Double = 1.0,
+    val enabledFadeMs: Double = 10.0,
     /** Smooths individual loop-layer gain changes and crossfades. */
-    val layerFadeMs: Double = 1.0,
+    val layerFadeMs: Double = 12.0,
 ) {
     fun sanitized(): AudioTuning = copy(
         masterGain = masterGain.coerceIn(0.0, 1.20),
@@ -294,7 +294,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 12
+        const val CALIBRATION_REVISION = 13
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
