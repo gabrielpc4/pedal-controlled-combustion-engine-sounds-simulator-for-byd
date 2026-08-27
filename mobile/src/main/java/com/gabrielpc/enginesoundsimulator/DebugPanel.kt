@@ -92,6 +92,12 @@ internal fun DebugPanel(
         )
         Spacer(Modifier.height(16.dp))
 
+        AudioExperimentsSection(
+            enabled = state.coastOnlyFullGainExperiment,
+            onCoastOnlyFullGainChange = onCoastOnlyFullGainChange,
+        )
+        Spacer(Modifier.height(14.dp))
+
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -146,26 +152,6 @@ internal fun DebugPanel(
                 }
             }
 
-            DebugSection(title = "AUDIO EXPERIMENTS", accent = DbgAmber) {
-                Text(
-                    "Coast-only full gain replaces Load layers with Coast at full level. " +
-                        "Pedal position no longer shapes layer gain — only RPM crossfades remain.",
-                    color = DbgMuted,
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                )
-                Spacer(Modifier.height(10.dp))
-                DebugLine("Coast-only experiment", if (state.coastOnlyFullGainExperiment) "ON" else "OFF")
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    DebugAction(
-                        label = if (state.coastOnlyFullGainExperiment) "DISABLE" else "ENABLE",
-                        accent = if (state.coastOnlyFullGainExperiment) DbgRed else DbgGreen,
-                        onClick = { onCoastOnlyFullGainChange(!state.coastOnlyFullGainExperiment) },
-                    )
-                }
-            }
-
             DebugSection(
                 title = "ENGINE SAMPLE AUDIO",
                 accent = if (state.audio.sampleStatus == "ACTIVE") DbgGreen else DbgAmber,
@@ -212,6 +198,45 @@ internal fun DebugPanel(
                     fontFamily = FontFamily.Monospace,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AudioExperimentsSection(
+    enabled: Boolean,
+    onCoastOnlyFullGainChange: (Boolean) -> Unit,
+) {
+    DebugSection(title = "AUDIO EXPERIMENTS", accent = DbgAmber) {
+        Text(
+            "Coast-only full gain: mutes Load, keeps Coast at full level. " +
+                "Pedal no longer shapes layer volume — only RPM crossfades.",
+            color = DbgMuted,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                DebugLine("Coast-only experiment", if (enabled) "ON" else "OFF")
+                if (enabled) {
+                    Text(
+                        "Header shows COAST EXP while active",
+                        color = DbgGreen,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+            DebugAction(
+                label = if (enabled) "DISABLE" else "ENABLE",
+                accent = if (enabled) DbgRed else DbgGreen,
+                onClick = { onCoastOnlyFullGainChange(!enabled) },
+            )
         }
     }
 }
