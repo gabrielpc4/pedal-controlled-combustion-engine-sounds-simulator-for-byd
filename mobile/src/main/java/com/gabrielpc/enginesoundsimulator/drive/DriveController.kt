@@ -3,7 +3,7 @@ package com.gabrielpc.enginesoundsimulator.drive
 import android.content.Context
 import android.os.Process
 import android.os.SystemClock
-import com.gabrielpc.enginesoundsimulator.audio.AudioExperimentRepository
+import com.gabrielpc.enginesoundsimulator.audio.AudioMixModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioChannelMode
 import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
@@ -63,7 +63,8 @@ data class DriveSnapshot(
     val soundEffects: List<SoundEffectOption>,
     val soloSoundEffects: Boolean,
     val layerMixTracks: List<LayerMixTrackState> = emptyList(),
-    val coastOnlyFullGainExperiment: Boolean = false,
+    val coastLayerMixEnabled: Boolean = true,
+    val legacyThrottleMixEnabled: Boolean = false,
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
     val transmissionLockedToVehicle: Boolean = false,
 )
@@ -82,10 +83,10 @@ class DriveController(context: Context) {
     private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
     private val layerMixRepository = LayerMixRepository(context.applicationContext)
     private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
-    private val audioExperimentRepository = AudioExperimentRepository(context.applicationContext)
+    private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
-    private val coastOnlyFullGainExperiment = AtomicBoolean(audioExperimentRepository.isCoastOnlyFullGain())
+    private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
     private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
     private val soloEffects = AtomicBoolean(soundEffectsRepository.loadSoloEffects(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
@@ -127,11 +128,13 @@ class DriveController(context: Context) {
         availableCarCount = EngineSampleProfiles.all.size,
         soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
         soloSoundEffects = soloEffects.get(),
-        coastOnlyFullGainExperiment = coastOnlyFullGainExperiment.get(),
+        coastLayerMixEnabled = coastLayerMixEnabled.get(),
+        legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
         carMasterVolume = carMasterVolume.get(),
     )
 
     init {
+        audioEngine.setCoastLayerMixEnabled(coastLayerMixEnabled.get())
         audioEngine.setSampleProfile(selectedSampleProfile.get())
     }
 
@@ -267,9 +270,10 @@ class DriveController(context: Context) {
         layerMixControls.set(layerMixRepository.setSolo(profile, trackId, solo))
     }
 
-    fun setCoastOnlyFullGainExperiment(enabled: Boolean) {
-        audioExperimentRepository.setCoastOnlyFullGain(enabled)
-        coastOnlyFullGainExperiment.set(enabled)
+    fun setCoastLayerMixEnabled(enabled: Boolean) {
+        audioMixModeRepository.setCoastLayerMixEnabled(enabled)
+        coastLayerMixEnabled.set(enabled)
+        audioEngine.setCoastLayerMixEnabled(enabled)
     }
 
     fun setCarMasterVolume(volume: Double) {
@@ -481,7 +485,7 @@ class DriveController(context: Context) {
                 },
                 tuning = effectiveAudioTuning(tuning),
                 layerMix = layerMixControls.get(),
-                coastOnlyFullGain = coastOnlyFullGainExperiment.get(),
+                coastLayerMixEnabled = coastLayerMixEnabled.get(),
             ),
         )
         val selectedCar = selectedSampleProfile.get()
@@ -506,7 +510,8 @@ class DriveController(context: Context) {
             soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
             soloSoundEffects = soloEffects.get(),
             layerMixTracks = buildLayerMixTracks(selectedCar, layerMixControls.get(), outputLevels),
-            coastOnlyFullGainExperiment = coastOnlyFullGainExperiment.get(),
+            coastLayerMixEnabled = coastLayerMixEnabled.get(),
+        legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
             carMasterVolume = carMasterVolume.get(),
             transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
         )

@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
                         onSoloSoundEffectsChange = controller::setSoloSoundEffects,
                         onRequestSnapshot = controller::snapshot,
                         onDebugPanelVisible = controller::setDebugPanelVisible,
-                        onCoastOnlyFullGainChange = controller::setCoastOnlyFullGainExperiment,
+                        onCoastLayerMixEnabledChange = controller::setCoastLayerMixEnabled,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
                     )
                 }
@@ -224,7 +224,7 @@ private fun MotorSoundDashboard(
     onSoloSoundEffectsChange: (Boolean) -> Unit,
     onRequestSnapshot: () -> DriveSnapshot,
     onDebugPanelVisible: (Boolean) -> Unit,
-    onCoastOnlyFullGainChange: (Boolean) -> Unit,
+    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
@@ -334,7 +334,7 @@ private fun MotorSoundDashboard(
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
-                            coastExperimentActive = state.coastOnlyFullGainExperiment,
+                            coastLayerMixEnabled = state.coastLayerMixEnabled,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -357,7 +357,7 @@ private fun MotorSoundDashboard(
                         requestSnapshot = onRequestSnapshot,
                         onRestartBydReader = onRestartBydReader,
                         onRunSampleValidation = onRunSampleValidation,
-                        onCoastOnlyFullGainChange = onCoastOnlyFullGainChange,
+                        onCoastLayerMixEnabledChange = onCoastLayerMixEnabledChange,
                         onClose = { debugOpen = false },
                     )
                 }
@@ -434,8 +434,8 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
-            if (state.coastOnlyFullGainExperiment) {
-                StatusTag("COAST EXP", Amber)
+            if (state.legacyThrottleMixEnabled) {
+                StatusTag("LEGACY MIX", Amber)
             }
             DashboardScreenSwitcher(
                 selected = mainScreen,

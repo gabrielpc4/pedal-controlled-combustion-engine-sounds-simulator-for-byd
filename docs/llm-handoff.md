@@ -117,11 +117,7 @@ machinery without a compile-only vendor SDK and a specific on-car reason.
 Read [sample-engine-audio.md](sample-engine-audio.md) before changing sample mappings. It records
 the recovery/reconstruction confidence and licensing boundary.
 
-**Adding cars or porting from Assetto Corsa work:** read
-[llm-handoff-audio-simulation-and-car-porting.md](llm-handoff-audio-simulation-and-car-porting.md)
-first. It is the single narrative for audio layering, mixing, tach/RPM simulation, upshift/downshift
-rules, and the checklist to register new `EngineSampleProfile` cars (external AC reference:
-`C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`).
+**Audio / simulation context for other LLMs:** [llm-handoff-audio-simulation-and-car-porting.md](llm-handoff-audio-simulation-and-car-porting.md) describes the current WAV pipeline, coast vs legacy mix modes, tach/RPM/shift behavior, and how cars are registered today.
 
 ## Diagnostics and scripted validation
 
@@ -188,8 +184,7 @@ assembly, but never the APK itself.
 ## Essential reading order
 
 1. [Engineering context](README.md)
-2. **Porting cars / audio + simulation deep dive:**
-   [llm-handoff-audio-simulation-and-car-porting.md](llm-handoff-audio-simulation-and-car-porting.md)
+2. [Audio / simulation context for LLMs](llm-handoff-audio-simulation-and-car-porting.md)
 3. [Full implementation](full-implementation.md)
 4. [Sample engine audio](sample-engine-audio.md)
 5. [BYD Seal calibration](byd-seal-performance-calibration.md)

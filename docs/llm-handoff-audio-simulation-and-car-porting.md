@@ -1,120 +1,97 @@
-# LLM handoff: audio layering, simulation, shifting, and car porting
+# Audio, simulation, and car profiles — context for LLMs
 
-Read this document when you need to understand **how this Android app produces engine sound and drives the tachometer**, or when you are porting **additional cars** (for example from the separate Assetto Corsa RPM simulator at `C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`) into this project.
+This document describes **how this Android app currently works**: input, synthetic tach/RPM, shifting, and sample-based engine audio. It is written for an LLM that also has access to the repo files and to related work elsewhere (for example the Assetto Corsa RPM simulator at `C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`).
 
-This repo also contains supporting docs. Use them as deeper references; this file is the **single narrative** an LLM should read first.
+It explains what is implemented today. It does not prescribe what a future change should look like — another model may replace the WAV pipeline, change mix logic, or port cars differently.
 
-| Topic | Deeper doc |
+Other docs in this repo go deeper on specific topics:
+
+| Topic | Doc |
 | --- | --- |
-| FMOD recovery, WAV extraction, licensing | [sample-engine-audio.md](sample-engine-audio.md) |
-| Full app architecture | [full-implementation.md](full-implementation.md) |
+| FMOD recovery, WAV extraction | [sample-engine-audio.md](sample-engine-audio.md) |
+| App architecture | [full-implementation.md](full-implementation.md) |
 | EV physics / Seal calibration | [byd-seal-performance-calibration.md](byd-seal-performance-calibration.md) |
-| UI vs simulation decisions | [ui-display-and-simulation-decisions.md](ui-display-and-simulation-decisions.md) |
-| Tuning panel semantics | [tuning-interface.md](tuning-interface.md) |
-| Project workflow / BYD constraints | [llm-handoff.md](llm-handoff.md) |
+| UI vs simulation | [ui-display-and-simulation-decisions.md](ui-display-and-simulation-decisions.md) |
+| Tuning panel | [tuning-interface.md](tuning-interface.md) |
+| Project workflow | [llm-handoff.md](llm-handoff.md) |
 
 ---
 
-## 1. Mental model (read this first)
+## 1. What the app is
 
-This app is **not** a game engine plugin and **does not** call Assetto Corsa at runtime.
+A **BYD DiLink dashboard** (Compose UI, `mobile` module) that:
 
-It is a **BYD DiLink dashboard** that:
+1. Reads **accelerator, brake, speed**, and optionally **gearbox P/N/D** from the car via reflection on `android.hardware.bydauto.*`, or uses **on-screen simulator pedals**.
+2. Runs a **200 Hz longitudinal EV model** (mass, axle torque curves, drag, brakes) calibrated toward a BYD Seal Performance.
+3. Runs a **presentation gearbox** that maps road speed to **synthetic engine RPM**, shift events, and tach display. This layer is separate from EV wheel torque.
+4. Today, engine sound comes from **pre-authored WAV loops and one-shots**, mixed in real time with **varispeed** (playback rate tied to RPM). There is no procedural synth path in the current code.
 
-1. Reads **accelerator, brake, speed** (and optionally **gearbox P/N/D**) from the car via reflection on `android.hardware.bydauto.*`, or falls back to **simulator pedals**.
-2. Runs a **200 Hz EV road model** (mass, axle torque curves, drag, brakes) calibrated for a BYD Seal Performance.
-3. Runs a **fictional presentation gearbox** that converts road speed into **synthetic engine RPM**, shift events, and tachometer display — **without changing EV wheel torque**.
-4. Mixes **pre-authored WAV loops** (layers + one-shot effects) in real time using **varispeed** (playback rate tied to RPM). There is **no procedural synth fallback**.
-
-The Assetto Corsa RPM simulator is useful as **authoring reference**: which loops exist, at which RPM roots they crossfade, shift timing, redline, gear count. The Android app needs **Kotlin profile definitions + packaged WAV assets**, not AC runtime hooks.
+The Assetto Corsa RPM simulator is a **separate project** that can hold authoring knowledge (loop names, root RPMs, shift feel). This Android app does not call it at runtime.
 
 ---
 
-## 2. End-to-end data flow
+## 2. Data flow (current code)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Input (20 ms BYD poll OR manual sliders)                               │
-│    accelerator 0–100%  →  throttle 0..1                                 │
-│    brake 0–100%      →  brake 0..1                                     │
-│    speed km/h (integer from BYD or rounded from SIM physics)            │
-│    gearbox P/N/D (BYD LIVE only)                                        │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  DriveController @ 200 Hz (5 ms fixed step)                           │
-│    resolveDriveInput()           → pedals + speed source label          │
-│    resolveTransmissionControl()  → P/N/D (manual or locked to BYD)      │
-│    EngineSimulation.update()     → DrivetrainState                      │
-│    build EngineAudioFrame        → rpm, throttle, shifts, layer mix     │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                ▼
-┌──────────────────────────┐    ┌──────────────────────────────────────────┐
-│  UI (Compose)            │    │  EngineAudioEngine (dedicated thread)    │
-│  - Tach needle ← rpm     │    │    SampleEngineRenderer.render()         │
-│  - Speed digits ← raw    │    │      mix all LoopVoice + EffectVoice   │
-│    integer km/h          │    │      → stereo PCM16                      │
-│  - Gear ← gear or P/N    │    │    mapStereoAcrossChannels()             │
-└──────────────────────────┘    │      → 2/4/6/8 ch AudioTrack            │
-                                └──────────────────────────────────────────┘
+Input (20 ms BYD poll or manual sliders)
+  → DriveController @ 200 Hz
+      → EngineSimulation → DrivetrainState (rpm, gear, shifts, speed)
+      → EngineAudioFrame → EngineAudioEngine → SampleEngineRenderer → AudioTrack
+  → Compose UI (tach, speed, mixer, tuning)
 ```
 
-**Key files**
-
-| Layer | Path |
+| Area | Main files |
 | --- | --- |
-| Drive loop | `mobile/src/main/java/.../drive/DriveController.kt` |
-| Simulation | `mobile/src/main/java/.../simulation/EngineSimulation.kt` |
-| Transmission enum | `mobile/src/main/java/.../simulation/TransmissionPosition.kt` |
-| Audio frame DTO | `mobile/src/main/java/.../audio/EngineAudioFrame.kt` |
-| Audio output | `mobile/src/main/java/.../audio/EngineAudioEngine.kt` |
-| Sample mixer | `mobile/src/main/java/.../audio/SampleEngineRenderer.kt` |
-| Profile model | `mobile/src/main/java/.../audio/EngineSampleProfile.kt` |
-| WAV decode | `mobile/src/main/java/.../audio/WavPcmDecoder.kt` |
-| BYD telemetry | `mobile/src/main/java/.../telemetry/BydSpeedReader.kt` |
+| Drive loop | `drive/DriveController.kt` |
+| Simulation | `simulation/EngineSimulation.kt` |
+| Audio frame | `audio/EngineAudioFrame.kt` |
+| Audio output | `audio/EngineAudioEngine.kt` |
+| Sample mixer | `audio/SampleEngineRenderer.kt` |
+| Profiles | `audio/EngineSampleProfile.kt`, `HuracanProfile.kt`, `AdditionalCarProfiles.kt` |
+| WAV decode | `audio/WavPcmDecoder.kt` |
+| Mix mode prefs | `audio/AudioMixModeRepository.kt` |
+| BYD telemetry | `telemetry/BydSpeedReader.kt`, `BydGearboxMapping.kt` |
 
 ---
 
-## 3. Synthetic gears vs real EV physics (critical)
+## 3. Two parallel models: EV physics vs presentation gearbox
 
-These are **deliberately separate**:
-
-| | **EV physics** | **Presentation gearbox** |
+| | EV physics | Presentation gearbox |
 | --- | --- | --- |
-| Purpose | How fast the car accelerates/brakes | Tach RPM, shift sounds, gear number on HUD |
-| Affected by shifts? | **No** | **Yes** |
-| Uses `gearRatios` values at runtime? | **No** | **Only gear count** (`gearRatios.size`) |
-| Feeds audio RPM? | Indirectly via speed | **Directly** via `drivetrain.rpm` |
+| Purpose | Acceleration / braking | Tach RPM, shift sounds, gear label |
+| Changes when user shifts? | No | Yes |
+| Uses numeric `gearRatios[]` at runtime? | No | Only **count** (`gearRatios.size`) |
+| Feeds audio RPM? | Indirectly via speed | Directly via `drivetrain.rpm` |
 
-Wheel torque comes from digitized front/rear axle curves, motor power cap, mass, drag, and brakes. Shifting from 3rd to 4th **does not** change acceleration — it only changes the synthetic RPM mapping and may fire shift one-shots.
+Wheel torque uses digitized front/rear axle curves, motor cap, mass, drag, brakes. An upshift changes synthetic RPM and may fire shift one-shots; it does not change EV acceleration in the current simulation.
 
 ---
 
-## 4. Tachometer and RPM simulation
+## 4. Tachometer and RPM
 
-### 4.1 What the tach displays
+### 4.1 UI sources
 
 **Analog gauge** (`MainActivity.kt` → `TachometerGauge`):
 
 | Element | Source |
 | --- | --- |
-| Needle / arc | `drivetrain.rpm` vs profile `maxRpm` (gauge rounds up to next 1000) |
-| Center label | Gear number if **D**, else **P** or **N** |
-| Digital speed (bottom) | `drivetrain.rawSpeedKmh` — **whole integer km/h** |
-| Red zone | From `redlineRpm` |
+| Needle | `drivetrain.rpm` vs profile `maxRpm` |
+| Center label | Gear number in **D**; **P** or **N** otherwise |
+| Digital speed | `drivetrain.rawSpeedKmh` (integer km/h) |
+| Red zone | `redlineRpm` |
 | SHIFT overlay | `isShifting` + direction |
 
-**Mixer bar HUD** (`DashboardScreens.kt` → `BarTachometerHud`): speed integer, gear, horizontal RPM bar — same underlying `drivetrain` fields.
+**Mixer HUD** (`DashboardScreens.kt` → `BarTachometerHud`) uses the same `drivetrain` fields.
 
-The **needle uses continuous RPM**; the **speed digits use integer km/h** (BYD integer or SIM rounded). A continuous speed estimator sits between integer readings and RPM so sound/tach do not jump at whole-km/h boundaries.
+Needle RPM is continuous; speed digits are whole km/h. `QuantizedSpeedEstimator` smooths integer BYD (or SIM-rounded) speed before RPM/audio use.
 
-### 4.2 P / N / D behavior
+### 4.2 P / N / D
 
-| Position | Wheels driven by throttle? | Auto shifts? | Speed integration | RPM model |
-| --- | --- | --- | --- | --- |
-| **D** | Yes | Yes | Full (BYD or SIM) | **Road-speed coupled** |
-| **N** | No | No | SIM coast/brake still moves speed | **Free-rev** from pedal |
-| **P** | No | No | Speed forced to **0** | **Free-rev** from pedal |
+| Position | Throttle drives wheels? | Auto shifts? | RPM model |
+| --- | --- | --- | --- |
+| **D** | Yes | Yes | Road-speed coupled |
+| **N** | No | No | Free-rev from pedal |
+| **P** | No | No | Free-rev; speed held at 0 |
 
 **Free-rev (N/P):**
 
@@ -122,402 +99,260 @@ The **needle uses continuous RPM**; the **speed digits use integer km/h** (BYD i
 targetRPM = idleRpm + filteredThrottle × (redlineRpm − idleRpm)
 ```
 
-Time constants: rev-up **0.55 s**, rev-down **0.90 s** (fixed, not in tuning panel).
+Rev-up time constant **0.55 s**, rev-down **0.90 s** (fixed in code).
 
-**Drive (D) — road-speed coupled RPM:**
+**Drive (D) — road-speed coupled:**
 
 ```
 wheelRpm = vehicleSpeedMps / (2π × wheelRadiusMeters) × 60
-
 targetRPM = idleRpm + wheelRpm × evenlySpacedGearRatio(currentGearIndex)
-          = clamp(idleRpm .. limiterRpm)
+          clamped to [idleRpm .. limiterRpm]
 ```
 
-RPM follows target with exponential smoothing (`syntheticRpmResponseMs`, default **20 ms** in tuning).
+Smoothed with `syntheticRpmResponseMs` (default **20 ms** in tuning).
 
-### 4.3 Equal-width speed bands and derived ratios
+### 4.3 Equal-width speed bands
 
-Gear **count** = number of entries in profile `gearRatios` (default **7**).
-
-Upshift speed boundary for gear index `g` (0-based):
+Gear count = `profile.gearRatios.size` (often **7**).
 
 ```
 upshiftSpeedKmh(g) = topSpeedKmh × (g + 1) / gearCount
 ```
 
-With default `topSpeedKmh = 190` and 7 gears → band width ≈ **27.14 km/h** per gear.
+Default `topSpeedKmh = 190`, 7 gears → ~**27.14 km/h** per band.
 
-At each band top, synthetic RPM should hit **normal shift RPM** (`upshiftRpm`). The runtime derives:
+At each band top, RPM targets **upshiftRpm**. Runtime derives:
 
 ```
-boundaryWheelRpm = (boundaryKmh / 3.6) / (2π × wheelRadius) × 60
-coupledRpm = upshiftRpm − idleRpm
-evenlySpacedGearRatio(g) = coupledRpm / boundaryWheelRpm
+evenlySpacedGearRatio(g) = (upshiftRpm − idleRpm) / boundaryWheelRpm(g)
 ```
 
-**Important:** The numeric values in `gearRatios` (e.g. Huracán `[3.75, 2.38, …]`) are **not** used for this runtime mapping. They appear in the **TuningPanel gear-landing graph** only. Runtime uses `evenlySpacedGearRatio()` from `topSpeedKmh` + gear count.
+The numeric values stored in `gearRatios` (e.g. Huracán `[3.75, 2.38, …]`) are used in the **TuningPanel gear graph**, not in this runtime ratio calculation.
 
-### 4.4 When upshifts happen
-
-Constants in `EngineSimulation`:
+### 4.4 Shift logic (`EngineSimulation.kt`)
 
 | Constant | Value |
 | --- | --- |
-| `SHIFT_THROTTLE_THRESHOLD` | **0.10** — min throttle for normal upshift |
-| `EMERGENCY_UPSHIFT_RPM_FRACTION` | **0.98** — near-redline upshift without throttle |
-| `DOWNSHIFT_SPEED_HYSTERESIS_KMH` | **4.0** |
+| Normal upshift throttle floor | **0.10** |
+| Emergency upshift RPM fraction | **0.98** of redline |
+| Downshift speed hysteresis | **4.0 km/h** |
 | Kickdown throttle | **> 0.78** |
-| `KICKDOWN_SPEED_MARGIN_KMH` | **10.0** |
-| `shiftDwellSeconds` | **0.150 s** default between shifts |
-| Gear index swap during shift | at progress **≥ 0.38** |
+| Kickdown speed margin | **10.0 km/h** below remembered upshift boundary |
+| Shift dwell | **0.150 s** default |
+| Gear index swap during shift | progress **≥ 0.38** |
 
-**Normal upshift** (in D, dwell elapsed, not already shifting):
+**Normal upshift (D):** throttle > 0.10 and `speedKmh >= upshiftSpeedKmh(currentGearIndex)`.
 
-- `currentGearIndex < lastIndex`
-- `filteredThrottle > 0.10`
-- `speedKmh >= upshiftSpeedKmh(currentGearIndex)`
+**Emergency upshift:** `rpmForSpeed(currentGear) >= redlineRpm × 0.98`.
 
-**Emergency upshift** (external speed forcing RPM up without throttle):
+**Downshift:** speed ≤ remembered upshift boundary − 4 km/h (floor 2 km/h), or kickdown with throttle > 0.78 and speed below boundary − 10 km/h.
 
-- `rpmForSpeed(currentGear) >= redlineRpm × 0.98`
+Each upshift stores current speed as the downshift boundary for the target gear.
 
-**Downshift**:
+Shift presentation: `shiftSerial` increments, `shiftDirection` UP/DOWN, durations from profile (e.g. Huracán 60 ms up / 150 ms down). RPM target blends between gears during the shift window.
 
-- Remember `downshiftBoundaryKmhByGear[gear]` = vehicle speed at the upshift that entered this gear
-- Trigger if `speedKmh <= max(rememberedBoundary − 4.0, 2.0)`
-- **Or** kickdown: `throttle > 0.78` AND `speedKmh < rememberedBoundary − 10.0`
+### 4.5 Integer speed smoothing
 
-On upshift start, the current speed is stored as the downshift boundary for the **target** gear.
-
-**Shift presentation:** `isShifting`, `shiftProgress`, `shiftSerial` increment, `shiftDirection` UP/DOWN. Duration from profile: Huracán 60 ms up / 150 ms down; Aventador 80 ms / 260 ms (overridable via tuning when car selected).
-
-During shift, RPM target switches from old gear's road coupling to new gear's at 38% progress, with faster smoothing (`max(shiftDuration × 0.30, 18 ms)`).
-
-### 4.5 Integer speed reconstruction
-
-Both BYD integer speed and SIM physics speed pass through `QuantizedSpeedEstimator`:
-
-- Predictive critically-damped smoothing (`externalSpeedSmoothingMs`, default **120 ms**)
-- Prevents tach/audio steps when BYD reports whole km/h only
-- SIM path: `rawExternalSpeedKmh = round(physicalSpeedMps × 3.6)` then same estimator
+`QuantizedSpeedEstimator` (`externalSpeedSmoothingMs`, default **120 ms**) sits between integer speed readings and simulation/audio.
 
 ---
 
-## 5. Audio: profiles, layers, and how they are read
+## 5. Audio: sample profiles (current implementation)
 
-### 5.1 One profile = one car sound
+### 5.1 Profile shape
 
 ```kotlin
 EngineSampleProfile(
     id, displayName,
-    assetDirectory,              // under assets/sample_engine/
-    previewAssetName,            // under assets/car_previews/
-    outputSampleRate,            // authored WAV rate (validation)
-    playbackSampleRate,          // AudioTrack + renderer rate (may differ)
+    assetDirectory,           // assets/sample_engine/{assetDirectory}/
+    previewAssetName,         // assets/car_previews/
+    outputSampleRate,         // authored WAV rate
+    playbackSampleRate,       // AudioTrack rate (may differ)
     idleRpm, maximumRpm, redlineRpm, limiterRpm, upshiftRpm,
-    gearRatios,                  // count matters; values mostly for tuning UI
-    upshiftDurationSeconds, downshiftDurationSeconds,
+    gearRatios,
     layers: List<SampleLayerSpec>,
     effects: List<SampleEffectSpec>,
-    throttleOutputGainDb,        // optional route-level trim vs pedal
+    ...
 )
 ```
 
-Registry: `EngineSampleProfiles.all` in `EngineSampleProfile.kt`.
+Registry: `EngineSampleProfiles.all`.
 
-**Current cars**
+**Cars in repo today**
 
-| ID | Authoring style | Layers | Effects | Rates |
-| --- | --- | --- | --- | --- |
-| `lamborghini_huracan_trofeo_evo2_cabin` | Full FMOD reconstruction (`HuracanProfile.kt`) | 24 | transmission + shift up/down | 44100 authored → **48000 playback** |
-| `lamborghini_aventador_sv_cabin` | Generic bands (`AdditionalCarProfiles.kt`) | 16 | + overrun on throttle lift | 48000 native |
+| ID | Definition | Layers | Notes |
+| --- | --- | --- | --- |
+| `lamborghini_huracan_trofeo_evo2_cabin` | `HuracanProfile.kt` | 24 | FMOD-style curves; 44100 → 48000 playback |
+| `lamborghini_aventador_sv_cabin` | `AdditionalCarProfiles.kt` `bandProfile()` | 16 | Band factory; 48000 native |
 
 ### 5.2 Layer roles
 
-| Role | Purpose | Typical automation |
-| --- | --- | --- |
-| **IDLE** | Stationary / low RPM loop | +8 dB boost constant; throttle fades idle out |
-| **LOAD** | On-throttle engine body | `throttleGainDb` opens at high pedal |
-| **COAST** | Lift-off / overrun harmonics | `throttleGainDb` favors low pedal |
-| **TEXTURE** | Noise / sine fill | Moderate throttle curve |
-| **LIMITER** | Hard redline layer | RPM dB automation near limiter |
-
-Each layer is one **looping WAV** with:
-
-- `startRpm` / `endRpm` — silent outside range
-- `autopitchRootRpm` — varispeed root: `playbackRatio = rpm / root`
-- `baseGainDb`, `throttleGainDb`, `rpmAmplitudeCurves`, `rpmGainDbCurves`
-
-**Layer gain (normal mode):**
-
-```
-if rpm ∉ [startRpm, endRpm] → 0
-amplitude = product of rpmAmplitudeCurves(rpm)
-decibels = baseGainDb + (IDLE ? +8dB : 0) + throttleCurve(throttle) + sum(rpmGainDbCurves)
-gain = amplitude × 10^(decibels/20)
-```
-
-### 5.3 Effects (one-shots and loops)
-
-| Trigger | When it fires |
+| Role | Typical content |
 | --- | --- |
-| `SHIFT_UP` / `SHIFT_DOWN` | `shiftSerial` changes; direction ±1; control bit enabled; RPM ≥ minimum |
-| `TRANSMISSION_LOOP` | Continuous if enabled; gain scales with RPM and throttle |
-| `THROTTLE_LIFT` | Arm throttle ≥ 0.35; fire once when throttle ≤ 0.08 |
+| **IDLE** | Low-RPM loop |
+| **LOAD** | On-throttle body |
+| **COAST** | Lift-off / overrun |
+| **TEXTURE** | Noise fill |
+| **LIMITER** | Near redline |
 
-Effect groups (UI toggles): **Gear changes**, **Transmission**, **Exhaust overrun** — bitmask in `enabledEffectMask`.
+Each layer: looping WAV, `startRpm`/`endRpm`, `autopitchRootRpm`, automation curves.
 
-### 5.4 WAV loading and varispeed
+Varispeed: `playbackRatio = rpm / autopitchRootRpm` (clamped). Cubic interpolation; phase advances when inaudible (FMOD-style timeline continuity).
 
-**Path:** `assets/sample_engine/{assetDirectory}/{assetName}`
-
-**Build:** `prepareSampleEngineAssets` in `mobile/build.gradle.kts` copies enumerated WAVs from local `audio_samples/...` into generated assets. **Every WAV must be listed explicitly** — nothing is copied by glob.
-
-**Decoder** (`WavPcmDecoder.kt`): PCM16, mono/stereo, reads `smpl` loop points → `PcmLoopData` with float samples per channel.
-
-**Playback** (`SampleEngineRenderer` → `LoopVoice`):
-
-```
-playbackRatio = (rpm / autopitchRootRpm) × 2^(basePitchSemitones/12)   // clamped 0.1..4.0
-phaseIncrement = sourceSampleRate / outputSampleRate × playbackRatio
-```
-
-**Cubic (Hermite) interpolation** between samples; **phase advances even when inaudible** (FMOD timeline continuity). Loop wraps at `smpl` loop region.
-
-**Rate conversion:** No separate resampler — changing `outputSampleRate` vs authored rate is handled by `phaseIncrement`. Huracán uses 48 kHz playback on 44.1 kHz sources to avoid BYD head-unit resampling.
+WAVs are copied into assets by an explicit list in `mobile/build.gradle.kts` (`prepareSampleEngineAssets`); local sources live under `audio_samples/`.
 
 ---
 
-## 6. Audio: mixing and gain chain
+## 6. Two mix modes
 
-### 6.1 Per-block pipeline (`SampleEngineRenderer.render`)
+The renderer supports two paths, selected by `coastLayerMixEnabled` on `EngineAudioFrame` (from `AudioMixModeRepository`, **default ON**).
 
-1. Smooth `rpm` and `throttle` (from `AudioTuning`: 16 ms / 10 ms defaults).
-2. For each layer: compute authored `gainAt(rpm, throttle)`, apply user **layer mix** (mute/solo/volume).
-3. Each voice: smooth gain, cubic read L/R, accumulate.
-4. Effects: same; one-shots deactivate at end of buffer.
-5. Bus mix:
+### 6.1 Coast layer mix (default, app focus)
+
+When `coastLayerMixEnabled == true`:
+
+| Behavior | Detail |
+| --- | --- |
+| **LOAD** | Gain forced to 0 |
+| **COAST** | Full RPM-band gain; throttle curve ignored |
+| **IDLE** | Special amplitude fade ~1350–2950 RPM (`idleCoastMixAmplitude`) |
+| **Profile output gain** | Uses full-throttle curve point (`outputGainAt(1.0)`) |
+| **Idle layer fade time** | 120 ms (vs normal layer fade) |
+| **MIXER UI** | LOAD rows hidden; per-track **GAIN** sliders active |
+| **Layer mix volume** | User multiplier 0..8× applied |
+| **Asset load** | LOAD layer WAVs are not decoded into memory |
+
+This is the mix mode the project is oriented toward for new work.
+
+### 6.2 Legacy throttle mix
+
+When `coastLayerMixEnabled == false`:
+
+| Behavior | Detail |
+| --- | --- |
+| **LOAD / COAST / IDLE** | Original FMOD-style throttle + RPM automation |
+| **Profile output gain** | Follows live throttle |
+| **MIXER UI** | All layer rows visible; GAIN multipliers fixed at 1.0× |
+
+Toggle: DEBUG panel → **AUDIO MIX MODE**, or Gradle `coastLayerMixEnabledByDefault` / persisted pref `coast_layer_mix_enabled`. Header shows **LEGACY MIX** tag when legacy is active.
+
+Legacy pref key `coast_only_full_gain` is still read for migration.
+
+---
+
+## 7. Mixing pipeline (`SampleEngineRenderer.render`)
+
+1. Smooth RPM and throttle (`AudioTuning`: 16 ms / 10 ms defaults).
+2. Per layer: `SampleLayerSpec.gainAt(rpm, throttle, coastLayerMixEnabled)` then user mute/solo/volume.
+3. Accumulate loop voices + effects; one-shots on triggers.
+4. Bus:
 
 ```
-mixedL/R = loopSum × continuousProgramGain + effectSum
-
+mixed = loopSum × continuousProgramGain + effectSum
 commonGain = 0.65 × masterGain × profileOutputGain × enabledGain
-
-output = transparentLimit(mixed × commonGain)   // hard clip ±1.0 only
-PCM16 = output × 32767
+output = hard clip at ±1.0 → PCM16
 ```
 
-### 6.2 Master and profile trim
+**Master gain:** per-car `CarMasterVolumeRepository` × global `AudioTuning.masterGain / 0.72`.
 
-| Stage | Source |
+**Effects triggers:**
+
+| Trigger | Fires when |
 | --- | --- |
-| `masterGain` | Per-car `CarMasterVolumeRepository` × global `AudioTuning.masterGain / 0.72` |
-| `profileOutputGain` | `profile.outputGainAt(throttle)` from optional throttle curve |
-| `enabledGain` | User engine ON/OFF mute |
-| `continuousProgramGain` | 0 if **SOLO EFFECTS** (mutes loops, keeps effects) |
+| `SHIFT_UP` / `SHIFT_DOWN` | `shiftSerial` changes |
+| `TRANSMISSION_LOOP` | Continuous if enabled |
+| `THROTTLE_LIFT` | Armed at throttle ≥ 0.35; fires once at ≤ 0.08 |
 
-**Duplication gain** (`EngineAudioEngine`): when mirroring stereo to 4/6/8 channels, gain is reduced (0.38 quad, 0.27 5.1, 0.23 7.1) to avoid clipping.
-
-### 6.3 User mixer (MIXER screen)
-
-`LayerMixRepository` persists per `{profileId}.{trackId}`: volume (0..8×), mute, solo.
-
-Default behavior: volume multiplier **only applies when COAST EXP experiment is ON**; otherwise multiplier forced to 1.0. LOAD rows hidden during experiment.
-
-Solo: any track solo → non-solo tracks silent; also blocks shift one-shots.
-
-### 6.4 COAST EXP experiment (debug flag)
-
-When `coastOnlyFullGain` is true:
-
-- **LOAD** layers forced to 0 gain
-- **COAST** ignores throttle curve (full RPM-band gain)
-- **IDLE** uses special fade above ~1350–2950 RPM
-- Per-track GAIN sliders active in MIXER
+**Solo effects mode:** mutes continuous loops; only checked effects play.
 
 ---
 
-## 7. What audio receives each frame
+## 8. What audio receives each frame
 
-`EngineAudioFrame` (built in `DriveController.step`):
+`EngineAudioFrame` fields:
 
-| Field | From |
+| Field | Source |
 | --- | --- |
-| `rpm` | `drivetrain.rpm` |
-| `throttle` | `drivetrain.smoothedThrottle` |
+| `rpm`, `throttle` | `drivetrain` |
 | `shiftSerial`, `shiftDirection` | shift state |
-| `enabledEffectMask`, `soloEffects` | per-car prefs |
-| `layerMix` | per-car prefs |
+| `layerMix`, `enabledEffectMask`, `soloEffects` | persisted per-car prefs |
 | `tuning` | `AudioTuning` + car master volume |
-| `coastOnlyFullGain` | experiment flag |
+| `coastLayerMixEnabled` | `AudioMixModeRepository` |
 
-**Not sent to audio:** speed, gear index, brake, engineLoad, limiter flag. Audio only cares about **RPM, throttle, shifts, and mix settings**.
-
-Shift sounds are triggered by **`shiftSerial` change**, not by gear number directly.
+Speed, gear index, and brake are not passed to the renderer in the current design. Shift sounds follow **`shiftSerial`**, not gear number.
 
 ---
 
-## 8. BYD input modes
+## 9. BYD input modes
 
 | Mode | Pedals | Speed | P/N/D |
 | --- | --- | --- | --- |
-| **AUTO** | BYD if valid, else SIM | BYD if valid | Manual |
-| **BYD LIVE** | BYD if valid, else zeros | BYD if valid | **Locked to BYD gearbox** |
-| **SIMULATOR** | Manual sliders | Integrated physics | Manual |
+| **AUTO** | BYD if valid, else SIM | BYD if valid | Manual UI |
+| **BYD LIVE** | BYD if valid | BYD if valid | Locked to BYD gearbox |
+| **SIMULATOR** | Sliders | Integrated physics | Manual UI |
 
-Gearbox read: `BYDAutoGearboxDevice.getGearboxAutoModeType()` + `getGearboxCode()` via reflection; mapped P/N/D in `BydGearboxMapping.kt`. Permission: `BYDAUTO_GEARBOX_GET`.
+Gearbox: `BYDAutoGearboxDevice` via reflection; mapping in `BydGearboxMapping.kt`.
 
 ---
 
-## 9. Porting a new car (e.g. from Assetto Corsa knowledge)
+## 10. How cars are registered today (reference)
 
-You are **not** wiring the AC app into Android. You are **authoring a new `EngineSampleProfile`** and **packaging WAVs**.
+Current pattern when adding a profile to this repo:
 
-### 9.1 What to extract from AC / bank work
+1. WAV files locally under `audio_samples/...`
+2. Each file listed in `mobile/build.gradle.kts` → `LocalEngineProfileAssets`
+3. Kotlin profile (`HuracanProfile.kt` full curves, or `bandProfile()` factory)
+4. Entry in `EngineSampleProfiles.all`
+5. Preview image in `car_previews/`
 
-For each candidate car, collect:
+**Authoring styles in code:**
 
-| Data | Used for |
+- **Full curves** — one `SampleLayerSpec` per recovered layer with explicit `AutomationCurve` lists.
+- **Band factory** — lists of `RootedSample(asset, rpm, gainDb)`; factory builds crossfaded RPM bands.
+
+Selecting a car → `DriveController.applySelectedCar()` reloads mix prefs, effect mask, tuning limits, restarts audio.
+
+---
+
+## 11. Persistence
+
+| Pref file | Purpose |
 | --- | --- |
-| Loop WAV files (idle, load/on-throttle, coast/off-throttle, limiter, textures) | `SampleLayerSpec.assetName` |
-| Root RPM per loop | `autopitchRootRpm` |
-| Crossfade regions / automation | `HuracanProfile`-style curves **or** band list for `bandProfile()` |
-| Shift up/down one-shots | `SampleEffectSpec` SHIFT_UP/DOWN |
-| Transmission whine loop | TRANSMISSION_LOOP effect |
-| Overrun / lift-off sample | THROTTLE_LIFT effect (optional) |
-| idle/redline/limiter/upshift RPM | profile metadata + simulation when car selected |
-| Gear count | length of `gearRatios` list |
-| Authored sample rate | `outputSampleRate` |
-| Preview image | `car_previews/` |
-
-### 9.2 Two authoring paths in this codebase
-
-**A. Full reconstruction** (Huracán pattern) — `HuracanProfile.kt`
-
-- One `SampleLayerSpec` per recovered FMOD layer
-- Explicit `AutomationCurve` for throttle and RPM
-- Use when you have **complete** bank automation data
-
-**B. Band factory** (Aventador pattern) — `AdditionalCarProfiles.kt` → `bandProfile()`
-
-- Provide lists of `RootedSample(asset, rpm, gainDb)` for idle, load, coast, optional texture
-- Factory builds RPM bands with crossfade widths (~55% of band, min 220 RPM)
-- Shared throttle curves for load/coast/texture
-- **Fastest path** when you have named loops + root RPMs from AC work
-
-### 9.3 Checklist to register a car
-
-1. **Place WAVs** in `audio_samples/<your_folder>/converted/` (local, gitignored unless user has rights).
-
-2. **Register in `mobile/build.gradle.kts`** — new `LocalEngineProfileAssets` entry with every `assetName` and preview image.
-
-3. **Create profile Kotlin** — `XxxProfile.kt` or `bandProfile(...)` call.
-
-4. **Append to `EngineSampleProfiles.all`** and optional `specifications` map for dashboard stats.
-
-5. **Set rates** — `outputSampleRate` = authored rate; if 44.1 kHz and BYD path prefers 48 kHz, set `playbackSampleRate = 48_000`.
-
-6. **Wire effects** — map AC shift/transmission/overrun samples to `SampleEffectSpec` with correct triggers and control bits.
-
-7. **Tests** — `SampleEngineRendererTest.everySelectableCarHasACompleteDistinctSampleProfile` must pass (layers audible across RPM range, rate consistency).
-
-8. **On-device** — `ExampleInstrumentedTest` validates packaged WAVs decode.
-
-Selecting a car in app → `DriveController.applySelectedCar()` reloads layer mix, effect mask, tuning RPM limits from profile, restarts audio engine.
-
-### 9.4 Mapping AC RPM behavior to this app
-
-| AC concept | Android equivalent |
-| --- | --- |
-| Engine RPM at speed | `evenlySpacedGearRatio` + D-mode coupling (not AC physics) |
-| Gear count | `gearRatios.size` |
-| Shift RPM threshold | `upshiftRpm` + `upshiftSpeedKmh` bands |
-| Redline / limiter | `redlineRpm`, `limiterRpm` + LIMITER layers |
-| Layer crossfade vs RPM | `SampleLayerSpec` curves or `bandLayers()` |
-| Shift sound | `SampleEffectSpec` on `shiftSerial` change |
-| Master volume | `CarMasterVolumeRepository` per profile id |
-
-Do **not** copy AC drivetrain torque or clutch models — EV physics stays Seal-calibrated.
+| `selected_car` | Last car |
+| `car_master_volume` | Per-car master 0..1.2 (default 0.72) |
+| `sample_layer_mix` | Mixer mute/solo/volume per track |
+| `sample_sound_effects` | Effect toggles |
+| `engine_tuning` | TUNE panel |
+| `audio_experiments` | `coast_layer_mix_enabled` |
 
 ---
 
-## 10. Persistence (survives reinstall if app data kept)
-
-| Pref file | Keys | Purpose |
-| --- | --- | --- |
-| `selected_car` | `profile_id` | Last selected car |
-| `car_master_volume` | `{profileId}.master_gain` | Per-car master 0..1.2 (default 0.72) |
-| `sample_layer_mix` | `{profileId}.{trackId}.volume/muted/solo` | Mixer |
-| `sample_sound_effects` | effect masks per profile | Effect toggles |
-| `engine_tuning` | global simulation/audio tuning | TUNE panel |
-
-New cars automatically get default volume 0.72 until user adjusts.
-
----
-
-## 11. Formulas quick reference
+## 12. Formulas (as implemented)
 
 ```
-// Upshift speed threshold (gear index g, 0-based)
 upshiftSpeedKmh(g) = topSpeedKmh × (g + 1) / gearCount
-
-// Runtime ratio (NOT stored gearRatios[g])
 ratio(g) = (upshiftRpm − idleRpm) / boundaryWheelRpm(g)
 
-// D-mode target RPM
-targetRPM = idleRpm + wheelRpm × ratio(currentGear)
+D-mode:  targetRPM = idleRpm + wheelRpm × ratio(gear)
+N/P:     targetRPM = idleRpm + throttle × (redlineRpm − idleRpm)
 
-// N/P target RPM
-targetRPM = idleRpm + throttle × (redlineRpm − idleRpm)
-
-// Layer varispeed
 playbackRatio = rpm / autopitchRootRpm
 
-// Layer gain
-gain = amplitude(rpm) × 10^(dB(rpm, throttle) / 20)
+Normal upshift:     throttle > 0.10 AND speed ≥ upshiftSpeedKmh(g)
+Emergency upshift:  rpmForSpeed(g) ≥ redline × 0.98
+Downshift:          speed ≤ boundary − 4  OR  kickdown (throttle > 0.78, speed < boundary − 10)
 
-// Normal upshift
-throttle > 0.10 AND speedKmh ≥ upshiftSpeedKmh(g)
-
-// Emergency upshift
-rpmForSpeed(g) ≥ redlineRpm × 0.98
-
-// Downshift
-speedKmh ≤ max(rememberedUpshiftKmh − 4, 2)
-OR (throttle > 0.78 AND speedKmh < rememberedUpshiftKmh − 10)
-
-// Exponential smoothing
-value += (target − value) × (1 − exp(−dt / τ))
+Smoothing: value += (target − value) × (1 − exp(−dt / τ))
 ```
 
 ---
 
-## 12. Known doc/code gaps (verify in source)
+## 13. Doc/code notes (as of this writing)
 
-1. **`ui-display-and-simulation-decisions.md` §3.2** — D-row says throttle-driven RPM; **code uses road-speed coupling** (§3.3 in that doc is correct).
-2. **`gearRatios` numeric values** — tuning graph only; runtime uses equal bands from `topSpeedKmh`.
-3. **SIM coast regen** — hardcoded 2.5 m/s² in `EngineProfile`, not yet in TuningConfig UI.
-4. **BYD LIVE gearbox mapping** — fallback constants P=1,R=2,N=3,D=4 if SDK fields not discovered; R/S/M map to NEUTRAL for sound.
-
----
-
-## 13. Tests to run after car or audio changes
-
-```powershell
-$env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
-.\gradlew :mobile:testDebugUnitTest :mobile:assembleDebug
-```
-
-Important unit tests:
-
-| Test file | What it guards |
-| --- | --- |
-| `EngineSimulationTest.kt` | Equal bands, downshift hysteresis, D RPM vs speed, P park speed |
-| `SampleEngineRendererTest.kt` | Profile completeness, coast experiment, effects, solo |
-| `DriveControllerInputTest.kt` | BYD vs SIM input arbitration |
-| `BydTransmissionControlTest.kt` | BYD LIVE shifter lock |
-
-Scripted integration (no UI): `DriveControllerScriptedIntegrationTest` (androidTest).
+1. `ui-display-and-simulation-decisions.md` §3.2 may still describe throttle-driven D RPM; runtime D-mode is road-speed coupled (§3.3 aligns with code).
+2. `gearRatios` numeric values are for tuning UI; runtime uses equal bands from `topSpeedKmh`.
+3. SIM coast regen is hardcoded in `EngineProfile` (2.5 m/s²), not exposed in TUNE UI.
+4. BYD gearbox mapping uses fallback constants if SDK fields are missing.
 
 ---
 
@@ -525,24 +360,16 @@ Scripted integration (no UI): `DriveControllerScriptedIntegrationTest` (androidT
 
 **Assetto Corsa RPM simulator:** `C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`
 
-Use it to prototype RPM curves, layer roots, and shift feel. Deliverables for **this** repo are always:
-
-- Kotlin `EngineSampleProfile` (or `bandProfile` inputs)
-- Enumerated WAV list in `build.gradle.kts`
-- Preview JPG
-- Passing renderer tests
-
-No runtime dependency between the two projects.
+That codebase may contain RPM curves, layer roots, and shift behavior used while authoring. This Android repo currently consumes **Kotlin profiles + packaged WAV assets**; there is no runtime link between the two.
 
 ---
 
-## 15. Suggested reading order for the next LLM
+## 15. Useful source files to open
 
-1. This document (full pass)
-2. Skim `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `EngineSimulation.kt`
-3. Read one complete profile: `HuracanProfile.kt` **and** `AdditionalCarProfiles.kt` — understand both patterns
-4. [sample-engine-audio.md](sample-engine-audio.md) — extraction tooling
-5. [byd-seal-performance-calibration.md](byd-seal-performance-calibration.md) — why EV physics must stay separate
-6. `mobile/build.gradle.kts` — asset enumeration pattern
+- `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `EngineSimulation.kt`
+- `HuracanProfile.kt` and `AdditionalCarProfiles.kt` (two profile styles)
+- `AudioMixModeRepository.kt` (coast vs legacy default)
+- `mobile/build.gradle.kts` (asset enumeration)
+- [sample-engine-audio.md](sample-engine-audio.md) (extraction history)
 
-When adding cars from AC: prefer **`bandProfile()`** unless you have full FMOD-style automation; match **root RPMs** and **gear count** to the AC simulator's behavior for that vehicle; keep **authored sample rates** honest.
+Tests: `EngineSimulationTest.kt`, `SampleEngineRendererTest.kt`, `DriveControllerInputTest.kt`, `BydTransmissionControlTest.kt`.

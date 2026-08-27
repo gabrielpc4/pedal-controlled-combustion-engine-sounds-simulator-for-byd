@@ -67,6 +67,7 @@ class EngineAudioEngine(context: Context) {
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
     private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
+    private val coastLayerMixEnabled = AtomicBoolean(true)
     private val requestedMode = AtomicReference(AudioChannelMode.AUTO)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
@@ -137,6 +138,19 @@ class EngineAudioEngine(context: Context) {
             outputState.updateAndGet { it.copy(requestedMode = mode) }
             if (!changed) return
 
+            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
+            if (shouldRestart && stopLocked()) {
+                startLocked()
+            }
+        }
+    }
+
+    internal fun setCoastLayerMixEnabled(enabled: Boolean) {
+        synchronized(lifecycleLock) {
+            val changed = coastLayerMixEnabled.getAndSet(enabled) != enabled
+            if (!changed) {
+                return
+            }
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
             if (shouldRestart && stopLocked()) {
                 startLocked()
@@ -291,7 +305,12 @@ class EngineAudioEngine(context: Context) {
             // BYD route's native 48 kHz so its 44.1 kHz bank never enters the vendor resampler.
             val sampleRate = sampleProfile.playbackSampleRate
             val sampleRenderer = try {
-                SampleEngineRenderer.load(appContext.assets, sampleRate, sampleProfile)
+                SampleEngineRenderer.load(
+                    appContext.assets,
+                    sampleRate,
+                    sampleProfile,
+                    coastLayerMixEnabled = coastLayerMixEnabled.get(),
+                )
             } catch (throwable: Throwable) {
                 failure = "Required sample bank unavailable: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty()}"
                 outputState.updateAndGet {

@@ -14,5 +14,5 @@ data class EngineAudioFrame(
     val tuning: AudioTuning = AudioTuning(),
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** When true, mute Load layers and ignore throttle in layer/output gain (RPM crossfades only). */
-    val coastOnlyFullGain: Boolean = false,
+    val coastLayerMixEnabled: Boolean = true,
 )

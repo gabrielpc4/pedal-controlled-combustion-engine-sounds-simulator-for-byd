@@ -1,6 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-/** User trim applied to one loop layer or effect sample. [volume] is a gain multiplier (1.0 = unchanged) while the coast experiment is active. */
+/** User trim applied to one loop layer or effect sample. [volume] is a gain multiplier (1.0 = unchanged) in coast layer mix mode. */
 data class LayerMixControl(
     val volume: Double = DEFAULT_GAIN_MULTIPLIER,
     val muted: Boolean = false,

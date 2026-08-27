@@ -57,7 +57,7 @@ internal fun DebugPanel(
     requestSnapshot: () -> DriveSnapshot,
     onRestartBydReader: () -> Unit,
     onRunSampleValidation: () -> Unit,
-    onCoastOnlyFullGainChange: (Boolean) -> Unit,
+    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     var state by remember { mutableStateOf(requestSnapshot()) }
@@ -93,9 +93,9 @@ internal fun DebugPanel(
         )
         Spacer(Modifier.height(16.dp))
 
-        AudioExperimentsSection(
-            enabled = state.coastOnlyFullGainExperiment,
-            onCoastOnlyFullGainChange = onCoastOnlyFullGainChange,
+        AudioMixModeSection(
+            coastLayerMixEnabled = state.coastLayerMixEnabled,
+            onCoastLayerMixEnabledChange = onCoastLayerMixEnabledChange,
         )
         Spacer(Modifier.height(14.dp))
 
@@ -204,23 +204,23 @@ internal fun DebugPanel(
 }
 
 @Composable
-private fun AudioExperimentsSection(
-    enabled: Boolean,
-    onCoastOnlyFullGainChange: (Boolean) -> Unit,
+private fun AudioMixModeSection(
+    coastLayerMixEnabled: Boolean,
+    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
 ) {
-    DebugSection(title = "AUDIO EXPERIMENTS", accent = DbgAmber) {
+    DebugSection(title = "AUDIO MIX MODE", accent = DbgAmber) {
         Text(
-            "Coast-only full gain: mutes Load, runs Coast at full level when active. " +
-                "Use GAIN multipliers under each MIXER meter for everything else.",
+            "Coast layer mix (default): Load layers muted, Coast at full RPM-band level, per-track GAIN sliders in MIXER. " +
+                "Legacy throttle mix: original FMOD-style throttle crossfade between Load/Coast/Idle.",
             color = DbgMuted,
             fontSize = 12.sp,
             lineHeight = 18.sp,
         )
         Spacer(Modifier.height(10.dp))
-        DebugLine("Coast-only experiment", if (enabled) "ON" else "OFF")
-        if (enabled) {
+        DebugLine("Active mix", if (coastLayerMixEnabled) "Coast layer mix" else "Legacy throttle mix")
+        if (coastLayerMixEnabled) {
             Text(
-                "Header shows COAST EXP · GAIN sliders in MIXER multiply the dynamic level (1.0x = default)",
+                "MIXER hides Load rows · GAIN sliders multiply dynamic level (1.0x = default)",
                 color = DbgGreen,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
@@ -228,9 +228,13 @@ private fun AudioExperimentsSection(
         }
         Spacer(Modifier.height(8.dp))
         ExperimentToggleButton(
-            label = if (enabled) "DISABLE COAST EXPERIMENT" else "ENABLE COAST EXPERIMENT",
-            accent = if (enabled) DbgRed else DbgGreen,
-            onClick = { onCoastOnlyFullGainChange(!enabled) },
+            label = if (coastLayerMixEnabled) {
+                "SWITCH TO LEGACY THROTTLE MIX"
+            } else {
+                "SWITCH TO COAST LAYER MIX"
+            },
+            accent = if (coastLayerMixEnabled) DbgAmber else DbgGreen,
+            onClick = { onCoastLayerMixEnabledChange(!coastLayerMixEnabled) },
         )
     }
 }

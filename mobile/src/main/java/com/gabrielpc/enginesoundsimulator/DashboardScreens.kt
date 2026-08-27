@@ -117,7 +117,7 @@ internal fun MixerDashboardScreen(
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
-    coastExperimentActive: Boolean,
+    coastLayerMixEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -138,7 +138,7 @@ internal fun MixerDashboardScreen(
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
         Spacer(Modifier.height(10.dp))
-        val visibleTracks = if (state.coastOnlyFullGainExperiment) {
+        val visibleTracks = if (state.coastLayerMixEnabled) {
             state.layerMixTracks.filter { track -> !track.isLoadLayer }
         } else {
             state.layerMixTracks
@@ -155,7 +155,7 @@ internal fun MixerDashboardScreen(
                 items(visibleTracks, key = { it.id }) { track ->
                     LayerMixTrackControl(
                         track = track,
-                        coastExperimentActive = coastExperimentActive,
+                        coastLayerMixEnabled = coastLayerMixEnabled,
                         onMuted = { onLayerMuted(track.id, it) },
                         onSolo = { onLayerSolo(track.id, it) },
                         onVolume = { onLayerVolume(track.id, it) },
@@ -504,14 +504,14 @@ private data class LoadedCarPreview(
 @Composable
 private fun LayerMixTrackControl(
     track: LayerMixTrackState,
-    coastExperimentActive: Boolean,
+    coastLayerMixEnabled: Boolean,
     onMuted: (Boolean) -> Unit,
     onSolo: (Boolean) -> Unit,
     onVolume: (Double) -> Unit,
 ) {
     val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
-    val showTrimSlider = coastExperimentActive && track.showVolumeSlider
+    val showTrimSlider = coastLayerMixEnabled && track.showVolumeSlider
     Column(
         modifier = Modifier
             .fillMaxWidth()

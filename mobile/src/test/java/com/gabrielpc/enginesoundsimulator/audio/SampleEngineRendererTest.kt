@@ -24,8 +24,8 @@ class SampleEngineRendererTest {
             assertTrue(candidate.requiredAssets.containsAll(candidate.effects.map { it.assetName }))
             assertTrue(candidate.outputSampleRate == 44_100 || candidate.outputSampleRate == 48_000)
             for (rpm in candidate.idleRpm.toInt()..candidate.limiterRpm.toInt() step 25) {
-                val onLoad = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0) }
-                val lifted = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 0.0) }
+                val onLoad = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0, coastLayerMixEnabled = false) }
+                val lifted = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 0.0, coastLayerMixEnabled = false) }
                 assertTrue("${candidate.id} has no full-load voice at $rpm", onLoad > 0.0001)
                 assertTrue("${candidate.id} has no lift-off voice at $rpm", lifted > 0.0001)
             }
@@ -69,9 +69,9 @@ class SampleEngineRendererTest {
         val coast = profile.layers.first { it.id == "c2" }
         val broadbandNoise = profile.layers.first { it.id == "engine_noise_7" }
 
-        assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0) * 8.0)
-        assertTrue(coast.gainAt(7_000.0, 0.0) > coast.gainAt(7_000.0, 1.0) * 2.5)
-        assertTrue(coast.gainAt(7_000.0, 1.0) > 0.10)
+        assertTrue(load.gainAt(7_500.0, 1.0, coastLayerMixEnabled = false) > load.gainAt(7_500.0, 0.0, coastLayerMixEnabled = false) * 8.0)
+        assertTrue(coast.gainAt(7_000.0, 0.0, coastLayerMixEnabled = false) > coast.gainAt(7_000.0, 1.0, coastLayerMixEnabled = false) * 2.5)
+        assertTrue(coast.gainAt(7_000.0, 1.0, coastLayerMixEnabled = false) > 0.10)
         assertEquals(-0.5, broadbandNoise.baseGainDb, 0.0)
     }
 
@@ -303,33 +303,49 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun coastOnlyFullGainExperimentMutesLoadAndIgnoresThrottleCurve() {
-        val load = profile.layers.first { it.id == "l1" }
-        val coast = profile.layers.first { it.id == "c2" }
-        val idle = profile.layers.first { it.id == "idle_low" }
-        assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0))
-        assertEquals(0.0, load.gainAt(7_500.0, 1.0, coastOnlyFullGain = true), 0.0)
-        val coastAtFullPedal = coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = true)
-        val coastAtLiftOff = coast.gainAt(7_000.0, 0.0, coastOnlyFullGain = true)
-        assertEquals(coastAtLiftOff, coastAtFullPedal, 0.0001)
-        assertTrue(coastAtFullPedal > 0.0)
-        assertTrue(
-            coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = true) >
-                coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = false),
+    fun coastLayerMixLoadSkipsLoadLayerAssets() {
+        val loadAssets = profile.layers
+            .filter { layer -> layer.role == SampleLayerRole.LOAD }
+            .map { layer -> layer.assetName }
+            .toSet()
+        assertTrue(loadAssets.isNotEmpty())
+        val coastAssets = profile.requiredAssetsForLoad(coastLayerMixEnabled = true)
+        assertTrue(loadAssets.none { asset -> asset in coastAssets })
+        assertTrue(coastAssets.size < profile.requiredAssets.size)
+        assertEquals(
+            profile.layers.count { layer -> layer.role != SampleLayerRole.LOAD },
+            profile.loopLayersForLoad(coastLayerMixEnabled = true).size,
         )
-        assertTrue(idle.gainAt(1_000.0, 1.0, coastOnlyFullGain = true) > idle.gainAt(1_000.0, 0.0, coastOnlyFullGain = true))
-        assertTrue(idle.gainAt(2_000.0, 1.0, coastOnlyFullGain = true) > idle.gainAt(2_000.0, 1.0, coastOnlyFullGain = false) * 0.5)
     }
 
     @Test
-    fun coastExperimentGainMultiplierScalesDynamicEffects() {
+    fun coastLayerMixMutesLoadAndIgnoresThrottleCurve() {
+        val load = profile.layers.first { it.id == "l1" }
+        val coast = profile.layers.first { it.id == "c2" }
+        val idle = profile.layers.first { it.id == "idle_low" }
+        assertTrue(load.gainAt(7_500.0, 1.0, coastLayerMixEnabled = false) > load.gainAt(7_500.0, 0.0, coastLayerMixEnabled = false))
+        assertEquals(0.0, load.gainAt(7_500.0, 1.0, coastLayerMixEnabled = true), 0.0)
+        val coastAtFullPedal = coast.gainAt(7_000.0, 1.0, coastLayerMixEnabled = true)
+        val coastAtLiftOff = coast.gainAt(7_000.0, 0.0, coastLayerMixEnabled = true)
+        assertEquals(coastAtLiftOff, coastAtFullPedal, 0.0001)
+        assertTrue(coastAtFullPedal > 0.0)
+        assertTrue(
+            coast.gainAt(7_000.0, 1.0, coastLayerMixEnabled = true) >
+                coast.gainAt(7_000.0, 1.0, coastLayerMixEnabled = false),
+        )
+        assertTrue(idle.gainAt(1_000.0, 1.0, coastLayerMixEnabled = true) > idle.gainAt(1_000.0, 0.0, coastLayerMixEnabled = true))
+        assertTrue(idle.gainAt(2_000.0, 1.0, coastLayerMixEnabled = true) > idle.gainAt(2_000.0, 1.0, coastLayerMixEnabled = false) * 0.5)
+    }
+
+    @Test
+    fun coastLayerMixGainMultiplierScalesDynamicEffects() {
         val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
         val output = ShortArray(1_920)
         val frame = EngineAudioFrame(
             rpm = 5_500.0,
             throttle = 0.8,
             enabledEffectMask = profile.defaultEffectMask,
-            coastOnlyFullGain = true,
+            coastLayerMixEnabled = true,
         )
         repeat(24) {
             renderer.render(frame, output, gain = 0.7)
@@ -394,7 +410,7 @@ class SampleEngineRendererTest {
     }
 
     private fun strongestGain(rpm: Double, throttle: Double): Double =
-        profile.layers.maxOf { it.gainAt(rpm, throttle) }
+        profile.layers.maxOf { it.gainAt(rpm, throttle, coastLayerMixEnabled = false) }
 
     private fun testBank(): Map<String, PcmLoopData> = profile.requiredAssets.associateWith { asset ->
         val frequency = 70.0 + abs(asset.hashCode() % 220)

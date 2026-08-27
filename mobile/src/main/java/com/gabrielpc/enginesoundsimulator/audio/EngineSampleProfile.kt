@@ -86,13 +86,13 @@ internal data class SampleLayerSpec(
     fun gainAt(
         rpm: Double,
         throttle: Double,
-        coastOnlyFullGain: Boolean = false,
+        coastLayerMixEnabled: Boolean = true,
     ): Double {
         if (rpm !in startRpm..endRpm) return 0.0
-        if (coastOnlyFullGain && role == SampleLayerRole.LOAD) return 0.0
+        if (coastLayerMixEnabled && role == SampleLayerRole.LOAD) return 0.0
 
-        if (coastOnlyFullGain && role == SampleLayerRole.IDLE) {
-            val amplitude = idleExperimentAmplitude(rpm)
+        if (coastLayerMixEnabled && role == SampleLayerRole.IDLE) {
+            val amplitude = idleCoastMixAmplitude(rpm)
             if (amplitude <= 0.0) return 0.0
 
             val throttleGainContribution = throttleGainDb?.valueAt(throttle) ?: 0.0
@@ -104,7 +104,7 @@ internal data class SampleLayerSpec(
         val amplitude = rpmAmplitudeCurves.fold(1.0) { gain, curve -> gain * curve.valueAt(rpm) }
         if (amplitude <= 0.0) return 0.0
 
-        if (coastOnlyFullGain && role == SampleLayerRole.COAST) {
+        if (coastLayerMixEnabled && role == SampleLayerRole.COAST) {
             return amplitude * 10.0.pow(baseGainDb / 20.0)
         }
 
@@ -116,7 +116,7 @@ internal data class SampleLayerSpec(
     }
 
     /** Wider smoothstep fade so idle_low eases in/out instead of snapping at the band edge. */
-    private fun idleExperimentAmplitude(rpm: Double): Double {
+    private fun idleCoastMixAmplitude(rpm: Double): Double {
         val holdEndRpm = 1_350.0
         val fadeOutEndRpm = 2_950.0
         if (rpm <= holdEndRpm) return 1.0
@@ -156,6 +156,18 @@ internal data class EngineSampleProfile(
 ) {
     val requiredAssets: Set<String> = linkedSetOf<String>().apply {
         layers.mapTo(this) { it.assetName }
+        effects.mapTo(this) { it.assetName }
+    }
+
+    fun loopLayersForLoad(coastLayerMixEnabled: Boolean): List<SampleLayerSpec> {
+        if (coastLayerMixEnabled) {
+            return layers.filter { layer -> layer.role != SampleLayerRole.LOAD }
+        }
+        return layers
+    }
+
+    fun requiredAssetsForLoad(coastLayerMixEnabled: Boolean): Set<String> = linkedSetOf<String>().apply {
+        loopLayersForLoad(coastLayerMixEnabled).mapTo(this) { it.assetName }
         effects.mapTo(this) { it.assetName }
     }
     val effectControls: List<SampleEffectControlSpec> = effects.map { it.control }.distinctBy { it.id }
