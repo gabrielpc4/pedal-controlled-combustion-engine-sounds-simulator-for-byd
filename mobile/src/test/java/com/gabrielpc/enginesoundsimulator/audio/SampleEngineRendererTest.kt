@@ -249,6 +249,60 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun layerMixSoloMutesNonSoloLoopsAndBlocksShiftEffects() {
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
+        val output = ShortArray(1_920)
+        val allEffects = profile.effectControls.fold(0L) { mask, control -> mask or control.bit }
+        val soloCoast = mapOf(
+            "c1" to LayerMixControl(volume = 1.0, solo = true),
+        )
+        repeat(40) {
+            renderer.render(
+                EngineAudioFrame(
+                    rpm = 6_500.0,
+                    throttle = 0.0,
+                    enabledEffectMask = allEffects,
+                    layerMix = soloCoast,
+                ),
+                output,
+                gain = 0.7,
+            )
+        }
+        val coastSoloPeak = output.maxOf { abs(it.toInt()) }
+        assertTrue("solo coast layer should remain audible", coastSoloPeak > 20)
+
+        renderer.render(
+            EngineAudioFrame(
+                rpm = 6_500.0,
+                throttle = 0.0,
+                enabledEffectMask = allEffects,
+                shiftSerial = 1,
+                shiftDirection = -1,
+                layerMix = soloCoast,
+            ),
+            output,
+            gain = 0.7,
+        )
+        repeat(20) {
+            renderer.render(
+                EngineAudioFrame(
+                    rpm = 6_500.0,
+                    throttle = 0.0,
+                    enabledEffectMask = allEffects,
+                    shiftSerial = 1,
+                    shiftDirection = -1,
+                    layerMix = soloCoast,
+                ),
+                output,
+                gain = 0.7,
+            )
+        }
+        assertEquals("shift effects must not trigger while another layer is soloed", 0L, renderer.diagnostics().effectTriggers)
+        assertEquals("none", renderer.diagnostics().activeEffects)
+        assertTrue("non-solo output should stay near the coast solo level", output.maxOf { abs(it.toInt()) } <= coastSoloPeak + 5)
+    }
+
+    @Test
     fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
         val decoded = mapOf(
             profile.requiredAssets.first() to PcmLoopData(arrayOf(FloatArray(32) { 0.1f }), 48_000, 1),

@@ -173,9 +173,13 @@ internal class SampleEngineRenderer private constructor(
 
     /** Loop and effect WAV assets audibly contributing to the mixed output right now. */
     private fun audiblePlayingSamples(target: EngineAudioFrame): List<PlayingSampleLabel> = buildList {
+        val anyLayerSolo = target.layerMix.values.any { it.solo && !it.muted }
         if (isProgramAudible(target) && !target.soloEffects && continuousProgramGain > SILENCE_GAIN) {
             voices.asSequence()
-                .filter { it.gain > SILENCE_GAIN }
+                .filter { voice ->
+                    voice.gain > SILENCE_GAIN &&
+                        (!anyLayerSolo || target.layerMix[voice.spec.id]?.solo == true)
+                }
                 .sortedByDescending { it.gain }
                 .map { voice ->
                     PlayingSampleLabel(voice.spec.role.playingRoleLabel(), voice.spec.assetName)
@@ -184,7 +188,11 @@ internal class SampleEngineRenderer private constructor(
         }
         if (isProgramAudible(target)) {
             effectVoices.asSequence()
-                .filter { it.isAudible && it.gain > SILENCE_GAIN }
+                .filter { voice ->
+                    voice.isAudible &&
+                        voice.gain > SILENCE_GAIN &&
+                        (!anyLayerSolo || target.layerMix[voice.spec.id]?.solo == true)
+                }
                 .sortedByDescending { it.gain }
                 .map { voice ->
                     PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName)
@@ -200,17 +208,6 @@ internal class SampleEngineRenderer private constructor(
         val mask = target.enabledEffectMask
         val normalizedRpm = ((smoothedRpm - profile.idleRpm) / (profile.limiterRpm - profile.idleRpm))
             .coerceIn(0.0, 1.0)
-        effectVoices.filter { it.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP }.forEach { voice ->
-            val enabled = mask and voice.spec.control.bit != 0L
-            val authoredGain = if (enabled) {
-                voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
-            } else {
-                0.0
-            }
-            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
-            voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
-                (0.55 + normalizedRpm * 1.25)
-        }
 
         val previousShift = lastShiftSerial
         if (previousShift == null) {
@@ -221,22 +218,51 @@ internal class SampleEngineRenderer private constructor(
                 if (target.shiftDirection > 0) SampleEffectTrigger.SHIFT_UP else SampleEffectTrigger.SHIFT_DOWN,
                 mask,
                 smoothedRpm,
+                layerMix,
             )
         }
 
         if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
         if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
             throttleLiftArmed = false
-            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm)
+            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm, layerMix)
+        }
+
+        for (voice in effectVoices) {
+            val authoredGain = when (voice.spec.trigger) {
+                SampleEffectTrigger.TRANSMISSION_LOOP -> {
+                    val enabled = mask and voice.spec.control.bit != 0L
+                    if (enabled) {
+                        voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+                    } else {
+                        0.0
+                    }
+                }
+                else -> {
+                    if (voice.isOneShotActive) voice.baseGain else 0.0
+                }
+            }
+            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
+            if (voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP) {
+                voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
+                    (0.55 + normalizedRpm * 1.25)
+            }
         }
     }
 
-    private fun triggerOneShots(trigger: SampleEffectTrigger, mask: Long, rpm: Double) {
+    private fun triggerOneShots(
+        trigger: SampleEffectTrigger,
+        mask: Long,
+        rpm: Double,
+        layerMix: Map<String, LayerMixControl>,
+    ) {
         effectVoices.filter {
             it.spec.trigger == trigger && mask and it.spec.control.bit != 0L && rpm >= it.spec.minimumRpm
-        }.forEach {
-            it.trigger()
-            effectTriggers += 1
+        }.forEach { voice ->
+            if (applyLayerMix(voice.spec.id, voice.baseGain, layerMix) > SILENCE_GAIN) {
+                voice.trigger()
+                effectTriggers += 1
+            }
         }
     }
 
@@ -334,13 +360,13 @@ internal class SampleEngineRenderer private constructor(
         private var active = spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP
         private var hasLooped = false
         val baseGain = 10.0.pow(spec.baseGainDb / 20.0)
+        val isOneShotActive: Boolean
+            get() = spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP && active
         val isAudible: Boolean get() = active && gain > SILENCE_GAIN
 
         fun trigger() {
             phase = 0.0
             phaseIncrement = data.sampleRate.toDouble() / outputSampleRate
-            gain = baseGain
-            targetGain = baseGain
             active = true
             hasLooped = false
         }
