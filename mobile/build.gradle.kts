@@ -20,6 +20,8 @@ val isAssembling = gradle.startParameter.taskNames.any { taskName ->
 
 val storedBuildNumber = buildNumberProperties.getProperty("buildNumber", "1").toInt()
 val stampedBuildNumber = if (isAssembling) storedBuildNumber + 1 else storedBuildNumber
+val coastOnlyFullGainExperiment =
+    (project.findProperty("coastOnlyFullGainExperiment") as String?)?.toBooleanStrictOrNull() ?: false
 
 fun gitShortShaFromFiles(rootDir: File): String {
     val gitHead = File(rootDir, ".git/HEAD")
@@ -140,6 +142,7 @@ android {
         buildConfigField("int", "BUILD_NUMBER", stampedBuildNumber.toString())
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
+        buildConfigField("boolean", "COAST_ONLY_FULL_GAIN_EXPERIMENT", coastOnlyFullGainExperiment.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

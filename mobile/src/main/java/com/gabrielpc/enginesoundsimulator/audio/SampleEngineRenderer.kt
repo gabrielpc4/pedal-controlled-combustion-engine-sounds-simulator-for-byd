@@ -66,10 +66,14 @@ internal class SampleEngineRenderer private constructor(
         smoothedRpm += (requestedRpm - smoothedRpm) * rpmAlpha
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
 
-        updateVoiceTargets(smoothedRpm, smoothedThrottle, target.layerMix)
+        updateVoiceTargets(smoothedRpm, smoothedThrottle, target.layerMix, target.coastOnlyFullGain)
         updateEffectTargetsAndTriggers(target, target.layerMix)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
-        val targetProfileOutputGain = profile.outputGainAt(smoothedThrottle)
+        val targetProfileOutputGain = if (target.coastOnlyFullGain) {
+            profile.outputGainAt(1.0)
+        } else {
+            profile.outputGainAt(smoothedThrottle)
+        }
         val targetEnabled = if (target.enabled) 1.0 else 0.0
         val targetContinuousProgram = if (target.soloEffects) 0.0 else 1.0
         val programFadeSeconds = target.tuning.programFadeMs / 1_000.0
@@ -232,8 +236,9 @@ internal class SampleEngineRenderer private constructor(
             val authoredGain = when (voice.spec.trigger) {
                 SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     val enabled = mask and voice.spec.control.bit != 0L
+                    val effectThrottle = if (target.coastOnlyFullGain) 1.0 else smoothedThrottle
                     if (enabled) {
-                        voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+                        voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + effectThrottle * 0.45)
                     } else {
                         0.0
                     }
@@ -266,9 +271,14 @@ internal class SampleEngineRenderer private constructor(
         }
     }
 
-    private fun updateVoiceTargets(rpm: Double, throttle: Double, layerMix: Map<String, LayerMixControl>) {
+    private fun updateVoiceTargets(
+        rpm: Double,
+        throttle: Double,
+        layerMix: Map<String, LayerMixControl>,
+        coastOnlyFullGain: Boolean,
+    ) {
         for (voice in voices) {
-            val authoredGain = voice.spec.gainAt(rpm, throttle)
+            val authoredGain = voice.spec.gainAt(rpm, throttle, coastOnlyFullGain)
             voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
             voice.playbackRatio = voice.spec.playbackRatio(rpm)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate * voice.playbackRatio

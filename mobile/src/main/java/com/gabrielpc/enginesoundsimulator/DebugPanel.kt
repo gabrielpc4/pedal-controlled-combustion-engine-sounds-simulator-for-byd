@@ -56,6 +56,7 @@ internal fun DebugPanel(
     requestSnapshot: () -> DriveSnapshot,
     onRestartBydReader: () -> Unit,
     onRunSampleValidation: () -> Unit,
+    onCoastOnlyFullGainChange: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     var state by remember { mutableStateOf(requestSnapshot()) }
@@ -142,6 +143,26 @@ internal fun DebugPanel(
                     state.telemetry.diagnostics.forEach { line ->
                         Text(line, color = DbgMuted, fontSize = 12.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace)
                     }
+                }
+            }
+
+            DebugSection(title = "AUDIO EXPERIMENTS", accent = DbgAmber) {
+                Text(
+                    "Coast-only full gain replaces Load layers with Coast at full level. " +
+                        "Pedal position no longer shapes layer gain — only RPM crossfades remain.",
+                    color = DbgMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                DebugLine("Coast-only experiment", if (state.coastOnlyFullGainExperiment) "ON" else "OFF")
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    DebugAction(
+                        label = if (state.coastOnlyFullGainExperiment) "DISABLE" else "ENABLE",
+                        accent = if (state.coastOnlyFullGainExperiment) DbgRed else DbgGreen,
+                        onClick = { onCoastOnlyFullGainChange(!state.coastOnlyFullGainExperiment) },
+                    )
                 }
             }
 

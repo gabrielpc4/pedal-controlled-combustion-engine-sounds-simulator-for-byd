@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
                         onSoloSoundEffectsChange = controller::setSoloSoundEffects,
                         onRequestSnapshot = controller::snapshot,
                         onDebugPanelVisible = controller::setDebugPanelVisible,
+                        onCoastOnlyFullGainChange = controller::setCoastOnlyFullGainExperiment,
                     )
                 }
             }
@@ -220,6 +221,7 @@ private fun MotorSoundDashboard(
     onSoloSoundEffectsChange: (Boolean) -> Unit,
     onRequestSnapshot: () -> DriveSnapshot,
     onDebugPanelVisible: (Boolean) -> Unit,
+    onCoastOnlyFullGainChange: (Boolean) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -351,6 +353,7 @@ private fun MotorSoundDashboard(
                         requestSnapshot = onRequestSnapshot,
                         onRestartBydReader = onRestartBydReader,
                         onRunSampleValidation = onRunSampleValidation,
+                        onCoastOnlyFullGainChange = onCoastOnlyFullGainChange,
                         onClose = { debugOpen = false },
                     )
                 }
@@ -418,6 +421,9 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
+            if (state.coastOnlyFullGainExperiment) {
+                StatusTag("COAST EXP", Amber)
+            }
             DashboardScreenSwitcher(
                 selected = mainScreen,
                 onSelect = onMainScreenChange,

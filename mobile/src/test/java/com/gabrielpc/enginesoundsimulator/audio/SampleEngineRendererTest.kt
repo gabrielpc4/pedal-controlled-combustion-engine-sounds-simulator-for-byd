@@ -303,6 +303,18 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun coastOnlyFullGainExperimentMutesLoadAndIgnoresThrottleCurve() {
+        val load = profile.layers.first { it.id == "l1" }
+        val coast = profile.layers.first { it.id == "c2" }
+        assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0))
+        assertEquals(0.0, load.gainAt(7_500.0, 1.0, coastOnlyFullGain = true), 0.0)
+        val coastAtFullPedal = coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = true)
+        val coastAtLiftOff = coast.gainAt(7_000.0, 0.0, coastOnlyFullGain = true)
+        assertEquals(coastAtLiftOff, coastAtFullPedal, 0.0001)
+        assertTrue(coastAtFullPedal > 0.0)
+    }
+
+    @Test
     fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
         val decoded = mapOf(
             profile.requiredAssets.first() to PcmLoopData(arrayOf(FloatArray(32) { 0.1f }), 48_000, 1),

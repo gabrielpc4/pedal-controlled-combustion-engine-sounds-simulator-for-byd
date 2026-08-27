@@ -83,12 +83,20 @@ internal data class SampleLayerSpec(
         return ((autopitchRootRpm?.let { rpm / it } ?: 1.0) * authoredPitch).coerceIn(0.10, 4.0)
     }
 
-    fun gainAt(rpm: Double, throttle: Double): Double {
+    fun gainAt(rpm: Double, throttle: Double, coastOnlyFullGain: Boolean = false): Double {
         if (rpm !in startRpm..endRpm) return 0.0
+        if (coastOnlyFullGain && role == SampleLayerRole.LOAD) return 0.0
+
         val amplitude = rpmAmplitudeCurves.fold(1.0) { gain, curve -> gain * curve.valueAt(rpm) }
         if (amplitude <= 0.0) return 0.0
+
+        val throttleGainContribution = if (coastOnlyFullGain) {
+            0.0
+        } else {
+            throttleGainDb?.valueAt(throttle) ?: 0.0
+        }
         val decibels = baseGainDb + (if (role == SampleLayerRole.IDLE) IDLE_LAYER_GAIN_BOOST_DB else 0.0) +
-            (throttleGainDb?.valueAt(throttle) ?: 0.0) +
+            throttleGainContribution +
             rpmGainDbCurves.sumOf { it.valueAt(rpm) }
         return amplitude * 10.0.pow(decibels / 20.0)
     }
