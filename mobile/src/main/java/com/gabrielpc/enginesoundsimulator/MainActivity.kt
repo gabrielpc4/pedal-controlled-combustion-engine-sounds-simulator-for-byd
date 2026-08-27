@@ -259,6 +259,7 @@ private fun MotorSoundDashboard(
             },
         color = Night,
     ) {
+        Box(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -335,11 +336,7 @@ private fun MotorSoundDashboard(
                                 .fillMaxWidth()
                                 .weight(1f),
                         )
-                        DashboardMainScreen.GRID -> ResolutionProbeScreen(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                        )
+                        DashboardMainScreen.GRID -> Spacer(Modifier.weight(1f))
                     }
                 }
 
@@ -370,6 +367,15 @@ private fun MotorSoundDashboard(
                         onClose = { effectsOpen = false },
                     )
                 }
+            }
+        }
+
+            if (mainScreen == DashboardMainScreen.GRID) {
+                ResolutionProbeScreen(
+                    selectedScreen = mainScreen,
+                    onSelectScreen = { mainScreen = it },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }
