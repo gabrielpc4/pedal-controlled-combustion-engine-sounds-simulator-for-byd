@@ -8,6 +8,11 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
+import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
+import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
+import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
+import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
@@ -52,6 +57,7 @@ data class DriveSnapshot(
     val availableCarCount: Int,
     val soundEffects: List<SoundEffectOption>,
     val soloSoundEffects: Boolean,
+    val layerMixTracks: List<LayerMixTrackState> = emptyList(),
 )
 
 data class SoundEffectOption(
@@ -66,7 +72,9 @@ class DriveController(context: Context) {
     private val tuningRepository = TuningRepository(context.applicationContext)
     private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
     private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
+    private val layerMixRepository = LayerMixRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
+    private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
     private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
     private val soloEffects = AtomicBoolean(soundEffectsRepository.loadSoloEffects(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
@@ -130,12 +138,23 @@ class DriveController(context: Context) {
                     sampleError = liveAudio.sampleError,
                     error = liveAudio.error,
                     samplePlaying = liveAudio.samplePlaying,
+                    layerOutputMeters = liveAudio.layerOutputMeters,
+                ),
+                layerMixTracks = buildLayerMixTracks(
+                    selectedSampleProfile.get(),
+                    layerMixControls.get(),
+                    liveAudio.layerOutputMeters.associate { it.id to it.outputLevel },
                 ),
             )
         }
         return base.copy(
             telemetry = vehicleReader.snapshot(),
             audio = liveAudio,
+            layerMixTracks = buildLayerMixTracks(
+                selectedSampleProfile.get(),
+                layerMixControls.get(),
+                liveAudio.layerOutputMeters.associate { it.id to it.outputLevel },
+            ),
         )
     }
 
@@ -214,6 +233,26 @@ class DriveController(context: Context) {
 
     fun selectNextCar() = selectAdjacentCar(1)
 
+    fun selectCar(profileId: String) {
+        val selected = EngineSampleProfiles.find(profileId)
+        applySelectedCar(selected)
+    }
+
+    fun setLayerMixVolume(trackId: String, volume: Double) {
+        val profile = selectedSampleProfile.get()
+        layerMixControls.set(layerMixRepository.setVolume(profile, trackId, volume))
+    }
+
+    fun setLayerMixMuted(trackId: String, muted: Boolean) {
+        val profile = selectedSampleProfile.get()
+        layerMixControls.set(layerMixRepository.setMuted(profile, trackId, muted))
+    }
+
+    fun setLayerMixSolo(trackId: String, solo: Boolean) {
+        val profile = selectedSampleProfile.get()
+        layerMixControls.set(layerMixRepository.setSolo(profile, trackId, solo))
+    }
+
     fun setSoundEffectEnabled(controlId: String, enabled: Boolean) {
         val selected = selectedSampleProfile.get()
         val updatedMask = soundEffectsRepository.setEnabled(selected, controlId, enabled)
@@ -230,9 +269,14 @@ class DriveController(context: Context) {
         val previous = selectedSampleProfile.get()
         val selected = EngineSampleProfiles.adjacent(previous.id, offset)
         if (selected.id == previous.id) return
+        applySelectedCar(selected)
+    }
+
+    private fun applySelectedCar(selected: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile) {
         selectedSampleProfile.set(selected)
         enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(selected))
         soloEffects.set(soundEffectsRepository.loadSoloEffects(selected))
+        layerMixControls.set(layerMixRepository.load(selected))
         selectedCarRepository.save(selected)
         val tuning = tuningConfig.get().withSampleProfile(selected)
         tuningConfig.set(tuning)
@@ -394,9 +438,11 @@ class DriveController(context: Context) {
                     ShiftDirection.NONE -> 0
                 },
                 tuning = tuning.audio,
+                layerMix = layerMixControls.get(),
             ),
         )
         val selectedCar = selectedSampleProfile.get()
+        val outputLevels = audioEngine.state().layerOutputMeters.associate { it.id to it.outputLevel }
         val debugVisible = debugPanelVisible.get()
         latest = DriveSnapshot(
             drivetrain = drivetrain,
@@ -416,6 +462,7 @@ class DriveController(context: Context) {
             availableCarCount = EngineSampleProfiles.all.size,
             soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
             soloSoundEffects = soloEffects.get(),
+            layerMixTracks = buildLayerMixTracks(selectedCar, layerMixControls.get(), outputLevels),
         )
     }
 
@@ -448,6 +495,43 @@ private fun soundEffectOptions(
         description = control.description,
         enabled = mask and control.bit != 0L,
     )
+}
+
+private fun buildLayerMixTracks(
+    profile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile,
+    controls: Map<String, LayerMixControl>,
+    outputLevels: Map<String, Double>,
+): List<LayerMixTrackState> {
+    val layerById = profile.layers.associateBy { it.id }
+    val effectById = profile.effects.associateBy { it.id }
+    return profile.mixerTrackOrder().mapNotNull { (trackId, sortGroup) ->
+        val control = controls[trackId] ?: LayerMixControl.DEFAULT
+        val layer = layerById[trackId]
+        val effect = effectById[trackId]
+        when {
+            layer != null -> LayerMixTrackState(
+                id = trackId,
+                displayName = layer.mixerDisplayName(),
+                sortGroup = sortGroup,
+                userVolume = control.volume,
+                muted = control.muted,
+                solo = control.solo,
+                outputLevel = outputLevels[trackId] ?: 0.0,
+                isEffect = false,
+            )
+            effect != null -> LayerMixTrackState(
+                id = trackId,
+                displayName = effect.mixerDisplayName(),
+                sortGroup = sortGroup,
+                userVolume = control.volume,
+                muted = control.muted,
+                solo = control.solo,
+                outputLevel = outputLevels[trackId] ?: 0.0,
+                isEffect = true,
+            )
+            else -> null
+        }
+    }
 }
 
 private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile): EngineProfile {

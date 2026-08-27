@@ -82,7 +82,6 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
-import com.gabrielpc.enginesoundsimulator.audio.PlayingSampleLabel
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -146,6 +145,10 @@ class MainActivity : ComponentActivity() {
                         onRunSampleValidation = controller::runSampleAudioValidation,
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
+                        onSelectCar = controller::selectCar,
+                        onLayerMixVolume = controller::setLayerMixVolume,
+                        onLayerMixMuted = controller::setLayerMixMuted,
+                        onLayerMixSolo = controller::setLayerMixSolo,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
                         onSoloSoundEffectsChange = controller::setSoloSoundEffects,
                         onRequestSnapshot = controller::snapshot,
@@ -212,6 +215,10 @@ private fun MotorSoundDashboard(
     onRunSampleValidation: () -> Unit,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
+    onSelectCar: (String) -> Unit,
+    onLayerMixVolume: (String, Double) -> Unit,
+    onLayerMixMuted: (String, Boolean) -> Unit,
+    onLayerMixSolo: (String, Boolean) -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
     onSoloSoundEffectsChange: (Boolean) -> Unit,
     onRequestSnapshot: () -> DriveSnapshot,
@@ -220,6 +227,7 @@ private fun MotorSoundDashboard(
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
     var effectsOpen by remember { mutableStateOf(false) }
+    var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(debugOpen) {
         onDebugPanelVisible(debugOpen)
@@ -271,6 +279,8 @@ private fun MotorSoundDashboard(
                 Column(modifier = Modifier.fillMaxSize()) {
                     DashboardHeader(
                         state = state,
+                        mainScreen = mainScreen,
+                        onMainScreenChange = { mainScreen = it },
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
                         onCycleChannels = onCycleChannels,
@@ -279,36 +289,54 @@ private fun MotorSoundDashboard(
                         onOpenEffects = { effectsOpen = true },
                     )
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .padding(horizontal = 34.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CarStage(
+                    when (mainScreen) {
+                        DashboardMainScreen.CLASSIC -> Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(horizontal = 34.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CarStage(
+                                state = state,
+                                onThrottle = onThrottle,
+                                onBrake = onBrake,
+                                onTransmissionChange = onTransmissionChange,
+                                onPreviousCar = onPreviousCar,
+                                onNextCar = onNextCar,
+                                modifier = Modifier
+                                    .weight(1.12f)
+                                    .fillMaxHeight(),
+                            )
+                            Tachometer(
+                                drivetrain = state.drivetrain,
+                                transmissionPosition = state.transmissionPosition,
+                                maxRpm = state.tuning.engine.maxRpm,
+                                redlineRpm = state.tuning.engine.redlineRpm,
+                                upshiftRpm = state.tuning.engine.upshiftRpm,
+                                modifier = Modifier
+                                    .weight(0.88f)
+                                    .fillMaxHeight()
+                                    .padding(start = 16.dp, bottom = 6.dp),
+                            )
+                        }
+                        DashboardMainScreen.MIXER -> MixerDashboardScreen(
                             state = state,
                             onThrottle = onThrottle,
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
-                            onPreviousCar = onPreviousCar,
-                            onNextCar = onNextCar,
+                            onSelectCar = onSelectCar,
+                            onLayerVolume = onLayerMixVolume,
+                            onLayerMuted = onLayerMixMuted,
+                            onLayerSolo = onLayerMixSolo,
                             modifier = Modifier
-                                .weight(1.12f)
-                                .fillMaxHeight(),
+                                .fillMaxWidth()
+                                .weight(1f),
                         )
-                        Tachometer(
-                            drivetrain = state.drivetrain,
-                            transmissionPosition = state.transmissionPosition,
-                            maxRpm = state.tuning.engine.maxRpm,
-                            redlineRpm = state.tuning.engine.redlineRpm,
-                            upshiftRpm = state.tuning.engine.upshiftRpm,
-                            playingSamples = state.audio.samplePlaying,
-                            engineSoundEnabled = state.engineSoundEnabled,
+                        DashboardMainScreen.GRID -> ResolutionProbeScreen(
                             modifier = Modifier
-                                .weight(0.88f)
-                                .fillMaxHeight()
-                                .padding(start = 16.dp, bottom = 6.dp),
+                                .fillMaxWidth()
+                                .weight(1f),
                         )
                     }
                 }
@@ -349,6 +377,8 @@ private const val EXTRA_RUN_SAMPLE_VALIDATION = "run_sample_audio_validation"
 @Composable
 private fun DashboardHeader(
     state: DriveSnapshot,
+    mainScreen: DashboardMainScreen,
+    onMainScreenChange: (DashboardMainScreen) -> Unit,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
@@ -392,6 +422,10 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
+            DashboardScreenSwitcher(
+                selected = mainScreen,
+                onSelect = onMainScreenChange,
+            )
         }
 
         HeaderButton(
@@ -568,7 +602,7 @@ private fun CarStage(
 }
 
 @Composable
-private fun TransmissionShifter(
+internal fun TransmissionShifter(
     position: TransmissionPosition,
     onPositionChange: (TransmissionPosition) -> Unit,
     modifier: Modifier = Modifier,
@@ -650,7 +684,7 @@ private fun CarSelectorArrow(
 }
 
 @Composable
-private fun PedalControl(
+internal fun PedalControl(
     label: String,
     value: Double,
     accent: Color,
@@ -733,29 +767,16 @@ private fun Tachometer(
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
-    playingSamples: List<PlayingSampleLabel>,
-    engineSoundEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier) {
-        TachometerGauge(
-            drivetrain = drivetrain,
-            transmissionPosition = transmissionPosition,
-            maxRpm = maxRpm,
-            redlineRpm = redlineRpm,
-            upshiftRpm = upshiftRpm,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        )
-        PlayingSamplesPanel(
-            playingSamples = playingSamples,
-            engineSoundEnabled = engineSoundEnabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-        )
-    }
+    TachometerGauge(
+        drivetrain = drivetrain,
+        transmissionPosition = transmissionPosition,
+        maxRpm = maxRpm,
+        redlineRpm = redlineRpm,
+        upshiftRpm = upshiftRpm,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -927,50 +948,6 @@ private fun TachometerGauge(
                     letterSpacing = 1.4.sp,
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = gaugeSize * 0.08f),
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlayingSamplesPanel(
-    playingSamples: List<PlayingSampleLabel>,
-    engineSoundEnabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Panel.copy(alpha = 0.92f))
-            .border(1.dp, Line.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-    ) {
-        Text(
-            text = "NOW PLAYING",
-            color = Cyan,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.4.sp,
-        )
-        Spacer(Modifier.height(6.dp))
-        when {
-            !engineSoundEnabled -> {
-                Text("Engine audio muted", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            }
-            playingSamples.isEmpty() -> {
-                Text("No audible samples", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            }
-            else -> {
-                playingSamples.forEach { sample ->
-                    Text(
-                        text = sample.displayText(),
-                        color = White,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                    )
-                }
             }
         }
     }

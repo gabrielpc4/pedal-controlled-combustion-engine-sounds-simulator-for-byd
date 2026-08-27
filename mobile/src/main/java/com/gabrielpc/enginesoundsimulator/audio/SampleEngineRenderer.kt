@@ -16,6 +16,7 @@ internal data class SampleRendererDiagnostics(
     val throttle: Double = 0.0,
     val activeLayers: String = "none",
     val playingSamples: List<PlayingSampleLabel> = emptyList(),
+    val layerOutputMeters: List<LayerOutputMeter> = emptyList(),
     val framesRendered: Long = 0,
     val loopWraps: Long = 0,
     val peak: Double = 0.0,
@@ -45,6 +46,7 @@ internal class SampleEngineRenderer private constructor(
     private var effectTriggers = 0L
     private var lastShiftSerial: Long? = null
     private var throttleLiftArmed = false
+    private var layerOutputMeters = emptyList<LayerOutputMeter>()
     private var diagnostics = SampleRendererDiagnostics(
         profileId = profile.id,
         loadedLoops = voices.size,
@@ -64,8 +66,8 @@ internal class SampleEngineRenderer private constructor(
         smoothedRpm += (requestedRpm - smoothedRpm) * rpmAlpha
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
 
-        updateVoiceTargets(smoothedRpm, smoothedThrottle)
-        updateEffectTargetsAndTriggers(target)
+        updateVoiceTargets(smoothedRpm, smoothedThrottle, target.layerMix)
+        updateEffectTargetsAndTriggers(target, target.layerMix)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
         val targetProfileOutputGain = profile.outputGainAt(smoothedThrottle)
         val targetEnabled = if (target.enabled) 1.0 else 0.0
@@ -123,6 +125,7 @@ internal class SampleEngineRenderer private constructor(
 
         framesRendered += frameCount
         renderedBlocks += 1
+        layerOutputMeters = buildLayerOutputMeters(target)
         val playingSamples = audiblePlayingSamples(target)
         if (renderedBlocks % DIAGNOSTIC_BLOCK_INTERVAL == 0L || diagnostics.framesRendered == 0L) {
             val active = if (target.soloEffects) "none (effects solo)" else voices.asSequence()
@@ -143,6 +146,7 @@ internal class SampleEngineRenderer private constructor(
                 throttle = smoothedThrottle,
                 activeLayers = active,
                 playingSamples = playingSamples,
+                layerOutputMeters = layerOutputMeters,
                 framesRendered = framesRendered,
                 loopWraps = loopWraps,
                 peak = blockPeak,
@@ -155,6 +159,7 @@ internal class SampleEngineRenderer private constructor(
         } else {
             diagnostics = diagnostics.copy(
                 playingSamples = playingSamples,
+                layerOutputMeters = layerOutputMeters,
                 targetRpm = requestedRpm.toInt(),
                 renderRpm = smoothedRpm.toInt(),
                 throttle = smoothedThrottle,
@@ -191,17 +196,18 @@ internal class SampleEngineRenderer private constructor(
     private fun isProgramAudible(target: EngineAudioFrame): Boolean =
         target.enabled && enabledGain > SILENCE_GAIN && masterGain > SILENCE_GAIN
 
-    private fun updateEffectTargetsAndTriggers(target: EngineAudioFrame) {
+    private fun updateEffectTargetsAndTriggers(target: EngineAudioFrame, layerMix: Map<String, LayerMixControl>) {
         val mask = target.enabledEffectMask
         val normalizedRpm = ((smoothedRpm - profile.idleRpm) / (profile.limiterRpm - profile.idleRpm))
             .coerceIn(0.0, 1.0)
         effectVoices.filter { it.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP }.forEach { voice ->
             val enabled = mask and voice.spec.control.bit != 0L
-            voice.targetGain = if (enabled) {
+            val authoredGain = if (enabled) {
                 voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
             } else {
                 0.0
             }
+            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
                 (0.55 + normalizedRpm * 1.25)
         }
@@ -234,12 +240,42 @@ internal class SampleEngineRenderer private constructor(
         }
     }
 
-    private fun updateVoiceTargets(rpm: Double, throttle: Double) {
+    private fun updateVoiceTargets(rpm: Double, throttle: Double, layerMix: Map<String, LayerMixControl>) {
         for (voice in voices) {
-            voice.targetGain = voice.spec.gainAt(rpm, throttle)
+            val authoredGain = voice.spec.gainAt(rpm, throttle)
+            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
             voice.playbackRatio = voice.spec.playbackRatio(rpm)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate * voice.playbackRatio
         }
+    }
+
+    private fun applyLayerMix(trackId: String, authoredGain: Double, layerMix: Map<String, LayerMixControl>): Double {
+        val mix = layerMix[trackId] ?: LayerMixControl.DEFAULT
+        if (mix.muted) {
+            return 0.0
+        }
+        val anySolo = layerMix.values.any { control -> control.solo && !control.muted }
+        if (anySolo && !mix.solo) {
+            return 0.0
+        }
+        return authoredGain * mix.volume.coerceIn(0.0, 1.0)
+    }
+
+    private fun buildLayerOutputMeters(target: EngineAudioFrame): List<LayerOutputMeter> {
+        if (!isProgramAudible(target)) {
+            return emptyList()
+        }
+        val loopScale = if (target.soloEffects) 0.0 else continuousProgramGain
+        val meters = buildList {
+            voices.forEach { voice ->
+                add(LayerOutputMeter(voice.spec.id, (voice.gain * loopScale).coerceIn(0.0, 1.0)))
+            }
+            effectVoices.forEach { voice ->
+                val level = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+                add(LayerOutputMeter(voice.spec.id, level))
+            }
+        }
+        return meters
     }
 
     private class LoopVoice(val spec: SampleLayerSpec, val data: PcmLoopData) {
