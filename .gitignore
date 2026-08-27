@@ -4,6 +4,7 @@
 .gradle/
 .kotlin/
 local.properties
+mobile/build-number.properties
 .DS_Store
 
 # Build and native tooling output
