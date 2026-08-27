@@ -1,12 +1,17 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-/** User trim applied to one loop layer or effect sample. */
+/** User trim applied to one loop layer or effect sample. [volume] is a gain multiplier (1.0 = unchanged) while the coast experiment is active. */
 data class LayerMixControl(
-    val volume: Double = 1.0,
+    val volume: Double = DEFAULT_GAIN_MULTIPLIER,
     val muted: Boolean = false,
     val solo: Boolean = false,
 ) {
     companion object {
+        const val DEFAULT_GAIN_MULTIPLIER = 1.0
+        const val MIN_GAIN_MULTIPLIER = 0.0
+        /** Enough headroom for quiet effects (e.g. transmission ~14%) to reach full meter scale. */
+        const val MAX_GAIN_MULTIPLIER = 8.0
+
         val DEFAULT = LayerMixControl()
     }
 }
@@ -22,6 +27,9 @@ data class LayerMixTrackState(
     /** Smoothed gain currently reaching the audio mix (0–1). */
     val outputLevel: Double,
     val isEffect: Boolean,
+    /** True for every mixer row except Coast and Load — shows a trim slider under the live meter. */
+    val showVolumeSlider: Boolean = false,
+    val isLoadLayer: Boolean = false,
 )
 
 /** Live output level for one mixer track row. */

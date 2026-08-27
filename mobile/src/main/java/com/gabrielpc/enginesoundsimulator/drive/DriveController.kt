@@ -14,6 +14,7 @@ import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
 import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
 import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
+import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
@@ -530,6 +531,8 @@ private fun buildLayerMixTracks(
                 solo = control.solo,
                 outputLevel = outputLevels[trackId] ?: 0.0,
                 isEffect = false,
+                showVolumeSlider = layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD,
+                isLoadLayer = layer.role == SampleLayerRole.LOAD,
             )
             effect != null -> LayerMixTrackState(
                 id = trackId,
@@ -540,6 +543,7 @@ private fun buildLayerMixTracks(
                 solo = control.solo,
                 outputLevel = outputLevels[trackId] ?: 0.0,
                 isEffect = true,
+                showVolumeSlider = true,
             )
             else -> null
         }

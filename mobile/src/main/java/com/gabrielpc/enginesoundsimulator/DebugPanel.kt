@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -209,35 +210,55 @@ private fun AudioExperimentsSection(
 ) {
     DebugSection(title = "AUDIO EXPERIMENTS", accent = DbgAmber) {
         Text(
-            "Coast-only full gain: mutes Load, keeps Coast at full level. " +
-                "Pedal no longer shapes layer volume — only RPM crossfades.",
+            "Coast-only full gain: mutes Load, runs Coast at full level when active. " +
+                "Use GAIN multipliers under each MIXER meter for everything else.",
             color = DbgMuted,
             fontSize = 12.sp,
             lineHeight = 18.sp,
         )
         Spacer(Modifier.height(10.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                DebugLine("Coast-only experiment", if (enabled) "ON" else "OFF")
-                if (enabled) {
-                    Text(
-                        "Header shows COAST EXP while active",
-                        color = DbgGreen,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            }
-            DebugAction(
-                label = if (enabled) "DISABLE" else "ENABLE",
-                accent = if (enabled) DbgRed else DbgGreen,
-                onClick = { onCoastOnlyFullGainChange(!enabled) },
+        DebugLine("Coast-only experiment", if (enabled) "ON" else "OFF")
+        if (enabled) {
+            Text(
+                "Header shows COAST EXP · GAIN sliders in MIXER multiply the dynamic level (1.0x = default)",
+                color = DbgGreen,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
             )
         }
+        Spacer(Modifier.height(8.dp))
+        ExperimentToggleButton(
+            label = if (enabled) "DISABLE COAST EXPERIMENT" else "ENABLE COAST EXPERIMENT",
+            accent = if (enabled) DbgRed else DbgGreen,
+            onClick = { onCoastOnlyFullGainChange(!enabled) },
+        )
+    }
+}
+
+@Composable
+private fun ExperimentToggleButton(
+    label: String,
+    accent: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .background(accent.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .border(2.dp, accent.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = accent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp,
+        )
     }
 }
 

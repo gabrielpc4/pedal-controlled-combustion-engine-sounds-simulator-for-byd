@@ -147,6 +147,7 @@ class MainActivity : ComponentActivity() {
                         onSelectCar = controller::selectCar,
                         onLayerMixMuted = controller::setLayerMixMuted,
                         onLayerMixSolo = controller::setLayerMixSolo,
+                        onLayerMixVolume = controller::setLayerMixVolume,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
                         onSoloSoundEffectsChange = controller::setSoloSoundEffects,
                         onRequestSnapshot = controller::snapshot,
@@ -217,6 +218,7 @@ private fun MotorSoundDashboard(
     onSelectCar: (String) -> Unit,
     onLayerMixMuted: (String, Boolean) -> Unit,
     onLayerMixSolo: (String, Boolean) -> Unit,
+    onLayerMixVolume: (String, Double) -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
     onSoloSoundEffectsChange: (Boolean) -> Unit,
     onRequestSnapshot: () -> DriveSnapshot,
@@ -327,6 +329,8 @@ private fun MotorSoundDashboard(
                             onSelectCar = onSelectCar,
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
+                            onLayerVolume = onLayerMixVolume,
+                            coastExperimentActive = state.coastOnlyFullGainExperiment,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),

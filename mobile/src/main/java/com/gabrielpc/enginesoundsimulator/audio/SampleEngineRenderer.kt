@@ -80,7 +80,14 @@ internal class SampleEngineRenderer private constructor(
         val masterAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
         val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
         val enabledAlpha = 1.0 - exp(-1.0 / (outputSampleRate * (target.tuning.enabledFadeMs / 1_000.0)))
-        val layerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * (target.tuning.layerFadeMs / 1_000.0)))
+        val layerFadeSeconds = target.tuning.layerFadeMs / 1_000.0
+        val idleLayerFadeSeconds = if (target.coastOnlyFullGain) {
+            COAST_EXPERIMENT_IDLE_LAYER_FADE_MS / 1_000.0
+        } else {
+            layerFadeSeconds
+        }
+        val layerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * layerFadeSeconds))
+        val idleLayerAlpha = 1.0 - exp(-1.0 / (outputSampleRate * idleLayerFadeSeconds))
         var blockPeak = 0.0
 
         for (frameIndex in 0 until frameCount) {
@@ -88,7 +95,12 @@ internal class SampleEngineRenderer private constructor(
             var loopLeft = 0.0
             var loopRight = 0.0
             for (voice in voices) {
-                voice.gain += (voice.targetGain - voice.gain) * layerAlpha
+                val voiceLayerAlpha = if (target.coastOnlyFullGain && voice.spec.role == SampleLayerRole.IDLE) {
+                    idleLayerAlpha
+                } else {
+                    layerAlpha
+                }
+                voice.gain += (voice.targetGain - voice.gain) * voiceLayerAlpha
                 if (voice.gain > SILENCE_GAIN || voice.targetGain > SILENCE_GAIN) {
                     loopLeft += voice.readCubic(0) * voice.gain
                     loopRight += voice.readCubic(1) * voice.gain
@@ -223,31 +235,35 @@ internal class SampleEngineRenderer private constructor(
                 mask,
                 smoothedRpm,
                 layerMix,
+                target.coastOnlyFullGain,
             )
         }
 
         if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
         if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
             throttleLiftArmed = false
-            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm, layerMix)
+            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm, layerMix, target.coastOnlyFullGain)
         }
 
         for (voice in effectVoices) {
             val authoredGain = when (voice.spec.trigger) {
                 SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     val enabled = mask and voice.spec.control.bit != 0L
-                    val effectThrottle = if (target.coastOnlyFullGain) 1.0 else smoothedThrottle
-                    if (enabled) {
-                        voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + effectThrottle * 0.45)
+                    if (!enabled) {
+                        0.0
+                    } else {
+                        voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+                    }
+                }
+                else -> {
+                    if (voice.isOneShotActive) {
+                        voice.baseGain
                     } else {
                         0.0
                     }
                 }
-                else -> {
-                    if (voice.isOneShotActive) voice.baseGain else 0.0
-                }
             }
-            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
+            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix, target.coastOnlyFullGain)
             if (voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP) {
                 voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
                     (0.55 + normalizedRpm * 1.25)
@@ -260,11 +276,13 @@ internal class SampleEngineRenderer private constructor(
         mask: Long,
         rpm: Double,
         layerMix: Map<String, LayerMixControl>,
+        coastOnlyFullGain: Boolean,
     ) {
         effectVoices.filter {
             it.spec.trigger == trigger && mask and it.spec.control.bit != 0L && rpm >= it.spec.minimumRpm
         }.forEach { voice ->
-            if (applyLayerMix(voice.spec.id, voice.baseGain, layerMix) > SILENCE_GAIN) {
+            val authoredGain = voice.baseGain
+            if (applyLayerMix(voice.spec.id, authoredGain, layerMix, coastOnlyFullGain) > SILENCE_GAIN) {
                 voice.trigger()
                 effectTriggers += 1
             }
@@ -279,13 +297,18 @@ internal class SampleEngineRenderer private constructor(
     ) {
         for (voice in voices) {
             val authoredGain = voice.spec.gainAt(rpm, throttle, coastOnlyFullGain)
-            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix)
+            voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix, coastOnlyFullGain)
             voice.playbackRatio = voice.spec.playbackRatio(rpm)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate * voice.playbackRatio
         }
     }
 
-    private fun applyLayerMix(trackId: String, authoredGain: Double, layerMix: Map<String, LayerMixControl>): Double {
+    private fun applyLayerMix(
+        trackId: String,
+        authoredGain: Double,
+        layerMix: Map<String, LayerMixControl>,
+        coastOnlyFullGain: Boolean,
+    ): Double {
         val mix = layerMix[trackId] ?: LayerMixControl.DEFAULT
         if (mix.muted) {
             return 0.0
@@ -294,7 +317,12 @@ internal class SampleEngineRenderer private constructor(
         if (anySolo && !mix.solo) {
             return 0.0
         }
-        return authoredGain * mix.volume.coerceIn(0.0, 1.0)
+        val multiplier = if (coastOnlyFullGain) {
+            mix.volume.coerceIn(LayerMixControl.MIN_GAIN_MULTIPLIER, LayerMixControl.MAX_GAIN_MULTIPLIER)
+        } else {
+            LayerMixControl.DEFAULT_GAIN_MULTIPLIER
+        }
+        return authoredGain * multiplier
     }
 
     private fun buildLayerOutputMeters(target: EngineAudioFrame): List<LayerOutputMeter> {
@@ -484,6 +512,7 @@ internal class SampleEngineRenderer private constructor(
         private const val DIAGNOSTIC_BLOCK_INTERVAL = 10L
         private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
         private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
+        private const val COAST_EXPERIMENT_IDLE_LAYER_FADE_MS = 120.0
     }
 }
 

@@ -83,23 +83,53 @@ internal data class SampleLayerSpec(
         return ((autopitchRootRpm?.let { rpm / it } ?: 1.0) * authoredPitch).coerceIn(0.10, 4.0)
     }
 
-    fun gainAt(rpm: Double, throttle: Double, coastOnlyFullGain: Boolean = false): Double {
+    fun gainAt(
+        rpm: Double,
+        throttle: Double,
+        coastOnlyFullGain: Boolean = false,
+    ): Double {
         if (rpm !in startRpm..endRpm) return 0.0
         if (coastOnlyFullGain && role == SampleLayerRole.LOAD) return 0.0
+
+        if (coastOnlyFullGain && role == SampleLayerRole.IDLE) {
+            val amplitude = idleExperimentAmplitude(rpm)
+            if (amplitude <= 0.0) return 0.0
+
+            val throttleGainContribution = throttleGainDb?.valueAt(throttle) ?: 0.0
+            val decibels = baseGainDb + IDLE_LAYER_GAIN_BOOST_DB + throttleGainContribution +
+                rpmGainDbCurves.sumOf { it.valueAt(rpm) }
+            return amplitude * 10.0.pow(decibels / 20.0)
+        }
 
         val amplitude = rpmAmplitudeCurves.fold(1.0) { gain, curve -> gain * curve.valueAt(rpm) }
         if (amplitude <= 0.0) return 0.0
 
-        val throttleGainContribution = if (coastOnlyFullGain) {
-            0.0
-        } else {
-            throttleGainDb?.valueAt(throttle) ?: 0.0
+        if (coastOnlyFullGain && role == SampleLayerRole.COAST) {
+            return amplitude * 10.0.pow(baseGainDb / 20.0)
         }
+
+        val throttleGainContribution = throttleGainDb?.valueAt(throttle) ?: 0.0
         val decibels = baseGainDb + (if (role == SampleLayerRole.IDLE) IDLE_LAYER_GAIN_BOOST_DB else 0.0) +
             throttleGainContribution +
             rpmGainDbCurves.sumOf { it.valueAt(rpm) }
         return amplitude * 10.0.pow(decibels / 20.0)
     }
+
+    /** Wider smoothstep fade so idle_low eases in/out instead of snapping at the band edge. */
+    private fun idleExperimentAmplitude(rpm: Double): Double {
+        val holdEndRpm = 1_350.0
+        val fadeOutEndRpm = 2_950.0
+        if (rpm <= holdEndRpm) return 1.0
+        if (rpm >= fadeOutEndRpm) return 0.0
+
+        val fraction = (rpm - holdEndRpm) / (fadeOutEndRpm - holdEndRpm)
+        return 1.0 - smoothstep(fraction)
+    }
+}
+
+private fun smoothstep(fraction: Double): Double {
+    val clamped = fraction.coerceIn(0.0, 1.0)
+    return clamped * clamped * (3.0 - 2.0 * clamped)
 }
 
 internal data class EngineSampleProfile(

@@ -18,7 +18,10 @@ internal class LayerMixRepository(context: Context) {
 
     fun setVolume(profile: EngineSampleProfile, trackId: String, volume: Double): Map<String, LayerMixControl> {
         preferences.edit()
-            .putFloat(volumeKey(profile.id, trackId), volume.coerceIn(0.0, 1.0).toFloat())
+            .putFloat(
+                volumeKey(profile.id, trackId),
+                volume.coerceIn(LayerMixControl.MIN_GAIN_MULTIPLIER, LayerMixControl.MAX_GAIN_MULTIPLIER).toFloat(),
+            )
             .apply()
         return load(profile)
     }

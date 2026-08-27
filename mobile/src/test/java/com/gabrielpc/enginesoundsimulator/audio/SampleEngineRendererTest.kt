@@ -306,12 +306,68 @@ class SampleEngineRendererTest {
     fun coastOnlyFullGainExperimentMutesLoadAndIgnoresThrottleCurve() {
         val load = profile.layers.first { it.id == "l1" }
         val coast = profile.layers.first { it.id == "c2" }
+        val idle = profile.layers.first { it.id == "idle_low" }
         assertTrue(load.gainAt(7_500.0, 1.0) > load.gainAt(7_500.0, 0.0))
         assertEquals(0.0, load.gainAt(7_500.0, 1.0, coastOnlyFullGain = true), 0.0)
         val coastAtFullPedal = coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = true)
         val coastAtLiftOff = coast.gainAt(7_000.0, 0.0, coastOnlyFullGain = true)
         assertEquals(coastAtLiftOff, coastAtFullPedal, 0.0001)
         assertTrue(coastAtFullPedal > 0.0)
+        assertTrue(
+            coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = true) >
+                coast.gainAt(7_000.0, 1.0, coastOnlyFullGain = false),
+        )
+        assertTrue(idle.gainAt(1_000.0, 1.0, coastOnlyFullGain = true) > idle.gainAt(1_000.0, 0.0, coastOnlyFullGain = true))
+        assertTrue(idle.gainAt(2_000.0, 1.0, coastOnlyFullGain = true) > idle.gainAt(2_000.0, 1.0, coastOnlyFullGain = false) * 0.5)
+    }
+
+    @Test
+    fun coastExperimentGainMultiplierScalesDynamicEffects() {
+        val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
+        val output = ShortArray(1_920)
+        val frame = EngineAudioFrame(
+            rpm = 5_500.0,
+            throttle = 0.8,
+            enabledEffectMask = profile.defaultEffectMask,
+            coastOnlyFullGain = true,
+        )
+        repeat(24) {
+            renderer.render(frame, output, gain = 0.7)
+        }
+
+        val baseline = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
+        assertTrue("transmission should stay in a normal dynamic range at 1x", baseline in 0.05..0.35)
+
+        repeat(24) {
+            renderer.render(
+                frame.copy(layerMix = mapOf("transmission_loop" to LayerMixControl(volume = 2.0))),
+                output,
+                gain = 0.7,
+            )
+        }
+        val doubled = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
+        assertEquals(baseline * 2.0, doubled, 0.03)
+
+        repeat(24) {
+            renderer.render(
+                frame.copy(layerMix = mapOf("transmission_loop" to LayerMixControl(volume = 0.5))),
+                output,
+                gain = 0.7,
+            )
+        }
+        val halved = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
+        assertEquals(baseline * 0.5, halved, 0.03)
+
+        repeat(48) {
+            renderer.render(
+                frame.copy(layerMix = mapOf("transmission_loop" to LayerMixControl(volume = LayerMixControl.MAX_GAIN_MULTIPLIER))),
+                output,
+                gain = 0.7,
+            )
+        }
+        val maxed = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
+        val expectedMax = (baseline * LayerMixControl.MAX_GAIN_MULTIPLIER).coerceAtMost(1.0)
+        assertEquals(expectedMax, maxed, 0.06)
     }
 
     @Test

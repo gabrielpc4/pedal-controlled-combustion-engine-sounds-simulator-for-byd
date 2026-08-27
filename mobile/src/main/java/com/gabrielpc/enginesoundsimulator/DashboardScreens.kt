@@ -21,10 +21,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,15 +43,18 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
+import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -94,6 +97,8 @@ internal fun MixerDashboardScreen(
     onSelectCar: (String) -> Unit,
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
+    onLayerVolume: (String, Double) -> Unit,
+    coastExperimentActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -111,6 +116,11 @@ internal fun MixerDashboardScreen(
             onSelectCar = onSelectCar,
         )
         Spacer(Modifier.height(10.dp))
+        val visibleTracks = if (state.coastOnlyFullGainExperiment) {
+            state.layerMixTracks.filter { track -> !track.isLoadLayer }
+        } else {
+            state.layerMixTracks
+        }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -120,11 +130,13 @@ internal fun MixerDashboardScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(state.layerMixTracks, key = { it.id }) { track ->
+                items(visibleTracks, key = { it.id }) { track ->
                     LayerMixTrackControl(
                         track = track,
+                        coastExperimentActive = coastExperimentActive,
                         onMuted = { onLayerMuted(track.id, it) },
                         onSolo = { onLayerSolo(track.id, it) },
+                        onVolume = { onLayerVolume(track.id, it) },
                     )
                 }
             }
@@ -325,11 +337,14 @@ private fun CarDropdownSelector(
 @Composable
 private fun LayerMixTrackControl(
     track: LayerMixTrackState,
+    coastExperimentActive: Boolean,
     onMuted: (Boolean) -> Unit,
     onSolo: (Boolean) -> Unit,
+    onVolume: (Double) -> Unit,
 ) {
     val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
+    val showTrimSlider = coastExperimentActive && track.showVolumeSlider
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -362,51 +377,115 @@ private fun LayerMixTrackControl(
             )
         }
         Spacer(Modifier.height(6.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(20.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF061018))
-                .border(1.dp, Line.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (level > 0.002f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(level)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    fillColor.copy(alpha = 0.45f),
-                                    fillColor,
-                                    fillColor.copy(red = minOf(fillColor.red + 0.08f, 1f)),
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(22.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF061018))
+                    .border(1.dp, Line.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
+            ) {
+                if (level > 0.002f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(level)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        fillColor.copy(alpha = 0.45f),
+                                        fillColor,
+                                        fillColor.copy(red = minOf(fillColor.red + 0.08f, 1f)),
+                                    ),
                                 ),
                             ),
-                        ),
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                MixToggleChip(
+                    label = "M",
+                    checked = track.muted,
+                    accent = Red,
+                    onCheckedChange = onMuted,
+                )
+                MixToggleChip(
+                    label = "S",
+                    checked = track.solo,
+                    accent = Amber,
+                    onCheckedChange = onSolo,
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Checkbox(
-                    checked = track.muted,
-                    onCheckedChange = onMuted,
-                    colors = CheckboxDefaults.colors(checkedColor = Red, uncheckedColor = Muted),
+        if (showTrimSlider) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "GAIN",
+                    color = Muted,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                    modifier = Modifier.width(34.dp),
                 )
-                Text("Mute", color = Muted, fontSize = 10.sp)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Checkbox(
-                    checked = track.solo,
-                    onCheckedChange = onSolo,
-                    colors = CheckboxDefaults.colors(checkedColor = Amber, uncheckedColor = Muted),
+                Slider(
+                    value = track.userVolume.toFloat().coerceIn(
+                        LayerMixControl.MIN_GAIN_MULTIPLIER.toFloat(),
+                        LayerMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
+                    ),
+                    onValueChange = { onVolume(it.toDouble()) },
+                    valueRange = LayerMixControl.MIN_GAIN_MULTIPLIER.toFloat()..LayerMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Cyan,
+                        activeTrackColor = Cyan,
+                        inactiveTrackColor = Line,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp),
                 )
-                Text("Solo", color = Muted, fontSize = 10.sp)
+                Text(
+                    String.format(Locale.US, "%.1fx", track.userVolume),
+                    color = Cyan,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.width(40.dp),
+                )
             }
         }
     }
+}
+
+@Composable
+private fun MixToggleChip(
+    label: String,
+    checked: Boolean,
+    accent: Color,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Text(
+        text = label,
+        color = if (checked) accent else Muted,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Black,
+        modifier = Modifier
+            .width(24.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (checked) accent.copy(alpha = 0.18f) else Color(0xFF061018))
+            .border(1.dp, if (checked) accent.copy(alpha = 0.85f) else Line.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 3.dp),
+        textAlign = TextAlign.Center,
+    )
 }
 
 /** Green → cyan → amber → red as the live output meter fills. */
