@@ -113,9 +113,8 @@ class MainActivity : ComponentActivity() {
     private val refreshUi = object : Runnable {
         override fun run() {
             driveState = controller.snapshot()
-            // The simulation and audio control loop remain at 200 Hz. Thirty visual
-            // updates per second are smooth on the head unit without competing with audio.
-            uiHandler.postDelayed(this, 33L)
+            // Mixer meters feel best near 60 Hz; the simulation loop still runs at 200 Hz.
+            uiHandler.postDelayed(this, 16L)
         }
     }
 
@@ -146,7 +145,6 @@ class MainActivity : ComponentActivity() {
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSelectCar = controller::selectCar,
-                        onLayerMixVolume = controller::setLayerMixVolume,
                         onLayerMixMuted = controller::setLayerMixMuted,
                         onLayerMixSolo = controller::setLayerMixSolo,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
@@ -216,7 +214,6 @@ private fun MotorSoundDashboard(
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
-    onLayerMixVolume: (String, Double) -> Unit,
     onLayerMixMuted: (String, Boolean) -> Unit,
     onLayerMixSolo: (String, Boolean) -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
@@ -326,7 +323,6 @@ private fun MotorSoundDashboard(
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
                             onSelectCar = onSelectCar,
-                            onLayerVolume = onLayerMixVolume,
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             modifier = Modifier

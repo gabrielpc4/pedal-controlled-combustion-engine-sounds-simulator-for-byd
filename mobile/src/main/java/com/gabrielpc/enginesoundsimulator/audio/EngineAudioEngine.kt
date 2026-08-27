@@ -405,6 +405,8 @@ class EngineAudioEngine(context: Context) {
                 mapStereoAcrossChannels(stereoProgram, interleaved, active.layout.channelCount)
                 if (!writeFully(track, interleaved, runId)) break
                 writes += 1
+                val liveMeters = sampleRenderer.diagnostics().layerOutputMeters
+                outputState.updateAndGet { it.copy(layerOutputMeters = liveMeters) }
                 if (writes % 48 == 0) {
                     val sampleDiagnostics = sampleRenderer.diagnostics()
                     val currentUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0

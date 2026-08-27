@@ -25,8 +25,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -94,7 +92,6 @@ internal fun MixerDashboardScreen(
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onSelectCar: (String) -> Unit,
-    onLayerVolume: (String, Double) -> Unit,
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -126,7 +123,6 @@ internal fun MixerDashboardScreen(
                 items(state.layerMixTracks, key = { it.id }) { track ->
                     LayerMixTrackControl(
                         track = track,
-                        onVolume = { onLayerVolume(track.id, it) },
                         onMuted = { onLayerMuted(track.id, it) },
                         onSolo = { onLayerSolo(track.id, it) },
                     )
@@ -329,10 +325,11 @@ private fun CarDropdownSelector(
 @Composable
 private fun LayerMixTrackControl(
     track: LayerMixTrackState,
-    onVolume: (Double) -> Unit,
     onMuted: (Boolean) -> Unit,
     onSolo: (Boolean) -> Unit,
 ) {
+    val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
+    val fillColor = outputMeterFillColor(level)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -341,55 +338,56 @@ private fun LayerMixTrackControl(
             .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        Text(
-            text = track.displayName,
-            color = White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            lineHeight = 13.sp,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = track.displayName,
+                color = White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 13.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${(level * 100f).roundToInt()}%",
+                color = fillColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         Spacer(Modifier.height(6.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(16.dp)
+                .height(20.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color(0xFF061018))
                 .border(1.dp, Line.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(track.userVolume.toFloat().coerceIn(0f, 1f))
-                    .background(Color.White.copy(alpha = 0.06f)),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(track.outputLevel.toFloat().coerceIn(0f, 1f))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                if (track.isEffect) Amber.copy(alpha = 0.55f) else Cyan.copy(alpha = 0.55f),
-                                if (track.isEffect) Amber else Cyan,
+            if (level > 0.002f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(level)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    fillColor.copy(alpha = 0.45f),
+                                    fillColor,
+                                    fillColor.copy(red = minOf(fillColor.red + 0.08f, 1f)),
+                                ),
                             ),
                         ),
-                    ),
-            )
+                )
+            }
         }
-        Slider(
-            value = track.userVolume.toFloat(),
-            onValueChange = { onVolume(it.toDouble()) },
-            valueRange = 0f..1f,
-            modifier = Modifier.fillMaxWidth().height(28.dp),
-            colors = SliderDefaults.colors(
-                thumbColor = Cyan,
-                activeTrackColor = Cyan.copy(alpha = 0.65f),
-                inactiveTrackColor = Line,
-            ),
-        )
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Checkbox(
@@ -409,6 +407,27 @@ private fun LayerMixTrackControl(
             }
         }
     }
+}
+
+/** Green → cyan → amber → red as the live output meter fills. */
+private fun outputMeterFillColor(level: Float): Color {
+    return when {
+        level <= 0.01f -> Muted.copy(alpha = 0.35f)
+        level < 0.30f -> blendColors(Green.copy(alpha = 0.65f), Cyan, level / 0.30f)
+        level < 0.60f -> blendColors(Cyan, Amber, (level - 0.30f) / 0.30f)
+        level < 0.85f -> blendColors(Amber, Color(0xFFFF7040), (level - 0.60f) / 0.25f)
+        else -> blendColors(Color(0xFFFF7040), Red, (level - 0.85f) / 0.15f)
+    }
+}
+
+private fun blendColors(start: Color, end: Color, fraction: Float): Color {
+    val t = fraction.coerceIn(0f, 1f)
+    return Color(
+        red = start.red + (end.red - start.red) * t,
+        green = start.green + (end.green - start.green) * t,
+        blue = start.blue + (end.blue - start.blue) * t,
+        alpha = start.alpha + (end.alpha - start.alpha) * t,
+    )
 }
 
 @Composable
