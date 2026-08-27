@@ -9,8 +9,8 @@ state and source before assuming it is still current.
 - Do not work in `C:\Users\Gabriel\Documents\ChatGPT\BYDMotorSound`; it may be a separate empty
   local repository.
 - Remote: `git@github.com:gabrielpc4/pedal-controlled-combustion-engine-sounds-simulator-for-byd.git`.
-- Check `git status -sb`, `git branch --show-current`, `git log -1 --oneline`, then pull the branch
-  the user identifies as current before changing anything.
+- **Primary branch: `main`.** All current work lives here. Pull `origin/main` before changing anything.
+- Check `git status -sb`, `git branch --show-current`, `git log -1 --oneline` after pulling.
 
 The user expects this after every change, including documentation:
 
