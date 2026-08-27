@@ -222,32 +222,53 @@ private fun BarTachometerHud(
 ) {
     val rpmFraction = (drivetrain.rpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
     val redlineFraction = (redlineRpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    val speedKmh = drivetrain.rawSpeedKmh.roundToInt().coerceAtLeast(0)
+    val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
+        drivetrain.gear.toString()
+    } else {
+        transmissionPosition.displayName
+    }
     Column(modifier = modifier, verticalArrangement = Arrangement.SpaceBetween) {
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = drivetrain.rpm.roundToInt().toString(),
-                color = if (drivetrain.limiterActive) Red else White,
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-            )
-            Column {
-                Text("RPM", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = if (transmissionPosition == TransmissionPosition.DRIVE) "G${drivetrain.gear}" else transmissionPosition.displayName,
+                    text = speedKmh.toString(),
+                    color = White,
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text(
+                    text = "Km/h",
+                    color = Muted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 7.dp),
+                )
+            }
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.padding(end = 10.dp),
+            ) {
+                Text(
+                    "GEAR",
+                    color = Muted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+                Text(
+                    text = gearLabel,
                     color = Cyan,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Black,
-                )
-            }
-            Column {
-                Text("KM/H", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(
-                    text = drivetrain.rawSpeedKmh.roundToInt().toString(),
-                    color = Cyan,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Light,
                     fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.End,
                 )
             }
         }
