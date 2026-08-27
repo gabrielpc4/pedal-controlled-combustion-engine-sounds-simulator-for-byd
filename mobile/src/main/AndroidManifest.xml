@@ -5,6 +5,7 @@
     <!-- Read-only BYD DiLink telemetry. This app deliberately requests no vehicle SET permission. -->
     <uses-permission android:name="android.permission.BYDAUTO_SPEED_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_SPEED_GET" />
+    <uses-permission android:name="android.permission.BYDAUTO_GEARBOX_GET" />
 
     <application
         android:name=".EngineSoundsSimulatorApplication"

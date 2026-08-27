@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
                         onRequestSnapshot = controller::snapshot,
                         onDebugPanelVisible = controller::setDebugPanelVisible,
                         onCoastOnlyFullGainChange = controller::setCoastOnlyFullGainExperiment,
+                        onCarMasterVolumeChange = controller::setCarMasterVolume,
                     )
                 }
             }
@@ -224,6 +225,7 @@ private fun MotorSoundDashboard(
     onRequestSnapshot: () -> DriveSnapshot,
     onDebugPanelVisible: (Boolean) -> Unit,
     onCoastOnlyFullGainChange: (Boolean) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -328,6 +330,7 @@ private fun MotorSoundDashboard(
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
                             onSelectCar = onSelectCar,
+                            onCarMasterVolumeChange = onCarMasterVolumeChange,
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
@@ -607,6 +610,7 @@ private fun CarStage(
             TransmissionShifter(
                 position = state.transmissionPosition,
                 onPositionChange = onTransmissionChange,
+                lockedToVehicle = state.transmissionLockedToVehicle,
             )
         }
 
@@ -617,6 +621,7 @@ private fun CarStage(
 internal fun TransmissionShifter(
     position: TransmissionPosition,
     onPositionChange: (TransmissionPosition) -> Unit,
+    lockedToVehicle: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -629,11 +634,22 @@ internal fun TransmissionShifter(
                     listOf(Color(0xFF5B6670), Color(0xFF232D35), Color(0xFF11181E)),
                 ),
             )
-            .border(2.dp, Color(0xFF60717D), RoundedCornerShape(16.dp))
-            .padding(8.dp),
+            .border(2.dp, if (lockedToVehicle) Green.copy(alpha = 0.75f) else Color(0xFF60717D), RoundedCornerShape(16.dp))
+            .padding(8.dp)
+            .alpha(if (lockedToVehicle) 0.88f else 1f),
         verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (lockedToVehicle) {
+            Text(
+                text = "BYD",
+                color = Green,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.8.sp,
+            )
+        }
+
         TransmissionPosition.entries.forEach { option ->
             val selected = option == position
             Box(
@@ -653,7 +669,13 @@ internal fun TransmissionShifter(
                         color = if (selected) Amber else Color(0xFF4A5A66),
                         shape = RoundedCornerShape(10.dp),
                     )
-                    .clickable { onPositionChange(option) },
+                    .then(
+                        if (lockedToVehicle) {
+                            Modifier
+                        } else {
+                            Modifier.clickable { onPositionChange(option) }
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(

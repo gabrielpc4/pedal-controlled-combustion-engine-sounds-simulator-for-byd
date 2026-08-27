@@ -8,6 +8,7 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioChannelMode
 import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
+import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
@@ -26,6 +27,8 @@ import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
+import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
+import com.gabrielpc.enginesoundsimulator.telemetry.transmissionFollowsVehicle
 import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
 import com.gabrielpc.enginesoundsimulator.tuning.TuningRepository
@@ -61,6 +64,8 @@ data class DriveSnapshot(
     val soloSoundEffects: Boolean,
     val layerMixTracks: List<LayerMixTrackState> = emptyList(),
     val coastOnlyFullGainExperiment: Boolean = false,
+    val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
+    val transmissionLockedToVehicle: Boolean = false,
 )
 
 data class SoundEffectOption(
@@ -76,6 +81,7 @@ class DriveController(context: Context) {
     private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
     private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
     private val layerMixRepository = LayerMixRepository(context.applicationContext)
+    private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
     private val audioExperimentRepository = AudioExperimentRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
@@ -83,6 +89,7 @@ class DriveController(context: Context) {
     private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
     private val soloEffects = AtomicBoolean(soundEffectsRepository.loadSoloEffects(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
+    private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(selectedCarRepository.load().id))
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
     private val simulation = EngineSimulation(profile)
@@ -121,6 +128,7 @@ class DriveController(context: Context) {
         soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
         soloSoundEffects = soloEffects.get(),
         coastOnlyFullGainExperiment = coastOnlyFullGainExperiment.get(),
+        carMasterVolume = carMasterVolume.get(),
     )
 
     init {
@@ -264,6 +272,16 @@ class DriveController(context: Context) {
         coastOnlyFullGainExperiment.set(enabled)
     }
 
+    fun setCarMasterVolume(volume: Double) {
+        val profileId = selectedSampleProfile.get().id
+        carMasterVolume.set(carMasterVolumeRepository.save(profileId, volume))
+    }
+
+    fun resetAllCarMasterVolumes() {
+        carMasterVolumeRepository.resetAll()
+        carMasterVolume.set(carMasterVolumeRepository.load(selectedSampleProfile.get().id))
+    }
+
     fun setSoundEffectEnabled(controlId: String, enabled: Boolean) {
         val selected = selectedSampleProfile.get()
         val updatedMask = soundEffectsRepository.setEnabled(selected, controlId, enabled)
@@ -288,6 +306,7 @@ class DriveController(context: Context) {
         enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(selected))
         soloEffects.set(soundEffectsRepository.loadSoloEffects(selected))
         layerMixControls.set(layerMixRepository.load(selected))
+        carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
         selectedCarRepository.save(selected)
         val tuning = tuningConfig.get().withSampleProfile(selected)
         tuningConfig.set(tuning)
@@ -302,6 +321,10 @@ class DriveController(context: Context) {
     }
 
     fun setTransmissionPosition(position: TransmissionPosition) {
+        val telemetry = vehicleReader.snapshot()
+        if (telemetry.transmissionFollowsVehicle(selectedInputMode.get())) {
+            return
+        }
         transmissionPosition.set(position)
     }
 
@@ -421,6 +444,14 @@ class DriveController(context: Context) {
         val mode = selectedInputMode.get()
         val manual = manualInput.get()
         val input = resolveDriveInput(mode, telemetry, manual.throttle, manual.brake)
+        val transmissionControl = resolveTransmissionControl(
+            mode = mode,
+            telemetry = telemetry,
+            manualPosition = transmissionPosition.get(),
+        )
+        if (transmissionControl.lockedToVehicle) {
+            transmissionPosition.set(transmissionControl.position)
+        }
 
         val drivetrain = simulation.update(
             DriverInput(
@@ -430,7 +461,7 @@ class DriveController(context: Context) {
                 // AUTO falls back to the same SIM pedals when BYD input is unavailable.
                 // Use the resolved source, not just the selected mode, for its speed behavior.
                 simulateCoastRegen = input.isSimulator,
-                transmissionPosition = transmissionPosition.get(),
+                transmissionPosition = transmissionControl.position,
             ),
             dt,
         )
@@ -448,7 +479,7 @@ class DriveController(context: Context) {
                     ShiftDirection.DOWN -> -1
                     ShiftDirection.NONE -> 0
                 },
-                tuning = tuning.audio,
+                tuning = effectiveAudioTuning(tuning),
                 layerMix = layerMixControls.get(),
                 coastOnlyFullGain = coastOnlyFullGainExperiment.get(),
             ),
@@ -462,7 +493,7 @@ class DriveController(context: Context) {
             activeInput = input.label,
             throttle = input.throttle,
             brake = input.brake,
-            transmissionPosition = transmissionPosition.get(),
+            transmissionPosition = transmissionControl.position,
             engineSoundEnabled = enabled,
             audio = if (debugVisible) audioEngine.state() else latest.audio,
             telemetry = if (debugVisible) telemetry else latest.telemetry,
@@ -476,8 +507,16 @@ class DriveController(context: Context) {
             soloSoundEffects = soloEffects.get(),
             layerMixTracks = buildLayerMixTracks(selectedCar, layerMixControls.get(), outputLevels),
             coastOnlyFullGainExperiment = coastOnlyFullGainExperiment.get(),
+            carMasterVolume = carMasterVolume.get(),
+            transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
         )
     }
+
+    private fun effectiveAudioTuning(tuning: TuningConfig) = tuning.audio.copy(
+        masterGain = (
+            carMasterVolume.get() * tuning.audio.masterGain / CarMasterVolumeRepository.DEFAULT
+            ).coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX),
+    )
 
     private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 

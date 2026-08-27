@@ -19,8 +19,10 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private const val BYD_SPEED_CLASS = "android.hardware.bydauto.speed.BYDAutoSpeedDevice"
+private const val BYD_GEARBOX_CLASS = "android.hardware.bydauto.gearbox.BYDAutoGearboxDevice"
 internal const val BYD_SPEED_COMMON = "android.permission.BYDAUTO_SPEED_COMMON"
 internal const val BYD_SPEED_GET = "android.permission.BYDAUTO_SPEED_GET"
+internal const val BYD_GEARBOX_GET = "android.permission.BYDAUTO_GEARBOX_GET"
 
 enum class ReaderState {
     IDLE,
@@ -55,6 +57,8 @@ data class TelemetrySnapshot(
     val accelerator: SignalValue = SignalValue(),
     val brake: SignalValue = SignalValue(),
     val speed: SignalValue = SignalValue(),
+    val gearboxAutoMode: SignalValue = SignalValue(),
+    val gearboxCode: String? = null,
     val lastReadAtNanos: Long? = null,
     val lastReadDurationMs: Double? = null,
     val cadence: CadenceStats = CadenceStats(),
@@ -84,6 +88,8 @@ class BydSpeedReader(
     private var executor: ScheduledExecutorService? = null
 
     private var accessors: Accessors? = null
+    private var gearboxAccessors: GearboxAccessors? = null
+    private var gearboxConstants = BydGearboxConstants.fallback()
     private val cadenceTracker = CadenceTracker()
 
     fun snapshot(): TelemetrySnapshot = latestSnapshot
@@ -97,6 +103,7 @@ class BydSpeedReader(
             runId = generation.incrementAndGet()
             cadenceTracker.reset()
             accessors = null
+            gearboxAccessors = null
             latestSnapshot = TelemetrySnapshot(
                 readerState = ReaderState.PROBING,
                 deliveryMode = "PROBE",
@@ -118,6 +125,7 @@ class BydSpeedReader(
             val current = executor
             executor = null
             accessors = null
+            gearboxAccessors = null
             current
         }
         worker?.shutdownNow()
@@ -170,6 +178,7 @@ class BydSpeedReader(
             diagnostics += "Read-only BYD speed compatibility context: active"
             diagnostics += describeListenerApi(runtimeType)
             diagnostics += "Delivery: polling every ${pollIntervalMs} ms (listener SDK not packaged)"
+            diagnostics += initializeGearbox(deviceContext, diagnostics)
 
             if (!isCurrent(runId)) return
             accessors = Accessors(device, throttle, brake, speed)
@@ -213,16 +222,19 @@ class BydSpeedReader(
         val throttleRead = invokeNumber(currentAccessors.device, currentAccessors.throttle)
         val brakeRead = invokeNumber(currentAccessors.device, currentAccessors.brake)
         val speedRead = invokeNumber(currentAccessors.device, currentAccessors.speed)
+        val gearboxReads = readGearboxSignals()
 
         val completedAt = SystemClock.elapsedRealtimeNanos()
         val previous = latestSnapshot
         val throttleValidation = TelemetryValidation.pedal(throttleRead.raw, throttleRead.error)
         val brakeValidation = TelemetryValidation.pedal(brakeRead.raw, brakeRead.error)
         val speedValidation = TelemetryValidation.speed(speedRead.raw, speedRead.error)
+        val gearboxValidation = TelemetryValidation.gearboxAutoMode(gearboxReads.autoModeRaw, gearboxReads.autoModeError)
         val errors = listOfNotNull(
             throttleRead.error?.let { "accelerator: $it" },
             brakeRead.error?.let { "brake: $it" },
             speedRead.error?.let { "speed: $it" },
+            gearboxReads.autoModeError?.let { "gearbox: $it" },
         )
 
         if (!isCurrent(runId)) return
@@ -238,6 +250,13 @@ class BydSpeedReader(
             accelerator = updateSignal(previous.accelerator, throttleRead.raw, throttleValidation, completedAt),
             brake = updateSignal(previous.brake, brakeRead.raw, brakeValidation, completedAt),
             speed = updateSignal(previous.speed, speedRead.raw, speedValidation, completedAt),
+            gearboxAutoMode = updateSignal(
+                previous.gearboxAutoMode,
+                gearboxReads.autoModeRaw,
+                gearboxValidation,
+                completedAt,
+            ),
+            gearboxCode = gearboxReads.code ?: previous.gearboxCode,
             lastReadAtNanos = completedAt,
             lastReadDurationMs = nanosToMillis(completedAt - startedAt),
             cadence = cadenceTracker.record(completedAt),
@@ -259,6 +278,50 @@ class BydSpeedReader(
         )
         add(permissionDiagnostic(BYD_SPEED_COMMON))
         add(permissionDiagnostic(BYD_SPEED_GET))
+        add(permissionDiagnostic(BYD_GEARBOX_GET))
+    }
+
+    @SuppressLint("PrivateApi")
+    private fun initializeGearbox(deviceContext: Context, diagnostics: MutableList<String>): String {
+        return try {
+            val deviceType = Class.forName(BYD_GEARBOX_CLASS, false, appContext.classLoader)
+            diagnostics += "BYD gearbox class: present"
+            val getInstance = deviceType.methods.firstOrNull { method ->
+                method.name == "getInstance" &&
+                    Modifier.isStatic(method.modifiers) &&
+                    method.parameterTypes.size == 1 &&
+                    method.parameterTypes[0].isAssignableFrom(deviceContext.javaClass)
+            } ?: throw NoSuchMethodException("$BYD_GEARBOX_CLASS.getInstance(Context)")
+
+            val device = getInstance.invoke(null, deviceContext)
+                ?: throw IllegalStateException("BYD gearbox getInstance returned null")
+            val runtimeType = device.javaClass
+            gearboxConstants = BydGearboxConstants.discover(runtimeType)
+            val autoMode = findGetter(runtimeType, "getGearboxAutoModeType")
+            val code = findGetter(runtimeType, "getGearboxCode")
+            gearboxAccessors = GearboxAccessors(device, autoMode, code)
+            diagnostics += "Gearbox auto mode getter: ${if (autoMode == null) "missing" else "present"}"
+            diagnostics += "Gearbox code getter: ${if (code == null) "missing" else "present"}"
+            diagnostics += "Gearbox constants: P=${gearboxConstants.park} R=${gearboxConstants.reverse} N=${gearboxConstants.neutral} D=${gearboxConstants.drive}"
+            "Gearbox reader: active"
+        } catch (throwable: Throwable) {
+            gearboxAccessors = null
+            val message = "Gearbox probe: ${describeThrowable(throwable)}"
+            diagnostics += message
+            message
+        }
+    }
+
+    private fun readGearboxSignals(): GearboxReads {
+        val current = gearboxAccessors ?: return GearboxReads()
+        val autoModeRead = invokeNumber(current.device, current.autoMode)
+        val codeRead = invokeString(current.device, current.code)
+        return GearboxReads(
+            autoModeRaw = autoModeRead.raw,
+            autoModeError = autoModeRead.error,
+            code = codeRead.value,
+            codeError = codeRead.error,
+        )
     }
 
     private fun permissionDiagnostic(permission: String): String {
@@ -317,9 +380,24 @@ class BydSpeedReader(
         val brake: Method?,
         val speed: Method?,
     )
+
+    private data class GearboxAccessors(
+        val device: Any,
+        val autoMode: Method?,
+        val code: Method?,
+    )
 }
 
 private data class NumberRead(val raw: Double?, val error: String?)
+
+private data class StringRead(val value: String?, val error: String?)
+
+private data class GearboxReads(
+    val autoModeRaw: Double? = null,
+    val autoModeError: String? = null,
+    val code: String? = null,
+    val codeError: String? = null,
+)
 
 private fun invokeNumber(receiver: Any, method: Method?): NumberRead {
     if (method == null) return NumberRead(null, "method not available")
@@ -333,6 +411,21 @@ private fun invokeNumber(receiver: Any, method: Method?): NumberRead {
 } catch (throwable: Throwable) {
     NumberRead(null, describeThrowable(throwable))
 }
+}
+
+private fun invokeString(receiver: Any, method: Method?): StringRead {
+    if (method == null) return StringRead(null, "method not available")
+    return try {
+        val result = method.invoke(receiver)
+        when (result) {
+            null -> StringRead(null, "no value")
+            is String -> StringRead(result, null)
+            is Number -> StringRead(result.toInt().toString(), null)
+            else -> StringRead(result.toString(), null)
+        }
+    } catch (throwable: Throwable) {
+        StringRead(null, describeThrowable(throwable))
+    }
 }
 
 private fun findGetter(type: Class<*>, name: String): Method? =
@@ -372,6 +465,16 @@ internal object TelemetryValidation {
         if (!raw.isFinite()) return Validation(null, "non-finite value")
         if (raw < 0.0 || raw > 282.0) {
             return Validation(null, sentinelOrRange(raw, "expected 0..282 km/h"))
+        }
+        return Validation(raw, null)
+    }
+
+    fun gearboxAutoMode(raw: Double?, invocationError: String? = null): Validation {
+        if (invocationError != null) return Validation(null, invocationError)
+        if (raw == null) return Validation(null, "no value")
+        if (!raw.isFinite()) return Validation(null, "non-finite value")
+        if (raw < 0.0 || raw > 32.0) {
+            return Validation(null, sentinelOrRange(raw, "expected gearbox auto mode"))
         }
         return Validation(raw, null)
     }

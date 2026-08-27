@@ -1,7 +1,9 @@
 package com.gabrielpc.enginesoundsimulator
 
+import android.graphics.BitmapFactory
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +11,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -45,9 +48,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -105,6 +113,7 @@ internal fun MixerDashboardScreen(
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onSelectCar: (String) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
@@ -123,7 +132,10 @@ internal fun MixerDashboardScreen(
             redlineRpm = state.tuning.engine.redlineRpm,
             selectedCarId = state.selectedCarId,
             selectedCarName = state.selectedCarName,
+            selectedCarPreviewAsset = state.selectedCarPreviewAsset,
+            carMasterVolume = state.carMasterVolume,
             onSelectCar = onSelectCar,
+            onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
         Spacer(Modifier.height(10.dp))
         val visibleTracks = if (state.coastOnlyFullGainExperiment) {
@@ -179,6 +191,7 @@ internal fun MixerDashboardScreen(
                     TransmissionShifter(
                         position = state.transmissionPosition,
                         onPositionChange = onTransmissionChange,
+                        lockedToVehicle = state.transmissionLockedToVehicle,
                     )
                 }
             }
@@ -194,7 +207,10 @@ private fun MixerHeaderRow(
     redlineRpm: Double,
     selectedCarId: String,
     selectedCarName: String,
+    selectedCarPreviewAsset: String,
+    carMasterVolume: Double,
     onSelectCar: (String) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -216,7 +232,10 @@ private fun MixerHeaderRow(
         CarDropdownSelector(
             selectedCarId = selectedCarId,
             selectedCarName = selectedCarName,
+            selectedCarPreviewAsset = selectedCarPreviewAsset,
+            carMasterVolume = carMasterVolume,
             onSelectCar = onSelectCar,
+            onCarMasterVolumeChange = onCarMasterVolumeChange,
             modifier = Modifier.weight(0.42f).fillMaxHeight(),
         )
     }
@@ -318,7 +337,10 @@ private fun BarTachometerHud(
 private fun CarDropdownSelector(
     selectedCarId: String,
     selectedCarName: String,
+    selectedCarPreviewAsset: String,
+    carMasterVolume: Double,
     onSelectCar: (String) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -326,34 +348,98 @@ private fun CarDropdownSelector(
         modifier = modifier.padding(start = 12.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight()
                 .clip(RoundedCornerShape(10.dp))
                 .background(PanelBright)
-                .border(1.dp, Line, RoundedCornerShape(10.dp))
-                .clickable { expanded = true }
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .border(1.dp, Line, RoundedCornerShape(10.dp)),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("ENGINE PROFILE", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Text(
-                text = selectedCarName,
-                color = White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            CarPreviewThumbnail(
+                previewAsset = selectedCarPreviewAsset,
+                contentDescription = selectedCarName,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .clickable { expanded = true },
             )
-            Text("Tap to change car", color = CyanSoft, fontSize = 10.sp)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = true },
+                ) {
+                    Text("SIMULATED CAR", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(
+                        text = selectedCarName,
+                        color = White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Volume:",
+                        color = Amber,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.4.sp,
+                    )
+                    Slider(
+                        value = carMasterVolume.toFloat(),
+                        onValueChange = { onCarMasterVolumeChange(it.toDouble()) },
+                        valueRange = 0f..1.2f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Amber,
+                            activeTrackColor = Amber,
+                            inactiveTrackColor = Line.copy(alpha = 0.85f),
+                        ),
+                    )
+                    Text(
+                        text = "${(carMasterVolume * 100.0).roundToInt()}%",
+                        color = Amber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             EngineSampleProfiles.all.forEach { profile ->
                 DropdownMenuItem(
                     text = {
-                        Text(
-                            profile.displayName,
-                            fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CarPreviewThumbnail(
+                                previewAsset = profile.previewAssetName,
+                                contentDescription = profile.displayName,
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                            )
+                            Text(
+                                profile.displayName,
+                                fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
+                            )
+                        }
                     },
                     onClick = {
                         expanded = false
@@ -364,6 +450,56 @@ private fun CarDropdownSelector(
         }
     }
 }
+
+@Composable
+private fun CarPreviewThumbnail(
+    previewAsset: String,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val preview = remember(previewAsset) {
+        runCatching {
+            context.assets.open(previewAsset).use { input ->
+                val bitmap = requireNotNull(BitmapFactory.decodeStream(input))
+                LoadedCarPreview(
+                    image = bitmap.asImageBitmap(),
+                    aspectRatio = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1).toFloat(),
+                )
+            }
+        }.getOrNull()
+    }
+
+    val aspectRatio = preview?.aspectRatio ?: (16f / 9f)
+
+    Box(
+        modifier = modifier
+            .aspectRatio(aspectRatio)
+            .background(Color.Black.copy(alpha = 0.42f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (preview != null) {
+            Image(
+                bitmap = preview.image,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.apex_v10_car),
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+private data class LoadedCarPreview(
+    val image: ImageBitmap,
+    val aspectRatio: Float,
+)
 
 @Composable
 private fun LayerMixTrackControl(
