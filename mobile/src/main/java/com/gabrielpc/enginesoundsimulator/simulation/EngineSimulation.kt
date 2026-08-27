@@ -32,7 +32,7 @@ data class EngineProfile(
     val topSpeedKmh: Double,
     val syntheticRpmResponseSeconds: Double,
     val externalSpeedSmoothingSeconds: Double,
-    val simulatorCoastRegenMps2: Double,
+    val simulatorCoastRegenMps2: Double = 2.50,
     val gearRatios: DoubleArray,
     /** X is normalized road speed; Y is normalized front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_FRONT_WHEEL_TORQUE_CURVE,

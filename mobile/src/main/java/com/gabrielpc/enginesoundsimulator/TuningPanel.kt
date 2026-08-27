@@ -76,9 +76,8 @@ private val TuneWhite = Color(0xFFF5FAFD)
 private val TuneMuted = Color(0xFF8CA7B5)
 
 private enum class TuningTab(val title: String, val subtitle: String) {
-    ENGINE("SIMULATION", "TACH + SHIFT BEHAVIOR"),
-    RESPONSE("RESPONSE", "PEDAL + SIM COAST"),
-    DELAYS("DELAYS", "INPUT, SHIFTS + AUDIO"),
+    ENGINE("ENGINE", "TACH + SHIFT BEHAVIOR"),
+    DELAYS("RESPONSE", "BYD INPUT + AUDIO"),
     AUDIO("AUDIO", "SAMPLE BANK"),
 }
 
@@ -117,7 +116,6 @@ internal fun TuningPanel(
         Box(modifier = Modifier.weight(1f)) {
             when (TuningTab.entries[tabIndex]) {
                 TuningTab.ENGINE -> EngineTab(config, onConfigChange)
-                TuningTab.RESPONSE -> ResponseTab(state, config, onConfigChange)
                 TuningTab.DELAYS -> DelaysTab(config, onConfigChange)
                 TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
             }
@@ -184,7 +182,7 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
-            "SIMULATED ENGINE",
+            "SOUND ENGINE",
             "Road-speed-driven RPM and automatic sound gearbox",
             Modifier.weight(1f),
         ) {
@@ -217,50 +215,16 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 }
 
 @Composable
-private fun ResponseTab(state: DriveSnapshot, config: TuningConfig, onChange: (TuningConfig) -> Unit) {
-    val engine = config.engine
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SIM PEDAL RESPONSE", "Drag points • pedal vs simulated drive request", Modifier.weight(1.05f)) {
-            EditableCurveGraph(
-                points = engine.throttleCurve,
-                xLabel = { "${(it * 100).roundToInt()}" },
-                yLabel = { "${(it * 100).roundToInt()}" },
-                xMarkerLabel = { "${(it * 100).roundToInt()}%" },
-                yMarkerLabel = { "${(it * 100).roundToInt()}%" },
-                xAxisTitle = "PEDAL INPUT (%)",
-                yAxisTitle = "SIM DRIVE REQUEST (%)",
-                currentX = state.throttle,
-                accent = TuneGreen,
-                lockEndpointX = true,
-                lockEndpointY = true,
-                onPointsChange = { onChange(config.copy(engine = engine.copy(throttleCurve = it))) },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        PanelCard("SIM COAST", "How the simulated vehicle loses speed after pedal lift", Modifier.weight(0.95f)) {
-            ParameterSlider("SIM LIFT-OFF DECEL", engine.simulatorCoastRegenMps2, 0.0..4.00, "%.0f m/s²") {
-                onChange(config.copy(engine = engine.copy(simulatorCoastRegenMps2 = it)))
-            }
-            Spacer(Modifier.height(12.dp))
-            ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
-        }
-    }
-}
-
-@Composable
 private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
     val audio = config.audio
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("PEDAL FILTERING", "How quickly pedal input reaches the simulated engine", Modifier.weight(1f)) {
+        PanelCard("PEDAL + BYD SPEED", "How quickly pedal and car speed reach the sound engine", Modifier.weight(1f)) {
             ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
             }
             ParameterSlider("THROTTLE RELEASE", engine.throttleReleaseMs, 20.0..800.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleReleaseMs = it)))
-            }
-            ParameterSlider("BRAKE ATTACK", engine.brakeResponseMs, 15.0..500.0, "%.0f ms") {
-                onChange(config.copy(engine = engine.copy(brakeResponseMs = it)))
             }
             ParameterSlider("BYD SPEED SMOOTHING", engine.externalSpeedSmoothingMs, 60.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(externalSpeedSmoothingMs = it)))
@@ -268,6 +232,8 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             ParameterSlider("TACH FOLLOWS SPEED", engine.syntheticRpmResponseMs, 20.0..300.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(syntheticRpmResponseMs = it)))
             }
+            Spacer(Modifier.height(12.dp))
+            ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
         }
         PanelCard("VIRTUAL SHIFTS", "Time spent moving between virtual gears", Modifier.weight(1f)) {
             ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 40.0..900.0, "%.0f ms") {
@@ -1118,7 +1084,7 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
         val bottom = size.height - 68f
         val width = right - left
         val height = bottom - top
-        val responseTimesMs = listOf(0.0, engine.throttleAttackMs, engine.throttleReleaseMs, engine.brakeResponseMs)
+        val responseTimesMs = listOf(0.0, engine.throttleAttackMs, engine.throttleReleaseMs)
         val xTicks = axisTicksFromValues(
             values = responseTimesMs,
             positionOf = { (it / 1_000.0).toFloat().coerceIn(0f, 1f) },
@@ -1154,17 +1120,15 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
         }
         drawPath(responsePath(engine.throttleAttackMs), TuneGreen, style = Stroke(3f))
         drawPath(responsePath(engine.throttleReleaseMs), TuneCyan, style = Stroke(3f))
-        drawPath(responsePath(engine.brakeResponseMs), TuneRed, style = Stroke(3f))
         val responseCurves = listOf(
             Triple(engine.throttleAttackMs, android.graphics.Color.rgb(54, 227, 145), "ATTACK"),
             Triple(engine.throttleReleaseMs, android.graphics.Color.rgb(53, 232, 242), "RELEASE"),
-            Triple(engine.brakeResponseMs, android.graphics.Color.rgb(255, 70, 92), "BRAKE"),
         )
         responseTimesMs.forEach { timeMs ->
             val normalizedTime = (timeMs / 1_000.0).toFloat().coerceIn(0f, 1f)
             val px = left + width * normalizedTime
             var markerBottomY = bottom
-            val labelOffsets = listOf(-14f, 0f, 14f)
+            val labelOffsets = listOf(-10f, 10f)
             responseCurves.forEachIndexed { curveIndex, (tauMs, color, _) ->
                 val response = 1.0 - kotlin.math.exp(-(timeMs / 1_000.0) / (tauMs / 1_000.0))
                 val py = bottom - height * response.toFloat().coerceIn(0f, 1f)
@@ -1205,11 +1169,10 @@ private fun ResponsePreview(engine: EngineTuning, modifier: Modifier = Modifier)
             val legend = listOf(
                 "ATTACK" to android.graphics.Color.rgb(54, 227, 145),
                 "RELEASE" to android.graphics.Color.rgb(53, 232, 242),
-                "BRAKE" to android.graphics.Color.rgb(255, 70, 92),
             )
             legend.forEachIndexed { index, (label, color) ->
                 paint.color = color
-                canvas.nativeCanvas.drawText(label, left + index * (width / 3f), 36f, paint)
+                canvas.nativeCanvas.drawText(label, left + index * (width / 2f), 36f, paint)
             }
             paint.textAlign = Paint.Align.RIGHT
             paint.color = android.graphics.Color.rgb(140, 167, 181)

@@ -29,16 +29,14 @@ data class EngineTuning(
     val rollingResistanceCoefficient: Double = 0.010,
     val topSpeedKmh: Double = 190.0,
     /** Tach response after the continuous road-speed estimate changes. */
-    val syntheticRpmResponseMs: Double = 55.0,
+    val syntheticRpmResponseMs: Double = 20.0,
     /** Reconstructs continuous speed from the integer BYD reading. */
-    val externalSpeedSmoothingMs: Double = 120.0,
-    val simulatorCoastRegenMps2: Double = 2.50,
-    val throttleAttackMs: Double = 120.0,
-    val throttleReleaseMs: Double = 90.0,
-    val brakeResponseMs: Double = 55.0,
-    val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
-    val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
-    val shiftDwellMs: Double = 150.0,
+    val externalSpeedSmoothingMs: Double = 60.0,
+    val throttleAttackMs: Double = 15.0,
+    val throttleReleaseMs: Double = 20.0,
+    val upshiftDurationMs: Double = 40.0,
+    val downshiftDurationMs: Double = 60.0,
+    val shiftDwellMs: Double = 100.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -75,10 +73,8 @@ data class EngineTuning(
             topSpeedKmh = topSpeedKmh.coerceIn(100.0, 350.0),
             syntheticRpmResponseMs = syntheticRpmResponseMs.coerceIn(20.0, 300.0),
             externalSpeedSmoothingMs = externalSpeedSmoothingMs.coerceIn(60.0, 500.0),
-            simulatorCoastRegenMps2 = simulatorCoastRegenMps2.coerceIn(0.0, 4.00),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
-            brakeResponseMs = brakeResponseMs.coerceIn(15.0, 500.0),
             upshiftDurationMs = upshiftDurationMs.coerceIn(40.0, 900.0),
             downshiftDurationMs = downshiftDurationMs.coerceIn(60.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
@@ -141,15 +137,15 @@ data class EngineTuning(
 data class AudioTuning(
     val masterGain: Double = 0.72,
     /** Smooths dashboard RPM changes before they move the audio sample positions. */
-    val rpmSmoothingMs: Double = 16.0,
+    val rpmSmoothingMs: Double = 1.0,
     /** Smooths throttle changes before they alter the sample-bank load blend. */
-    val throttleSmoothingMs: Double = 10.0,
+    val throttleSmoothingMs: Double = 1.0,
     /** Smooths the main program level and load-dependent output level. */
-    val programFadeMs: Double = 8.0,
+    val programFadeMs: Double = 1.0,
     /** Smooths enable/disable so starting or stopping playback never clicks. */
-    val enabledFadeMs: Double = 10.0,
+    val enabledFadeMs: Double = 1.0,
     /** Smooths individual loop-layer gain changes and crossfades. */
-    val layerFadeMs: Double = 12.0,
+    val layerFadeMs: Double = 1.0,
 ) {
     fun sanitized(): AudioTuning = copy(
         masterGain = masterGain.coerceIn(0.0, 1.20),
@@ -191,8 +187,6 @@ class TuningRepository(context: Context) {
     fun load(): TuningConfig {
         val defaults = TuningConfig.DEFAULT
         val currentCalibration = preferences.getInt(KEY_CALIBRATION_REVISION, 0) == CALIBRATION_REVISION
-        val currentCoastDeceleration =
-            preferences.getInt(KEY_COAST_DECELERATION_REVISION, 0) == COAST_DECELERATION_REVISION
         val storedEngine = defaults.engine.copy(
             idleRpm = number(KEY_IDLE, defaults.engine.idleRpm),
             maxRpm = number(KEY_MAX_RPM, defaults.engine.maxRpm),
@@ -215,14 +209,8 @@ class TuningRepository(context: Context) {
             topSpeedKmh = number(KEY_TOP_SPEED, defaults.engine.topSpeedKmh),
             syntheticRpmResponseMs = number(KEY_SYNTHETIC_RPM_RESPONSE, defaults.engine.syntheticRpmResponseMs),
             externalSpeedSmoothingMs = number(KEY_EXTERNAL_SPEED_SMOOTHING, defaults.engine.externalSpeedSmoothingMs),
-            simulatorCoastRegenMps2 = if (currentCoastDeceleration) {
-                number(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2)
-            } else {
-                defaults.engine.simulatorCoastRegenMps2
-            },
             throttleAttackMs = number(KEY_THROTTLE_ATTACK, defaults.engine.throttleAttackMs),
             throttleReleaseMs = number(KEY_THROTTLE_RELEASE, defaults.engine.throttleReleaseMs),
-            brakeResponseMs = number(KEY_BRAKE_RESPONSE, defaults.engine.brakeResponseMs),
             upshiftDurationMs = number(KEY_UPSHIFT_DURATION, defaults.engine.upshiftDurationMs),
             downshiftDurationMs = number(KEY_DOWNSHIFT_DURATION, defaults.engine.downshiftDurationMs),
             shiftDwellMs = number(KEY_SHIFT_DWELL, defaults.engine.shiftDwellMs),
@@ -249,12 +237,6 @@ class TuningRepository(context: Context) {
         if (!currentCalibration) {
             preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).apply()
         }
-        if (!currentCoastDeceleration) {
-            preferences.edit()
-                .putInt(KEY_COAST_DECELERATION_REVISION, COAST_DECELERATION_REVISION)
-                .putString(KEY_SIMULATOR_COAST_REGEN, defaults.engine.simulatorCoastRegenMps2.toString())
-                .apply()
-        }
         return TuningConfig(engine, audio).sanitized()
     }
 
@@ -262,7 +244,6 @@ class TuningRepository(context: Context) {
         val clean = config.sanitized()
         preferences.edit()
             .putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION)
-            .putInt(KEY_COAST_DECELERATION_REVISION, COAST_DECELERATION_REVISION)
             .putString(KEY_IDLE, clean.engine.idleRpm.toString())
             .putString(KEY_MAX_RPM, clean.engine.maxRpm.toString())
             .putString(KEY_REDLINE_RPM, clean.engine.redlineRpm.toString())
@@ -284,10 +265,8 @@ class TuningRepository(context: Context) {
             .putString(KEY_TOP_SPEED, clean.engine.topSpeedKmh.toString())
             .putString(KEY_SYNTHETIC_RPM_RESPONSE, clean.engine.syntheticRpmResponseMs.toString())
             .putString(KEY_EXTERNAL_SPEED_SMOOTHING, clean.engine.externalSpeedSmoothingMs.toString())
-            .putString(KEY_SIMULATOR_COAST_REGEN, clean.engine.simulatorCoastRegenMps2.toString())
             .putString(KEY_THROTTLE_ATTACK, clean.engine.throttleAttackMs.toString())
             .putString(KEY_THROTTLE_RELEASE, clean.engine.throttleReleaseMs.toString())
-            .putString(KEY_BRAKE_RESPONSE, clean.engine.brakeResponseMs.toString())
             .putString(KEY_UPSHIFT_DURATION, clean.engine.upshiftDurationMs.toString())
             .putString(KEY_DOWNSHIFT_DURATION, clean.engine.downshiftDurationMs.toString())
             .putString(KEY_SHIFT_DWELL, clean.engine.shiftDwellMs.toString())
@@ -315,9 +294,7 @@ class TuningRepository(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
-        const val CALIBRATION_REVISION = 11
-        const val KEY_COAST_DECELERATION_REVISION = "coast_deceleration_revision"
-        const val COAST_DECELERATION_REVISION = 1
+        const val CALIBRATION_REVISION = 12
         const val KEY_IDLE = "idle_rpm"
         const val KEY_MAX_RPM = "max_rpm"
         const val KEY_REDLINE_RPM = "redline_rpm"
@@ -339,10 +316,8 @@ class TuningRepository(context: Context) {
         const val KEY_TOP_SPEED = "top_speed"
         const val KEY_SYNTHETIC_RPM_RESPONSE = "synthetic_rpm_response"
         const val KEY_EXTERNAL_SPEED_SMOOTHING = "external_speed_smoothing"
-        const val KEY_SIMULATOR_COAST_REGEN = "simulator_coast_regen_mps2"
         const val KEY_THROTTLE_ATTACK = "throttle_attack"
         const val KEY_THROTTLE_RELEASE = "throttle_release"
-        const val KEY_BRAKE_RESPONSE = "brake_response"
         const val KEY_UPSHIFT_DURATION = "upshift_duration"
         const val KEY_DOWNSHIFT_DURATION = "downshift_duration"
         const val KEY_SHIFT_DWELL = "shift_dwell"
