@@ -36,15 +36,14 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
 
 enum class InputMode(val displayName: String) {
-    AUTO("AUTO"),
+    PREFER_BYD("BYD LIVE"),
     SIMULATOR("SIM"),
-    VEHICLE("BYD LIVE"),
 }
 
 data class DriveSnapshot(
     val drivetrain: DrivetrainState,
-    val inputMode: InputMode,
-    val activeInput: String,
+    val inputSourceName: String,
+    val inputSourceFaded: Boolean,
     val throttle: Double,
     val brake: Double,
     val transmissionPosition: TransmissionPosition,
@@ -83,7 +82,8 @@ class DriveController(context: Context) {
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
     private val manualInput = AtomicReference(ManualInput())
-    private val selectedInputMode = AtomicReference(InputMode.AUTO)
+    private val selectedInputMode = AtomicReference(InputMode.PREFER_BYD)
+    private val vehiclePreviewUntilElapsedMs = AtomicLong(0L)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val soundEnabled = AtomicBoolean(true)
 
@@ -93,8 +93,8 @@ class DriveController(context: Context) {
     @Volatile
     private var latest = DriveSnapshot(
         drivetrain = simulation.state,
-        inputMode = InputMode.AUTO,
-        activeInput = "SIM FALLBACK",
+        inputSourceName = "SIM",
+        inputSourceFaded = false,
         throttle = 0.0,
         brake = 0.0,
         transmissionPosition = TransmissionPosition.DRIVE,
@@ -259,15 +259,37 @@ class DriveController(context: Context) {
         audioEngine.setSampleProfile(selected)
     }
 
-    fun cycleInputMode() {
-        val modes = InputMode.entries
-        val current = selectedInputMode.get()
-        setInputMode(modes[(current.ordinal + 1) % modes.size])
+    fun toggleInputSource() {
+        val telemetry = vehicleReader.snapshot()
+        val vehicleAvailable = telemetry.vehiclePedalsAvailable()
+        val now = SystemClock.elapsedRealtime()
+        val previewActive = vehiclePreviewUntilElapsedMs.get() > now
+
+        if (previewActive) {
+            vehiclePreviewUntilElapsedMs.set(0L)
+            return
+        }
+
+        if (vehicleAvailable) {
+            selectedInputMode.set(
+                if (selectedInputMode.get() == InputMode.SIMULATOR) {
+                    InputMode.PREFER_BYD
+                } else {
+                    InputMode.SIMULATOR
+                },
+            )
+            return
+        }
+
+        if (!vehicleAvailable) {
+            vehiclePreviewUntilElapsedMs.set(now + VEHICLE_INPUT_PREVIEW_MS)
+            return
+        }
     }
 
     fun setTransmissionPosition(position: TransmissionPosition) {
         val telemetry = vehicleReader.snapshot()
-        if (telemetry.transmissionFollowsVehicle(selectedInputMode.get())) {
+        if (telemetry.transmissionFollowsVehicle(selectedInputMode.get(), telemetry)) {
             return
         }
         transmissionPosition.set(position)
@@ -321,6 +343,7 @@ class DriveController(context: Context) {
             simulation.updateProfile(profile)
             appliedTuning = tuning
         }
+        clearExpiredVehiclePreview()
         val telemetry = vehicleReader.snapshot()
         val mode = selectedInputMode.get()
         val manual = manualInput.get()
@@ -339,8 +362,7 @@ class DriveController(context: Context) {
                 throttle = input.throttle,
                 brake = input.brake,
                 externalSpeedKmh = input.externalSpeedKmh,
-                // AUTO falls back to the same SIM pedals when BYD input is unavailable.
-                // Use the resolved source, not just the selected mode, for its speed behavior.
+                // Use the resolved source, not just the selected mode, for coast/regen behavior.
                 simulateCoastRegen = input.isSimulator,
                 transmissionPosition = transmissionControl.position,
             ),
@@ -364,10 +386,17 @@ class DriveController(context: Context) {
             ),
         )
         val selectedCar = selectedSampleProfile.get()
+        val vehicleAvailable = telemetry.vehiclePedalsAvailable()
+        val previewActive = vehiclePreviewUntilElapsedMs.get() > SystemClock.elapsedRealtime()
+        val inputUi = resolveInputSourceUi(
+            mode = mode,
+            vehicleAvailable = vehicleAvailable,
+            previewActive = previewActive,
+        )
         latest = DriveSnapshot(
             drivetrain = drivetrain,
-            inputMode = mode,
-            activeInput = input.label,
+            inputSourceName = inputUi.displayName,
+            inputSourceFaded = inputUi.faded,
             throttle = input.throttle,
             brake = input.brake,
             transmissionPosition = transmissionControl.position,
@@ -393,11 +422,19 @@ class DriveController(context: Context) {
 
     private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
+    private fun clearExpiredVehiclePreview() {
+        val deadline = vehiclePreviewUntilElapsedMs.get()
+        if (deadline in 1..SystemClock.elapsedRealtime()) {
+            vehiclePreviewUntilElapsedMs.set(0L)
+        }
+    }
+
     private companion object {
         const val FIXED_STEP_SECONDS = 1.0 / 200.0
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
         const val MASTER_VOLUME_STEP = 0.10
+        const val VEHICLE_INPUT_PREVIEW_MS = 2_000L
     }
 }
 
@@ -494,22 +531,12 @@ internal fun resolveDriveInput(
 ): ResolvedDriveInput {
     val vehicleAvailable = telemetry.vehiclePedalsAvailable()
 
-    if (vehicleAvailable && mode != InputMode.SIMULATOR) {
+    if (vehicleAvailable && mode == InputMode.PREFER_BYD) {
         return ResolvedDriveInput(
             throttle = (telemetry.accelerator.value!! / 100.0).coerceIn(0.0, 1.0),
             brake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0),
             externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid },
             label = "BYD PEDALS",
-            isSimulator = false,
-        )
-    }
-
-    if (mode == InputMode.VEHICLE) {
-        return ResolvedDriveInput(
-            throttle = 0.0,
-            brake = 0.0,
-            externalSpeedKmh = null,
-            label = "BYD UNAVAILABLE",
             isSimulator = false,
         )
     }
@@ -520,5 +547,35 @@ internal fun resolveDriveInput(
         externalSpeedKmh = null,
         label = "SIM PEDALS",
         isSimulator = true,
+    )
+}
+
+internal data class InputSourceUiState(
+    val displayName: String,
+    val faded: Boolean,
+)
+
+internal fun resolveInputSourceUi(
+    mode: InputMode,
+    vehicleAvailable: Boolean,
+    previewActive: Boolean,
+): InputSourceUiState {
+    if (previewActive) {
+        return InputSourceUiState(
+            displayName = InputMode.PREFER_BYD.displayName,
+            faded = true,
+        )
+    }
+
+    if (mode == InputMode.PREFER_BYD && vehicleAvailable) {
+        return InputSourceUiState(
+            displayName = InputMode.PREFER_BYD.displayName,
+            faded = false,
+        )
+    }
+
+    return InputSourceUiState(
+        displayName = InputMode.SIMULATOR.displayName,
+        faded = false,
     )
 }

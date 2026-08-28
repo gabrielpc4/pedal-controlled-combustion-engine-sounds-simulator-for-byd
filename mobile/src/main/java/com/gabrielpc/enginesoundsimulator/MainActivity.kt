@@ -85,6 +85,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -138,7 +139,7 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         onThrottle = controller::setManualThrottle,
                         onBrake = controller::setManualBrake,
-                        onCycleInput = controller::cycleInputMode,
+                        onCycleInput = controller::toggleInputSource,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
                         onDecreaseMasterVolume = controller::decreaseCarMasterVolume,
@@ -383,7 +384,6 @@ private fun DashboardHeader(
                 letterSpacing = 2.0.sp,
             )
             StatusTag("BUILD ${AppBuildInfo.buildNumber}", Muted)
-            StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
             if (state.legacyThrottleMixEnabled) {
                 StatusTag("LEGACY MIX", Amber)
             }
@@ -400,8 +400,10 @@ private fun DashboardHeader(
             onClick = onOpenTuning,
         )
         HeaderButton(
-            primary = state.inputMode.displayName,
+            primary = state.inputSourceName,
             secondary = "INPUT",
+            accent = if (state.inputSourceName == InputMode.PREFER_BYD.displayName) Green else Cyan,
+            contentAlpha = if (state.inputSourceFaded) 0.42f else 1f,
             onClick = onCycleInput,
         )
         MasterVolumeControls(
@@ -533,13 +535,16 @@ private fun HeaderButton(
     primary: String,
     secondary: String? = null,
     accent: Color = Cyan,
+    contentAlpha: Float = 1f,
     onClick: () -> Unit,
 ) {
     Button(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = White),
-        modifier = Modifier.height(52.dp),
+        modifier = Modifier
+            .height(52.dp)
+            .alpha(contentAlpha),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
     ) {
         Column(horizontalAlignment = Alignment.Start) {

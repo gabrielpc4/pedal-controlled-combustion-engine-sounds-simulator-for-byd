@@ -4,12 +4,14 @@ import com.gabrielpc.enginesoundsimulator.telemetry.ReaderState
 import com.gabrielpc.enginesoundsimulator.telemetry.SignalValue
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DriveControllerInputTest {
     @Test
-    fun explicitVehicleModeFailsSafeToZeroWhenPedalsAreUnavailable() {
+    fun preferBydFallsBackToSimulatorWhenPedalsAreUnavailable() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 65.0, value = null, issue = "permission denied"),
@@ -17,23 +19,23 @@ class DriveControllerInputTest {
         )
 
         val result = resolveDriveInput(
-            mode = InputMode.VEHICLE,
+            mode = InputMode.PREFER_BYD,
             telemetry = telemetry,
             simulatorThrottle = 1.0,
             simulatorBrake = 0.75,
         )
 
-        assertEquals(0.0, result.throttle, 0.0)
-        assertEquals(0.0, result.brake, 0.0)
+        assertEquals(1.0, result.throttle, 0.0)
+        assertEquals(0.75, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
-        assertEquals("BYD UNAVAILABLE", result.label)
-        assertEquals(false, result.isSimulator)
+        assertEquals("SIM PEDALS", result.label)
+        assertEquals(true, result.isSimulator)
     }
 
     @Test
-    fun autoModeUsesSimulatorOnlyWhenVehiclePedalsAreUnavailable() {
+    fun preferBydUsesSimulatorOnlyWhenVehiclePedalsAreUnavailable() {
         val result = resolveDriveInput(
-            mode = InputMode.AUTO,
+            mode = InputMode.PREFER_BYD,
             telemetry = TelemetrySnapshot(readerState = ReaderState.UNAVAILABLE),
             simulatorThrottle = 1.4,
             simulatorBrake = -0.2,
@@ -47,7 +49,7 @@ class DriveControllerInputTest {
     }
 
     @Test
-    fun validVehiclePedalsWinInAutoModeAndInvalidSpeedIsNotForwarded() {
+    fun validVehiclePedalsWinWhenPreferBydAndInvalidSpeedIsNotForwarded() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 47.0, value = 47.0),
@@ -56,7 +58,7 @@ class DriveControllerInputTest {
         )
 
         val result = resolveDriveInput(
-            mode = InputMode.AUTO,
+            mode = InputMode.PREFER_BYD,
             telemetry = telemetry,
             simulatorThrottle = 0.9,
             simulatorBrake = 0.8,
@@ -90,5 +92,29 @@ class DriveControllerInputTest {
         assertNull(result.externalSpeedKmh)
         assertEquals("SIM PEDALS", result.label)
         assertEquals(true, result.isSimulator)
+    }
+
+    @Test
+    fun inputUiShowsFadedBydLiveDuringUnavailablePreview() {
+        val ui = resolveInputSourceUi(
+            mode = InputMode.SIMULATOR,
+            vehicleAvailable = false,
+            previewActive = true,
+        )
+
+        assertEquals("BYD LIVE", ui.displayName)
+        assertTrue(ui.faded)
+    }
+
+    @Test
+    fun inputUiShowsSimWhenPreferBydButVehicleIsUnavailable() {
+        val ui = resolveInputSourceUi(
+            mode = InputMode.PREFER_BYD,
+            vehicleAvailable = false,
+            previewActive = false,
+        )
+
+        assertEquals("SIM", ui.displayName)
+        assertFalse(ui.faded)
     }
 }

@@ -91,8 +91,11 @@ internal fun TelemetrySnapshot.resolvedTransmissionPosition(
         ?: BydGearboxConstants.fallback().toTransmissionPosition(raw)
 }
 
-internal fun TelemetrySnapshot.transmissionFollowsVehicle(mode: InputMode): Boolean {
-    return mode == InputMode.VEHICLE && vehiclePedalsAvailable()
+internal fun TelemetrySnapshot.transmissionFollowsVehicle(
+    mode: InputMode,
+    telemetry: TelemetrySnapshot = this,
+): Boolean {
+    return false
 }
 
 internal data class ResolvedTransmissionControl(
