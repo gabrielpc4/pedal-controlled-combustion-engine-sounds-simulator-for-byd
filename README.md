@@ -1,86 +1,46 @@
-# Pedal-Controlled Combustion Engine Sounds Simulator for BYD
+# Engine Sounds Simulator for BYD
 
-**Engine Sounds Simulator** brings responsive, pedal-driven combustion-engine sound to the BYD Seal head unit. The app reads accelerator, brake, and road speed from DiLink in real time, maps them through a calibrated electric drivetrain model, and drives a profile-based sample engine whose RPM, shifts, and limiter follow your right foot — without touching vehicle control.
+A private Android dashboard experiment for a BYD Seal DiLink head unit. It reads vehicle signals
+only when the vendor API permits them, or uses built-in simulator pedals, to drive a fictional
+combustion-engine tachometer and profile-based sample audio. It does not control the vehicle.
 
-Built for the rotating BYD tablet on DiLink firmware `13.1.33.2503250.1` (`2503`). Vehicle integration is read-only: no setters, no CAN injection, no rooted firmware.
+The app is designed for the 1920 × 990 safe dashboard area observed on the rotating head unit.
+Audio is intentionally delivered as fixed true stereo; the vehicle DSP distributes that route to
+the factory speakers.
 
-## What it does
+## Start here
 
-- **Live pedal control** — accelerator and brake depth from `BYDAutoSpeedDevice`, with automatic fallback to touch/keyboard pedals when DiLink telemetry is unavailable
-- **Calibrated Seal Performance response** — a 200 Hz EV road model anchored on BYD's published 390 kW / 670 Nm figures and A2MAC1 measured front/rear wheel-torque curves
-- **Presentation gears that never bog the car** — seven synthetic ratios shape tachometer RPM and sound only; wheel torque stays continuous through every shift
-- **Sample engine audio** — a true-stereo engine event reconstructed from bank-authored RPM, throttle, gain, pitch, and loop controls
-- **Cabin audio routing** — fixed true-stereo media output, confirmed on-car to reach the complete factory speaker system through BYD's DSP
-- **Full-screen dashboard** — landscape tachometer, virtual pedals, **P / N / D** shifter, input-mode controls, and a persistent tuning workstation for curves, ratios, and audio layers
+The durable context for a future developer or LLM is in [docs/README.md](docs/README.md):
 
-## How it works
+- [Architecture](docs/architecture.md)
+- [Vehicle integration and local assets](docs/vehicle-integration-and-assets.md)
 
-```text
-BYD pedals & speed (DiLink)     Touch / keyboard pedals
-              \                       /
-               +---- DriveController ----+
-                          | 200 Hz
-                   EngineSimulation
-                     /           \
-              Dashboard UI    EngineAudioFrame
-               display Hz            |
-                           SampleEngineRenderer
-                                     |
-                          cabin AudioTrack output
-```
-
-The electric model handles mass, drag, rolling resistance, and measured axle torque. The sound layer sits on top: fictional gears convert road speed into gauge RPM and shift timing while the EV underneath keeps behaving like a Seal.
-
-## Target vehicle
-
-| Item | Value |
-| --- | --- |
-| Vehicle | BYD Seal (Performance AWD) |
-| Head unit | DiLink `13.1.33.2503250.1` / family `2503` |
-| APK module | `mobile` (full-screen sideload app) |
-| Display name | Engine Sounds Simulator |
+Those documents state the project boundaries and point back to the code as the source of truth.
+They deliberately avoid mirroring volatile car profiles, tuning values, UI details, and historical
+experiments.
 
 ## Build
 
-Requirements: Android Studio with SDK 37, embedded JDK as `JAVA_HOME`.
-
-The `mobile` module compiles against SDK 37 and targets SDK 25 for DiLink vendor-framework compatibility.
-Audio builds also require the locally decoded profile WAVs documented in [Profile-based sample engine audio](docs/sample-engine-audio.md). They are intentionally Git-ignored and not redistributable from this repository.
+The app module is `mobile`. The project expects the user-owned sample WAVs and previews in the
+ignored `audio_samples/` tree; Gradle packages only the explicit allow-list in
+`mobile/build.gradle.kts`.
 
 ```powershell
 $env:JAVA_HOME = '<Android Studio JBR path>'
-.\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:lintDebug
+.\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:assembleDebugAndroidTest :mobile:lintDebug --no-daemon
 ```
 
-Output: `mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<build>-debug.apk`
+Assembly produces a locally numbered debug APK under
+`mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<number>-debug.apk`.
 
 ## Install
 
-Sideload the debug APK on the BYD tablet or a matching emulator. On Android versions that block legacy target-SDK apps, use `adb install --bypass-low-target-sdk-block -r ...` on a dedicated test device only.
+For the `Simple_Automotive` emulator or another dedicated test device:
 
 ```powershell
-adb install -r mobile\build\outputs\apk\debug\engine-sounds-simulator-build-<build>-debug.apk
+adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\engine-sounds-simulator-build-<number>-debug.apk
 adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
 ```
 
-Use only while parked or in a controlled environment. Synthetic engine audio can mask turn signals, ADAS alerts, navigation, and other safety cues.
-
-## Documentation
-
-- [Sample-based engine audio](docs/sample-engine-audio.md) — local asset packaging, seamless RPM/load blending, diagnostics, and code-driven validation.
-- [Engineering context](docs/README.md)
-- [Full implementation](docs/full-implementation.md)
-- [BYD Seal Performance calibration](docs/byd-seal-performance-calibration.md)
-- [Live tuning interface](docs/tuning-interface.md)
-- [Emulator validation](docs/emulator-validation.md)
-- [Persistent diagnostics](docs/persistent-diagnostics.md)
-- [Research findings](docs/research-findings.md)
-- [Source provenance](docs/source-material/README.md)
-
-## Safety and scope
-
-This is an independent enthusiast project, not an official BYD product. It requests only read-oriented DiLink speed permissions, never writes to vehicle ECUs, and stops audio when the dashboard is not visible. Treat it as a sound and tuning tool for parked or supervised use until you have validated permissions, speaker routing, and audio-focus behaviour on your exact firmware.
-
-## License
-
-No root software or asset license is declared yet. Normal copyright defaults apply until explicit terms are added.
+Use the app only while parked or in a controlled environment. Its audio can mask navigation,
+alerts, and other safety cues.

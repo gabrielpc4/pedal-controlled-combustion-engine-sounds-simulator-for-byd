@@ -1,83 +1,70 @@
-# BYD Motor Sound - Engineering Context
+# Project context for future work
 
-Last updated: 2026-08-28
+This directory deliberately contains only durable engineering context. It is not a changelog,
+release record, or duplicate specification of the Kotlin source. A future change should not make
+these documents false merely because a calibration number, car profile, UI control, or test case
+changes.
 
-This directory is the durable technical memory for the project. Future work should start here instead of repeating the original research or assuming that the BYD head unit behaves like a standard Android Automotive OS device.
+## Read this first
 
-## Bottom line
+Engine Sounds Simulator is a private Android dashboard for a BYD Seal DiLink head unit. It turns
+**read-only** vehicle telemetry, or the built-in simulator controls, into a fictional
+combustion-engine tachometer and sample-based engine audio. It never controls a vehicle.
 
-The best candidate for low-latency pedal telemetry is BYD's proprietary DiLink API:
+The intended environment is a rotated BYD tablet. The observed target software is
+`13.1.33.2503250.1` (family `2503`), but each DiLink firmware must be treated as a separate
+compatibility target.
 
-- `android.hardware.bydauto.speed.BYDAutoSpeedDevice`
-- `getAccelerateDeepness()` -> accelerator depth, 0-100 percent
-- `getBrakeDeepness()` -> brake depth, 0-100 percent
-- `getCurrentSpeed()` -> speed, 0-282 km/h
-- `AbsBYDAutoSpeedListener` for change callbacks
-- manifest permission `android.permission.BYDAUTO_SPEED_GET`
+The repository's source, tests, and build configuration are the current truth. These documents
+describe boundaries and reasons, not a second implementation to keep in sync.
 
-The principal risk is the process/permission route, not the API shape or APK installation. The first on-car test on firmware `2503` confirmed that the BYD class and getters exist, but an ordinary app context receives `SecurityException` for the signature-only `BYDAUTO_SPEED_GET` permission. The exception is produced by BYD's client wrapper calling the `Context` supplied to `BYDAutoSpeedDevice.getInstance()`. The implementation now supplies a narrowly scoped context that answers granted only for `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`; it never grants or answers granted for a SET permission. This compatibility path still needs its second on-car test.
+## Source-of-truth order
 
-The separately supplied Electro APK does not request any `BYDAUTO_*` permission. It is third-party signed and contains explicit ADB/debugging bootstrap activities plus privileged Android permission requests, so its successful installation is not evidence that Android grants BYD's speed permission to normal apps. See [Electro APK analysis](electro-apk-analysis.md).
+When information conflicts, use this order:
 
-Do not begin with standard `CarPropertyManager`. The current AOSP accelerator/brake percentage properties are VHAL version 4 properties from much newer Android Automotive releases, while the target head unit is a BYD DiLink branch commonly mapped to Android 10.
+1. Current Kotlin source, Gradle configuration, and automated tests.
+2. Direct observation on the exact head unit and firmware being tested.
+3. Primary vendor material and locally retained reference artifacts.
+4. Community reverse engineering and older implementation notes.
 
-## Target vehicle
+Do not infer a permission grant, audio route, sample license, vehicle parameter, or API behavior
+from a similarly named class, a different firmware, or an old document.
 
-| Item | Value |
-| --- | --- |
-| Vehicle | BYD Seal |
-| System version | `13.1.33.2503250.1` |
-| Relevant firmware family | `13.1.33` / `2503` |
-| FWC | `18.3.5.2411180.2.18.3.2.2312260.1` |
-| DSP | `2411083_V1.0.1` |
-| Hardware | `V02.E03.00.32.03` |
-| Audio | `4.00.13` |
+## Non-negotiable boundaries
 
-The source screenshot is `../reference/car_software_version.jpg`. It also contains IMEI and ICCID values; never reproduce those values in issues, logs, documentation, or screenshots intended for sharing.
+- Vehicle access is read-only. Do not add setters, CAN transmission, rooting, firmware changes,
+  package spoofing, or broader permission bypasses.
+- Never expose, commit, or log vehicle identifiers, credentials, location, or complete driving
+  traces. Some supplied screenshots contain IMEI/ICCID and must be treated as sensitive.
+- The sample recordings and reference APKs are local, ignored inputs. They are not part of this
+  repository's redistribution rights.
+- Treat vehicle testing as parked or controlled testing. Synthetic sound can mask safety alerts.
+- The app owns audio only while its visible Activity is running. Background playback needs a
+  separate, explicitly reviewed design.
 
-## Documentation map
+## Working agreement
 
-- [Full engine-sound implementation](full-implementation.md) - architecture, drivetrain, input policy, profile-based sample audio, fixed stereo routing, UI, controls, verification, and on-car acceptance.
-- [Profile-based sample engine audio](sample-engine-audio.md) - recovered bank controls, reusable car profiles, local asset boundary, renderer behavior, telemetry, and validation.
-- [BYD Seal Performance calibration](byd-seal-performance-calibration.md) - published vehicle anchors, digitized A2MAC1 axle curves, Sport-pedal uncertainty, road-load assumptions, and synthetic-gear separation.
-- [UI display and simulation decisions](ui-display-and-simulation-decisions.md) - cosmetic kgfm/HP display, graph annotation policy, P/N/D shifter, neutral RPM inertia, lift-off RPM removal (D only), SIM coast regen, and other presentation choices that must not be mistaken for physics bugs.
-- [Emulator validation](emulator-validation.md) - exact software-ARM fallback, final APK identity, viewport, and pedal-test evidence.
-- [Drivetrain and audio research](drivetrain-audio-research.md) - professional simulation evidence, sound-synthesis references, commercial asset options, and licensing exclusions.
-- [Research findings](research-findings.md) - platform identification, official versus community evidence, Android Automotive comparison, permissions, known failure modes, and source links.
-- [BYD DiLink API V1.0.5 notes](byd-dilink-api-v1.0.5.md) - English engineering notes and complete module/method inventory extracted from the 159-page Chinese manual.
-- [Reference APK analysis](reference-apk-analysis.md) - static inspection of the supplied BYD motor-sound APK and what can and cannot be inferred from it.
-- [Electro APK analysis](electro-apk-analysis.md) - third-party signer, manifest permissions, and the ADB/debugging bootstrap evidence.
-- [POC implementation and test plan](poc-plan.md) - recommended project changes, runtime capability probe, callback implementation, diagnostics, latency measurement, success criteria, and fallbacks.
-- [Implemented diagnostic POC](poc-implementation.md) - current source layout, build artifact, behavior, limitations, and exact install/test commands.
-- [Fresh-chat LLM handoff](llm-handoff.md) - source checkout, current state, architecture, validation workflow, constraints, and open vehicle work for a new agent.
-- [Source-material index](source-material/README.md) - provenance, local artifacts, URLs, hashes, and evidence-quality rules.
+Use the checkout that contains this repository's `.git` directory; do not assume a similarly
+named folder is the active checkout. Pull `main` before work and preserve unrelated changes.
 
-## Current project state
+For every source or documentation change, the expected delivery is:
 
-- The Android Studio project contains `mobile`, `automotive`, and `shared` modules.
-- `automotive` remains an Android Automotive media-template shell. It requires `android.hardware.type.automotive`, has no launcher Activity, targets API 37, and depends on the template `shared` media service.
-- `shared/MyMusicService.kt` is template boilerplate with empty media callbacks.
-- The DiLink telemetry probe and the full engine-sound dashboard are implemented together in `mobile`, which produces a regular full-screen APK for the rotating BYD tablet. It uses reflection and packages no BYD framework stubs.
-- The reader polls the documented accelerator, brake, and speed getters every 20 ms. `DriveController` then feeds a 200 Hz Seal-calibrated EV road model, independent synthetic sound gears, and a continuous audio renderer; simulator pedals take over when live values are unavailable.
-- The project is a public Git repository. APKs, local reference artifacts, raw licensed audio, and build/emulator downloads must remain ignored.
+1. Run relevant tests, assemble the debug APK, and run lint.
+2. Install and foreground the generated APK on the `Simple_Automotive` emulator when available.
+3. Commit and push. Do not commit APKs, build output, raw samples, decoded samples, reference
+   APKs, or private reference material.
 
-## Decisions that should survive future sessions
+The build increments a local build number on assembly and names the artifact
+`engine-sounds-simulator-build-<number>-debug.apk`. That local counter and generated APK are
+intentionally ignored.
 
-1. Preserve the read-only capability probe as the gate in front of the audio engine.
-2. Prefer BYD listener callbacks over polling for production telemetry.
-3. Record raw callback timestamps before adding smoothing or UI throttling.
-4. Preserve the confirmed ordinary-context denial and the upcoming read-only-context result for firmware `13.1.33.2503250.1`; do not generalize from another BYD firmware.
-5. Use a compile-only BYD SDK/stub dependency. Never package replacement classes under `android.hardware.bydauto.*` in the APK.
-6. Do not use vehicle-control setters, root the head unit, flash firmware, or inject CAN frames as part of this POC.
-7. If the restricted read-only context is also blocked by server-side enforcement, keep simulator input for development and evaluate a separately reviewed shell helper or speed-derived longitudinal acceleration fallback.
-8. Treat OBD-II/CAN as an external, read-only fallback. Standard OBD support for pedal position is optional and brake intensity is normally proprietary.
-9. Do not confuse UI display units with simulated physics: wheel torque is shown as ≈ motor kgfm, wheel power is scaled and shown as HP (PS/cv). See [UI display and simulation decisions](ui-display-and-simulation-decisions.md).
+## Canonical documents
 
-## Next action
+- [Architecture](architecture.md) explains the durable runtime boundaries, realtime rules, and
+  how to make safe changes.
+- [Vehicle integration and assets](vehicle-integration-and-assets.md) records the BYD API
+  evidence, testing discipline, and local sample-asset contract.
 
-The complete simulator/audio dashboard is implemented and verified locally. Install the numbered debug APK and run the parked on-car validation checklist in [the full implementation handoff](full-implementation.md). The next vehicle session should answer these questions:
-
-- Do accelerator, brake, and speed getters return plausible values?
-- Does the header switch from simulator fallback to BYD pedal input?
-
-The APK deliberately uses 20 ms polling because the listener is an abstract BYD class and the current project has no trustworthy compile-only vendor SDK. If direct getters work, callback integration is the next iteration.
+If a future change would invalidate an invariant in these documents, update the relevant document
+in the same change. Do not recreate historical per-feature notes; point to the code and tests
+instead.
