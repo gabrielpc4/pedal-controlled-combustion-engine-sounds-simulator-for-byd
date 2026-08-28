@@ -251,34 +251,44 @@ private fun MotorSoundDashboard(
                     )
 
                     when (mainScreen) {
-                        DashboardMainScreen.CLASSIC -> Row(
+                        DashboardMainScreen.CLASSIC -> Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
                                 .padding(horizontal = 34.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            CarStage(
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CarStage(
+                                    state = state,
+                                    onPreviousCar = onPreviousCar,
+                                    onNextCar = onNextCar,
+                                    modifier = Modifier
+                                        .weight(1.12f)
+                                        .fillMaxHeight(),
+                                )
+                                Tachometer(
+                                    drivetrain = state.drivetrain,
+                                    transmissionPosition = state.transmissionPosition,
+                                    maxRpm = state.tuning.engine.maxRpm,
+                                    redlineRpm = state.tuning.engine.redlineRpm,
+                                    upshiftRpm = state.tuning.engine.upshiftRpm,
+                                    modifier = Modifier
+                                        .weight(0.88f)
+                                        .fillMaxHeight()
+                                        .padding(start = 16.dp, bottom = 6.dp),
+                                )
+                            }
+                            ClassicDriveControls(
                                 state = state,
                                 onThrottle = onThrottle,
                                 onBrake = onBrake,
                                 onTransmissionChange = onTransmissionChange,
-                                onPreviousCar = onPreviousCar,
-                                onNextCar = onNextCar,
                                 modifier = Modifier
-                                    .weight(1.12f)
-                                    .fillMaxHeight(),
-                            )
-                            Tachometer(
-                                drivetrain = state.drivetrain,
-                                transmissionPosition = state.transmissionPosition,
-                                maxRpm = state.tuning.engine.maxRpm,
-                                redlineRpm = state.tuning.engine.redlineRpm,
-                                upshiftRpm = state.tuning.engine.upshiftRpm,
-                                modifier = Modifier
-                                    .weight(0.88f)
-                                    .fillMaxHeight()
-                                    .padding(start = 16.dp, bottom = 6.dp),
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 12.dp),
                             )
                         }
                         DashboardMainScreen.MIXER -> MixerDashboardScreen(
@@ -426,11 +436,45 @@ private fun StatusTag(text: String, color: Color) {
 }
 
 @Composable
-private fun CarStage(
+private fun ClassicDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        PedalControl(
+            label = "BRAKE",
+            value = state.brake,
+            accent = Red,
+            width = 92.dp,
+            height = 154.dp,
+            onValue = onBrake,
+        )
+        PedalControl(
+            label = "THROTTLE",
+            value = state.throttle,
+            accent = Green,
+            width = 84.dp,
+            height = 202.dp,
+            onValue = onThrottle,
+        )
+        TransmissionShifter(
+            position = state.transmissionPosition,
+            onPositionChange = onTransmissionChange,
+            lockedToVehicle = state.transmissionLockedToVehicle,
+        )
+    }
+}
+
+@Composable
+private fun CarStage(
+    state: DriveSnapshot,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     modifier: Modifier = Modifier,
@@ -486,37 +530,6 @@ private fun CarStage(
 
         CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
         CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
-
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            PedalControl(
-                label = "BRAKE",
-                value = state.brake,
-                accent = Red,
-                width = 92.dp,
-                height = 154.dp,
-                onValue = onBrake,
-            )
-            PedalControl(
-                label = "THROTTLE",
-                value = state.throttle,
-                accent = Green,
-                width = 84.dp,
-                height = 202.dp,
-                onValue = onThrottle,
-            )
-            TransmissionShifter(
-                position = state.transmissionPosition,
-                onPositionChange = onTransmissionChange,
-                lockedToVehicle = state.transmissionLockedToVehicle,
-            )
-        }
-
     }
 }
 
