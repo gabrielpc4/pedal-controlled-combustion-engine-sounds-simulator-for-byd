@@ -228,6 +228,14 @@ class DriveController(context: Context) {
         carMasterVolume.set(carMasterVolumeRepository.save(profileId, volume))
     }
 
+    fun decreaseCarMasterVolume() {
+        setCarMasterVolume(carMasterVolume.get() - MASTER_VOLUME_STEP)
+    }
+
+    fun increaseCarMasterVolume() {
+        setCarMasterVolume(carMasterVolume.get() + MASTER_VOLUME_STEP)
+    }
+
     fun resetAllCarMasterVolumes() {
         carMasterVolumeRepository.resetAll()
         carMasterVolume.set(carMasterVolumeRepository.load(selectedSampleProfile.get().id))
@@ -389,6 +397,7 @@ class DriveController(context: Context) {
         const val FIXED_STEP_SECONDS = 1.0 / 200.0
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
+        const val MASTER_VOLUME_STEP = 0.10
     }
 }
 

@@ -134,6 +134,8 @@ class MainActivity : ComponentActivity() {
                         onCycleInput = controller::cycleInputMode,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
+                        onDecreaseMasterVolume = controller::decreaseCarMasterVolume,
+                        onIncreaseMasterVolume = controller::increaseCarMasterVolume,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
                         onPreviousCar = controller::selectPreviousCar,
@@ -183,6 +185,8 @@ private fun MotorSoundDashboard(
     onCycleInput: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
+    onDecreaseMasterVolume: () -> Unit,
+    onIncreaseMasterVolume: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
     onPreviousCar: () -> Unit,
@@ -247,6 +251,8 @@ private fun MotorSoundDashboard(
                         onMainScreenChange = { mainScreen = it },
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
+                        onDecreaseMasterVolume = onDecreaseMasterVolume,
+                        onIncreaseMasterVolume = onIncreaseMasterVolume,
                         onOpenTuning = { tuningOpen = true },
                     )
 
@@ -330,6 +336,8 @@ private fun DashboardHeader(
     onMainScreenChange: (DashboardMainScreen) -> Unit,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
+    onDecreaseMasterVolume: () -> Unit,
+    onIncreaseMasterVolume: () -> Unit,
     onOpenTuning: () -> Unit,
 ) {
     Row(
@@ -389,11 +397,46 @@ private fun DashboardHeader(
             secondary = "INPUT",
             onClick = onCycleInput,
         )
+        MasterVolumeControls(
+            volume = state.carMasterVolume,
+            muted = !state.engineSoundEnabled,
+            onDecrease = onDecreaseMasterVolume,
+            onIncrease = onIncreaseMasterVolume,
+            onToggleMute = onToggleSound,
+        )
+    }
+}
+
+@Composable
+private fun MasterVolumeControls(
+    volume: Double,
+    muted: Boolean,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+    onToggleMute: () -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         HeaderButton(
-            primary = if (state.engineSoundEnabled) "ON" else "MUTED",
-            secondary = "ENGINE AUDIO",
-            accent = if (state.engineSoundEnabled) Green else Red,
-            onClick = onToggleSound,
+            primary = "−10%",
+            secondary = "VOLUME",
+            accent = Cyan,
+            onClick = onDecrease,
+        )
+        HeaderButton(
+            primary = "+10%",
+            secondary = "VOLUME",
+            accent = Cyan,
+            onClick = onIncrease,
+        )
+        HeaderButton(
+            primary = if (muted) {
+                "MUTE"
+            } else {
+                "${(volume * 100.0).roundToInt()}%"
+            },
+            secondary = "MASTER",
+            accent = if (muted) Red else Green,
+            onClick = onToggleMute,
         )
     }
 }
