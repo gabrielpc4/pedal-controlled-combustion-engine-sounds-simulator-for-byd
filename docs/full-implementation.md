@@ -18,8 +18,7 @@ The `mobile` module is now a complete, landscape dashboard application:
 - advances a Seal Performance-calibrated electric road model and an independent sample-engine layer at a fixed 200 Hz;
 - performs presentation-only automatic upshifts, braking downshifts, safe kickdowns, and ratio swaps without interrupting electric wheel torque;
 - renders the selected sample profile continuously from RPM and throttle using recovered per-layer bank automation;
-- experimentally requests stereo, quad, 5.1, or 7.1 logical PCM output and mirrors the same engine program to every initialized logical channel;
-- exposes the requested output mode and active logical channel count in the dashboard header;
+- sends the true-stereo engine program through one fixed stereo media `AudioTrack`, allowing the BYD DSP to distribute it across the cabin;
 - renders the requested car-and-tachometer composition against the 1920 x 990 safe-area target measured on the emulator; the actual car dimensions and insets remain unmeasured.
 
 The road model is not a pedal-to-needle animation: throttle requests motor torque, and motor speed, the 390 kW ceiling, mass, traction, drag, rolling resistance, and braking determine vehicle acceleration. Fictional gears then turn road speed into the sound RPM shown on the gauge. Those gears never feed back into wheel torque.
@@ -34,7 +33,7 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and live meter output |
 | `audio/RealtimeLayerMeterBus.kt` | Allocation-free audio-thread to UI meter handoff |
 | `audio/WavPcmDecoder.kt` | PCM16 mono/stereo preservation and embedded loop-point decoding |
-| `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
+| `audio/EngineAudioEngine.kt` | Audio focus, fixed stereo output, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
 | `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, mixer, tuning, and input controls |
 | `telemetry/BydSpeedReader.kt` | Read-only reflective DiLink capability probe and getter polling |
@@ -140,33 +139,20 @@ The app has two selectable Lamborghini interior engine profiles. Each owns its c
 
 The native bank axis is retained directly; profile redline or limiter values do not stretch its sample regions. Full implementation and validation details are in [Profile-based sample engine audio](sample-engine-audio.md).
 
-## Audio routing and multichannel truth
+## Audio routing
 
-The setting cycles `AUTO -> 7.1 -> 5.1 -> QUAD -> STEREO`.
-
-`AUTO` inspects channel-count metadata for all output devices currently enumerated by Android and requests the highest advertised layout. That metadata is not limited to the route that the track will ultimately use, so an unrelated HDMI or USB device can make `AUTO` optimistic. A forced layout falls back to progressively smaller layouts when `AudioTrack` cannot initialize it. The output uses:
+On-car testing established that Android stereo output is the route the BYD head unit distributes to all factory speakers. The earlier quad, 5.1, 7.1, automatic negotiation, channel mirroring, gain compensation, and UI selector have therefore been removed. The output uses:
 
 - one continuous `AudioTrack` in `MODE_STREAM`;
-- PCM 16-bit at the primary-output rate advertised by Android, normally 48 kHz but not necessarily native to every routed or multichannel sink;
+- true-stereo PCM 16-bit at the selected profile playback rate;
 - `USAGE_GAME` and `CONTENT_TYPE_MUSIC`;
 - API-24/25 low-latency attributes or API-26+ performance mode;
 - a capacity of at least four native bursts, tuned toward two bursts where supported;
-- one blocking writer on an audio-priority thread;
-- reduced gain for 4/6/8-channel mirroring in an attempt to retain downmix headroom.
-
-The 5.1 and 7.1 experiments retain left/right on every matching front/rear/side pair and use the stereo midpoint for center and LFE. This is still not a conventional surround master. OEM bass management may filter, omit, or sum LFE, and a downmixer may combine correlated channels with unexpected gain. Keep test volume low. A production surround path should feed LFE a separately limited, low-pass signal after the actual HAL/downmix behavior is known.
+- one blocking writer on an audio-priority thread.
 
 The application requests audio focus before creating the renderer. A denied request prevents playback; duck, transient loss, recovery, and permanent loss update gain without writing logs. Shutdown and spontaneous renderer failure both release focus. Gain ramps are unit-tested and the lifecycle was exercised on the emulator, but platform focus acquisition/listener paths are not isolated behind a fake in the JVM suite. Actual coexistence with calls, navigation, ADAS, and system warnings still requires on-car policy testing.
 
-Important: an 8-channel `AudioTrack` is not proof that eight physical BYD speakers receive discrete channels. Android applications submit logical channels. Audio policy selects a bus, and the BYD amplifier/DSP maps that bus to physical front/rear/center/subwoofer speakers. If the vehicle media bus is stereo, Android may downmix 5.1/7.1 before the BYD DSP distributes it across the cabin. Such downmixing can also disqualify the low-latency fast path.
-
-Therefore the production preference is:
-
-1. choose native-rate stereo when the car exposes only a stereo media sink and let the factory DSP distribute it;
-2. retain 5.1/7.1 only when on-car AudioFlinger/audio-policy evidence confirms a matching HAL output;
-3. never claim physical speaker coverage based only on `AudioTrack.channelCount`.
-
-The header shows the build number, requested mode, and active logical channel count. The former debug screen, route details, in-memory event history, and persistent file logs were removed to reduce heap churn and keep the mixer responsive.
+The app preserves the source recording's left and right channels. Physical speaker distribution remains the responsibility of the factory BYD amplifier/DSP. The header shows the build number but no output-layout indicator or selector.
 
 ## Head-unit UI and controls
 
@@ -185,7 +171,6 @@ Controls:
 - keyboard `S`, Down Arrow, or Space for full brake;
 - tap the input header to cycle AUTO/SIM/BYD LIVE;
 - tap engine audio to mute/unmute;
-- tap output mode to cycle channel policy.
 
 The red sports-car illustration is an AI-generated fictional concept created for this app with no intentional manufacturer branding or text. Generation does not guarantee that a design is unique, copyrightable in every jurisdiction, or free of similarity to protected vehicle designs or marks. Treat it as a prototype asset pending visual/IP review. Source asset: `res/drawable-nodpi/apex_v10_car.png`; generation provenance and hash are recorded in [the source-material log](source-material/README.md#generated-ui-asset).
 
@@ -212,7 +197,6 @@ Tests verify that:
 - braking decelerates more strongly than coasting;
 - the stopped engine returns to the configured 950 RPM idle;
 - the sample renderer decodes PCM/loop metadata, evaluates recovered control curves, produces nonzero PCM throughout the operating range, advances loop cursors, exposes test-only snapshots on demand, and fails closed on an incomplete bank; tests do not establish perceived quality or cabin audibility;
-- channel duplication writes exactly the same sample to every logical channel;
 - explicit BYD LIVE mode fails safe to zero pedals when telemetry is unavailable, while AUTO alone may use simulator fallback;
 - rapid controller lifecycle transitions cannot revive an obsolete simulation loop.
 
@@ -239,10 +223,9 @@ adb shell dumpsys media.audio_flinger > byd_audio_flinger.txt
 adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 ```
 
-6. Find the active track by PID. Compare its channel mask with the containing output thread/HAL channel mask. Track=7.1 plus output=stereo proves downmix; both 8-channel proves multichannel reaches the HAL, not the final physical speakers.
-7. Confirm physical cabin coverage by listening at low volume in every seating position. Listening is a practical end-to-end check, not the only possible proof: an OEM routing description, electrical measurement, or calibrated multichannel acoustic capture can provide stronger evidence. Bass management may deliberately redirect the LFE or main-channel bass.
-8. Inspect underruns through `dumpsys media.audio_flinger`. If they rise, increase the effective buffer by one native burst.
-9. Measure pedal-to-acoustic latency externally. `AudioTimestamp` cannot include unknown amplifier/DSP delay.
+6. Confirm physical cabin coverage by listening at low volume in every seating position.
+7. Inspect underruns through `dumpsys media.audio_flinger`. If they rise, increase the effective buffer by one native burst.
+8. Measure pedal-to-acoustic latency externally. `AudioTimestamp` cannot include unknown amplifier/DSP delay.
 
 ## Known limitations and next work
 

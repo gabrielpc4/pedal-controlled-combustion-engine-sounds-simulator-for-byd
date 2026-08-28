@@ -134,7 +134,6 @@ class MainActivity : ComponentActivity() {
                         onCycleInput = controller::cycleInputMode,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
-                        onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
                         onPreviousCar = controller::selectPreviousCar,
@@ -186,7 +185,6 @@ private fun MotorSoundDashboard(
     onCycleInput: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
-    onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
     onPreviousCar: () -> Unit,
@@ -255,7 +253,6 @@ private fun MotorSoundDashboard(
                         onMainScreenChange = { mainScreen = it },
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
-                        onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
                         onOpenEffects = { effectsOpen = true },
                     )
@@ -348,7 +345,6 @@ private fun DashboardHeader(
     onMainScreenChange: (DashboardMainScreen) -> Unit,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
-    onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
     onOpenEffects: () -> Unit,
 ) {
@@ -420,12 +416,6 @@ private fun DashboardHeader(
             secondary = "ENGINE AUDIO",
             accent = if (state.engineSoundEnabled) Green else Red,
             onClick = onToggleSound,
-        )
-        HeaderButton(
-            primary = state.audio.requestedMode.displayName,
-            secondary = "${state.audio.activeChannels.coerceAtLeast(0)} CH OUTPUT",
-            accent = Cyan,
-            onClick = onCycleChannels,
         )
     }
 }

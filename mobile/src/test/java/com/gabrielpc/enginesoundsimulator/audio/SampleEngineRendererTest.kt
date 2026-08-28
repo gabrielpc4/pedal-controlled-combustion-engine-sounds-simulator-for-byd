@@ -399,17 +399,6 @@ class SampleEngineRendererTest {
         assertTrue(failure?.message?.startsWith("Missing ") == true)
     }
 
-    @Test
-    fun logicalChannelMappingPreservesStereoAndMirrorsTheProgram() {
-        val stereo = shortArrayOf(10, 30, -20, 40)
-        val surround = ShortArray(16)
-
-        mapStereoAcrossChannels(stereo, surround, 8)
-
-        assertEquals(listOf<Short>(10, 30, 20, 20, 10, 30, 10, 30), surround.take(8))
-        assertEquals(listOf<Short>(-20, 40, 10, 10, -20, 40, -20, 40), surround.drop(8))
-    }
-
     private fun strongestGain(rpm: Double, throttle: Double): Double =
         profile.layers.maxOf { it.gainAt(rpm, throttle, coastLayerMixEnabled = false) }
 

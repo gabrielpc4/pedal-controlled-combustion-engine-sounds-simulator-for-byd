@@ -88,6 +88,6 @@ when a test explicitly requests one.
 
 ## Automated coverage
 
-`SampleEngineRendererTest` checks all selectable profile IDs/previews/rates, required continuous/effect assets, and full-load/lift-off audibility every 25 RPM from idle to limiter. It additionally checks the fully reconstructed interior profile, recovered load/coast throttle direction, lossless stereo preservation, `smpl` metadata after the data chunk, direct profile RPM mapping, logical multichannel mapping, effect-mask gating, one-shot shift triggering, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
+`SampleEngineRendererTest` checks all selectable profile IDs/previews/rates, required continuous/effect assets, and full-load/lift-off audibility every 25 RPM from idle to limiter. It additionally checks the fully reconstructed interior profile, recovered load/coast throttle direction, lossless stereo preservation, `smpl` metadata after the data chunk, direct profile RPM mapping, effect-mask gating, one-shot shift triggering, an end-to-end sweep with runtime telemetry, and fail-closed behavior for an incomplete bank.
 
 The connected-device asset test opens every packaged required WAV and fully decodes each optional effect, while JVM renderer tests deliberately use generated signals rather than copyrighted local recordings.

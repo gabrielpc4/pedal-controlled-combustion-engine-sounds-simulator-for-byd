@@ -4,8 +4,6 @@ import android.content.Context
 import android.os.Process
 import android.os.SystemClock
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixModeRepository
-import com.gabrielpc.enginesoundsimulator.audio.AudioChannelMode
-import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
@@ -52,7 +50,6 @@ data class DriveSnapshot(
     val brake: Double,
     val transmissionPosition: TransmissionPosition,
     val engineSoundEnabled: Boolean,
-    val audio: AudioOutputState,
     val tuning: TuningConfig,
     val selectedCarId: String,
     val selectedCarName: String,
@@ -118,7 +115,6 @@ class DriveController(context: Context) {
         brake = 0.0,
         transmissionPosition = TransmissionPosition.DRIVE,
         engineSoundEnabled = true,
-        audio = AudioOutputState(),
         tuning = appliedTuning,
         selectedCarId = selectedSampleProfile.get().id,
         selectedCarName = selectedSampleProfile.get().displayName,
@@ -139,9 +135,7 @@ class DriveController(context: Context) {
 
     fun snapshot(): DriveSnapshot {
         val base = latest
-        val liveAudio = audioEngine.state()
         return base.copy(
-            audio = liveAudio,
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
                 layerMixControls.get(),
@@ -314,19 +308,6 @@ class DriveController(context: Context) {
         }
     }
 
-    fun cycleChannelMode() {
-        val order = listOf(
-            AudioChannelMode.AUTO,
-            AudioChannelMode.SURROUND_7_1,
-            AudioChannelMode.SURROUND_5_1,
-            AudioChannelMode.QUAD,
-            AudioChannelMode.STEREO,
-        )
-        val current = audioEngine.state().requestedMode
-        val selected = order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size]
-        audioEngine.setChannelMode(selected)
-    }
-
     private fun runLoop(runId: Long) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
         var previousNanos = SystemClock.elapsedRealtimeNanos()
@@ -420,7 +401,6 @@ class DriveController(context: Context) {
             brake = input.brake,
             transmissionPosition = transmissionControl.position,
             engineSoundEnabled = enabled,
-            audio = latest.audio,
             tuning = tuning,
             selectedCarId = selectedCar.id,
             selectedCarName = selectedCar.displayName,

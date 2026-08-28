@@ -54,9 +54,9 @@ modules, not the DiLink app.
 - a sample-only, profile-driven audio renderer: layered RPM/load/coast/idle WAV loops, persistent
   fractional cursors, cubic interpolation, stereo preservation, crossfades, optional effects, and
   no procedural synth fallback;
-- `AudioTrack` output with focus/lifecycle handling and logical stereo/quad/5.1/7.1 modes;
-  Logical multichannel does not prove discrete physical speaker access; stereo routed through the
-  vehicle DSP is usually the safest low-latency default;
+- one fixed true-stereo `AudioTrack` with focus/lifecycle handling. On-car testing established that
+  this is the route BYD distributes to the complete factory speaker system; do not restore logical
+  quad/5.1/7.1 negotiation or its former UI selector;
 - read-only reflective BYD pedal/speed probing with 20 ms polling and simulator fallback.
 
 Car profiles are extensible data/configuration. A new profile needs its source files listed in

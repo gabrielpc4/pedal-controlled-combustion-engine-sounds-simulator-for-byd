@@ -45,7 +45,6 @@ These affect runtime behavior immediately but are **not** persisted in `TuningRe
 | **P / N / D** shifter | Column beside pedals | Selects `TransmissionPosition`; **D** enables the speed-coupled RPM model |
 | **INPUT** | Header | Cycles AUTO / SIM / BYD LIVE |
 | **ENGINE AUDIO** | Header | Mutes/unmutes sample playback |
-| **CH OUTPUT** | Header | Cycles logical channel layout |
 
 See [UI display and simulation decisions §3.2](ui-display-and-simulation-decisions.md#32-p--n--d-shifter-2026-08) for neutral steady-state and inertia timing.
 
