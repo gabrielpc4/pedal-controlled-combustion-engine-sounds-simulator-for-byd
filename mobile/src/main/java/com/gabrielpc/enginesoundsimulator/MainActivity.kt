@@ -35,8 +35,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,6 +56,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
@@ -398,7 +403,6 @@ private fun DashboardHeader(
             onClick = onCycleInput,
         )
         MasterVolumeControls(
-            volume = state.carMasterVolume,
             muted = !state.engineSoundEnabled,
             onDecrease = onDecreaseMasterVolume,
             onIncrease = onIncreaseMasterVolume,
@@ -409,35 +413,63 @@ private fun DashboardHeader(
 
 @Composable
 private fun MasterVolumeControls(
-    volume: Double,
     muted: Boolean,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
     onToggleMute: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HeaderButton(
-            primary = "−10%",
+        HeaderIconButton(
+            icon = Icons.AutoMirrored.Filled.VolumeDown,
+            contentDescription = "Decrease master volume",
             secondary = "VOLUME",
             accent = Cyan,
             onClick = onDecrease,
         )
-        HeaderButton(
-            primary = "+10%",
+        HeaderIconButton(
+            icon = Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = "Increase master volume",
             secondary = "VOLUME",
             accent = Cyan,
             onClick = onIncrease,
         )
         HeaderButton(
             primary = if (muted) {
-                "MUTE"
+                "UNMUTE"
             } else {
-                "${(volume * 100.0).roundToInt()}%"
+                "MUTE"
             },
             secondary = "MASTER",
-            accent = if (muted) Red else Green,
+            accent = if (muted) Green else Red,
             onClick = onToggleMute,
         )
+    }
+}
+
+@Composable
+private fun HeaderIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    secondary: String,
+    accent: Color = Cyan,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = White),
+        modifier = Modifier.height(52.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.Start) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = accent,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(secondary, color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, maxLines = 1)
+        }
     }
 }
 
