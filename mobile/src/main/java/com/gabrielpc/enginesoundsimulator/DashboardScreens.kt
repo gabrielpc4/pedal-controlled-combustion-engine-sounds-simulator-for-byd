@@ -7,14 +7,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,8 +31,6 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,20 +42,16 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
@@ -73,14 +61,11 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
-import kotlin.math.ceil
-import kotlin.math.max
 import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
     MIXER("MIXER", "HUD + LAYERS"),
-    GRID("GRID", "DISPLAY BOUNDS"),
 }
 
 @Composable
@@ -674,230 +659,6 @@ private fun blendColors(start: Color, end: Color, fraction: Float): Color {
         blue = start.blue + (end.blue - start.blue) * t,
         alpha = start.alpha + (end.alpha - start.alpha) * t,
     )
-}
-
-@Composable
-internal fun ResolutionProbeScreen(
-    selectedScreen: DashboardMainScreen,
-    onSelectScreen: (DashboardMainScreen) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var gridStepPx by remember { mutableIntStateOf(100) }
-    var probeWidthPx by remember { mutableFloatStateOf(-1f) }
-    var probeHeightPx by remember { mutableFloatStateOf(-1f) }
-
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val density = LocalDensity.current
-        val screenWidthPx = with(density) { maxWidth.roundToPx() }
-        val screenHeightPx = with(density) { maxHeight.roundToPx() }
-        val probeReady = probeWidthPx >= 0f
-
-        val probeWidthDp = with(density) { max(probeWidthPx, 1f).toDp() }
-        val probeHeightDp = with(density) { max(probeHeightPx, 1f).toDp() }
-        val contentWidthPx = max(screenWidthPx, if (probeReady) probeWidthPx.roundToInt() else screenWidthPx)
-        val contentHeightPx = max(screenHeightPx, if (probeReady) probeHeightPx.roundToInt() else screenHeightPx)
-        val contentWidthDp = with(density) { contentWidthPx.toDp() }
-        val contentHeightDp = with(density) { contentHeightPx.toDp() }
-
-        val verticalScrollState = rememberScrollState()
-        val horizontalScrollState = rememberScrollState()
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF020608)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(verticalScrollState),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .horizontalScroll(horizontalScrollState)
-                        .size(contentWidthDp, contentHeightDp),
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val step = gridStepPx.toFloat()
-                        val verticalLines = ceil(size.width / step).toInt()
-                        val horizontalLines = ceil(size.height / step).toInt()
-
-                        for (index in 0..verticalLines) {
-                            val x = index * step
-                            drawLine(
-                                color = if (index % 5 == 0) Cyan.copy(alpha = 0.45f) else Line.copy(alpha = 0.28f),
-                                start = Offset(x, 0f),
-                                end = Offset(x, size.height),
-                                strokeWidth = if (index % 5 == 0) 1.5f else 1f,
-                            )
-                        }
-
-                        for (index in 0..horizontalLines) {
-                            val y = index * step
-                            drawLine(
-                                color = if (index % 5 == 0) Cyan.copy(alpha = 0.45f) else Line.copy(alpha = 0.28f),
-                                start = Offset(0f, y),
-                                end = Offset(size.width, y),
-                                strokeWidth = if (index % 5 == 0) 1.5f else 1f,
-                            )
-                        }
-                    }
-
-                    if (probeReady) {
-                        Box(
-                            modifier = Modifier
-                                .size(probeWidthDp, probeHeightDp)
-                                .border(width = 4.dp, color = Red),
-                        ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawLine(Color.Red, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 2f)
-                            drawLine(Color.Red, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), 2f)
-                            drawRect(Color.Red.copy(alpha = 0.12f))
-                            drawIntoCanvas { canvas ->
-                                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                                    color = android.graphics.Color.rgb(136, 162, 178)
-                                    textSize = 28f
-                                }
-                                canvas.nativeCanvas.drawText("0,0", 8f, 28f, paint)
-                                canvas.nativeCanvas.drawText(
-                                    "${probeWidthPx.roundToInt()},${probeHeightPx.roundToInt()}",
-                                    size.width - 220f,
-                                    size.height - 12f,
-                                    paint,
-                                )
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = 24.dp, y = 24.dp)
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Red.copy(alpha = 0.92f))
-                                .border(2.dp, White, RoundedCornerShape(10.dp))
-                                .pointerInput(Unit) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        probeWidthPx = max(50f, probeWidthPx + dragAmount.x)
-                                        probeHeightPx = max(50f, probeHeightPx + dragAmount.y)
-                                    }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("↘", color = White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .offset(x = 20.dp)
-                                .width(36.dp)
-                                .fillMaxHeight()
-                                .pointerInput(Unit) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        probeWidthPx = max(50f, probeWidthPx + dragAmount.x)
-                                    }
-                                },
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .offset(y = 20.dp)
-                                .height(36.dp)
-                                .fillMaxWidth()
-                                .pointerInput(Unit) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        probeHeightPx = max(50f, probeHeightPx + dragAmount.y)
-                                    }
-                                },
-                        )
-                        }
-                    }
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(12.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.82f))
-                    .border(1.dp, Line, RoundedCornerShape(12.dp))
-                    .padding(12.dp)
-                    .onGloballyPositioned { coordinates ->
-                        if (probeWidthPx < 0f) {
-                            val marginPx = with(density) { 12.dp.toPx() }
-                            probeWidthPx = coordinates.size.width + marginPx * 2f
-                            probeHeightPx = coordinates.size.height + marginPx * 2f
-                        }
-                    },
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                DashboardScreenSwitcher(
-                    selected = selectedScreen,
-                    onSelect = onSelectScreen,
-                )
-
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "PROBE SIZE",
-                        color = Cyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.8.sp,
-                    )
-                    Text(
-                        if (probeReady) {
-                            "${probeWidthPx.roundToInt()} × ${probeHeightPx.roundToInt()} px"
-                        } else {
-                            "— × — px"
-                        },
-                        color = White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(
-                        if (probeReady) {
-                            "${probeWidthDp.value.roundToInt()} × ${probeHeightDp.value.roundToInt()} dp"
-                        } else {
-                            "— × — dp"
-                        },
-                        color = White.copy(alpha = 0.85f),
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(
-                        "Screen: ${screenWidthPx} × ${screenHeightPx} px — drag ↘ corner (can exceed screen; scroll to see overflow)",
-                        color = Muted,
-                        fontSize = 10.sp,
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(50, 100, 200).forEach { step ->
-                        val selected = gridStepPx == step
-                        Text(
-                            text = "${step}px",
-                            color = if (selected) Cyan else Muted,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selected) PanelBright else Panel)
-                                .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(8.dp))
-                                .clickable { gridStepPx = step }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
 }
 
 private val Night = Color(0xFF060606)
