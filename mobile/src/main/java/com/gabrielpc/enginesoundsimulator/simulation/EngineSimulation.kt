@@ -103,7 +103,6 @@ data class DrivetrainState(
     val shiftProgress: Double,
     val shiftSerial: Long,
     val limiterActive: Boolean,
-    val accelerationMps2: Double,
     val rawSpeedKmh: Double,
 )
 
@@ -127,7 +126,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var secondsSinceShift = 10.0
     private var limiterLatched = false
     private var externalSpeedActive = false
-    private var lastAcceleration = 0.0
     private var downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
     private val externalSpeedEstimator = QuantizedSpeedEstimator()
 
@@ -157,7 +155,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         secondsSinceShift = 10.0
         limiterLatched = false
         externalSpeedActive = false
-        lastAcceleration = 0.0
         downshiftBoundaryKmhByGear.fill(0.0)
         externalSpeedEstimator.reset()
     }
@@ -196,7 +193,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             if (input.transmissionPosition == TransmissionPosition.PARK) {
                 simulatedPhysicalSpeedMps = 0.0
                 vehicleSpeedMps = 0.0
-                lastAcceleration = 0.0
             }
             applyQuantizedSimulatorSpeed(dt)
         }
@@ -217,7 +213,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         transmissionPosition: TransmissionPosition,
         applySimulatorRegen: Boolean,
     ) {
-        val previousSpeedMps = simulatedPhysicalSpeedMps
         val axleTorque = axleWheelTorqueAtSpeed(profile, simulatedPhysicalSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
         val throttleConnected = transmissionPosition == TransmissionPosition.DRIVE
@@ -259,8 +254,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (simulatedPhysicalSpeedMps < 0.04 && driveForce <= rollingResistance + serviceBrakeForce) {
             simulatedPhysicalSpeedMps = 0.0
         }
-        lastAcceleration = ((simulatedPhysicalSpeedMps - previousSpeedMps) / max(dt, 0.001))
-            .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
     }
 
     /** Feeds SIM through the same whole-km/h boundary exposed by the BYD framework. */
@@ -274,7 +267,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun applyExternalSpeed(externalSpeedKmh: Double, dt: Double) {
-        val previousSpeedMps = vehicleSpeedMps
         rawExternalSpeedKmh = externalSpeedKmh
         val continuousKmh = externalSpeedEstimator.update(
             measurementKmh = externalSpeedKmh,
@@ -284,16 +276,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         vehicleSpeedMps = continuousKmh / 3.6
         if (!externalSpeedActive) {
             synchronizeToRoadSpeed()
-            lastAcceleration = 0.0
-        } else {
-            val measuredAcceleration = ((vehicleSpeedMps - previousSpeedMps) / max(dt, 0.001))
-                .coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
-            lastAcceleration = approachExp(
-                current = lastAcceleration,
-                target = measuredAcceleration,
-                timeConstant = EXTERNAL_ACCELERATION_FILTER_SECONDS,
-                dt = dt,
-            ).coerceIn(-MAX_REPORTED_ACCELERATION, MAX_REPORTED_ACCELERATION)
         }
         externalSpeedActive = true
     }
@@ -436,7 +418,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             shiftProgress = shift?.let { (it.elapsedSeconds / it.durationSeconds).coerceIn(0.0, 1.0) } ?: 0.0,
             shiftSerial = shiftSerial,
             limiterActive = limiterLatched,
-            accelerationMps2 = lastAcceleration,
             rawSpeedKmh = rawExternalSpeedKmh,
         )
     }
@@ -447,9 +428,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val MAX_SERVICE_BRAKE_MPS2 = 11.2
         private const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0
-        private const val MAX_REPORTED_ACCELERATION = 15.0
         private const val PEDAL_RELEASE_THRESHOLD = 0.001
-        private const val EXTERNAL_ACCELERATION_FILTER_SECONDS = 0.10
         private const val SHIFT_THROTTLE_THRESHOLD = 0.10
         private const val EMERGENCY_UPSHIFT_RPM_FRACTION = 0.98
         private const val DOWNSHIFT_SPEED_HYSTERESIS_KMH = 4.0

@@ -486,10 +486,6 @@ private fun CarStage(
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
             )
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusTag("${formatWhole(state.drivetrain.accelerationMps2 / 9.81)} G", Amber)
-            }
         }
 
         val context = LocalContext.current
