@@ -32,7 +32,7 @@ class TuningConfigTest {
             ),
         ).sanitized()
 
-        assertEquals(6_000.0, result.maxRpm, 0.0)
+        assertEquals(5_000.0, result.maxRpm, 0.0)
         assertTrue(result.idleRpm < result.upshiftRpm)
         assertTrue(result.upshiftRpm <= result.redlineRpm)
         assertTrue(result.redlineRpm <= result.limiterRpm)
@@ -48,7 +48,28 @@ class TuningConfigTest {
 
         assertEquals(5, result.gearRatios.size)
         assertTrue(result.gearRatios.zipWithNext().all { (left, right) -> left > right })
-        assertTrue(result.gearRatios.all { it in 0.45..5.0 })
+        assertTrue(result.gearRatios.all { it in 0.45..8.0 })
+    }
+
+    @Test
+    fun sanitizerPreservesOfficialHighIdleFastShiftAndFirstGearValues() {
+        val result = EngineTuning(
+            idleRpm = 4_000.0,
+            maxRpm = 19_300.0,
+            redlineRpm = 18_800.0,
+            limiterRpm = 18_800.0,
+            upshiftRpm = 18_500.0,
+            upshiftDurationMs = 15.000001,
+            downshiftDurationMs = 20.000001,
+            gearRatios = listOf(5.09, 3.20, 2.10, 1.40),
+        ).sanitized()
+
+        assertEquals(4_000.0, result.idleRpm, 0.0)
+        assertEquals(19_300.0, result.maxRpm, 0.0)
+        assertEquals(18_500.0, result.upshiftRpm, 0.0)
+        assertEquals(15.000001, result.upshiftDurationMs, 0.0)
+        assertEquals(20.000001, result.downshiftDurationMs, 0.0)
+        assertEquals(listOf(5.09, 3.20, 2.10, 1.40), result.gearRatios)
     }
 
     @Test

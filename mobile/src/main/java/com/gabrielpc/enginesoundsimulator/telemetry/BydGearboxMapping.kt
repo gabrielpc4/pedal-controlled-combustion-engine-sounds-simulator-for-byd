@@ -25,7 +25,7 @@ internal data class BydGearboxConstants(
     }
 
     companion object {
-        fun fallback(): BydGearboxConstants = BydGearboxConstants(
+        private val FALLBACK = BydGearboxConstants(
             park = 1,
             reverse = 2,
             neutral = 3,
@@ -33,6 +33,8 @@ internal data class BydGearboxConstants(
             sport = 5,
             manual = 6,
         )
+
+        fun fallback(): BydGearboxConstants = FALLBACK
 
         fun discover(deviceClass: Class<*>): BydGearboxConstants {
             val fallback = fallback()
@@ -69,11 +71,13 @@ internal data class BydGearboxConstants(
 }
 
 internal fun gearboxCodeToTransmissionPosition(code: String?): TransmissionPosition? {
-    return when (code?.trim()?.uppercase()) {
-        "P" -> TransmissionPosition.PARK
-        "N" -> TransmissionPosition.NEUTRAL
-        "D" -> TransmissionPosition.DRIVE
-        "R", "S", "M" -> TransmissionPosition.NEUTRAL
+    val value = code?.trim() ?: return null
+    return when {
+        value.equals("P", ignoreCase = true) -> TransmissionPosition.PARK
+        value.equals("N", ignoreCase = true) -> TransmissionPosition.NEUTRAL
+        value.equals("D", ignoreCase = true) -> TransmissionPosition.DRIVE
+        value.equals("R", ignoreCase = true) || value.equals("S", ignoreCase = true) ||
+            value.equals("M", ignoreCase = true) -> TransmissionPosition.NEUTRAL
         else -> null
     }
 }

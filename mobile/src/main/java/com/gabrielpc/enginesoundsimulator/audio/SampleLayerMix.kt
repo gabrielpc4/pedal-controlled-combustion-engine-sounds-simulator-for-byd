@@ -27,9 +27,8 @@ data class LayerMixTrackState(
     /** Smoothed gain currently reaching the audio mix (0–1). */
     val outputLevel: Double,
     val isEffect: Boolean,
-    /** True for every mixer row except Coast and Load — shows a trim slider under the live meter. */
+    /** True for mixer rows that expose an independent trim slider. */
     val showVolumeSlider: Boolean = false,
-    val isLoadLayer: Boolean = false,
 )
 
 /** Live output level for one mixer track row. */
@@ -41,9 +40,12 @@ data class LayerOutputMeter(
 internal fun SampleLayerRole.mixerSortGroup(): Int = when (this) {
     SampleLayerRole.IDLE -> 0
     SampleLayerRole.COAST -> 1
-    SampleLayerRole.LOAD -> 2
-    SampleLayerRole.TEXTURE -> 3
-    SampleLayerRole.LIMITER -> 4
+    SampleLayerRole.TEXTURE -> 2
+    SampleLayerRole.INTAKE -> 3
+    SampleLayerRole.EXHAUST -> 4
+    SampleLayerRole.TURBO -> 5
+    SampleLayerRole.SPOOL -> 6
+    SampleLayerRole.LIMITER -> 7
 }
 
 internal fun SampleLayerSpec.mixerDisplayName(): String {
@@ -62,10 +64,16 @@ internal fun SampleLayerSpec.mixerDisplayName(): String {
 internal fun SampleEffectSpec.mixerDisplayName(): String = playingRoleLabel()
 
 internal fun SampleEffectTrigger.mixerSortGroup(): Int = when (this) {
-    SampleEffectTrigger.TRANSMISSION_LOOP -> 5
-    SampleEffectTrigger.SHIFT_UP -> 6
-    SampleEffectTrigger.SHIFT_DOWN -> 7
-    SampleEffectTrigger.THROTTLE_LIFT -> 8
+    SampleEffectTrigger.ENGINE_EVENT -> 7
+    SampleEffectTrigger.TURBO_EVENT -> 8
+    SampleEffectTrigger.CONTINUOUS_LOOP -> 8
+    SampleEffectTrigger.TRANSMISSION_LOOP -> 9
+    SampleEffectTrigger.LIMITER -> 10
+    SampleEffectTrigger.LIMITER_EVENT -> 10
+    SampleEffectTrigger.SHIFT_UP -> 11
+    SampleEffectTrigger.SHIFT_DOWN -> 12
+    SampleEffectTrigger.THROTTLE_LIFT -> 13
+    SampleEffectTrigger.BOV_LIFT -> 13
 }
 
 internal fun EngineSampleProfile.mixerTrackOrder(): List<Pair<String, Int>> {

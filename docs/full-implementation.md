@@ -1,256 +1,312 @@
 # Full engine-sound implementation
 
-> **Current behavior:** D mode derives sound RPM from continuous road speed and the selected
-> sample bank's gear count. Integer BYD speed readings pass through a predictive, critically
-> damped estimator before moving the tach or audio. The sound gearbox derives its shifts from each
-> equal-width road-speed bands and configured shift RPM without changing electric wheel force.
+> **Current design:** a foreground service keeps read-only BYD telemetry, the Seal EV model, the
+> imported-ratio tachometer, effects, and fixed-stereo sample audio alive while the dashboard is in
+> the background. Compose presentation stops when hidden. Sound media is imported privately as
+> validated lossless `.aclib` packs; it is not bundled in the base APK.
 
-Last verified: 2026-08-16
+Last architecture update: 2026-08-27
 
-This document is the durable implementation handoff for the interactive motor-sound application that followed the original pedal-telemetry POC. Read this together with [the BYD telemetry notes](research-findings.md), not instead of them.
+## Delivered system
 
-## Delivered behavior
+The `mobile` module provides:
 
-The `mobile` module is now a complete, landscape dashboard application:
+- read-only accelerator, brake, road-speed, and gearbox probing with simulator fallback;
+- a fixed-step 200 Hz Seal Performance longitudinal model;
+- a separate fully automatic combustion-car presentation gearbox and tachometer;
+- an immutable 178-car official/official-DLC selector backed by 153 deduplicated bank families;
+- searchable installed state, favorites, car previews, selected-car image, and private SAF imports;
+- strict versioned pack/catalog schemas and atomic app-private installation;
+- native lossless FLAC decode into bounded planar PCM16 and an allocation-free native mixer;
+- authored idle/coast/character/turbo/transmission/effect behavior with the excluded on-throttle
+  bank role absent;
+- one PCM16, 48 kHz, stereo `AudioTrack` with adaptive buffering and focus handling;
+- foreground/background continuity, notification Mute/Unmute and Stop, and crackle diagnostics.
 
-- reads accelerator, brake, and road speed from the existing read-only BYD DiLink probe when the corresponding signals are valid;
-- falls back automatically to touch/keyboard simulator pedals when the vendor API is unavailable;
-- advances a Seal Performance-calibrated electric road model and an independent sample-engine layer at a fixed 200 Hz;
-- performs presentation-only automatic upshifts, braking downshifts, safe kickdowns, and ratio swaps without interrupting electric wheel torque;
-- renders the selected sample profile continuously from RPM and throttle using recovered per-layer bank automation;
-- experimentally requests stereo, quad, 5.1, or 7.1 logical PCM output and mirrors the same engine program to every initialized logical channel;
-- exposes live audio route, channel, buffer, sample-rate, session, and underrun diagnostics;
-- renders the requested car-and-tachometer composition against the 1920 x 990 safe-area target measured on the emulator; the actual car dimensions and insets remain unmeasured.
+Combustion gears affect only RPM, the tach, pitch, and events. They never alter electric wheel
+force. That separation is a core product invariant.
 
-The road model is not a pedal-to-needle animation: throttle requests motor torque, and motor speed, the 390 kW ceiling, mass, traction, drag, rolling resistance, and braking determine vehicle acceleration. Fictional gears then turn road speed into the sound RPM shown on the gauge. Those gears never feed back into wheel torque.
+## Runtime ownership
+
+```text
+                     DriveRuntimeService
+  +----------------------------------------------------------------+
+  | BYD reader -> input arbitration -> Seal EV model                |
+  |                                     |                           |
+  |                          presentation gearbox @ 200 Hz          |
+  |                                     |                           |
+  |                              EngineAudioFrame                   |
+  |                                     |                           |
+  | background FLAC loader -> native profile -> native mixer        |
+  |                                     |                           |
+  |                          fixed stereo AudioTrack                |
+  |                                                                |
+  | runtime counters -> on-demand snapshot / bounded JSONL export   |
+  +----------------------------------------------------------------+
+                    ^ local binder, only while visible
+                    |
+             MainActivity / Compose @ <= 60 Hz
+```
+
+`DriveRuntimeService` exclusively owns `DriveController`, BYD polling, simulation, gearbox state,
+decode workers, mixer, `AudioTrack`, focus, and diagnostics. `START_STICKY` is conditioned on an
+explicit active-session marker; there is no boot receiver.
+
+Activity behavior:
+
+- `onStart()`: bind, mark the UI visible, request one immediate snapshot, start the visible sampler;
+- `onStop()`: cancel the sampler and UI-only work, release manual pedals, mark hidden, unbind;
+- returning does not recreate `AudioTrack`, reset the gear, restart telemetry, or reset loop phase;
+- thumbnail/image decoding and Compose models are not periodically built in the background.
+
+Service behavior:
+
+- Home/app switch keeps telemetry, RPM, effects, and audio running;
+- low-importance notification changes only when car or sound-enabled state changes;
+- notification **Mute/Unmute** changes audio state without stopping the driving core;
+- notification **Stop** or Recents dismissal records user stop, releases manual pedals, fades audio,
+  stops workers/reader/track, abandons focus, removes the notification, and calls `stopSelf()`;
+- sticky process recreation respects the stop marker; reopening the dashboard starts a new session;
+- no partial wake lock is held.
 
 ## Source map
 
-| File | Responsibility |
+| Area | Responsibility |
 | --- | --- |
-| `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, continuous BYD-speed estimation, and speed-coupled sound gearbox |
-| `simulation/TransmissionPosition.kt` | `P` / `N` / `D` enum consumed by `DriverInput` |
-| `audio/EngineSampleProfile.kt` | Car-profile metadata, gearbox calibration, layers, and recovered control curves |
-| `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and telemetry |
-| `audio/WavPcmDecoder.kt` | PCM16 mono/stereo preservation and embedded loop-point decoding |
-| `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
-| `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
-| `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
-| `telemetry/BydSpeedReader.kt` | Read-only reflective DiLink capability probe and getter polling |
-| `telemetry/BydReadOnlyPermissionContext.kt` | Exact speed-read-only scope for BYD client-side permission checks |
-| `diagnostics/PersistentDiagnosticLog.kt` | Bounded, synced app-private transition/crash event trail |
-| `EngineSoundsSimulatorApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
-| `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
-| `audio/SampleEngineRendererTest.kt` | Profile integrity, decoder, curve, sweep, and runtime-telemetry tests |
+| `drive/DriveRuntimeService.kt` | Foreground lifecycle, binder commands, notification, imports, export |
+| `drive/DriveController.kt` | 200 Hz primitive core, input arbitration, state publication |
+| `drive/DriveRuntimeDiagnostics.kt` | Non-real-time crackle marker and bounded JSONL export |
+| `simulation/EngineSimulation.kt` | Seal road model, continuous speed reconstruction, presentation gearbox |
+| `catalog/OfficialCarIndex.kt` | Immutable 178-entry selector seed |
+| `catalog/CarCatalog.kt` | Private catalog/family state and persistent favorites |
+| `catalog/AclibPackImporter.kt` | Strict ZIP/media/hash validation and atomic install |
+| `catalog/SoundFamilyManifestV1.kt` | Versioned manifest and car/gear/effect metadata |
+| `audio/NativeFlacDecoder.kt` | Cancellable native `libFLAC` decode and native planar clip ownership |
+| `audio/NativeSoundFamilyLoader.kt` | Verify/decode/prepare the selected installed family off-thread |
+| `audio/NativePcmMixer.kt` | Preallocated JNI control/status bridge to the native mixer |
+| `audio/SampleEngineRenderer.kt` | Curves, trigger decisions, swap/crossfade integration |
+| `audio/EngineAudioEngine.kt` | Focus, writer thread, profile swap, adaptive `AudioTrack` |
+| `audio/AdaptiveAudioBuffer.kt` | 30–80 ms buffer policy and render histogram |
+| `src/main/cpp/native_flac.cpp` | FLAC decoder and native PCM mixer |
+| `MainActivity.kt` | Visible client, Compose dashboard, SAF launchers |
 
-## Runtime architecture
+## Catalog, provenance, and installation
+
+The compiler accepts only the complete usable Kunos/official-DLC set: 178 cars and 153 exact-bank
+families. Two installed Ferrari directories without usable physics/audio are excluded as
+placeholders. A car sharing a bank references the same family rather than duplicating media.
+
+The APK contains the immutable car-name seed so all entries can appear before media is installed.
+The generated `catalog-v1.json` adds full engine, gearbox, effect, quirk, family, preview, and
+provenance metadata. It stays local and is imported with SAF. Each `.aclib` is an atomic ZIP with:
+
+- one strict `SoundFamilyManifestV1`;
+- FLAC files for the family's permitted tracks;
+- optional JPEG/PNG previews for member cars;
+- source-bank/catalog/capture-plan/encoder provenance and integrity values.
+
+The Android importer bounds archive/member sizes and counts, rejects path traversal and duplicate
+members, accepts only exact supported image/audio formats, checks official family membership, and
+validates every compressed hash. FLAC STREAMINFO must state 48 kHz, stereo, 16-bit PCM and the
+declared frame count. It also decodes and hashes PCM before committing the staged directory. Failed
+or interrupted imports do not replace a known-good family.
+
+The pack picker accepts one or many documents in one SAF selection. The service imports distinct
+URIs serially on its catalog worker and commits each family atomically, so a large selection neither
+blocks Compose nor interrupts the active driving/audio runtime; single-pack selection uses the same
+path. This is deliberately per-pack atomic rather than one batch transaction: if a later document
+is invalid, earlier valid commits remain installed. Installed-family discovery and selector state
+are refreshed exactly once when the batch closes, including that partial-success failure path, and
+the original validation failure is returned to the UI.
+
+Official quirks use a closed, car-derived vocabulary. Complete turbo-controller programs execute on
+the audio thread; hybrid and AWD data remain excluded from the separate Seal physics; alternate
+`.rto` option pools and partial turbo programs remain diagnosed provenance; and the BMW M3 E30 GrA
+Gain-DSP plus Tatuus silent-BOV decisions are compiler-time behavior already represented by the
+captured or omitted PCM. Shared-family quirk unions are never applied indiscriminately to siblings.
+
+Imported AC recordings and previews are private copies of game content. A valid pack proves
+technical provenance and integrity, not redistribution rights. They and compiler output are ignored
+by Git and must not enter an APK or public release without permission.
+
+The pinned native FLAC dependency's New BSD notice is shipped in
+`mobile/src/main/assets/third_party_licenses/FLAC.txt`; this does not grant rights to the private AC
+recordings or previews.
+
+## Lossless audio pipeline
+
+The offline reference renderer uses FMOD no-sound/non-real-time capture at 48 kHz stereo. The final
+signed PCM16 program is encoded with pinned FLAC compression level 8. Decoding must reproduce that
+PCM bit-for-bit; FLAC does not repair clicks or clipping, so loop selection/crossfade and headroom
+validation happen first. The Huracán Trofeo EVO2 `c1`, `c3`, and limiter seams are explicit compiler
+regressions.
+
+Installed pack roles:
+
+| Continuous | One-shot/effect |
+| --- | --- |
+| IDLE, COAST, TEXTURE, INTAKE, EXHAUST, TURBO, SPOOL, TRANSMISSION | BOV, LIMITER, SHIFT_UP, SHIFT_DOWN, OVERRUN, POP, BANG, CRACK |
+
+Every family must have audible authored `IDLE`. Optional effects may be absent. The `LOAD` role is
+forbidden by compiler and Android schema rather than muted by a runtime flag. There is one mix path;
+no legacy load/coast mode remains.
+
+The decoder worker completely prepares the selected family before activation:
+
+1. recheck manifest and FLAC hashes;
+2. decode loops and enabled one-shots with native `libFLAC`;
+3. verify PCM hash/frame count and exclusive loop bounds;
+4. create immutable native planar clips and the native mixer;
+5. prewarm renderer state;
+6. publish a pending profile;
+7. swap at an audio-buffer boundary with a preallocated short crossfade;
+8. retire/free the prior native profile on the worker, never on the writer.
+
+Changing selection cancels stale decode work. The old car remains active until the replacement is
+complete. The writer performs no decoding, file I/O, locks, diagnostic formatting, large frees, or
+per-buffer allocation.
+
+When multiple authored track roles reference the same manifest path, their file/PCM identity
+metadata must agree. Import verification, decoded-byte accounting, FLAC decode, native ownership,
+and release happen once per unique physical path; role, curve, trigger, gain, priority, and loop
+interpretation remain separate logical track metadata.
+
+### Memory policy
 
 ```text
-BYD getters (when available)       Simulator touch / W-S keys
-             \                       /
-              +---- DriveController ----+
-                         | 200 Hz
-                  EngineSimulation
-                    /           \
-             UI snapshot      EngineAudioFrame
-                 30 Hz              |
-             Compose UI     SampleEngineRenderer
-                                     |
-                            stereo PCM16 program
-                                     |
-                        duplicate into N channels
-                                     |
-                    one continuous streaming AudioTrack
+soft budget = min(64 MiB, Android memory class / 8)
+hard budget = min(192 MiB, Android memory class / 4)
 ```
 
-Threads have intentionally separate duties:
+Only the active family is decoded and no second-car cache is retained. The hard budget is
+unconditional. Until an accepted compiler window/partition schema exists, import and activation
+also fail closed above the device soft budget. An oversized family must be reduced by the compiler;
+it must not silently exceed either enforced limit or evict audio on the real-time thread.
 
-- the BYD reader owns its vendor-getter polling worker;
-- `DriveController` owns the fixed-step simulation worker;
-- `EngineAudioEngine` owns a high-priority audio writer;
-- the main thread samples immutable state approximately every 33 ms for Compose, while simulation and audio control remain at 200 Hz.
+### Native mixer and output
 
-The hot mix/write path reuses its PCM arrays and performs no file I/O or persistent logging. It refreshes a bounded diagnostic snapshot and route/underrun state periodically; move framework route queries off the writer if profiling shows a real-time penalty.
+Profile preparation allocates native voice state and fixed JNI arrays. During each render burst the
+native mixer performs cubic interpolation, continuous phase advancement, exclusive-end wrap and seam
+crossfade, voice/effect gain smoothing, summing, a smooth safety limiter, and PCM16 conversion. It
+reports primitive wrap, peak, over-range, and active-voice counters.
 
-## Input policy
+Authored turbo timelines, limiter pulses, and engine-event sources carry their exact in-burst frame
+offset through preallocated Kotlin/JNI arrays. Native voices stay silent and do not advance phase or
+gain until that frame; scheduling is not quantized to the next render-buffer boundary. Fixed-size
+50 us histograms retain overall lifetime timing while separately exposing steady and 30 ms
+pack-transition bursts. Diagnostics report each p99 bucket's lower/upper interval, raw maximum, and
+sample count without resetting history. Acceptance gates the conservative upper edge of steady
+throughput at the 256-frame equivalent and transition maximum at the actual AudioTrack burst
+deadline; overall p99/max and underruns remain visible.
 
-The header input button cycles these modes:
+One allocation-free FMOD-style arbiter owns the stock AC limits of 2,048 logical voices and 256
+real/software voices. Continuous loops, fixed event sources and tails, engine-event transients, and
+limiter-event transients all compete in that same pool; there is no fixed reservation for static
+sources and no cross-program FIFO. Lower numeric channel priority is ranked first, then higher live
+audibility. Virtual sources keep advancing phase and gain, and native promotion starts them at the
+retained logical phase rather than frame zero. The final equal-priority/equal-audibility ordering is
+only a deterministic Android fallback: the FMOD 1.08 oracle does not establish that cross-source tie
+comparator or any ordering inside one 256-frame DSP update. Schema-v2 packs now fail closed unless
+every track and one-shot program carries its exact
+source-bound FMOD priority, all program leaves agree, and provenance binds the complete priority
+oracle by SHA-256. Schema-v1 compatibility and direct test fixtures alone retain 64/128 fallbacks.
 
-| Mode | Behavior |
-| --- | --- |
-| `AUTO` | Use valid live BYD accelerator/brake values; otherwise use simulator pedals |
-| `SIM` | Always use touch/keyboard pedals and integrate virtual road speed |
-| `BYD LIVE` | Require live BYD pedal values; the UI says `BYD UNAVAILABLE` until they are valid |
+Normal profiles are calibrated below -3 dBFS and the limiter ceiling is -1 dBFS. A zero default-gain
+over-range count is an acceptance gate; the limiter is emergency headroom, not a mix strategy.
 
-When a valid BYD road-speed value is present in live-pedal mode, it replaces simulated vehicle speed. In the current build, valid live pedals can coexist with an invalid/missing speed value; in that case `externalSpeedKmh` is null and virtual speed is still integrated. This is acceptable only for the bench POC. Before moving-car testing, live mode should require valid speed or enter a clearly disabled/frozen state rather than inventing vehicle motion. The same engine, shift, gauge, and audio model is otherwise used in both modes.
+There is one streaming `AudioTrack`:
 
-The vendor interaction remains read-only. Reflection invokes the vendor `getInstance(Context)` factory and the documented accelerator, brake, and current-speed getters; no vehicle setter permission or setter call was added. Firmware `2503` denied those getters under the ordinary application context. The reader now supplies a restricted context that recognizes only `BYDAUTO_SPEED_COMMON` and `BYDAUTO_SPEED_GET`; PackageManager still correctly reports the signature permission as denied.
+- PCM16, exactly 48 kHz;
+- `CHANNEL_OUT_STEREO` only;
+- `USAGE_GAME` / music content;
+- low-latency mode where the Android version supports it;
+- target starts at 50 ms, grows by 10 ms after underrun/low queue, and shrinks by 5 ms after a
+  60-second clean interval, bounded to 30–80 ms and one adjustment per minute.
 
-## Electric vehicle and synthetic engine model
+Audio focus smoothly ducks on `CAN_DUCK`, fades silent on transient loss, resumes on gain, and stays
+silent after permanent loss until valid reacquisition. These policies apply equally with the
+Activity visible or hidden.
 
-The physical longitudinal defaults use published Seal Performance AWD anchors. The complete evidence/assumption split and source links are recorded in [BYD Seal Performance calibration](byd-seal-performance-calibration.md).
+A sound-disabled state restored at service startup queues no selected-pack decode and opens no
+`AudioTrack`; telemetry, EV simulation, and gearbox still run. Enabling sound later prepares the
+current car off-thread and starts output. This is distinct from muting an already-running session,
+which keeps decoded PCM, loop phase, and `AudioTrack` alive behind the normal gain fade for an
+instant, phase-continuous unmute.
 
-| Physical parameter | Default |
-| --- | ---: |
-| Front / rear / combined maximum output | 160 / 230 / 390 kW |
-| Front / rear / combined maximum torque | 310 / 360 / 670 Nm |
-| Published 0–100 km/h / top speed | 3.8 s / 180 km/h |
-| Vehicle mass | 2,185 kg |
-| Motor-speed envelope | 0–16,000 RPM |
-| A2MAC1 front / rear peak wheel torque | 3,170 / 3,975 Nm |
-| A2MAC1 measured acceleration | 3.97 s to 100 km/h |
-| Effective fixed reduction | 10.81:1 |
-| Wheel radius | 0.347 m |
-| Drivetrain efficiency / traction ceiling | 0.92 / 10.0 m/s² |
-| Rotating-mass factor | 1.10 |
-| Drag area / rolling coefficient | 0.504 m² / 0.010 |
+## Electric road model and presentation gearbox
 
-BYD's official motor ratings remain the authority for 390 kW and 670 Nm. Vehicle acceleration now uses separately editable front/rear wheel-torque curves digitized from A2MAC1's measured acceleration chart. They total 7,145 Nm at peak; the rear share rises from approximately 56% at launch to 71% near the official top speed. The wheel-torque curves taper continuously with road speed and remain bounded by the configured motor-power/efficiency sanity ceiling. See [the calibration record](byd-seal-performance-calibration.md) for the digitized points and evidence policy.
+The Seal physical defaults and evidence split remain in
+[BYD Seal Performance calibration](byd-seal-performance-calibration.md). At 5 ms steps, input filters,
+editable axle torque curves, motor-power bounds, traction, mass, drag, rolling resistance, regen,
+and brakes advance simulated road speed. Valid BYD speed replaces the simulated speed; whole-km/h
+samples pass through the continuous estimator before reaching the tach/audio model.
 
-At every 5 ms fixed step:
-
-1. Raw accelerator position is evaluated through the editable Sport-like pedal curve, then accelerator and brake requests pass through exponential response filters.
-2. A valid external road-speed sample replaces virtual speed. The first live sample selects a safe synthetic sound gear without reporting a fake acceleration spike.
-3. In simulator mode, normalized road speed selects independent front and rear wheel torque from the digitized editable curves.
-4. Requested wheel torque is scaled by the filtered Sport-like pedal request and bounded by the configured motor-power/efficiency sanity ceiling.
-5. Wheel torque divided by tire radius produces drive force; the non-binding configurable traction ceiling remains available for tuning.
-6. In simulator mode only, lift-off applies a strong constant coast deceleration (`simulatorCoastRegenMps2`, default 2.50 m/s²) so virtual speed and synthetic RPM fall promptly. The value is independently editable from 0–4 m/s² and never affects BYD Live input.
-7. Service braking, aerodynamic drag, and rolling resistance are subtracted; net force divided by physical mass plus an effective rotating-mass factor advances vehicle speed. Reported acceleration is the actual clamped speed delta.
-8. The sound RPM behavior follows the **P / N / D** shifter: **D** maps continuous road speed through the active presentation gear ratio and sound final drive. **N** and **P** free-rev toward a throttle-position target using fixed neutral inertia constants (`NEUTRAL_REV_UP_RESPONSE_SECONDS` = 0.55 s, `NEUTRAL_REV_DOWN_RESPONSE_SECONDS` = 0.90 s).
-9. The sound gearbox can swap derived presentation ratios and create an audible/visible shift, but it never changes motor torque, wheel force, or physical acceleration.
-
-In BYD Live mode, lift-off and braking affect sound RPM only through the measured road-speed decrease. In SIM mode, service braking and the configured lift-off regen reduce virtual road speed, so coupled RPM follows naturally. There is no simulated clutch feeding torque back into the vehicle.
-
-### Synthetic automatic shifts
-
-The gearbox divides configured top speed evenly by the selected bank's gear count. Each derived ratio reaches normal shift RPM at the upper edge of its speed band. Each upshift remembers the actual road-speed boundary that selected the new gear; its downshift uses that remembered boundary with 4 km/h hysteresis. An independent near-redline safety upshift prevents a low gear from remaining pinned during an externally driven speed increase.
-
-The ratio changes at 38% of the configured shift animation. The initial sample profile defaults to its source calibration of 60 ms up and 150 ms down; a 150 ms completed-shift dwell and speed hysteresis reject duplicate requests. Shift RPM follows a ratio-derived target, but EV road force remains continuous throughout the presentation event. **N** and **P** free-rev without automatic shifts.
-
-## Profile-based sample model
-
-The public repository contains playback code and profile metadata but no recordings. Local ignored assets are required for a working audio build; redistribution requires permission from their rights holder.
-
-The app has two selectable Lamborghini interior engine profiles. Each owns its continuous waveform layers, RPM region, base level/pitch, optional autopitch root, recovered or reconstructed RPM envelopes, throttle route, gearbox calibration, preview, and authored 44.1 or 48 kHz rate. WAV `smpl` metadata preserves the authored loop subsection. Persistent fractional cursors and cubic interpolation perform varispeed without restarting at buffer boundaries. Inaudible timelines continue advancing, layer/control gains are smoothed, and both source channels remain intact. Calibrated headroom replaces the former always-on nonlinear soft clipping, so normal-range samples stay linear before logical output mapping. The Huracán profile retains its profile-local on-throttle output trim. There is no separate preview player or perspective-selection path; dashboard arrows atomically switch the displayed preview, RPM/gear defaults, and loaded bank.
-
-The native bank axis is retained directly; profile redline or limiter values do not stretch its sample regions. Full implementation and validation details are in [Profile-based sample engine audio](sample-engine-audio.md).
-
-## Audio routing and multichannel truth
-
-The setting cycles `AUTO -> 7.1 -> 5.1 -> QUAD -> STEREO`.
-
-`AUTO` inspects channel-count metadata for all output devices currently enumerated by Android and requests the highest advertised layout. That metadata is not limited to the route that the track will ultimately use, so an unrelated HDMI or USB device can make `AUTO` optimistic. A forced layout falls back to progressively smaller layouts when `AudioTrack` cannot initialize it. The output uses:
-
-- one continuous `AudioTrack` in `MODE_STREAM`;
-- PCM 16-bit at the primary-output rate advertised by Android, normally 48 kHz but not necessarily native to every routed or multichannel sink;
-- `USAGE_GAME` and `CONTENT_TYPE_MUSIC`;
-- API-24/25 low-latency attributes or API-26+ performance mode;
-- a capacity of at least four native bursts, tuned toward two bursts where supported;
-- one blocking writer on an audio-priority thread;
-- reduced gain for 4/6/8-channel mirroring in an attempt to retain downmix headroom.
-
-The 5.1 and 7.1 experiments retain left/right on every matching front/rear/side pair and use the stereo midpoint for center and LFE. This is still not a conventional surround master. OEM bass management may filter, omit, or sum LFE, and a downmixer may combine correlated channels with unexpected gain. Keep test volume low. A production surround path should feed LFE a separately limited, low-pass signal after the actual HAL/downmix behavior is known.
-
-The application requests audio focus before creating the renderer. A denied request now prevents playback; duck, transient loss, recovery, and permanent loss update diagnostic state and use short gain ramps to avoid discontinuities. Shutdown and spontaneous renderer failure both release focus. Gain ramps are unit-tested and the lifecycle was exercised on the emulator, but platform focus acquisition/listener paths are not isolated behind a fake in the JVM suite. Actual coexistence with calls, navigation, ADAS, and system warnings still requires on-car policy testing.
-
-Important: an 8-channel `AudioTrack` is not proof that eight physical BYD speakers receive discrete channels. Android applications submit logical channels. Audio policy selects a bus, and the BYD amplifier/DSP maps that bus to physical front/rear/center/subwoofer speakers. If the vehicle media bus is stereo, Android may downmix 5.1/7.1 before the BYD DSP distributes it across the cabin. Such downmixing can also disqualify the low-latency fast path.
-
-Therefore the production preference is:
-
-1. choose native-rate stereo when the car exposes only a stereo media sink and let the factory DSP distribute it;
-2. retain 5.1/7.1 only when on-car AudioFlinger/audio-policy evidence confirms a matching HAL output;
-3. never claim physical speaker coverage based only on `AudioTrack.channelCount`.
-
-The header/footer show the requested mode, active logical channel count/layout, routed device, sample rate, buffer, session ID, and underruns. Output-device capability metadata is retained in `AudioOutputState.advertisedChannels` but is not currently rendered in the UI.
-
-## Head-unit UI and controls
-
-The dashboard targets a 1920:990 design ratio. The emulator configuration used for this build measured a 1920 x 990 safe content area inside a 1920 x 1080 display after its 90-pixel system/navigation inset. That measurement does not establish the BYD panel's final `WindowInsets`, density, overscan, or bar height; record those on the car before calling the fit exact.
-
-The **TUNE** control opens a persistent live-editing workstation. It exposes the Seal-response motor ratings, measured front/rear wheel-torque peaks and curves, live AWD distribution, motor speed and reduction, efficiency, traction ceiling, mass/rotating-mass factor, tire radius, drag, rolling resistance, top speed, Sport-like pedal curve and timing, SIM coast regen, shift timing, master audio level, and the selected profile's layer-coverage graph. Display-unit policy is in [UI display and simulation decisions](ui-display-and-simulation-decisions.md). Control inventory: [Live tuning interface](tuning-interface.md).
-
-The layout scales both dimensions together to preserve the 1920:990 design ratio and letterboxes any remainder. `WindowInsets.safeDrawing` removes system-bar and cutout areas before that fit is calculated.
-
-Controls:
-
-- touch and drag vertically on the right accelerator pedal;
-- touch and drag vertically on the left brake pedal;
-- tap **P**, **N**, or **D** on the column shifter to the right of the pedals (runtime only; not saved in tuning);
-- keyboard `W` or Up Arrow for full throttle;
-- keyboard `S`, Down Arrow, or Space for full brake;
-- tap the input header to cycle AUTO/SIM/BYD LIVE;
-- tap engine audio to mute/unmute;
-- tap output mode to cycle channel policy.
-
-The red sports-car illustration is an AI-generated fictional concept created for this app with no intentional manufacturer branding or text. Generation does not guarantee that a design is unique, copyrightable in every jurisdiction, or free of similarity to protected vehicle designs or marks. Treat it as a prototype asset pending visual/IP review. Source asset: `res/drawable-nodpi/apex_v10_car.png`; generation provenance and hash are recorded in [the source-material log](source-material/README.md#generated-ui-asset).
-
-## Verification performed
-
-The following command passes:
-
-```powershell
-.\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:lintDebug
-```
-
-Tests verify that:
-
-- the default physical profile contains the published 670 Nm, 390 kW, 2,185 kg, and 180 km/h anchors;
-- the digitized axle curves reproduce the 3,170/3,975 Nm peaks and approximately 56% to 71% rear-share progression;
-- sustained throttle in **D** increases sound RPM progressively with road speed rather than jumping directly to a pedal-derived target; in **N**/**P**, partial throttle stabilizes at a free-rev setpoint;
-- first-gear sound RPM does not reverse at any tested positive throttle input;
-- full-throttle virtual acceleration reaches 100 km/h inside the 3.90–4.02 second A2MAC1 calibration band;
-- low-speed acceleration is stronger than high-speed acceleration, and a synthetic upshift causes no wheel-torque discontinuity;
-- automatic shifts begin near the shift point, drop RPM, and honor completed-gear dwell;
-- joining live speed selects a safe ratio, and projected over-rev forces a throttle-independent emergency upshift;
-- virtual/live acceleration has the correct sign and bounds, including zero acceleration when braking at rest;
-- the sound limiter uses hysteresis instead of buffer-rate chatter;
-- braking decelerates more strongly than coasting;
-- the stopped engine returns to the configured 950 RPM idle;
-- the sample renderer decodes PCM/loop metadata, evaluates recovered control curves, produces nonzero PCM throughout the operating range, advances loop cursors, reports runtime telemetry, and fails closed on an incomplete bank; tests do not establish perceived quality or cabin audibility;
-- channel duplication writes exactly the same sample to every logical channel;
-- explicit BYD LIVE mode fails safe to zero pedals when telemetry is unavailable, while AUTO alone may use simulator fallback;
-- rapid controller lifecycle transitions cannot revive an obsolete simulation loop.
-
-The automated suite covers drivetrain behavior, audio continuity/channel replication, input arbitration, and tuning sanitization/interpolation. The [emulator validation record](emulator-validation.md) preserves the accelerated emulator configuration, APK hash, viewport measurement, and final touch-throttle/brake evidence.
-
-APK output:
+In **D**, the imported car's exact default relative ratios are retained. Its authored default final
+drive and every alternate `.rto` option remain exported provenance; no alternate setup is selected
+without authored selection semantics. A separate presentation final drive scales top gear to reach
+upshift RPM at configured top speed:
 
 ```text
-mobile/build/outputs/apk/debug/mobile-debug.apk
+finalDrive = upshiftRpm / (wheelRpmAtTopSpeed * topRatio)
+rpm = wheelRpmAtSpeed * selectedRatio * finalDrive
+upshiftSpeed = topSpeed * topRatio / selectedRatio
 ```
 
-## Actual-car acceptance procedure
+The normal upshift landing RPM is exact:
 
-Only test parked, or have a passenger operate diagnostics in a controlled environment. The debug build has no enforced drive lockout or calibrated maximum-volume ceiling. Synthetic audio can mask turn signals, ADAS warnings, navigation prompts, calls, emergency vehicles, and other safety cues; it is not approved for public-road use.
-
-1. Install and launch the debug APK.
-2. Confirm `AUTO` changes from `SIM FALLBACK` to `BYD PEDALS` when the DiLink getter probe becomes active.
-3. Check accelerator and brake movement at rest and compare displayed response with physical pedal motion.
-4. Verify speed becomes the external-speed source during a safe passenger-operated test.
-5. Note the audio session ID and active logical layout from the footer.
-6. While audio is playing, capture on the host:
-
-```powershell
-adb shell dumpsys media.audio_flinger > byd_audio_flinger.txt
-adb shell dumpsys media.audio_policy > byd_audio_policy.txt
+```text
+landingRpm = upshiftRpm * nextRatio / currentRatio
 ```
 
-7. Find the active track by session ID/PID. Compare its channel mask with the containing output thread/HAL channel mask. Track=7.1 plus output=stereo proves downmix; both 8-channel proves multichannel reaches the HAL, not the final physical speakers.
-8. Confirm physical cabin coverage by listening at low volume in every seating position. A later diagnostic should solo FL/FR/FC/BL/BR/SL/SR and use a separately level-limited, low-frequency LFE test tone. Listening is a practical end-to-end check, not the only possible proof: an OEM routing description, electrical measurement, or calibrated multichannel acoustic capture can provide stronger evidence. Bass management may deliberately redirect the LFE or main-channel bass.
-9. Watch `underruns`. If they rise, increase the effective buffer by one native burst.
-10. Measure pedal-to-acoustic latency externally. `AudioTimestamp` cannot include unknown amplifier/DSP delay.
+When throttle is released, the current higher gear downshifts as soon as its RPM reaches that stored
+landing point. No 150 RPM offset or RPM hysteresis is applied. Shift dwell only prevents overlapping
+events. Demand kickdown and near-redline emergency upshift are independent. Profile-specific shift
+durations and the 38% presentation ratio swap remain visible/audible without touching EV wheel
+force. **P**/**N** retain free-rev behavior.
 
-## Known limitations and next work
+## UI and controls
 
-- The real-car getters are still polled every 20 ms. Reflection can call the getters, but `AbsBYDAutoSpeedListener` is an abstract vendor class and cannot be instantiated by `java.lang.reflect.Proxy`. Add a trustworthy compile-only BYD SDK/stub or a carefully reviewed runtime subclass mechanism before callback testing.
-- Firmware `13.1.33.2503250.1` confirms the class/getters exist and an ordinary context is denied `BYDAUTO_SPEED_GET`. The restricted speed-read context still needs on-car validation for plausible values and any second server-side check.
-- Live-pedal mode currently falls back to integrating virtual speed if BYD speed is invalid. Require a valid speed signal or fail closed before any moving-car test.
-- The local sample recordings are not licensed for APK redistribution by this repository. Obtain explicit rights before publishing a build containing them.
-- `AUTO` can inspect Android capability metadata, but only actual-car dumpsys and listening can establish physical speaker routing.
-- Full-band LFE mirroring is experimental. Audio-focus handling is implemented, but its interaction with vehicle warnings and other media remains unverified on the BYD audio policy.
-- The 1920 x 990 area is an emulator measurement. Actual-car insets remain unknown; the dashboard now preserves its ratio and letterboxes when the safe area differs.
-- Playback is Activity-owned and intentionally stops when the dashboard is no longer visible. Background/foreground-service operation is not included in this release.
-- The `mobile` APK deliberately targets SDK 25 for DiLink compatibility. It is a sideload prototype, not a Google Play-ready application, and modern devices may block installation without a low-target-SDK test override.
-- There is no enforced drive lockout or production volume policy. Do not use the current build on public roads.
-- BYD does not publish the complete motor dyno curves or Sport pedal transfer table. The A2MAC1 axle curves materially improve the longitudinal reconstruction, but they were digitized from a raster chart and may describe a modified or differently configured vehicle. Raw test data and instrumented validation on this exact Brazilian car remain necessary.
-- Add named profile import/export, a speaker-walk diagnostic, and in-app telemetry/audio recording after first-car validation.
+The dashboard preserves its 1920:990 design ratio inside `WindowInsets.safeDrawing` and letterboxes
+remaining space. Actual BYD insets still require measurement.
+
+The selector is searchable and lazy. It distinguishes installed/uninstalled entries, shows
+favorites in the list, and uses imported previews for the selected image. SAF actions import the
+strict catalog or one/more `.aclib` packs on a service-owned I/O worker.
+
+Audio controls include master and per-track gain/mute/solo, engine-and-transmission mute,
+availability-filtered effects, checked-effect isolation, and natural-path pops/bangs audition. The
+output format is fixed stereo, so there is no channel-mode control.
+
+Touch/keyboard simulator pedals are presentation input only and release whenever the window loses
+focus or the Activity stops. P/N/D, AUTO/SIM/BYD LIVE selection, tuning, favorites, and audio controls
+are commands sent through the local service binder.
+
+See [Live tuning interface](tuning-interface.md) for the control inventory.
+
+## Diagnostics and validation boundary
+
+**MARK CRACKLE** writes a timestamped low-rate event with car, RPM, gear, speed, throttle, buffer
+target, queued frames, underruns, wraps, render timing, GC counters, peak, and over-range samples.
+Bounded JSONL export contains a current snapshot plus recent persistent events, and runs off the
+real-time threads.
+
+Automated host gates can prove deterministic simulation, manifest strictness, PCM round trips,
+fixed format, loop math, lifecycle policy, and native build compatibility. Device instrumentation can
+measure service/UI lifecycle and retained memory. Only the actual BYD can validate vendor getters,
+OEM focus policy, amplifier/DSP latency, continuous background behavior under DiLink, and perceived
+sound quality.
+
+Do not claim those environment-specific gates from a successful Gradle build. Follow
+[Lossless packs and persistent driving acceptance](aclib-background-acceptance.md), record the build
+number/commit/device/pack hashes, and attach the exported JSONL for every physical run.
+
+## Known constraints
+
+- Firmware `2503` read permissions and signal plausibility remain physical-car gates.
+- No wake lock means deep sleep/ignition behavior remains the platform's decision; foreground-service
+  continuity applies while Android permits the process to run.
+- The compiler's soft-budget target is defined, but a cross-validator windowed-family format must be
+  completed before accepting a family that needs partitioned decoding.
+- A low-target-SDK sideload may require Android's install override on modern test devices.
+- The app has no enforced drive lockout or certified volume ceiling. It is not for public-road use.
+- UI fit was measured on an emulator; actual-car insets and font/render behavior remain unverified.

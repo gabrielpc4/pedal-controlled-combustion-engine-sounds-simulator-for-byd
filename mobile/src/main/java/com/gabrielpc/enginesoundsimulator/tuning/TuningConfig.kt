@@ -1,19 +1,21 @@
 package com.gabrielpc.enginesoundsimulator.tuning
 
 import android.content.Context
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
 import kotlin.math.max
 import kotlin.math.min
 
 data class CurvePoint(val x: Double, val y: Double)
 
+/** Covers the highest official AC tachometer (19,300 RPM) with a small validation margin. */
+internal const val MAX_PRESENTATION_RPM = 20_000.0
+
 data class EngineTuning(
-    val idleRpm: Double = EngineSampleProfiles.default.idleRpm,
-    val maxRpm: Double = EngineSampleProfiles.default.maximumRpm,
-    val redlineRpm: Double = EngineSampleProfiles.default.redlineRpm,
-    val limiterRpm: Double = EngineSampleProfiles.default.limiterRpm,
-    val upshiftRpm: Double = EngineSampleProfiles.default.upshiftRpm,
+    val idleRpm: Double = 1_040.0,
+    val maxRpm: Double = 10_000.0,
+    val redlineRpm: Double = 8_200.0,
+    val limiterRpm: Double = 8_350.0,
+    val upshiftRpm: Double = 8_200.0,
     val maxTorqueNm: Double = 670.0,
     val peakPowerKw: Double = 390.0,
     val motorMaxRpm: Double = 16_000.0,
@@ -34,8 +36,8 @@ data class EngineTuning(
     val externalSpeedSmoothingMs: Double = 120.0,
     val throttleAttackMs: Double = 15.0,
     val throttleReleaseMs: Double = 20.0,
-    val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
-    val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
+    val upshiftDurationMs: Double = 60.0,
+    val downshiftDurationMs: Double = 150.0,
     val shiftDwellMs: Double = 150.0,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
@@ -46,11 +48,16 @@ data class EngineTuning(
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
 ) {
     fun sanitized(): EngineTuning {
-        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.maximumSupportedRpm)
+        // These bounds must contain the complete official AC catalog. Several
+        // historic cars have a tachometer below 6,000 RPM, while modern Formula
+        // cars idle at 4,000 RPM and use 15/20 ms shift cuts. Profile values pass
+        // through this same sanitizer, so dashboard-editing safety bounds must not
+        // silently rewrite authored gearbox behaviour.
+        val cleanMaxRpm = maxRpm.coerceIn(5_000.0, MAX_PRESENTATION_RPM)
         val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 100.0)
         val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm)
-        val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
-        val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 1_000.0, cleanRedline)
+        val cleanIdle = idleRpm.coerceIn(500.0, min(5_000.0, cleanRedline - 500.0))
+        val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 500.0, cleanRedline)
         return copy(
             idleRpm = cleanIdle,
             maxRpm = cleanMaxRpm,
@@ -75,8 +82,8 @@ data class EngineTuning(
             externalSpeedSmoothingMs = externalSpeedSmoothingMs.coerceIn(60.0, 500.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
-            upshiftDurationMs = upshiftDurationMs.coerceIn(40.0, 900.0),
-            downshiftDurationMs = downshiftDurationMs.coerceIn(60.0, 1_000.0),
+            upshiftDurationMs = upshiftDurationMs.coerceIn(10.0, 900.0),
+            downshiftDurationMs = downshiftDurationMs.coerceIn(10.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
             gearRatios = sanitizeGears(gearRatios),
             frontWheelTorqueCurve = sanitizeCurve(
@@ -94,7 +101,7 @@ data class EngineTuning(
     }
 
     companion object {
-        val DEFAULT_GEARS = EngineSampleProfiles.default.gearRatios
+        val DEFAULT_GEARS = listOf(3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84)
         val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),
             CurvePoint(0.156, 0.989),
@@ -138,9 +145,9 @@ data class AudioTuning(
     val masterGain: Double = 0.72,
     /** Smooths dashboard RPM changes before they move the audio sample positions. */
     val rpmSmoothingMs: Double = 16.0,
-    /** Smooths throttle changes before they alter the sample-bank load blend. */
+    /** Smooths throttle changes before they alter the pedal-responsive layer blend. */
     val throttleSmoothingMs: Double = 10.0,
-    /** Smooths the main program level and load-dependent output level. */
+    /** Smooths the main program and pedal-dependent output level. */
     val programFadeMs: Double = 8.0,
     /** Smooths enable/disable so starting or stopping playback never clicks. */
     val enabledFadeMs: Double = 10.0,
@@ -354,7 +361,9 @@ private fun sanitizeGears(values: List<Double>): List<Double> {
     val source = if (values.size in 3..10) values else EngineTuning.DEFAULT_GEARS
     val output = mutableListOf<Double>()
     source.forEachIndexed { index, raw ->
-        val upper = if (index == 0) 5.0 else output.last() - 0.05
+        // The official catalog includes a 5.09 first gear. Keep authored ratios
+        // bit-for-bit while still repairing invalid user-entered sequences.
+        val upper = if (index == 0) 8.0 else output.last() - 0.05
         output += raw.coerceIn(0.45, upper.coerceAtLeast(0.50))
     }
     return output

@@ -1,6 +1,6 @@
 # BYD Motor Sound - Engineering Context
 
-Last updated: 2026-08-15
+Last updated: 2026-08-28
 
 This directory is the durable technical memory for the project. Future work should start here instead of repeating the original research or assuming that the BYD head unit behaves like a standard Android Automotive OS device.
 
@@ -37,8 +37,8 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 
 ## Documentation map
 
-- [Full engine-sound implementation](full-implementation.md) - architecture, drivetrain, input policy, profile-based sample audio, logical multichannel routing, UI, controls, verification, and on-car acceptance.
-- [Profile-based sample engine audio](sample-engine-audio.md) - recovered bank controls, reusable car profiles, local asset boundary, renderer behavior, telemetry, and validation.
+- [Full engine-sound implementation](full-implementation.md) - foreground-service architecture, drivetrain, lossless official-car packs, fixed-stereo native audio, UI, controls, verification, and on-car acceptance.
+- [Profile-based sample engine audio](sample-engine-audio.md) - archived two-car WAV experiment retained only as regression history.
 - [BYD Seal Performance calibration](byd-seal-performance-calibration.md) - published vehicle anchors, digitized A2MAC1 axle curves, Sport-pedal uncertainty, road-load assumptions, and synthetic-gear separation.
 - [UI display and simulation decisions](ui-display-and-simulation-decisions.md) - cosmetic kgfm/HP display, graph annotation policy, P/N/D shifter, neutral RPM inertia, lift-off RPM removal (D only), SIM coast regen, and other presentation choices that must not be mistaken for physics bugs.
 - [Emulator validation](emulator-validation.md) - exact software-ARM fallback, final APK identity, viewport, and pedal-test evidence.
@@ -59,7 +59,10 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 - `automotive` remains an Android Automotive media-template shell. It requires `android.hardware.type.automotive`, has no launcher Activity, targets API 37, and depends on the template `shared` media service.
 - `shared/MyMusicService.kt` is template boilerplate with empty media callbacks.
 - The DiLink telemetry probe and the full engine-sound dashboard are implemented together in `mobile`, which produces a regular full-screen APK for the rotating BYD tablet. It uses reflection and packages no BYD framework stubs.
-- The reader polls the documented accelerator, brake, and speed getters every 20 ms. `DriveController` then feeds a 200 Hz Seal-calibrated EV road model, independent synthetic sound gears, and a continuous audio renderer; simulator pedals take over when live values are unavailable.
+- `DriveRuntimeService` owns the read-only BYD reader, 200 Hz Seal-calibrated EV road model,
+  independent presentation gearbox, selected lossless `.aclib` family, fixed-stereo native renderer,
+  audio focus, and diagnostics. Simulator pedals take over when live values are unavailable; UI
+  sampling stops while the Activity is hidden without stopping the driving runtime.
 - The project is a public Git repository. APKs, local reference artifacts, raw licensed audio, and build/emulator downloads must remain ignored.
 
 ## Decisions that should survive future sessions

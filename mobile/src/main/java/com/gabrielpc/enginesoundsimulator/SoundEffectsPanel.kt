@@ -42,6 +42,7 @@ internal fun SoundEffectsPanel(
     state: DriveSnapshot,
     onEffectChange: (String, Boolean) -> Unit,
     onSoloChange: (Boolean) -> Unit,
+    onAuditionPopsAndBangs: () -> Unit,
     onClose: () -> Unit,
 ) {
     Box(
@@ -109,6 +110,19 @@ internal fun SoundEffectsPanel(
                     state.soundEffects.forEach { effect ->
                         EffectCheckbox(effect, onEffectChange)
                     }
+                    if (state.popsAndBangsAuditionAvailable) {
+                        Button(
+                            onClick = onAuditionPopsAndBangs,
+                            colors = ButtonDefaults.buttonColors(containerColor = FxCyan.copy(alpha = 0.18f)),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text(
+                                "AUDITION POPS, BANGS & CRACKS",
+                                color = FxCyan,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -146,7 +160,11 @@ private fun SoloEffectsCheckbox(enabled: Boolean, onChange: (Boolean) -> Unit) {
         Spacer(Modifier.width(14.dp))
         Column {
             Text("SOLO CHECKED EFFECTS", color = FxWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("Mute the engine loopset and hear only the effects checked below", color = FxMuted, fontSize = 12.sp)
+            Text(
+                "Mute engine and transmission sounds; hear only the effects checked below",
+                color = FxMuted,
+                fontSize = 12.sp,
+            )
         }
     }
 }

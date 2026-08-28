@@ -1,14 +1,21 @@
 package com.gabrielpc.enginesoundsimulator
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.graphics.Paint
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
@@ -24,7 +31,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,7 +61,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -66,22 +71,23 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import com.gabrielpc.enginesoundsimulator.drive.DriveController
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import com.gabrielpc.enginesoundsimulator.drive.DriveRuntimeService
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogEntry
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -106,54 +112,276 @@ private val White = Color(0xFFF5FAFD)
 private val Muted = Color(0xFF88A2B2)
 
 class MainActivity : ComponentActivity() {
-    private lateinit var controller: DriveController
     private val uiHandler = Handler(Looper.getMainLooper())
     private var driveState by mutableStateOf<DriveSnapshot?>(null)
+    private var carCatalog by mutableStateOf<CarCatalogSnapshot?>(null)
+    private var catalogStatus by mutableStateOf<String?>(null)
+    private var catalogStatusIsError by mutableStateOf(false)
+    private var activityVisible by mutableStateOf(false)
+    private var runtimeBinder: DriveRuntimeService.DriveRuntimeBinder? = null
+    private var serviceBound = false
+    private val uiLifecycleGate = DriveUiLifecycleGate()
+    private var sampleValidationPending = false
+    private var pendingDiagnosticExport: Uri? = null
+    private var notificationPermissionRequestInFlight = false
+    private val notificationPermissionPreferences by lazy {
+        getSharedPreferences(NOTIFICATION_PERMISSION_PREFERENCES, Context.MODE_PRIVATE)
+    }
+    private val requestNotificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        notificationPermissionRequestInFlight = false
+    }
+    private val createDiagnosticExport = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/x-ndjson"),
+    ) { destination ->
+        pendingDiagnosticExport = destination
+        exportPendingDiagnostics()
+    }
+    private val importCarPacks = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isEmpty()) return@registerForActivityResult
+        uris.forEach(::retainReadPermission)
+        val connected = runtimeBinder
+        if (connected == null) {
+            recordCatalogEvent(
+                DeferredCatalogEvent(
+                    DeferredCatalogEventKind.FAILURE,
+                    failureMessage = "Driving service is not connected",
+                ),
+            )
+            return@registerForActivityResult
+        }
+        recordCatalogEvent(
+            DeferredCatalogEvent(DeferredCatalogEventKind.PACK_IMPORT_STARTED, packCount = uris.size),
+        )
+        connected.importPacks(uris) { result ->
+            val event = result.fold(
+                onSuccess = {
+                    DeferredCatalogEvent(DeferredCatalogEventKind.PACK_IMPORT_SUCCEEDED, packCount = uris.size)
+                },
+                onFailure = { failure ->
+                    DeferredCatalogEvent(
+                        DeferredCatalogEventKind.FAILURE,
+                        failureMessage = failure.message ?: "Pack import failed",
+                    )
+                },
+            )
+            // A multi-pack batch may have installed earlier entries before a later one fails.
+            // Always refresh from the runtime after completion instead of inferring mutation from
+            // the aggregate Result.
+            recordCatalogEvent(event, catalogChanged = true)
+        }
+    }
+    private val importGeneratedCatalog = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@registerForActivityResult
+        retainReadPermission(uri)
+        val connected = runtimeBinder
+        if (connected == null) {
+            recordCatalogEvent(
+                DeferredCatalogEvent(
+                    DeferredCatalogEventKind.FAILURE,
+                    failureMessage = "Driving service is not connected",
+                ),
+            )
+            return@registerForActivityResult
+        }
+        recordCatalogEvent(DeferredCatalogEvent(DeferredCatalogEventKind.CATALOG_IMPORT_STARTED))
+        connected.importGeneratedCatalog(uri) { result ->
+            val event = result.fold(
+                onSuccess = { DeferredCatalogEvent(DeferredCatalogEventKind.CATALOG_IMPORT_SUCCEEDED) },
+                onFailure = { failure ->
+                    DeferredCatalogEvent(
+                        DeferredCatalogEventKind.FAILURE,
+                        failureMessage = failure.message ?: "Catalog import failed",
+                    )
+                },
+            )
+            recordCatalogEvent(event, catalogChanged = true)
+        }
+    }
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val connected = service as? DriveRuntimeService.DriveRuntimeBinder ?: return
+            runtimeBinder = connected
+            uiLifecycleGate.onRuntimeConnected()
+            if (uiLifecycleGate.visible) {
+                connected.setUiVisible(true)
+                driveState = connected.snapshot()
+                if (driveState != null) {
+                    refreshCatalogPresentationIfVisible(connected)
+                    maybeRunPendingSampleValidation()
+                    exportPendingDiagnostics()
+                }
+                startUiSampler()
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            runtimeBinder = null
+            uiLifecycleGate.onRuntimeDisconnected()
+            uiHandler.removeCallbacks(refreshUi)
+            if (uiLifecycleGate.visible) {
+                driveState = null
+                carCatalog = null
+            }
+        }
+
+        override fun onBindingDied(name: ComponentName?) {
+            runtimeBinder = null
+            uiLifecycleGate.onRuntimeDisconnected()
+            uiHandler.removeCallbacks(refreshUi)
+            if (uiLifecycleGate.visible) {
+                driveState = null
+                carCatalog = null
+            }
+            if (serviceBound) {
+                runCatching { unbindService(this) }
+                serviceBound = false
+            }
+            if (uiLifecycleGate.visible) bindToRuntime()
+        }
+
+        override fun onNullBinding(name: ComponentName?) {
+            runtimeBinder = null
+            uiLifecycleGate.onRuntimeDisconnected()
+            uiHandler.removeCallbacks(refreshUi)
+            if (uiLifecycleGate.visible) {
+                driveState = null
+                carCatalog = null
+            }
+            if (serviceBound) {
+                runCatching { unbindService(this) }
+                serviceBound = false
+            }
+        }
+    }
 
     private val refreshUi = object : Runnable {
         override fun run() {
-            driveState = controller.snapshot()
-            // Mixer meters feel best near 60 Hz; the simulation loop still runs at 200 Hz.
-            uiHandler.postDelayed(this, 16L)
+            val connected = runtimeBinder ?: return
+            if (!uiLifecycleGate.shouldSample) return
+            val next = connected.snapshot()
+            if (next != null) {
+                val becameReady = driveState == null
+                driveState = next
+                if (becameReady) {
+                    refreshCatalogPresentationIfVisible(connected)
+                    maybeRunPendingSampleValidation()
+                    exportPendingDiagnostics()
+                }
+            } else if (driveState != null) {
+                // Notification Stop can tear down a still-bound service. Do not leave its last
+                // dashboard snapshot interactive after the ready controller is unpublished.
+                driveState = null
+                carCatalog = null
+            }
+            // Presentation stays below 60 Hz; the service's simulation loop remains independent.
+            uiHandler.postDelayed(
+                this,
+                if (next == null) RUNTIME_READY_RETRY_MILLIS else UI_REFRESH_MILLIS,
+            )
+        }
+    }
+
+    private val runSampleValidation = object : Runnable {
+        override fun run() {
+            if (!uiLifecycleGate.visible || !sampleValidationPending) return
+            val connected = runtimeBinder ?: return
+            if (!connected.runSampleAudioValidation()) {
+                if (connected.isInitializing()) {
+                    uiHandler.postDelayed(this, RUNTIME_READY_RETRY_MILLIS)
+                }
+                return
+            }
+            sampleValidationPending = false
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        controller = DriveController(applicationContext)
-        driveState = controller.snapshot()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
 
         setContent {
             EngineSoundsSimulatorTheme(darkTheme = true, dynamicColor = false) {
-                driveState?.let { state ->
+                if (activityVisible) driveState?.let { state ->
                     MotorSoundDashboard(
                         state = state,
-                        onThrottle = controller::setManualThrottle,
-                        onBrake = controller::setManualBrake,
-                        onCycleInput = controller::cycleInputMode,
-                        onTransmissionChange = controller::setTransmissionPosition,
-                        onToggleSound = controller::toggleSound,
-                        onCycleChannels = controller::cycleChannelMode,
-                        onConfigChange = controller::setTuning,
-                        onResetTuning = controller::resetTuning,
-                        onRestartBydReader = controller::restartVehicleReader,
-                        onRunSampleValidation = controller::runSampleAudioValidation,
-                        onPreviousCar = controller::selectPreviousCar,
-                        onNextCar = controller::selectNextCar,
-                        onSelectCar = controller::selectCar,
-                        onLayerMixMuted = controller::setLayerMixMuted,
-                        onLayerMixSolo = controller::setLayerMixSolo,
-                        onLayerMixVolume = controller::setLayerMixVolume,
-                        onSoundEffectChange = controller::setSoundEffectEnabled,
-                        onSoloSoundEffectsChange = controller::setSoloSoundEffects,
-                        onRequestSnapshot = controller::snapshot,
-                        onDebugPanelVisible = controller::setDebugPanelVisible,
-                        onCoastLayerMixEnabledChange = controller::setCoastLayerMixEnabled,
-                        onCarMasterVolumeChange = controller::setCarMasterVolume,
+                        carCatalog = carCatalog,
+                        catalogStatus = catalogStatus,
+                        catalogStatusIsError = catalogStatusIsError,
+                        onThrottle = { runtimeBinder?.setManualThrottle(it) },
+                        onBrake = { runtimeBinder?.setManualBrake(it) },
+                        onCycleInput = { runtimeBinder?.cycleInputMode() },
+                        onTransmissionChange = { runtimeBinder?.setTransmissionPosition(it) },
+                        onToggleSound = { runtimeBinder?.toggleSound() },
+                        onConfigChange = { runtimeBinder?.setTuning(it) },
+                        onResetTuning = { runtimeBinder?.resetTuning() },
+                        onRestartBydReader = { runtimeBinder?.restartVehicleReader() },
+                        onRunSampleValidation = { runtimeBinder?.runSampleAudioValidation() },
+                        onPreviousCar = {
+                            runtimeBinder?.let { connected ->
+                                connected.selectPreviousCar()
+                                connected.catalogSnapshot()?.let { carCatalog = it }
+                                connected.snapshot()?.let { driveState = it }
+                            }
+                        },
+                        onNextCar = {
+                            runtimeBinder?.let { connected ->
+                                connected.selectNextCar()
+                                connected.catalogSnapshot()?.let { carCatalog = it }
+                                connected.snapshot()?.let { driveState = it }
+                            }
+                        },
+                        onSelectCar = { carId ->
+                            runtimeBinder?.let { connected ->
+                                catalogStatus = "Instalando pacote do carro…"
+                                catalogStatusIsError = false
+                                connected.selectCarOrAutoInstall(carId) { message, percent, result ->
+                                    runOnUiThread {
+                                        catalogStatus = if (percent != null && percent < 100) "$message $percent%" else message
+                                        catalogStatusIsError = result?.isFailure == true
+                                        connected.catalogSnapshot()?.let { carCatalog = it }
+                                        connected.snapshot()?.let { driveState = it }
+                                    }
+                                }
+                            }
+                        },
+                        onToggleFavorite = { carId ->
+                            runtimeBinder?.let { connected ->
+                                connected.toggleFavorite(carId)?.let { carCatalog = it }
+                            }
+                        },
+                        onImportPacks = {
+                            importCarPacks.launch(
+                                arrayOf("application/zip", "application/octet-stream", "application/x-aclib"),
+                            )
+                        },
+                        onImportCatalog = {
+                            importGeneratedCatalog.launch(
+                                arrayOf("application/json", "text/json", "text/plain", "application/octet-stream"),
+                            )
+                        },
+                        onLayerMixMuted = { id, muted -> runtimeBinder?.setLayerMixMuted(id, muted) },
+                        onLayerMixSolo = { id, solo -> runtimeBinder?.setLayerMixSolo(id, solo) },
+                        onLayerMixVolume = { id, volume -> runtimeBinder?.setLayerMixVolume(id, volume) },
+                        onSoundEffectChange = { id, enabled -> runtimeBinder?.setSoundEffectEnabled(id, enabled) },
+                        onSoloSoundEffectsChange = { runtimeBinder?.setSoloSoundEffects(it) },
+                        onAuditionPopsAndBangs = { runtimeBinder?.auditionPopsAndBangs() },
+                        onDebugPanelVisible = { runtimeBinder?.setDebugPanelVisible(it) },
+                        onCarMasterVolumeChange = { runtimeBinder?.setCarMasterVolume(it) },
+                        onMarkCrackle = { runtimeBinder?.markCrackle() },
+                        onExportDiagnostics = {
+                            createDiagnosticExport.launch(
+                                "byd-drive-diagnostics-${System.currentTimeMillis()}.jsonl",
+                            )
+                        },
                     )
                 }
             }
@@ -164,28 +392,64 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // If the already-visible singleTop Activity reopens a stopped session there is no new
+        // bind callback to publish visibility. Do it through the current binder, where onStop()
+        // remains the authoritative later event; a delayed service Start intent must never set
+        // visibility on behalf of an Activity that has since gone to the background.
+        if (uiLifecycleGate.visible) runtimeBinder?.setUiVisible(true)
+        DriveRuntimeService.startDrivingSession(this)
         maybeScheduleSampleValidation(intent)
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        maybeRequestNotificationPermission()
     }
 
     private fun maybeScheduleSampleValidation(intent: Intent?) {
         if (!BuildConfig.DEBUG || intent == null) return
         if (intent.getBooleanExtra(EXTRA_RUN_SAMPLE_VALIDATION, false)) {
             intent.removeExtra(EXTRA_RUN_SAMPLE_VALIDATION)
-            uiHandler.postDelayed(controller::runSampleAudioValidation, 1_500L)
+            sampleValidationPending = true
+            maybeRunPendingSampleValidation()
         }
     }
 
     override fun onStart() {
         super.onStart()
-        controller.start()
-        uiHandler.removeCallbacks(refreshUi)
-        uiHandler.post(refreshUi)
+        // A disconnected/recreated service may still be constructing its controller. Never expose
+        // the previous runtime's dashboard as interactive while the new binder is not ready.
+        driveState = null
+        carCatalog = null
+        activityVisible = true
+        uiLifecycleGate.onActivityStarted()
+        DriveRuntimeService.startDrivingSession(this)
+        bindToRuntime()
+        runtimeBinder?.let { connected ->
+            connected.setUiVisible(true)
+            driveState = connected.snapshot()
+            if (driveState != null) {
+                refreshCatalogPresentationIfVisible(connected)
+                maybeRunPendingSampleValidation()
+                exportPendingDiagnostics()
+            }
+            startUiSampler()
+        }
     }
 
     override fun onStop() {
+        activityVisible = false
+        uiLifecycleGate.onActivityStopped()
         releaseManualControls()
         uiHandler.removeCallbacks(refreshUi)
-        controller.stop()
+        uiHandler.removeCallbacks(runSampleValidation)
+        runtimeBinder?.setUiVisible(false)
+        if (serviceBound) {
+            runCatching { unbindService(serviceConnection) }
+            serviceBound = false
+        }
+        runtimeBinder = null
+        uiLifecycleGate.onRuntimeDisconnected()
         super.onStop()
     }
 
@@ -195,8 +459,112 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun releaseManualControls() {
-        controller.setManualThrottle(0.0)
-        controller.setManualBrake(0.0)
+        runtimeBinder?.setManualThrottle(0.0)
+        runtimeBinder?.setManualBrake(0.0)
+    }
+
+    private fun bindToRuntime() {
+        if (serviceBound) return
+        serviceBound = bindService(
+            Intent(this, DriveRuntimeService::class.java),
+            serviceConnection,
+            Context.BIND_AUTO_CREATE,
+        )
+    }
+
+    private fun startUiSampler() {
+        uiHandler.removeCallbacks(refreshUi)
+        uiHandler.post(refreshUi)
+    }
+
+    private fun maybeRunPendingSampleValidation() {
+        if (!uiLifecycleGate.visible || !sampleValidationPending || runtimeBinder == null) return
+        uiHandler.removeCallbacks(runSampleValidation)
+        uiHandler.postDelayed(runSampleValidation, 1_500L)
+    }
+
+    private fun exportPendingDiagnostics() {
+        val destination = pendingDiagnosticExport ?: return
+        val connected = runtimeBinder ?: return
+        if (!connected.isReady()) return
+        pendingDiagnosticExport = null
+        connected.exportDiagnostics(destination)
+    }
+
+    private fun retainReadPermission(uri: Uri) {
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    private fun recordCatalogEvent(event: DeferredCatalogEvent, catalogChanged: Boolean = false) {
+        uiLifecycleGate.recordCatalogEvent(event, catalogChanged)
+        refreshCatalogPresentationIfVisible(runtimeBinder)
+    }
+
+    /** The only path that materializes catalog/status presentation after async callbacks. */
+    private fun refreshCatalogPresentationIfVisible(
+        connected: DriveRuntimeService.DriveRuntimeBinder?,
+    ) {
+        if (connected == null || !uiLifecycleGate.shouldSample) return
+        val currentCatalog = connected.catalogSnapshot() ?: return
+        if (uiLifecycleGate.takeCatalogRefreshRequest()) {
+            carCatalog = currentCatalog
+        }
+        uiLifecycleGate.takeCatalogEvent()?.let(::renderCatalogEvent)
+    }
+
+    private fun renderCatalogEvent(event: DeferredCatalogEvent) {
+        check(uiLifecycleGate.shouldSample) { "Catalog presentation must only be rendered while visible" }
+        when (event.kind) {
+            DeferredCatalogEventKind.PACK_IMPORT_STARTED -> setCatalogStatus(
+                "Importing ${event.packCount} car pack${if (event.packCount == 1) "" else "s"}…",
+            )
+            DeferredCatalogEventKind.PACK_IMPORT_SUCCEEDED -> setCatalogStatus(
+                "Imported packs · ${carCatalog?.installedFamilyCount ?: 0} sound families installed",
+            )
+            DeferredCatalogEventKind.CATALOG_IMPORT_STARTED -> setCatalogStatus("Importing official car catalog…")
+            DeferredCatalogEventKind.CATALOG_IMPORT_SUCCEEDED -> setCatalogStatus("Official metadata catalog imported")
+            DeferredCatalogEventKind.FAILURE -> setCatalogStatus(
+                event.failureMessage ?: "Catalog operation failed",
+                isError = true,
+            )
+        }
+    }
+
+    private fun maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val permissionGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        val promptRecorded = notificationPermissionPreferences.getBoolean(
+            NOTIFICATION_PERMISSION_PROMPT_RECORDED,
+            false,
+        )
+        if (!NotificationPermissionRequestPolicy.shouldRequest(
+                sdkInt = Build.VERSION.SDK_INT,
+                activityVisible = uiLifecycleGate.visible,
+                permissionGranted = permissionGranted,
+                promptRecorded = promptRecorded,
+                requestInFlight = notificationPermissionRequestInFlight,
+            )
+        ) return
+
+        notificationPermissionRequestInFlight = true
+        notificationPermissionPreferences.edit {
+            putBoolean(NOTIFICATION_PERMISSION_PROMPT_RECORDED, true)
+        }
+        runCatching { requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+            .onFailure {
+                notificationPermissionRequestInFlight = false
+                notificationPermissionPreferences.edit {
+                    remove(NOTIFICATION_PERMISSION_PROMPT_RECORDED)
+                }
+            }
+    }
+
+    private fun setCatalogStatus(message: String, isError: Boolean = false) {
+        catalogStatus = message
+        catalogStatusIsError = isError
     }
 
 }
@@ -204,12 +572,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MotorSoundDashboard(
     state: DriveSnapshot,
+    carCatalog: CarCatalogSnapshot?,
+    catalogStatus: String?,
+    catalogStatusIsError: Boolean,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onCycleInput: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
-    onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
     onRestartBydReader: () -> Unit,
@@ -217,15 +587,19 @@ private fun MotorSoundDashboard(
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onImportPacks: () -> Unit,
+    onImportCatalog: () -> Unit,
     onLayerMixMuted: (String, Boolean) -> Unit,
     onLayerMixSolo: (String, Boolean) -> Unit,
     onLayerMixVolume: (String, Double) -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
     onSoloSoundEffectsChange: (Boolean) -> Unit,
-    onRequestSnapshot: () -> DriveSnapshot,
+    onAuditionPopsAndBangs: () -> Unit,
     onDebugPanelVisible: (Boolean) -> Unit,
-    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
+    onMarkCrackle: () -> Unit,
+    onExportDiagnostics: () -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var debugOpen by remember { mutableStateOf(false) }
@@ -287,7 +661,6 @@ private fun MotorSoundDashboard(
                         onMainScreenChange = { mainScreen = it },
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
-                        onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
                         onOpenDebug = { debugOpen = true },
                         onOpenEffects = { effectsOpen = true },
@@ -303,6 +676,7 @@ private fun MotorSoundDashboard(
                         ) {
                             CarStage(
                                 state = state,
+                                selectedCatalogEntry = carCatalog?.find(state.selectedCarId),
                                 onThrottle = onThrottle,
                                 onBrake = onBrake,
                                 onTransmissionChange = onTransmissionChange,
@@ -326,15 +700,20 @@ private fun MotorSoundDashboard(
                         }
                         DashboardMainScreen.MIXER -> MixerDashboardScreen(
                             state = state,
+                            carCatalog = carCatalog,
+                            catalogStatus = catalogStatus,
+                            catalogStatusIsError = catalogStatusIsError,
                             onThrottle = onThrottle,
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
                             onSelectCar = onSelectCar,
+                            onToggleFavorite = onToggleFavorite,
+                            onImportPacks = onImportPacks,
+                            onImportCatalog = onImportCatalog,
                             onCarMasterVolumeChange = onCarMasterVolumeChange,
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
-                            coastLayerMixEnabled = state.coastLayerMixEnabled,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -354,10 +733,11 @@ private fun MotorSoundDashboard(
 
                 if (debugOpen) {
                     DebugPanel(
-                        requestSnapshot = onRequestSnapshot,
+                        state = state,
                         onRestartBydReader = onRestartBydReader,
                         onRunSampleValidation = onRunSampleValidation,
-                        onCoastLayerMixEnabledChange = onCoastLayerMixEnabledChange,
+                        onMarkCrackle = onMarkCrackle,
+                        onExportDiagnostics = onExportDiagnostics,
                         onClose = { debugOpen = false },
                     )
                 }
@@ -367,6 +747,7 @@ private fun MotorSoundDashboard(
                         state = state,
                         onEffectChange = onSoundEffectChange,
                         onSoloChange = onSoloSoundEffectsChange,
+                        onAuditionPopsAndBangs = onAuditionPopsAndBangs,
                         onClose = { effectsOpen = false },
                     )
                 }
@@ -385,6 +766,10 @@ private fun MotorSoundDashboard(
 }
 
 private const val EXTRA_RUN_SAMPLE_VALIDATION = "run_sample_audio_validation"
+private const val UI_REFRESH_MILLIS = 17L
+private const val RUNTIME_READY_RETRY_MILLIS = 100L
+private const val NOTIFICATION_PERMISSION_PREFERENCES = "notification_permission"
+private const val NOTIFICATION_PERMISSION_PROMPT_RECORDED = "post_notifications_prompt_recorded"
 
 @Composable
 private fun DashboardHeader(
@@ -393,7 +778,6 @@ private fun DashboardHeader(
     onMainScreenChange: (DashboardMainScreen) -> Unit,
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
-    onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
     onOpenDebug: () -> Unit,
     onOpenEffects: () -> Unit,
@@ -433,10 +817,14 @@ private fun DashboardHeader(
                 fontWeight = FontWeight.Light,
                 letterSpacing = 2.0.sp,
             )
-            StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
-            if (state.legacyThrottleMixEnabled) {
-                StatusTag("LEGACY MIX", Amber)
-            }
+            StatusTag(
+                text = state.activeInput,
+                color = if (state.activeInput.startsWith("BYD")) Green else Cyan,
+                // Input labels have different lengths (for example BYD PEDALS versus
+                // BYD UNAVAILABLE). Reserve their widest slot so the adjacent screen selector
+                // does not move when the live source changes.
+                modifier = Modifier.width(132.dp),
+            )
             DashboardScreenSwitcher(
                 selected = mainScreen,
                 onSelect = onMainScreenChange,
@@ -472,12 +860,6 @@ private fun DashboardHeader(
             accent = if (state.engineSoundEnabled) Green else Red,
             onClick = onToggleSound,
         )
-        HeaderButton(
-            primary = state.audio.requestedMode.displayName,
-            secondary = "${state.audio.activeChannels.coerceAtLeast(0)} CH OUTPUT",
-            accent = Cyan,
-            onClick = onCycleChannels,
-        )
     }
 }
 
@@ -503,14 +885,21 @@ private fun HeaderButton(
 }
 
 @Composable
-private fun StatusTag(text: String, color: Color) {
+private fun StatusTag(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
     Text(
         text = text,
         color = color,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 0.8.sp,
-        modifier = Modifier
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+        modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(color.copy(alpha = 0.12f))
             .border(1.dp, color.copy(alpha = 0.42f), RoundedCornerShape(50))
@@ -521,6 +910,7 @@ private fun StatusTag(text: String, color: Color) {
 @Composable
 private fun CarStage(
     state: DriveSnapshot,
+    selectedCatalogEntry: CarCatalogEntry?,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
@@ -542,7 +932,7 @@ private fun CarStage(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                EngineSampleProfiles.specificationsFor(state.selectedCarId).summary(),
+                selectedCatalogEntry.catalogSummary(),
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -553,33 +943,16 @@ private fun CarStage(
             }
         }
 
-        val context = LocalContext.current
-        val preview = remember(state.selectedCarPreviewAsset) {
-            runCatching {
-                context.assets.open(state.selectedCarPreviewAsset).use { input ->
-                    requireNotNull(BitmapFactory.decodeStream(input)).asImageBitmap()
-                }
-            }.getOrNull()
-        }
-        if (preview != null) {
-            Image(
-                bitmap = preview,
-                contentDescription = state.selectedCarName,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxWidth(0.88f)
-                    .fillMaxHeight(0.65f)
-                    .align(Alignment.Center)
-                    .offset(y = 18.dp),
-            )
-        } else {
-            Image(
-                painter = painterResource(R.drawable.apex_v10_car),
-                contentDescription = state.selectedCarName,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth(0.84f).fillMaxHeight(0.62f).align(Alignment.Center),
-            )
-        }
+        CarPreviewImage(
+            absolutePath = selectedCatalogEntry?.previewFile?.absolutePath,
+            assetFallback = state.selectedCarPreviewAsset,
+            contentDescription = state.selectedCarName,
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .fillMaxHeight(0.65f)
+                .align(Alignment.Center)
+                .offset(y = 18.dp),
+        )
 
         CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
         CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
@@ -615,6 +988,27 @@ private fun CarStage(
         }
 
     }
+}
+
+private fun CarCatalogEntry?.catalogSummary(): String {
+    if (this == null) return "OFFICIAL ASSETTO CORSA CAR · IMPORT ITS .ACLIB PACK TO ACTIVATE"
+    val engineMetadata = engine
+    val gearboxMetadata = gearbox
+    if (engineMetadata == null && gearboxMetadata == null) {
+        return "OFFICIAL ASSETTO CORSA CAR · IMPORT CATALOG OR .ACLIB FOR DETAILS"
+    }
+    val engineKind = when {
+        engineMetadata?.hybrid == true -> "HYBRID"
+        (engineMetadata?.turboCount ?: 0) > 1 -> "${engineMetadata?.turboCount} TURBOS"
+        engineMetadata?.turboCount == 1 -> "TURBO"
+        else -> "NATURALLY ASPIRATED"
+    }
+    return listOfNotNull(
+        engineKind,
+        gearboxMetadata?.forwardRatios?.size?.let { "$it-SPEED ${gearboxMetadata.traction}" },
+        engineMetadata?.idleRpm?.roundToInt()?.let { "IDLE $it RPM" },
+        engineMetadata?.redlineRpm?.roundToInt()?.let { "REDLINE $it RPM" },
+    ).joinToString(" · ")
 }
 
 @Composable

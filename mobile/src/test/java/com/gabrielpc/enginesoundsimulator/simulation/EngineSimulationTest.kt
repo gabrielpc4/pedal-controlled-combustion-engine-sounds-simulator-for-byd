@@ -73,45 +73,78 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun soundGearsDivideTopSpeedIntoEqualBands() {
+    fun soundGearsUseImportedRatioSpacingAndReachUpshiftRpm() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE
-        val expectedBandKmh = profile.topSpeedKmh / profile.gearRatios.size
         profile.gearRatios.indices.forEach { gearIndex ->
-            assertEquals(
-                expectedBandKmh * (gearIndex + 1),
-                evenlySpacedUpshiftSpeedKmh(profile, gearIndex),
-                0.0001,
-            )
-            val boundaryWheelRpm = (evenlySpacedUpshiftSpeedKmh(profile, gearIndex) / 3.6) /
-                (2.0 * Math.PI * profile.wheelRadiusMeters) * 60.0
-            val boundaryRpm = profile.idleRpm + boundaryWheelRpm *
-                evenlySpacedGearRatio(profile, gearIndex)
+            val boundary = presentationUpshiftSpeedKmh(profile, gearIndex)
+            val boundaryRpm = presentationRpmAtSpeed(profile, gearIndex, boundary)
             assertEquals(profile.upshiftRpm, boundaryRpm, 0.001)
         }
-        assertEquals(190.0 / 7.0, expectedBandKmh, 0.0001)
+        assertEquals(profile.topSpeedKmh, presentationUpshiftSpeedKmh(profile, profile.gearRatios.lastIndex), 0.0001)
+        assertTrue(
+            "first gear must be shorter than second according to the imported ratios",
+            presentationUpshiftSpeedKmh(profile, 0) < presentationUpshiftSpeedKmh(profile, 1),
+        )
+    }
+
+    @Test
+    fun calculatedLandingRpmUsesAdjacentImportedRatiosWithoutCompensation() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
+        profile.gearRatios.dropLast(1).indices.forEach { gearIndex ->
+            val expected = profile.upshiftRpm *
+                profile.gearRatios[gearIndex + 1] / profile.gearRatios[gearIndex]
+            assertEquals(expected, calculatedUpshiftLandingRpm(profile, gearIndex), 0.0001)
+        }
+    }
+
+    @Test
+    fun changingCarsClearsRememberedLandingsEvenWhenGearCountMatches() {
+        val original = EngineProfile.SAMPLE_BANK_ENGINE
+        val simulation = EngineSimulation(original)
+        simulation.followIntegerSpeedRamp(0.0, 85.0, 5.0, 1.0)
+        simulation.followIntegerSpeedRamp(85.0, 0.0, 8.0, 0.0)
+
+        val landingField = EngineSimulation::class.java
+            .getDeclaredField("downshiftLandingRpmByGear")
+            .apply { isAccessible = true }
+        val oldLandings = (landingField.get(simulation) as DoubleArray).copyOf()
+        assertTrue("test setup must have remembered at least one prior upshift", oldLandings.any { it > 0.0 })
+
+        val replacement = original.copy(
+            name = "same-count replacement",
+            gearRatios = original.gearRatios.mapIndexed { index, ratio ->
+                ratio * (1.0 - index * 0.025)
+            }.toDoubleArray(),
+        )
+        simulation.updateProfile(replacement)
+
+        val newLandings = landingField.get(simulation) as DoubleArray
+        assertEquals(original.gearRatios.size, newLandings.size)
+        assertTrue("no previous car landing RPM may survive selection", newLandings.all { it == 0.0 })
+        assertEquals(1, simulation.state.gear)
     }
 
     @Test
     fun downshiftUsesTheBoundaryThatSelectedTheGear() {
         val simulation = EngineSimulation()
-        val launched = simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 1.0)
-        assertEquals("65 km/h should be in the third equal-width band", 3, launched.gear)
+        val launched = simulation.followIntegerSpeedRamp(0.0, 75.0, 5.0, 1.0)
+        assertEquals("75 km/h should select third gear with the imported ratios", 3, launched.gear)
 
-        val lifted = simulation.followIntegerSpeedRamp(65.0, 45.0, 3.0, 0.0)
-        assertEquals("the remembered boundary must produce one stable downshift", 2, lifted.gear)
+        val lifted = simulation.followIntegerSpeedRamp(75.0, 65.0, 3.0, 0.0)
+        assertEquals("the exact remembered landing RPM must produce one stable downshift", 2, lifted.gear)
     }
 
     @Test
     fun integerNoiseNearThresholdDoesNotCauseShiftHunting() {
         val simulation = EngineSimulation()
-        simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 0.45)
+        simulation.followIntegerSpeedRamp(0.0, 75.0, 5.0, 0.45)
         val serialBeforeNoise = simulation.state.shiftSerial
         repeat(1_000) { frame ->
-            val raw = if ((frame / 20) % 2 == 0) 58.0 else 59.0
+            val raw = if ((frame / 20) % 2 == 0) 66.0 else 67.0
             simulation.update(DriverInput(throttle = 0.45, externalSpeedKmh = raw), STEP)
         }
         assertTrue(simulation.state.gear >= 2)
-        assertEquals("4 km/h hysteresis must prevent a shift loop", serialBeforeNoise, simulation.state.shiftSerial)
+        assertEquals("the released-throttle gate must prevent a shift loop", serialBeforeNoise, simulation.state.shiftSerial)
     }
 
     @Test

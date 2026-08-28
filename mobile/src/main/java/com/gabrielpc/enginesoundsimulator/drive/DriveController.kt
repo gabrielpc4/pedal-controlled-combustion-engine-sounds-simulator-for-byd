@@ -3,31 +3,36 @@ package com.gabrielpc.enginesoundsimulator.drive
 import android.content.Context
 import android.os.Process
 import android.os.SystemClock
-import com.gabrielpc.enginesoundsimulator.audio.AudioMixModeRepository
-import com.gabrielpc.enginesoundsimulator.audio.AudioChannelMode
 import com.gabrielpc.enginesoundsimulator.audio.AudioOutputState
-import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
-import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
+import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
+import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
+import com.gabrielpc.enginesoundsimulator.audio.AuthoredCarMetadata
+import com.gabrielpc.enginesoundsimulator.audio.authoredCarMetadata
+import com.gabrielpc.enginesoundsimulator.audio.engineSampleProfileFor
 import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
 import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
-import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
-import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
-import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
+import com.gabrielpc.enginesoundsimulator.audio.toTurboControllerBank
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogEntry
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogRepository
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogSnapshot
+import com.gabrielpc.enginesoundsimulator.catalog.InstalledSoundFamily
+import com.gabrielpc.enginesoundsimulator.catalog.SelectedOfficialCarRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.DebugEventLog
-import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
+import com.gabrielpc.enginesoundsimulator.simulation.RealtimeDrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
-import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
+import com.gabrielpc.enginesoundsimulator.telemetry.resolvedTransmissionPosition
 import com.gabrielpc.enginesoundsimulator.telemetry.transmissionFollowsVehicle
 import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -45,6 +50,7 @@ enum class InputMode(val displayName: String) {
 }
 
 data class DriveSnapshot(
+    val coreSteps: Long,
     val drivetrain: DrivetrainState,
     val inputMode: InputMode,
     val activeInput: String,
@@ -61,12 +67,14 @@ data class DriveSnapshot(
     val selectedCarIndex: Int,
     val availableCarCount: Int,
     val soundEffects: List<SoundEffectOption>,
+    val popsAndBangsAuditionAvailable: Boolean = false,
     val soloSoundEffects: Boolean,
+    val sampleLayerCoverage: List<SampleLayerCoverage> = emptyList(),
     val layerMixTracks: List<LayerMixTrackState> = emptyList(),
-    val coastLayerMixEnabled: Boolean = true,
-    val legacyThrottleMixEnabled: Boolean = false,
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
     val transmissionLockedToVehicle: Boolean = false,
+    /** Monotonic proof that a Compose/debug presentation snapshot was actually constructed. */
+    val uiSnapshotBuildCount: Long = 0L,
 )
 
 data class SoundEffectOption(
@@ -76,104 +84,134 @@ data class SoundEffectOption(
     val enabled: Boolean,
 )
 
+data class SampleLayerCoverage(
+    val id: String,
+    val role: String,
+    val startRpm: Double,
+    val endRpm: Double,
+)
+
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
-class DriveController(context: Context) {
-    private val tuningRepository = TuningRepository(context.applicationContext)
-    private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
-    private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
-    private val layerMixRepository = LayerMixRepository(context.applicationContext)
-    private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
-    private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
-    private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
-    private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
-    private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
+class DriveController(
+    context: Context,
+    initialSoundEnabled: Boolean = true,
+) : DriveRuntimePrimitiveState {
+    private val applicationContext = context.applicationContext
+    private val tuningRepository = TuningRepository(applicationContext)
+    private val catalogRepository = CarCatalogRepository(applicationContext)
+    private val selectedCarRepository = SelectedOfficialCarRepository(applicationContext)
+    private val soundEffectsRepository = SoundEffectsRepository(applicationContext)
+    private val layerMixRepository = LayerMixRepository(applicationContext)
+    private val carMasterVolumeRepository = CarMasterVolumeRepository(applicationContext)
+    private val catalogState = AtomicReference(catalogRepository.snapshot())
+    private val initialCatalogEntry = resolveInitialCatalogEntry(catalogState.get(), selectedCarRepository)
+    private val initialInstalledFamily = catalogRepository.installedFamilyForCar(initialCatalogEntry.id)
+    private val selectedCatalogEntry = AtomicReference(initialCatalogEntry)
+    private val selectedSampleProfile = AtomicReference(
+        profileFor(initialCatalogEntry, initialInstalledFamily),
+    )
+    private val layerMixControls = AtomicReference(layerMixRepository.load(selectedSampleProfile.get()))
     private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
     private val soloEffects = AtomicBoolean(soundEffectsRepository.loadSoloEffects(selectedSampleProfile.get()))
-    private val tuningConfig = AtomicReference(tuningRepository.load())
-    private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(selectedCarRepository.load().id))
+    private val tuningConfig = AtomicReference(tuningRepository.load().withSampleProfile(selectedSampleProfile.get()))
+    private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(initialCatalogEntry.id))
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
     private val simulation = EngineSimulation(profile)
-    private val vehicleReader = BydSpeedReader(context.applicationContext)
-    private val audioEngine = EngineAudioEngine(context.applicationContext)
+    private val runtimeDrivetrain = RealtimeDrivetrainState().also(simulation::publishSnapshot)
+    private val vehicleReader = BydSpeedReader(applicationContext)
+    private val audioEngine = EngineAudioEngine(applicationContext)
     private val lifecycleLock = Any()
+    /** Serializes multi-field car/profile publication against asynchronous catalog imports. */
+    private val carSelectionLock = Any()
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
     private val manualInput = AtomicReference(ManualInput())
     private val selectedInputMode = AtomicReference(InputMode.AUTO)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
-    private val soundEnabled = AtomicBoolean(true)
+    private val soundEnabled = AtomicBoolean(initialSoundEnabled)
+    /**
+     * True only after this controller has deliberately created its audio runtime. A persisted
+     * startup mute leaves this false, which prevents profile decode as well as AudioTrack/focus
+     * ownership. Once audio has started, ordinary runtime mute remains phase-preserving.
+     */
+    private val audioRuntimeStarted = AtomicBoolean(false)
     private val debugPanelVisible = AtomicBoolean(false)
     private val validationThread = AtomicReference<Thread?>(null)
+    private val uiSnapshotBuildCounter = AtomicLong(0L)
 
     @Volatile
     private var loopThread: Thread? = null
 
-    @Volatile
-    private var latest = DriveSnapshot(
-        drivetrain = simulation.state,
-        inputMode = InputMode.AUTO,
-        activeInput = "SIM FALLBACK",
-        throttle = 0.0,
-        brake = 0.0,
-        transmissionPosition = TransmissionPosition.DRIVE,
-        engineSoundEnabled = true,
-        audio = AudioOutputState(),
-        telemetry = TelemetrySnapshot(),
-        tuning = appliedTuning,
-        selectedCarId = selectedSampleProfile.get().id,
-        selectedCarName = selectedSampleProfile.get().displayName,
-        selectedCarPreviewAsset = selectedSampleProfile.get().previewAssetName,
-        selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
-        availableCarCount = EngineSampleProfiles.all.size,
-        soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
-        soloSoundEffects = soloEffects.get(),
-        coastLayerMixEnabled = coastLayerMixEnabled.get(),
-        legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
-        carMasterVolume = carMasterVolume.get(),
-    )
-
-    init {
-        audioEngine.setCoastLayerMixEnabled(coastLayerMixEnabled.get())
-        audioEngine.setSampleProfile(selectedSampleProfile.get())
-    }
+    // The 200 Hz loop publishes only its small runtime values. Compose-facing lists,
+    // labels, meters and copies are assembled exclusively when a visible client asks.
+    @Volatile private var latestInputMode = InputMode.AUTO
+    @Volatile private var latestActiveInput = "SIM FALLBACK"
+    @Volatile private var latestThrottle = 0.0
+    @Volatile private var latestBrake = 0.0
+    @Volatile private var latestTransmissionPosition = TransmissionPosition.DRIVE
+    @Volatile private var latestTransmissionLockedToVehicle = false
+    @Volatile private var coreSteps = 0L
+    private var cachedAudioSource = appliedTuning.audio
+    private var cachedCarMasterVolume = carMasterVolume.get()
+    private var cachedEffectiveAudioTuning = calculateEffectiveAudioTuning(cachedAudioSource, cachedCarMasterVolume)
 
     fun setDebugPanelVisible(visible: Boolean) {
         debugPanelVisible.set(visible)
     }
 
     fun snapshot(): DriveSnapshot {
-        val base = latest
+        val snapshotBuild = uiSnapshotBuildCounter.incrementAndGet()
         val liveAudio = audioEngine.state()
-        if (!debugPanelVisible.get()) {
-            return base.copy(
-                audio = base.audio.copy(
-                    requestedMode = liveAudio.requestedMode,
-                    activeChannels = liveAudio.activeChannels,
-                    running = liveAudio.running,
-                    sampleStatus = liveAudio.sampleStatus,
-                    sampleError = liveAudio.sampleError,
-                    error = liveAudio.error,
-                    samplePlaying = liveAudio.samplePlaying,
-                    layerOutputMeters = liveAudio.layerOutputMeters,
-                ),
-                layerMixTracks = buildLayerMixTracks(
-                    selectedSampleProfile.get(),
-                    layerMixControls.get(),
-                    liveAudio.layerOutputMeters.associate { it.id to it.outputLevel },
-                ),
-            )
-        }
-        return base.copy(
-            telemetry = vehicleReader.snapshot(),
+        val catalog = catalogState.get()
+        val catalogEntry = selectedCatalogEntry.get()
+        val selectedCar = selectedSampleProfile.get()
+        val outputLevels = liveAudio.layerOutputMeters.associate { it.id to it.outputLevel }
+        return DriveSnapshot(
+            coreSteps = coreSteps,
+            drivetrain = runtimeDrivetrain.snapshot(),
+            inputMode = latestInputMode,
+            activeInput = latestActiveInput,
+            throttle = latestThrottle,
+            brake = latestBrake,
+            transmissionPosition = latestTransmissionPosition,
+            engineSoundEnabled = soundEnabled.get(),
             audio = liveAudio,
+            telemetry = vehicleReader.snapshot(),
+            tuning = tuningConfig.get(),
+            selectedCarId = catalogEntry.id,
+            selectedCarName = catalogEntry.displayName,
+            selectedCarPreviewAsset = catalogEntry.previewFile?.absolutePath.orEmpty(),
+            selectedCarIndex = catalog.entries.indexOfFirst { it.id == catalogEntry.id }.coerceAtLeast(0),
+            availableCarCount = catalog.entries.size,
+            soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
+            popsAndBangsAuditionAvailable = selectedCar.effects.any { it.auditionable },
+            soloSoundEffects = soloEffects.get(),
+            sampleLayerCoverage = selectedCar.layers.map { layer ->
+                SampleLayerCoverage(
+                    id = layer.id,
+                    role = layer.role.name,
+                    startRpm = layer.startRpm,
+                    endRpm = layer.endRpm,
+                )
+            },
             layerMixTracks = buildLayerMixTracks(
-                selectedSampleProfile.get(),
+                selectedCar,
                 layerMixControls.get(),
-                liveAudio.layerOutputMeters.associate { it.id to it.outputLevel },
+                outputLevels,
             ),
+            carMasterVolume = carMasterVolume.get(),
+            transmissionLockedToVehicle = latestTransmissionLockedToVehicle,
+            uiSnapshotBuildCount = snapshotBuild,
         )
     }
+
+    /** Background-service reads deliberately avoid renderer diagnostics and presentation lists. */
+    override fun selectedCarDisplayName(): String = selectedCatalogEntry.get().displayName
+
+    override fun shutdownFadeTimeConstantMillis(): Double = tuningConfig.get().audio.enabledFadeMs
+
+    override fun uiSnapshotBuildCount(): Long = uiSnapshotBuildCounter.get()
 
     fun start() {
         synchronized(lifecycleLock) {
@@ -191,7 +229,9 @@ class DriveController(context: Context) {
             loopThread = thread
             try {
                 vehicleReader.start()
-                if (soundEnabled.get()) audioEngine.start()
+                if (DriveAudioResourcePolicy.shouldStartOnControllerStart(soundEnabled.get())) {
+                    startAudioRuntimeLocked()
+                }
                 thread.start()
             } catch (throwable: Throwable) {
                 running.set(false)
@@ -218,8 +258,15 @@ class DriveController(context: Context) {
             }
             vehicleReader.stop()
             audioEngine.stop()
+            audioRuntimeStarted.set(false)
             manualInput.set(ManualInput())
         }
+    }
+
+    /** Final service teardown; unlike [stop], this also terminates decoder ownership. */
+    fun close() {
+        stop()
+        audioEngine.close()
     }
 
     fun setManualThrottle(value: Double) {
@@ -250,10 +297,54 @@ class DriveController(context: Context) {
 
     fun selectNextCar() = selectAdjacentCar(1)
 
-    fun selectCar(profileId: String) {
-        val selected = EngineSampleProfiles.find(profileId)
-        applySelectedCar(selected)
+    fun selectCar(carId: String): Boolean {
+        return synchronized(carSelectionLock) {
+            val selected = catalogState.get().find(carId) ?: return@synchronized false
+            val family = catalogRepository.installedFamilyForCar(carId) ?: return@synchronized false
+            applySelectedCar(selected, family)
+            true
+        }
     }
+
+    internal fun catalogSnapshot(): CarCatalogSnapshot = catalogState.get()
+
+    internal fun toggleFavorite(carId: String): CarCatalogSnapshot {
+        val updated = catalogRepository.toggleFavorite(carId)
+        publishCatalog(updated)
+        return updated
+    }
+
+    /** Blocking import entry point; the foreground service invokes it only on its I/O worker. */
+    internal fun importPack(uri: android.net.Uri): CarCatalogSnapshot {
+        val updated = catalogRepository.importPack(uri)
+        publishCatalog(updated, refreshSelectedProfile = true)
+        return updated
+    }
+
+    /** Blocking batch import; every pack remains atomic and catalog publication happens once. */
+    internal fun importPacks(uris: List<android.net.Uri>): CarCatalogSnapshot {
+        val updated = catalogRepository.importPacks(uris)
+        publishCatalog(updated, refreshSelectedProfile = true)
+        return updated
+    }
+
+    internal fun autoInstallCar(carId: String, progress: (String, Int?) -> Unit = { _, _ -> }): CarCatalogSnapshot {
+        val updated = catalogRepository.autoInstallForCar(carId, progress)
+        catalogState.set(updated)
+        return updated
+    }
+
+    /** Blocking catalog entry point; the foreground service invokes it only on its I/O worker. */
+    internal fun importGeneratedCatalog(uri: android.net.Uri): CarCatalogSnapshot {
+        val updated = applicationContext.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "The selected catalog could not be opened" }
+            catalogRepository.importGeneratedCatalog(input)
+        }
+        publishCatalog(updated, refreshSelectedProfile = true)
+        return updated
+    }
+
+    fun auditionPopsAndBangs() = audioEngine.auditionPopsAndBangs()
 
     fun setLayerMixVolume(trackId: String, volume: Double) {
         val profile = selectedSampleProfile.get()
@@ -268,12 +359,6 @@ class DriveController(context: Context) {
     fun setLayerMixSolo(trackId: String, solo: Boolean) {
         val profile = selectedSampleProfile.get()
         layerMixControls.set(layerMixRepository.setSolo(profile, trackId, solo))
-    }
-
-    fun setCoastLayerMixEnabled(enabled: Boolean) {
-        audioMixModeRepository.setCoastLayerMixEnabled(enabled)
-        coastLayerMixEnabled.set(enabled)
-        audioEngine.setCoastLayerMixEnabled(enabled)
     }
 
     fun setCarMasterVolume(volume: Double) {
@@ -299,23 +384,53 @@ class DriveController(context: Context) {
     }
 
     private fun selectAdjacentCar(offset: Int) {
-        val previous = selectedSampleProfile.get()
-        val selected = EngineSampleProfiles.adjacent(previous.id, offset)
-        if (selected.id == previous.id) return
-        applySelectedCar(selected)
+        synchronized(carSelectionLock) {
+            val installed = catalogState.get().entries.filter(CarCatalogEntry::installed)
+            if (installed.isEmpty()) return@synchronized
+            val previousId = selectedCatalogEntry.get().id
+            val previousIndex = installed.indexOfFirst { it.id == previousId }
+            val selected = installed[(previousIndex.coerceAtLeast(0) + offset).mod(installed.size)]
+            if (selected.id == previousId) return@synchronized
+            val family = catalogRepository.installedFamilyForCar(selected.id) ?: return@synchronized
+            applySelectedCar(selected, family)
+        }
     }
 
-    private fun applySelectedCar(selected: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile) {
-        selectedSampleProfile.set(selected)
-        enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(selected))
-        soloEffects.set(soundEffectsRepository.loadSoloEffects(selected))
-        layerMixControls.set(layerMixRepository.load(selected))
+    private fun applySelectedCar(selected: CarCatalogEntry, family: InstalledSoundFamily?) {
+        val sampleProfile = profileFor(selected, family)
+        selectedCatalogEntry.set(selected)
+        selectedSampleProfile.set(sampleProfile)
+        enabledEffectMask.set(soundEffectsRepository.loadEnabledMask(sampleProfile))
+        soloEffects.set(soundEffectsRepository.loadSoloEffects(sampleProfile))
+        layerMixControls.set(layerMixRepository.load(sampleProfile))
         carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
-        selectedCarRepository.save(selected)
-        val tuning = tuningConfig.get().withSampleProfile(selected)
+        selectedCarRepository.save(selected.id)
+        val tuning = tuningConfig.get().withSampleProfile(sampleProfile)
         tuningConfig.set(tuning)
         tuningRepository.save(tuning)
-        audioEngine.setSampleProfile(selected)
+        if (DriveAudioResourcePolicy.shouldPrepareSelectedProfile(audioRuntimeStarted.get())) {
+            selectAudioProfile(sampleProfile, family)
+        }
+    }
+
+    private fun selectAudioProfile(profile: EngineSampleProfile, family: InstalledSoundFamily?) {
+        if (family == null) {
+            audioEngine.selectUninstalledProfile(profile)
+        } else {
+            audioEngine.setInstalledFamily(family, profile.id)
+        }
+    }
+
+    private fun publishCatalog(updated: CarCatalogSnapshot, refreshSelectedProfile: Boolean = false) {
+        synchronized(carSelectionLock) {
+            catalogState.set(updated)
+            val currentId = selectedCatalogEntry.get().id
+            val refreshed = updated.find(currentId) ?: return@synchronized
+            selectedCatalogEntry.set(refreshed)
+            if (refreshSelectedProfile) {
+                applySelectedCar(refreshed, catalogRepository.installedFamilyForCar(currentId))
+            }
+        }
     }
 
     fun cycleInputMode() {
@@ -337,28 +452,43 @@ class DriveController(context: Context) {
     }
 
     fun toggleSound() {
+        setSoundEnabled(!soundEnabled.get())
+    }
+
+    fun setSoundEnabled(enabled: Boolean) {
         synchronized(lifecycleLock) {
-            val enable = !soundEnabled.get()
-            soundEnabled.set(enable)
-            if (enable && running.get()) audioEngine.start() else audioEngine.stop()
+            soundEnabled.set(enabled)
+            if (running.get()) {
+                // Muting is an allocation-free renderer fade. Keep AudioTrack and
+                // the decoded native family alive so unmute resumes the same loop
+                // phases instead of falling back to the silent bootstrap profile.
+                if (enabled) startAudioRuntimeLocked()
+            }
         }
     }
 
-    fun cycleChannelMode() {
-        val order = listOf(
-            AudioChannelMode.AUTO,
-            AudioChannelMode.SURROUND_7_1,
-            AudioChannelMode.SURROUND_5_1,
-            AudioChannelMode.QUAD,
-            AudioChannelMode.STEREO,
-        )
-        val current = audioEngine.state().requestedMode
-        val selected = order[(order.indexOf(current).coerceAtLeast(0) + 1) % order.size]
-        audioEngine.setChannelMode(selected)
+    /** Must be called with [lifecycleLock]. Loads the current car exactly once before first play. */
+    private fun startAudioRuntimeLocked() {
+        if (!audioRuntimeStarted.get()) {
+            selectAudioProfile(selectedSampleProfile.get(), catalogRepository.installedFamilyForCar(
+                selectedCatalogEntry.get().id,
+            ))
+        }
+        audioEngine.start()
+        audioRuntimeStarted.set(true)
+    }
+
+    /**
+     * Starts the renderer's normal enabled-gain fade without tearing down AudioTrack. The
+     * foreground service calls this shortly before its final stop so task dismissal and the
+     * notification Stop action cannot create an abrupt full-scale edge.
+     */
+    fun beginShutdownFade() {
+        soundEnabled.set(false)
     }
 
     /** Runs a deterministic pedal program for on-device sample-renderer and telemetry validation. */
-    fun runSampleAudioValidation() {
+    fun runSampleAudioValidation(forceSoundEnabled: Boolean = true) {
         synchronized(lifecycleLock) {
             if (validationThread.get()?.isAlive == true) {
                 DebugEventLog.warning("sample_validation_already_running")
@@ -367,7 +497,9 @@ class DriveController(context: Context) {
             selectedInputMode.set(InputMode.SIMULATOR)
             transmissionPosition.set(TransmissionPosition.DRIVE)
             manualInput.set(ManualInput())
-            if (!soundEnabled.getAndSet(true) && running.get()) audioEngine.start()
+            if (forceSoundEnabled && !soundEnabled.getAndSet(true) && running.get()) {
+                audioEngine.start()
+            }
 
             val validation = Thread(
                 {
@@ -447,80 +579,102 @@ class DriveController(context: Context) {
         val telemetry = vehicleReader.snapshot()
         val mode = selectedInputMode.get()
         val manual = manualInput.get()
-        val input = resolveDriveInput(mode, telemetry, manual.throttle, manual.brake)
-        val transmissionControl = resolveTransmissionControl(
-            mode = mode,
-            telemetry = telemetry,
-            manualPosition = transmissionPosition.get(),
-        )
-        if (transmissionControl.lockedToVehicle) {
-            transmissionPosition.set(transmissionControl.position)
+        val vehicleAvailable = telemetry.vehiclePedalsAvailable()
+        val useVehiclePedals = vehicleAvailable && mode != InputMode.SIMULATOR
+        val resolvedThrottle: Double
+        val resolvedBrake: Double
+        val externalSpeedKmh: Double?
+        val inputLabel: String
+        val simulatorInput: Boolean
+        if (useVehiclePedals) {
+            resolvedThrottle = (telemetry.accelerator.value!! / 100.0).coerceIn(0.0, 1.0)
+            resolvedBrake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0)
+            externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid }
+            inputLabel = "BYD PEDALS"
+            simulatorInput = false
+        } else if (mode == InputMode.VEHICLE) {
+            resolvedThrottle = 0.0
+            resolvedBrake = 0.0
+            externalSpeedKmh = null
+            inputLabel = "BYD UNAVAILABLE"
+            simulatorInput = false
+        } else {
+            resolvedThrottle = manual.throttle.coerceIn(0.0, 1.0)
+            resolvedBrake = manual.brake.coerceIn(0.0, 1.0)
+            externalSpeedKmh = null
+            inputLabel = "SIM PEDALS"
+            simulatorInput = true
         }
 
-        val drivetrain = simulation.update(
-            DriverInput(
-                throttle = input.throttle,
-                brake = input.brake,
-                externalSpeedKmh = input.externalSpeedKmh,
-                // AUTO falls back to the same SIM pedals when BYD input is unavailable.
-                // Use the resolved source, not just the selected mode, for its speed behavior.
-                simulateCoastRegen = input.isSimulator,
-                transmissionPosition = transmissionControl.position,
-            ),
-            dt,
+        val transmissionLocked = telemetry.transmissionFollowsVehicle(mode)
+        val resolvedTransmission = if (transmissionLocked) {
+            telemetry.resolvedTransmissionPosition() ?: transmissionPosition.get()
+        } else {
+            transmissionPosition.get()
+        }
+        if (transmissionLocked) {
+            transmissionPosition.set(resolvedTransmission)
+        }
+
+        simulation.updateRealtime(
+            throttle = resolvedThrottle,
+            brake = resolvedBrake,
+            externalSpeedKmh = externalSpeedKmh,
+            // AUTO falls back to the same SIM pedals when BYD input is unavailable.
+            simulateCoastRegen = simulatorInput,
+            transmissionPosition = resolvedTransmission,
+            deltaSeconds = dt,
+            destination = runtimeDrivetrain,
         )
         val enabled = soundEnabled.get()
-        audioEngine.update(
-            EngineAudioFrame(
-                rpm = drivetrain.rpm,
-                throttle = drivetrain.smoothedThrottle,
-                enabled = enabled,
-                enabledEffectMask = enabledEffectMask.get(),
-                soloEffects = soloEffects.get(),
-                shiftSerial = drivetrain.shiftSerial,
-                shiftDirection = when (drivetrain.shiftDirection) {
-                    ShiftDirection.UP -> 1
-                    ShiftDirection.DOWN -> -1
-                    ShiftDirection.NONE -> 0
-                },
-                tuning = effectiveAudioTuning(tuning),
-                layerMix = layerMixControls.get(),
-                coastLayerMixEnabled = coastLayerMixEnabled.get(),
-            ),
+        audioEngine.updateCore(
+            rpm = runtimeDrivetrain.rpm,
+            drivetrainRpm = (runtimeDrivetrain.speedKmh.coerceAtLeast(0.0) / 3.6) /
+                (2.0 * Math.PI * profile.wheelRadiusMeters) * 60.0,
+            physicalPedal = resolvedThrottle,
+            // Seal EV pedal filtering belongs to motion only. AC/FM0D receives the driver's
+            // unsmoothed pedal, then applies its own authored gearbox-assist state.
+            throttle = resolvedThrottle,
+            enabled = enabled,
+            enabledEffectMask = enabledEffectMask.get(),
+            soloEffects = soloEffects.get(),
+            shiftSerial = runtimeDrivetrain.shiftSerial,
+            shiftDirection = when (runtimeDrivetrain.shiftDirection) {
+                ShiftDirection.UP -> 1
+                ShiftDirection.DOWN -> -1
+                ShiftDirection.NONE -> 0
+            },
+            isShifting = runtimeDrivetrain.isShifting,
+            gear = runtimeDrivetrain.gear,
+            limiterActive = runtimeDrivetrain.limiterActive,
+            tuning = effectiveAudioTuning(tuning),
+            layerMix = layerMixControls.get(),
         )
-        val selectedCar = selectedSampleProfile.get()
-        val outputLevels = audioEngine.state().layerOutputMeters.associate { it.id to it.outputLevel }
-        val debugVisible = debugPanelVisible.get()
-        latest = DriveSnapshot(
-            drivetrain = drivetrain,
-            inputMode = mode,
-            activeInput = input.label,
-            throttle = input.throttle,
-            brake = input.brake,
-            transmissionPosition = transmissionControl.position,
-            engineSoundEnabled = enabled,
-            audio = if (debugVisible) audioEngine.state() else latest.audio,
-            telemetry = if (debugVisible) telemetry else latest.telemetry,
-            tuning = tuning,
-            selectedCarId = selectedCar.id,
-            selectedCarName = selectedCar.displayName,
-            selectedCarPreviewAsset = selectedCar.previewAssetName,
-            selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
-            availableCarCount = EngineSampleProfiles.all.size,
-            soundEffects = soundEffectOptions(selectedCar, enabledEffectMask.get()),
-            soloSoundEffects = soloEffects.get(),
-            layerMixTracks = buildLayerMixTracks(selectedCar, layerMixControls.get(), outputLevels),
-            coastLayerMixEnabled = coastLayerMixEnabled.get(),
-        legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
-            carMasterVolume = carMasterVolume.get(),
-            transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
-        )
+        latestInputMode = mode
+        latestActiveInput = inputLabel
+        latestThrottle = resolvedThrottle
+        latestBrake = resolvedBrake
+        latestTransmissionPosition = resolvedTransmission
+        latestTransmissionLockedToVehicle = transmissionLocked
+        coreSteps += 1L
     }
 
-    private fun effectiveAudioTuning(tuning: TuningConfig) = tuning.audio.copy(
-        masterGain = (
-            carMasterVolume.get() * tuning.audio.masterGain / CarMasterVolumeRepository.DEFAULT
-            ).coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX),
+    private fun effectiveAudioTuning(tuning: TuningConfig): com.gabrielpc.enginesoundsimulator.tuning.AudioTuning {
+        val volume = carMasterVolume.get()
+        if (tuning.audio !== cachedAudioSource || volume != cachedCarMasterVolume) {
+            cachedAudioSource = tuning.audio
+            cachedCarMasterVolume = volume
+            cachedEffectiveAudioTuning = calculateEffectiveAudioTuning(tuning.audio, volume)
+        }
+        return cachedEffectiveAudioTuning
+    }
+
+    private fun calculateEffectiveAudioTuning(
+        audio: com.gabrielpc.enginesoundsimulator.tuning.AudioTuning,
+        volume: Double,
+    ) = audio.copy(
+        masterGain = (volume * audio.masterGain / CarMasterVolumeRepository.DEFAULT)
+            .coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX),
     )
 
     private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
@@ -542,6 +696,58 @@ class DriveController(context: Context) {
     private data class ValidationStage(val throttle: Double, val durationMs: Long)
 }
 
+private fun resolveInitialCatalogEntry(
+    snapshot: CarCatalogSnapshot,
+    repository: SelectedOfficialCarRepository,
+): CarCatalogEntry {
+    val selectedId = repository.load(snapshot)
+    return requireNotNull(snapshot.find(selectedId)) { "Selected official car is absent from the immutable catalog" }
+}
+
+private fun profileFor(entry: CarCatalogEntry, family: InstalledSoundFamily?): EngineSampleProfile {
+    if (family != null) {
+        return family.manifest.engineSampleProfileFor(entry.id, entry.previewFile?.absolutePath)
+    }
+
+    val engine = entry.engine
+    val gearbox = entry.gearbox
+    val idleRpm = engine?.idleRpm ?: 900.0
+    val redlineRpm = engine?.redlineRpm ?: 7_500.0
+    val limiterRpm = engine?.limiterRpm ?: redlineRpm
+    val maximumRpm = engine?.tachometerMaximumRpm
+        ?.coerceAtLeast(limiterRpm)
+        ?: (limiterRpm + 500.0).coerceAtLeast(8_000.0)
+    val ratios = gearbox?.forwardRatios?.takeIf { it.isNotEmpty() }
+        ?: listOf(3.20, 2.10, 1.52, 1.18, 0.96, 0.80)
+    val turboControllerBank = engine?.toTurboControllerBank()
+    val authoredMetadata = if (engine != null && gearbox != null) {
+        authoredCarMetadata(entry.id, engine, gearbox, turboControllerBank)
+    } else {
+        AuthoredCarMetadata.EMPTY
+    }
+    return EngineSampleProfile(
+        id = entry.id,
+        displayName = entry.displayName,
+        assetDirectory = "",
+        previewAssetName = entry.previewFile?.absolutePath.orEmpty(),
+        outputSampleRate = 48_000,
+        minimumRpm = 0.0,
+        maximumRpm = maximumRpm,
+        idleRpm = idleRpm,
+        redlineRpm = redlineRpm,
+        limiterRpm = limiterRpm,
+        upshiftRpm = gearbox?.upshiftRpm ?: redlineRpm,
+        gearRatios = ratios,
+        upshiftDurationSeconds = (gearbox?.upshiftTimeMs ?: 150.0) / 1_000.0,
+        downshiftDurationSeconds = (gearbox?.downshiftTimeMs ?: 180.0) / 1_000.0,
+        layers = emptyList(),
+        effects = emptyList(),
+        limiterHz = engine?.limiterHz ?: 20.0,
+        turboControllerBank = turboControllerBank,
+        authoredCarMetadata = authoredMetadata,
+    )
+}
+
 private fun soundEffectOptions(
     profile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile,
     mask: Long,
@@ -554,7 +760,7 @@ private fun soundEffectOptions(
     )
 }
 
-private fun buildLayerMixTracks(
+internal fun buildLayerMixTracks(
     profile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile,
     controls: Map<String, LayerMixControl>,
     outputLevels: Map<String, Double>,
@@ -575,8 +781,7 @@ private fun buildLayerMixTracks(
                 solo = control.solo,
                 outputLevel = outputLevels[trackId] ?: 0.0,
                 isEffect = false,
-                showVolumeSlider = layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD,
-                isLoadLayer = layer.role == SampleLayerRole.LOAD,
+                showVolumeSlider = true,
             )
             effect != null -> LayerMixTrackState(
                 id = trackId,

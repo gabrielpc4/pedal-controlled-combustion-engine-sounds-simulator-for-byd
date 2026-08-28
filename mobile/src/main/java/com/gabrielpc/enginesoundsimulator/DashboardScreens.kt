@@ -11,7 +11,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -22,16 +21,20 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -40,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,7 +59,6 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -65,13 +68,19 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogEntry
+import com.gabrielpc.enginesoundsimulator.catalog.CarCatalogSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
+import androidx.compose.ui.window.Dialog
+import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -109,15 +118,20 @@ internal fun DashboardScreenSwitcher(
 @Composable
 internal fun MixerDashboardScreen(
     state: DriveSnapshot,
+    carCatalog: CarCatalogSnapshot?,
+    catalogStatus: String?,
+    catalogStatusIsError: Boolean,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onSelectCar: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onImportPacks: () -> Unit,
+    onImportCatalog: () -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
-    coastLayerMixEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -133,16 +147,17 @@ internal fun MixerDashboardScreen(
             selectedCarId = state.selectedCarId,
             selectedCarName = state.selectedCarName,
             selectedCarPreviewAsset = state.selectedCarPreviewAsset,
+            carCatalog = carCatalog,
+            catalogStatus = catalogStatus,
+            catalogStatusIsError = catalogStatusIsError,
             carMasterVolume = state.carMasterVolume,
             onSelectCar = onSelectCar,
+            onToggleFavorite = onToggleFavorite,
+            onImportPacks = onImportPacks,
+            onImportCatalog = onImportCatalog,
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
         Spacer(Modifier.height(10.dp))
-        val visibleTracks = if (state.coastLayerMixEnabled) {
-            state.layerMixTracks.filter { track -> !track.isLoadLayer }
-        } else {
-            state.layerMixTracks
-        }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -152,10 +167,9 @@ internal fun MixerDashboardScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(visibleTracks, key = { it.id }) { track ->
+                items(state.layerMixTracks, key = { it.id }) { track ->
                     LayerMixTrackControl(
                         track = track,
-                        coastLayerMixEnabled = coastLayerMixEnabled,
                         onMuted = { onLayerMuted(track.id, it) },
                         onSolo = { onLayerSolo(track.id, it) },
                         onVolume = { onLayerVolume(track.id, it) },
@@ -208,14 +222,20 @@ private fun MixerHeaderRow(
     selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
+    carCatalog: CarCatalogSnapshot?,
+    catalogStatus: String?,
+    catalogStatusIsError: Boolean,
     carMasterVolume: Double,
     onSelectCar: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onImportPacks: () -> Unit,
+    onImportCatalog: () -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(118.dp)
+            .height(150.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Panel.copy(alpha = 0.92f))
             .border(1.dp, Line.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
@@ -233,8 +253,14 @@ private fun MixerHeaderRow(
             selectedCarId = selectedCarId,
             selectedCarName = selectedCarName,
             selectedCarPreviewAsset = selectedCarPreviewAsset,
+            carCatalog = carCatalog,
+            catalogStatus = catalogStatus,
+            catalogStatusIsError = catalogStatusIsError,
             carMasterVolume = carMasterVolume,
             onSelectCar = onSelectCar,
+            onToggleFavorite = onToggleFavorite,
+            onImportPacks = onImportPacks,
+            onImportCatalog = onImportCatalog,
             onCarMasterVolumeChange = onCarMasterVolumeChange,
             modifier = Modifier.weight(0.42f).fillMaxHeight(),
         )
@@ -338,12 +364,19 @@ private fun CarDropdownSelector(
     selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
+    carCatalog: CarCatalogSnapshot?,
+    catalogStatus: String?,
+    catalogStatusIsError: Boolean,
     carMasterVolume: Double,
     onSelectCar: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onImportPacks: () -> Unit,
+    onImportCatalog: () -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val selectedEntry = carCatalog?.find(selectedCarId)
     Box(
         modifier = modifier.padding(start = 12.dp),
         contentAlignment = Alignment.CenterStart,
@@ -352,15 +385,19 @@ private fun CarDropdownSelector(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
+                .heightIn(min = 112.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(PanelBright)
                 .border(1.dp, Line, RoundedCornerShape(10.dp)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CarPreviewThumbnail(
-                previewAsset = selectedCarPreviewAsset,
+            CarPreviewImage(
+                absolutePath = selectedEntry?.previewFile?.absolutePath,
+                assetFallback = selectedCarPreviewAsset,
+                maximumDimensionPx = 512,
                 contentDescription = selectedCarName,
                 modifier = Modifier
+                    .width(144.dp)
                     .fillMaxHeight()
                     .clickable { expanded = true },
             )
@@ -371,19 +408,52 @@ private fun CarDropdownSelector(
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { expanded = true },
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("SIMULATED CAR", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { expanded = true },
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text("SIMULATED CAR", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(
+                            text = selectedCarName,
+                            color = White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val selectorStatus = catalogStatus ?: selectedEntry?.let {
+                            if (it.installed) "PACK INSTALLED" else "PACK NOT INSTALLED"
+                        }
+                        Text(
+                            text = selectorStatus.orEmpty(),
+                            color = when {
+                                catalogStatusIsError -> Red
+                                catalogStatus != null || selectedEntry?.installed == true -> Green
+                                else -> Amber
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.height(16.dp),
+                        )
+                    }
                     Text(
-                        text = selectedCarName,
-                        color = White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        text = carFavoriteMarker(selectedEntry?.favorite),
+                        color = if (selectedEntry?.favorite == true) Amber else Muted,
+                        fontSize = 24.sp,
+                        modifier = Modifier
+                            .width(34.dp)
+                            .clickable(enabled = selectedEntry != null) {
+                                selectedEntry?.let { onToggleFavorite(it.id) }
+                            },
+                        textAlign = TextAlign.Center,
                     )
                 }
 
@@ -420,98 +490,312 @@ private fun CarDropdownSelector(
                 }
             }
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            EngineSampleProfiles.all.forEach { profile ->
-                DropdownMenuItem(
-                    text = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            CarPreviewThumbnail(
-                                previewAsset = profile.previewAssetName,
-                                contentDescription = profile.displayName,
-                                modifier = Modifier
-                                    .height(40.dp)
-                                    .clip(RoundedCornerShape(6.dp)),
-                            )
-                            Text(
-                                profile.displayName,
-                                fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
-                            )
-                        }
-                    },
-                    onClick = {
-                        expanded = false
-                        onSelectCar(profile.id)
-                    },
+        if (expanded) {
+            CarCatalogDialog(
+                catalog = carCatalog,
+                selectedCarId = selectedCarId,
+                catalogStatus = catalogStatus,
+                catalogStatusIsError = catalogStatusIsError,
+                onDismiss = { expanded = false },
+                onSelectCar = {
+                    expanded = false
+                    onSelectCar(it)
+                },
+                onToggleFavorite = onToggleFavorite,
+                onImportPacks = {
+                    expanded = false
+                    onImportPacks()
+                },
+                onImportCatalog = {
+                    expanded = false
+                    onImportCatalog()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CarCatalogDialog(
+    catalog: CarCatalogSnapshot?,
+    selectedCarId: String,
+    catalogStatus: String?,
+    catalogStatusIsError: Boolean,
+    onDismiss: () -> Unit,
+    onSelectCar: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onImportPacks: () -> Unit,
+    onImportCatalog: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val normalizedQuery = query.trim().lowercase(Locale.ROOT)
+    val entries = remember(catalog?.entries, normalizedQuery) {
+        filterCarCatalogEntries(catalog?.entries.orEmpty(), normalizedQuery)
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .fillMaxHeight(0.88f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Panel)
+                .border(1.dp, Line, RoundedCornerShape(18.dp))
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("ASSETTO CORSA CARS", color = White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    Text(
+                        if (catalog == null) "Connecting to the driving catalog…" else
+                            "${catalog.entries.count { it.installed }} / ${catalog.entries.size} cars installed · ${catalog.installedFamilyCount} sound families",
+                        color = Muted,
+                        fontSize = 11.sp,
+                    )
+                }
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
+                ) {
+                    Text("CLOSE", color = Cyan, fontWeight = FontWeight.Black)
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search name, brand, or car ID") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
                 )
+                Button(
+                    onClick = onImportPacks,
+                    colors = ButtonDefaults.buttonColors(containerColor = Cyan.copy(alpha = 0.18f)),
+                ) {
+                    Text("IMPORT .ACLIB", color = Cyan, fontWeight = FontWeight.Black)
+                }
+                Button(
+                    onClick = onImportCatalog,
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
+                ) {
+                    Text("CATALOG JSON", color = White, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (catalogStatus != null) {
+                Text(
+                    text = catalogStatus,
+                    color = if (catalogStatusIsError) Red else Green,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            if (entries.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (catalog == null) "CATALOG UNAVAILABLE" else "NO CARS MATCH YOUR SEARCH",
+                        color = Muted,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(entries, key = { it.id }) { entry ->
+                        CarCatalogRow(
+                            entry = entry,
+                            selected = entry.id == selectedCarId,
+                            onSelect = { onSelectCar(entry.id) },
+                            onToggleFavorite = { onToggleFavorite(entry.id) },
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun CarPreviewThumbnail(
-    previewAsset: String,
+private fun CarCatalogRow(
+    entry: CarCatalogEntry,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onToggleFavorite: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Cyan.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.22f))
+            .border(1.dp, if (selected) Cyan else Line.copy(alpha = 0.65f), RoundedCornerShape(10.dp))
+            .clickable(onClick = onSelect)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CarPreviewImage(
+            absolutePath = entry.previewFile?.absolutePath,
+            assetFallback = null,
+            maximumDimensionPx = 256,
+            contentDescription = entry.displayName,
+            modifier = Modifier.width(96.dp).height(54.dp).clip(RoundedCornerShape(6.dp)),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.displayName,
+                color = if (entry.installed) White else Muted,
+                fontSize = 14.sp,
+                fontWeight = if (selected || entry.favorite) FontWeight.Black else FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${entry.brand} · ${entry.id}",
+                color = Muted,
+                fontSize = 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = carInstallationLabel(entry.installed),
+            color = if (entry.installed) Green else Amber,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.width(76.dp),
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = carFavoriteMarker(entry.favorite),
+            color = if (entry.favorite) Amber else Muted,
+            fontSize = 25.sp,
+            modifier = Modifier.width(38.dp).clickable(onClick = onToggleFavorite),
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = if (selected) "✓" else "",
+            color = Cyan,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.width(22.dp),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** Pure catalog presentation policy, kept testable without constructing a Compose hierarchy. */
+internal fun filterCarCatalogEntries(
+    entries: List<CarCatalogEntry>,
+    query: String,
+): List<CarCatalogEntry> {
+    val normalizedQuery = query.trim().lowercase(Locale.ROOT)
+    if (normalizedQuery.isEmpty()) return entries
+    return entries.filter { entry ->
+        entry.displayName.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            entry.brand.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            entry.id.lowercase(Locale.ROOT).contains(normalizedQuery)
+    }
+}
+
+internal fun carInstallationLabel(installed: Boolean): String =
+    if (installed) "INSTALLED" else "IMPORT PACK"
+
+internal fun carFavoriteMarker(favorite: Boolean?): String = when (favorite) {
+    true -> "★"
+    false -> "☆"
+    null -> ""
+}
+
+@Composable
+internal fun CarPreviewImage(
+    absolutePath: String?,
+    assetFallback: String?,
     contentDescription: String,
+    maximumDimensionPx: Int = 1_280,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val preview = remember(previewAsset) {
-        runCatching {
-            context.assets.open(previewAsset).use { input ->
-                val bitmap = requireNotNull(BitmapFactory.decodeStream(input))
-                LoadedCarPreview(
-                    image = bitmap.asImageBitmap(),
-                    aspectRatio = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1).toFloat(),
-                )
+    val preview by produceState<ImageBitmap?>(null, absolutePath, assetFallback, maximumDimensionPx) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                val privateFile = sequenceOf(absolutePath, assetFallback)
+                    .filterNotNull()
+                    .map(::File)
+                    .firstOrNull { it.isAbsolute && it.isFile }
+                val asset = if (privateFile == null) {
+                    assetFallback
+                        ?.takeIf(String::isNotBlank)
+                        ?.takeUnless { File(it).isAbsolute }
+                        ?: throw IllegalStateException("No preview image is installed")
+                } else {
+                    null
+                }
+                val openInput = {
+                    privateFile?.inputStream() ?: context.assets.open(requireNotNull(asset))
+                }
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                openInput().use { BitmapFactory.decodeStream(it, null, bounds) }
+                var sampleSize = 1
+                val largestDimension = max(bounds.outWidth, bounds.outHeight).coerceAtLeast(1)
+                while (largestDimension / sampleSize > maximumDimensionPx.coerceAtLeast(64)) {
+                    sampleSize *= 2
+                }
+                val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                openInput().use {
+                    val bitmap = requireNotNull(BitmapFactory.decodeStream(it, null, options))
+                    bitmap.asImageBitmap()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
             }
-        }.getOrNull()
+        }
     }
-
-    val aspectRatio = preview?.aspectRatio ?: (16f / 9f)
 
     Box(
         modifier = modifier
-            .aspectRatio(aspectRatio)
             .background(Color.Black.copy(alpha = 0.42f)),
         contentAlignment = Alignment.Center,
     ) {
-        if (preview != null) {
+        val loadedPreview = preview
+        if (loadedPreview != null) {
             Image(
-                bitmap = preview.image,
+                bitmap = loadedPreview,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            Image(
-                painter = painterResource(R.drawable.apex_v10_car),
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
+            Text(
+                text = "NO PREVIEW",
+                color = Muted.copy(alpha = 0.72f),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.8.sp,
+                maxLines = 1,
             )
         }
     }
 }
 
-private data class LoadedCarPreview(
-    val image: ImageBitmap,
-    val aspectRatio: Float,
-)
-
 @Composable
 private fun LayerMixTrackControl(
     track: LayerMixTrackState,
-    coastLayerMixEnabled: Boolean,
     onMuted: (Boolean) -> Unit,
     onSolo: (Boolean) -> Unit,
     onVolume: (Double) -> Unit,
 ) {
     val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
-    val showTrimSlider = coastLayerMixEnabled && track.showVolumeSlider
+    val showTrimSlider = track.showVolumeSlider
     Column(
         modifier = Modifier
             .fillMaxWidth()

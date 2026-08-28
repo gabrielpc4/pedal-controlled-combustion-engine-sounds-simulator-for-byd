@@ -5,16 +5,19 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+/** Float PCM used only by deterministic host-side renderer tests. */
 internal data class PcmLoopData(
     val channelSamples: Array<FloatArray>,
-    val sampleRate: Int,
-    val loopStartFrame: Int = 0,
-    val loopEndFrameExclusive: Int = channelSamples.first().size,
-) {
-    val sourceChannels: Int get() = channelSamples.size
-    val frameCount: Int get() = channelSamples.first().size
+    override val sampleRate: Int,
+    override val loopStartFrame: Int = 0,
+    override val loopEndFrameExclusive: Int = channelSamples.first().size,
+) : PlanarPcmData {
+    override val sourceChannels: Int get() = channelSamples.size
+    override val frameCount: Int get() = channelSamples.first().size
+    override fun normalizedSample(channel: Int, frame: Int): Double = channelSamples[channel][frame].toDouble()
 }
 
+/** Legacy-WAV fixture parser retained solely to verify old source recordings in tests. */
 internal object WavPcmDecoder {
     fun decode(input: InputStream): PcmLoopData = input.buffered().use { stream ->
         require(stream.readAscii(4) == "RIFF") { "Not a RIFF file" }

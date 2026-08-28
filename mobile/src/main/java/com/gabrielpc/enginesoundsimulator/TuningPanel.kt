@@ -51,12 +51,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.drive.SampleLayerCoverage
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
+import com.gabrielpc.enginesoundsimulator.tuning.MAX_PRESENTATION_RPM
 import com.gabrielpc.enginesoundsimulator.tuning.interpolateCurve
 import java.util.Locale
 import kotlin.math.abs
@@ -117,7 +118,12 @@ internal fun TuningPanel(
             when (TuningTab.entries[tabIndex]) {
                 TuningTab.ENGINE -> EngineTab(config, onConfigChange)
                 TuningTab.DELAYS -> DelaysTab(config, onConfigChange)
-                TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
+                TuningTab.AUDIO -> AudioTab(
+                    config = config,
+                    selectedCarName = state.selectedCarName,
+                    layers = state.sampleLayerCoverage,
+                    onChange = onConfigChange,
+                )
             }
         }
     }
@@ -187,7 +193,7 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             Modifier.weight(1f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
+                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..MAX_PRESENTATION_RPM, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
                         redlineRpm = min(engine.redlineRpm, it - 100.0),
@@ -267,23 +273,27 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 }
 
 @Composable
-private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (TuningConfig) -> Unit) {
+private fun AudioTab(
+    config: TuningConfig,
+    selectedCarName: String,
+    layers: List<SampleLayerCoverage>,
+    onChange: (TuningConfig) -> Unit,
+) {
     val audio = config.audio
-    val profile = EngineSampleProfiles.find(selectedCarId)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("SAMPLE OUTPUT", "The recovered bank logic is the only engine source", Modifier.weight(0.72f)) {
             AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
             Spacer(Modifier.height(20.dp))
             Text("PROFILE", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
-            Text(profile.displayName, color = TuneWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(selectedCarName, color = TuneWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             Text("NATIVE RPM DOMAIN", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
-            Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("0–${config.engine.maxRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            Text("${profile.layers.size} continuous layers · bank-authored RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("${layers.size} continuous layers · manifest RPM and pedal automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
         }
         PanelCard("RPM LAYER COVERAGE", "Recovered FMOD regions on the bank's native parameter axis", Modifier.weight(1.85f)) {
-            SampleBankCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
+            SampleBankCoverageGraph(layers, config.engine.maxRpm, config.engine.redlineRpm, Modifier.fillMaxSize())
         }
     }
 }
@@ -924,8 +934,7 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
             AxisTick(((index + 0.5f) / count), "${index + 1}")
         }
         val landingRpms = (0 until engine.gearRatios.lastIndex).map { index ->
-            engine.idleRpm +
-                (engine.upshiftRpm - engine.idleRpm) * engine.gearRatios[index + 1] / engine.gearRatios[index]
+            engine.upshiftRpm * engine.gearRatios[index + 1] / engine.gearRatios[index]
         }
         val yTicks = axisTicksFromValues(
             values = listOf(engine.idleRpm, engine.upshiftRpm) + landingRpms,
@@ -943,8 +952,8 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
             drawLine(TuneLine.copy(alpha = 0.65f), Offset(x, top), Offset(x, bottom), 1f)
         }
         for (index in 0 until engine.gearRatios.lastIndex) {
-            val postShift = engine.idleRpm +
-                (engine.upshiftRpm - engine.idleRpm) * engine.gearRatios[index + 1] / engine.gearRatios[index]
+            val postShift =
+                engine.upshiftRpm * engine.gearRatios[index + 1] / engine.gearRatios[index]
             val x = left + width * ((index + 0.5f) / count)
             val barWidth = width / count * 0.52f
             val y = bottom - height * (postShift / engine.maxRpm).toFloat().coerceIn(0f, 1f)
@@ -999,8 +1008,13 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
-    val profile = EngineSampleProfiles.find(profileId)
+private fun SampleBankCoverageGraph(
+    layers: List<SampleLayerCoverage>,
+    maximumRpm: Double,
+    redlineRpm: Double,
+    modifier: Modifier = Modifier,
+) {
+    val safeMaximumRpm = maximumRpm.coerceAtLeast(1.0)
     Canvas(modifier) {
         val left = 90f
         val right = size.width - 26f
@@ -1011,22 +1025,25 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
         val roles = SampleLayerRole.entries
         val laneHeight = height / roles.size
 
-        for (rpm in 0..profile.maximumRpm.toInt() step 1_000) {
-            val x = left + width * (rpm / profile.maximumRpm).toFloat()
+        for (rpm in 0..safeMaximumRpm.toInt() step 1_000) {
+            val x = left + width * (rpm / safeMaximumRpm).toFloat()
             drawLine(TuneLine.copy(alpha = 0.75f), Offset(x, top), Offset(x, bottom), 1f)
         }
         roles.forEachIndexed { lane, role ->
             val laneTop = top + lane * laneHeight
             val color = when (role) {
                 SampleLayerRole.IDLE -> TuneWhite
-                SampleLayerRole.LOAD -> TuneGreen
                 SampleLayerRole.COAST -> TuneCyan
                 SampleLayerRole.TEXTURE -> TuneAmber
+                SampleLayerRole.INTAKE -> TuneGreen
+                SampleLayerRole.EXHAUST -> TuneAmber
+                SampleLayerRole.TURBO -> TuneCyan
+                SampleLayerRole.SPOOL -> TuneGreen
                 SampleLayerRole.LIMITER -> TuneRed
             }
-            profile.layers.filter { it.role == role }.forEach { layer ->
-                val x = left + width * (layer.startRpm / profile.maximumRpm).toFloat()
-                val endX = left + width * (layer.endRpm / profile.maximumRpm).toFloat()
+            layers.filter { it.role == role.name }.forEach { layer ->
+                val x = left + width * (layer.startRpm / safeMaximumRpm).toFloat()
+                val endX = left + width * (layer.endRpm / safeMaximumRpm).toFloat()
                 val y = laneTop + laneHeight * 0.20f
                 val barHeight = laneHeight * 0.60f
             drawRoundRect(
@@ -1041,10 +1058,10 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
         }
 
         val currentRedline = redlineRpm.coerceIn(
-            profile.minimumRpm,
-            profile.maximumRpm,
+            0.0,
+            safeMaximumRpm,
         )
-        val redlineX = left + width * (currentRedline / profile.maximumRpm).toFloat()
+        val redlineX = left + width * (currentRedline / safeMaximumRpm).toFloat()
         drawLine(TuneRed, Offset(redlineX, top), Offset(redlineX, bottom), 3f)
 
         drawIntoCanvas { canvas ->
@@ -1061,8 +1078,8 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
                 )
             }
             paint.textAlign = Paint.Align.CENTER
-            for (rpm in 0..profile.maximumRpm.toInt() step 1_000) {
-                val x = left + width * (rpm / profile.maximumRpm).toFloat()
+            for (rpm in 0..safeMaximumRpm.toInt() step 1_000) {
+                val x = left + width * (rpm / safeMaximumRpm).toFloat()
                 canvas.nativeCanvas.drawText(rpm.toString(), x, bottom + 28f, paint)
             }
             paint.textAlign = Paint.Align.LEFT

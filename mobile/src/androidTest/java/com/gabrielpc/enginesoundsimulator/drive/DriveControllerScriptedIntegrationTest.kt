@@ -4,6 +4,8 @@ import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -12,6 +14,27 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
+    @Test
+    fun persistedStartupMuteDoesNotDecodeOrOpenAudioTrack() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val controller = DriveController(context, initialSoundEnabled = false)
+        try {
+            controller.start()
+            SystemClock.sleep(300L)
+
+            val snapshot = controller.snapshot()
+            assertFalse(snapshot.engineSoundEnabled)
+            assertFalse(snapshot.audio.running)
+            assertEquals("OFFLINE", snapshot.audio.activeLayout)
+            assertEquals(0, snapshot.audio.sampleRate)
+            assertEquals(0L, snapshot.audio.nativeResidentBytes)
+            assertEquals(0L, snapshot.audio.nativeReservedBytes)
+            assertFalse(snapshot.audio.packLoadStatus == "LOADING")
+        } finally {
+            controller.close()
+        }
+    }
+
     @Test
     fun scriptedLaunchAndLiftOffStaySpeedCoupled() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

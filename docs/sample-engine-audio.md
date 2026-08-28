@@ -1,5 +1,14 @@
 # Profile-based sample engine audio
 
+> **Archived experiment, not the current runtime.** This file records the earlier two-car WAV
+> prototype and is retained only for regression history. The production design uses private
+> lossless `.aclib` packs, native FLAC/PCM16, 178 official cars, a foreground driving service,
+> fixed stereo, and no on-throttle source role. See
+> [Full engine-sound implementation](full-implementation.md) and
+> [Audio simulation and car porting](llm-handoff-audio-simulation-and-car-porting.md). None of the
+> profile counts, Gradle WAV enumeration, sample rates, or current-behavior claims below should be
+> used to modify the app.
+
 ## Status
 
 The app is sample-only and offers two selectable cabin-oriented engine profiles: Lamborghini Huracán Super Trofeo EVO2 and Lamborghini Aventador SV. The Huracán uses its explicitly named exterior idle loop while stationary, and the Aventador uses its explicitly named exterior exhaust-overrun one-shot; continuous moving engine layers remain cabin material. Huracán's authored 44.1 kHz bank is resampled by the app into a 48 kHz playback stream for the BYD route; Aventador remains direct 48 kHz playback. There is no procedural renderer, fallback sound, preview player, or perspective selector. Missing or invalid required WAVs put audio in a visible `ERROR` state and persist `sample_engine_load_failed`.

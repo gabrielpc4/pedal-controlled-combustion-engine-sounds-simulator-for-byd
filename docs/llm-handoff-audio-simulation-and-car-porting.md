@@ -1,375 +1,265 @@
-# Audio, simulation, and car profiles — context for LLMs
+# Audio, simulation, and Assetto Corsa car packs
 
-This document describes **how this Android app currently works**: input, synthetic tach/RPM, shifting, and sample-based engine audio. It is written for an LLM that also has access to the repo files and to related work elsewhere (for example the Assetto Corsa RPM simulator at `C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`).
+This is the current audio/simulation handoff for the Android `mobile` module. Read it with
+[the general handoff](llm-handoff.md), [the implementation overview](full-implementation.md), and
+[the acceptance checklist](aclib-background-acceptance.md). The offline compiler lives at
+`C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`; Assetto Corsa and FMOD are not used on Android at
+runtime.
 
-It explains what is implemented today. It does not prescribe what a future change should look like — another model may replace the WAV pipeline, change mix logic, or port cars differently.
+## Product model
 
-Other docs in this repo go deeper on specific topics:
+The app deliberately keeps two models separate:
 
-| Topic | Doc |
+| Model | Responsibility | Does a sound-gear shift affect it? |
+| --- | --- | --- |
+| Seal Performance EV model | Road speed, acceleration, drag, braking, and read-only BYD telemetry | No |
+| Imported combustion presentation | Tachometer RPM, automatic gears, loop pitch, and shift/effect events | Yes |
+
+The 200 Hz core runs in `DriveRuntimeService`. `DriveController` arbitrates BYD and simulator input,
+advances the EV and presentation models, and publishes primitive runtime state. The audio writer
+consumes that state independently. Compose is only a client: while the Activity is visible it asks
+for `DriveSnapshot` objects at up to 60 Hz; while hidden it requests none.
+
+```text
+BYD getter polling or simulator pedals
+                  |
+       DriveRuntimeService (foreground)
+                  |
+          DriveController @ 200 Hz
+             /                 \
+    Seal road model      presentation gearbox
+                               |
+                        EngineAudioFrame
+                               |
+             native installed-pack renderer
+                               |
+                  PCM16 / 48 kHz / stereo
+                               |
+                    streaming AudioTrack
+
+Visible Activity -> local binder -> on-demand DriveSnapshot -> Compose
+```
+
+`MainActivity` binds in `onStart()` and unbinds in `onStop()`. It does not own or recreate telemetry,
+simulation, decoding, the mixer, or `AudioTrack`.
+
+## Official catalog and private packs
+
+The immutable selector index contains **178 usable Kunos/official-DLC cars**. Two empty Ferrari
+placeholders are intentionally excluded. Exact source-bank hashing deduplicates those cars into
+**153 sound families**, so cars sharing a bank install and decode one family.
+
+The base APK contains the catalog code, not converted game media. Local compiler output is imported
+through the Storage Access Framework:
+
+- `catalog-v1.json` supplies strict full metadata for all cars and families;
+- one atomic `.aclib` ZIP stores a sound-family manifest, FLAC tracks, and the member cars' preview
+  images;
+- imported files live in app-private storage under `assetto_sound_library_v1`;
+- selector entries show installed state, favorites, thumbnails, and the selected-car image;
+- favorites are app-private preferences and sort ahead of non-favorites;
+- a family is activated only after the entire import and decode has validated.
+
+`SoundFamilyManifestV1` records family membership, provenance hashes, per-car engine and gearbox
+metadata, quirks, effect availability, track roles, curves, root RPM, triggers, gains, PCM/FLAC
+hashes, frame counts, and exclusive-end loop bounds. The importer rejects unknown fields, path
+traversal, unsafe ZIP shapes, unsupported images/audio, changed family membership, hash mismatches,
+and non-official car IDs. Installation uses staging and atomic replacement with interrupted-import
+recovery.
+
+The word `official` identifies the installed game's Kunos/DLC provenance. It does **not** grant a
+right to redistribute the recordings or previews. Generated catalogs, previews, FLAC files, and
+`.aclib` files must stay private, local, and ignored by Git unless the rights holder grants explicit
+permission.
+
+## Permitted audio program
+
+The installed-pack schema permits these core roles:
+
+| Continuous roles | Triggered roles |
 | --- | --- |
-| FMOD recovery, WAV extraction | [sample-engine-audio.md](sample-engine-audio.md) |
-| App architecture | [full-implementation.md](full-implementation.md) |
-| EV physics / Seal calibration | [byd-seal-performance-calibration.md](byd-seal-performance-calibration.md) |
-| UI vs simulation | [ui-display-and-simulation-decisions.md](ui-display-and-simulation-decisions.md) |
-| Tuning panel | [tuning-interface.md](tuning-interface.md) |
-| Project workflow | [llm-handoff.md](llm-handoff.md) |
+| `IDLE`, `COAST`, `TEXTURE`, `INTAKE`, `EXHAUST`, `TURBO`, `SPOOL`, `TRANSMISSION` | `BOV`, `LIMITER`, `SHIFT_UP`, `SHIFT_DOWN`, `OVERRUN`, `POP`, `BANG`, `CRACK` |
 
----
+`IDLE` is required and follows its authored RPM/gain curve. Continuous voices retain root RPM,
+fractional phase, cubic interpolation, and exclusive-end loop points. Inaudible timelines keep
+advancing so a curve opening does not restart a loop. Missing optional effects are valid and their
+controls remain hidden.
 
-## 1. What the app is
+All active sources share one allocation-free FMOD-style arbiter: at most 2,048 logical voices and
+256 real/software voices across continuous loops, fixed one-shots/tails, engine transients, and
+limiter transients. It ranks lower numeric channel priority before higher live audibility. Virtual
+sources retain advancing phase/gain and can promote without rewinding. Do not restore a static voice
+reservation or cross-program FIFO. The reference oracle leaves exact cross-source ties and
+within-buffer promotion order unknown, so the Android sequence/index tie-break is deterministic but
+must not be described as exact FMOD behavior. Schema-v2 packs require a source-bound priority for
+every track and one-shot program plus the FMOD priority-oracle SHA-256; program and leaf priorities
+must agree. The 64/128 defaults remain only for schema-v1 compatibility and direct test fixtures.
 
-A **BYD DiLink dashboard** (Compose UI, `mobile` module) that:
+`LOAD` is not a muted mode or optional asset. It is forbidden from capture recipes, manifests,
+packs, decoding, controls, and installed-pack runtime branches. Both compiler and Android validators
+reject it as a standalone schema token. Pedal response in the single supported mix comes from the
+authored curves on permitted coast/texture/character/turbo tracks. There is no legacy throttle-mix
+switch.
 
-1. Reads **accelerator, brake, speed**, and optionally **gearbox P/N/D** from the car via reflection on `android.hardware.bydauto.*`, or uses **on-screen simulator pedals**.
-2. Runs a **200 Hz longitudinal EV model** (mass, axle torque curves, drag, brakes) calibrated toward a BYD Seal Performance.
-3. Runs a **presentation gearbox** that maps road speed to **synthetic engine RPM**, shift events, and tach display. This layer is separate from EV wheel torque.
-4. Today, engine sound comes from **pre-authored WAV loops and one-shots**, mixed in real time with **varispeed** (playback rate tied to RPM). There is no procedural synth path in the current code.
+The controls retain per-track gain/mute/solo, engine-and-transmission mute, checked-effect isolation,
+and pops/bangs audition. Audition uses the same effect trigger path as a natural throttle-lift event;
+it is not a separate preview sound. Isolation silences the continuous engine/transmission program
+while leaving the selected available effects audible.
 
-The Assetto Corsa RPM simulator is a **separate project** that can hold authoring knowledge (loop names, root RPMs, shift feel). This Android app does not call it at runtime.
+## Offline compilation
 
----
+The Windows compiler inventories the installed game read-only, probes FMOD banks with the no-sound
+output, and captures the event-level final mix with the non-real-time WAV writer at 48 kHz stereo.
+It never modifies Assetto Corsa and must not open an audible output device. It supports missing
+effects, gear-dependent turbo controllers, hybrid metadata, alternate gear sets, shared banks, and
+the BMW M3 E30 GRA gain-DSP quirk.
 
-## 2. Data flow (current code)
+Compiler PCM is 16-bit, 48 kHz stereo. Pinned FLAC encodes it at compression level 8 without changing
+a sample. Before packing, the compiler:
 
+1. excludes forbidden roles by manifest role rather than filename;
+2. deduplicates identical captures instead of multiplying one sound under several controls;
+3. repairs or selects loop bounds and stores `[startFrame, endFrameExclusive)`;
+4. verifies FLAC decode is bit-identical to the pre-FLAC PCM;
+5. records compressed and decoded SHA-256, frame count, format, curves, and provenance;
+6. checks the conservative default mixed sweep remains below the calibrated headroom target.
+
+The Huracán Trofeo EVO2 `c1`, `c3`, and limiter sources are mandatory loop-seam/clipping regression
+inputs. FLAC is intentionally transparent: it cannot hide a bad seam, clipped source, or repeated
+discontinuity.
+
+### Official metadata execution boundary
+
+The Android profile keeps the default AC forward ratios and default final drive exactly as parsed
+numeric metadata. Only the default forward ratios drive the presentation gearbox. The authored
+final drive remains provenance because the Seal presentation gearbox derives its own final drive
+from configured top speed. Alternate `.rto` files are option pools, not a record of the setup
+selected in Assetto Corsa; every file, hash, label, and ratio is retained and exported, but no
+alternate combination is silently selected.
+
+Quirks have a closed vocabulary and an explicit execution site:
+
+| Metadata or quirk | Execution site | Android behavior |
+| --- | --- | --- |
+| Complete `ctrl_turbo*.ini` set | Runtime audio | Allocation-free RPM/throttle/gear LUTs, AC filter timing, limits, bounded normalization, and modulation of authored turbo/spool/BOV tracks |
+| Partial turbo-controller set | Metadata only | Program output is diagnosed, but audible gain stays neutral because missing turbo pressure metadata makes normalization undefined |
+| Hybrid/ERS/KERS metadata | Excluded Seal physics | Exact scalar/file provenance is retained; it cannot alter the calibrated Seal motion model or invent an absent hybrid audio lane |
+| AWD traction metadata | Excluded Seal physics | It identifies the source car but cannot replace the Seal Performance axle model |
+| BMW M3 E30 GrA additional FMOD Gain DSP | Compiler capture | The compatibility DSP is transparent at authored 0 dB/non-inverted state and its result is already in captured PCM; Android does not apply it twice |
+| Tatuus authored-silent BOV lane | Compiler capture | The inaudible lane is omitted and the runtime must not synthesize a BOV control or sound |
+
+Manifest quirks are validated against each exact member car. A shared bank's family-level union is
+never copied onto a sibling car whose traction, hybrid, or controller metadata differs.
+
+## Android decode, memory, and mixing
+
+Only the selected installed family is decoded. A cancellable single background worker uses the
+pinned native `libFLAC`; it decodes all enabled loops and one-shots before activation into immutable
+native planar PCM16. The loader verifies the manifest format, compressed hash, decoded interleaved
+PCM hash, frame count, curves, and loop bounds again. A completed profile is swapped at a buffer
+boundary with a short preallocated crossfade. The prior profile is retired and freed off the audio
+thread.
+
+Device budgets are derived from Android's memory class:
+
+```text
+soft = min(64 MiB, memoryClass / 8)
+hard = min(192 MiB, memoryClass / 4)
 ```
-Input (20 ms BYD poll or manual sliders)
-  → DriveController @ 200 Hz
-      → EngineSimulation → DrivetrainState (rpm, gear, shifts, speed)
-      → EngineAudioFrame → EngineAudioEngine → SampleEngineRenderer → AudioTrack
-  → Compose UI (tach, speed, mixer, tuning)
+
+The soft value is the compiler/pack planning target. The hard value is enforced during import and
+decode; a family that exceeds it is rejected. Only one decoded family is retained. Until a compiler
+windowed-family schema is accepted by both validators, any family above the soft target must be
+reduced or partitioned by the compiler rather than relying on a second runtime cache.
+
+Installed packs use the persistent native mixer. Its loop/effect state and control arrays are
+allocated during preparation; the writer performs cubic reads, phase/wrap updates, gain smoothing,
+summing, safety limiting, and PCM16 conversion without file access, decoding, locks, or per-buffer
+allocation. Diagnostic strings and presentation lists are built only by non-real-time callers.
+
+Output is fixed to `CHANNEL_OUT_STEREO`, PCM16, 48 kHz. There is no AUTO/quad/5.1/7.1 negotiation,
+mirroring, or channel cycling. The buffer target starts at 50 ms, grows by 10 ms on an underrun or
+low queue up to 80 ms, and shrinks by 5 ms after 60 clean seconds down to 30 ms. It changes no more
+than once per minute. Profiles are calibrated below -3 dBFS; a smooth safety limiter has a -1 dBFS
+ceiling instead of hard clipping.
+
+Audio focus applies smooth state changes in both foreground and background: duck on
+`AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK`, fade to silence on transient loss, resume on gain, and remain
+silent after permanent loss until focus is legitimately acquired again.
+
+## Presentation gearbox and tachometer
+
+In **D**, the selected car's imported relative gear ratios are retained. A presentation final drive
+is chosen so top gear reaches the configured upshift RPM at configured top speed:
+
+```text
+finalDrive = upshiftRpm / (wheelRpmAtTopSpeed * topGearRatio)
+rpm(g, speed) = wheelRpm(speed) * gearRatio[g] * finalDrive
+upshiftSpeed(g) = topSpeed * topGearRatio / gearRatio[g]
 ```
+
+The selected car supplies its exact default gear count/ratios, idle, redline, limiter, upshift RPM,
+and shift durations. Its authored final drive and alternate ratio pools remain diagnostic provenance;
+the EV torque model remains unaffected.
+
+At a normal upshift from gear `g`, the exact expected landing point is:
+
+```text
+landingRpm(g -> g+1) = upshiftRpm * gearRatio[g+1] / gearRatio[g]
+```
+
+On released throttle, the new gear downshifts when its RPM reaches that stored calculated landing
+point. There is **no 150 RPM compensation and no RPM hysteresis**. Kickdown and near-redline safety
+upshift are separate demand/safety paths; shift dwell prevents overlapping shift animations but does
+not alter the RPM threshold. **P** and **N** retain throttle-based free revving.
+
+## Background lifecycle
+
+Opening the dashboard explicitly starts `DriveRuntimeService` as a foreground service. It owns the
+BYD reader, EV model, gearbox, effects, decoder, native mixer, audio focus, `AudioTrack`, and runtime
+diagnostics.
+
+- Home or switching apps: service and loop phase continue; the Activity unbinds and UI sampling,
+  Compose models, meters, strings, thumbnails, animations, and debug presentation stop.
+- Return: one immediate snapshot is shown, then visible sampling resumes without restarting audio,
+  resetting a gear, or losing loop phase.
+- Focus/window loss: simulated touch/keyboard throttle and brake reset to zero; live BYD input keeps
+  flowing in the service.
+- Process pressure: `START_STICKY` restores an explicitly active session and persisted selection;
+  manual pedal input starts at zero. There is no boot receiver.
+- Dismiss from Recents or notification **Stop**: persist the user-stop marker, fade audio, stop all
+  workers/readers, abandon focus, remove the notification, and suppress sticky restoration.
+- Reopen after a user stop: an explicit dashboard start clears the marker and begins a new session.
+- No wake lock is acquired. Screen/system sleep and ignition behavior remain controlled by Android
+  and the BYD platform.
+
+The low-importance ongoing notification shows the selected car plus **Mute/Unmute** and **Stop**. It
+updates only when the selected car or sound-enabled state changes.
+
+## Diagnostics and acceptance
+
+The 200 Hz/audio paths update primitive counters only. **MARK CRACKLE** records the current car,
+RPM, gear, speed, throttle, buffer/queue state, total and steady-state underruns, loop wraps, render
+p99, GC counters, peak, and over-range count at the moment the listener hears an artifact. Bounded
+JSONL export adds a current snapshot and recent persistent events for correlation.
+
+Automated gates include strict catalog/pack validation, lossless FLAC round trips, required audible
+idle, exclusive loop bounds, fixed stereo, no forbidden-role schema path, zero default-gain
+over-range samples, no audio-thread allocation regressions, 256-frame p99 below 1.5 ms on target
+hardware, and no retained-memory growth across repeated car changes. Host tests cannot establish BYD
+permissions, OEM focus policy, DSP behavior, cabin audibility, or perceived loop quality.
+
+Use [the lossless-pack and background-driving acceptance checklist](aclib-background-acceptance.md)
+for silent host commands and the exact 15-minute Huracán plus 60-minute BYD procedure.
+
+## Main source map
 
 | Area | Main files |
 | --- | --- |
-| Drive loop | `drive/DriveController.kt` |
-| Simulation | `simulation/EngineSimulation.kt` |
-| Audio frame | `audio/EngineAudioFrame.kt` |
-| Audio output | `audio/EngineAudioEngine.kt` |
-| Sample mixer | `audio/SampleEngineRenderer.kt` |
-| Profiles | `audio/EngineSampleProfile.kt`, `HuracanProfile.kt`, `AdditionalCarProfiles.kt` |
-| WAV decode | `audio/WavPcmDecoder.kt` |
-| Mix mode prefs | `audio/AudioMixModeRepository.kt` |
-| BYD telemetry | `telemetry/BydSpeedReader.kt`, `BydGearboxMapping.kt` |
-
----
-
-## 3. Two parallel models: EV physics vs presentation gearbox
-
-| | EV physics | Presentation gearbox |
-| --- | --- | --- |
-| Purpose | Acceleration / braking | Tach RPM, shift sounds, gear label |
-| Changes when user shifts? | No | Yes |
-| Uses numeric `gearRatios[]` at runtime? | No | Only **count** (`gearRatios.size`) |
-| Feeds audio RPM? | Indirectly via speed | Directly via `drivetrain.rpm` |
-
-Wheel torque uses digitized front/rear axle curves, motor cap, mass, drag, brakes. An upshift changes synthetic RPM and may fire shift one-shots; it does not change EV acceleration in the current simulation.
-
----
-
-## 4. Tachometer and RPM
-
-### 4.1 UI sources
-
-**Analog gauge** (`MainActivity.kt` → `TachometerGauge`):
-
-| Element | Source |
-| --- | --- |
-| Needle | `drivetrain.rpm` vs profile `maxRpm` |
-| Center label | Gear number in **D**; **P** or **N** otherwise |
-| Digital speed | `drivetrain.rawSpeedKmh` (integer km/h) |
-| Red zone | `redlineRpm` |
-| SHIFT overlay | `isShifting` + direction |
-
-**Mixer HUD** (`DashboardScreens.kt` → `BarTachometerHud`) uses the same `drivetrain` fields.
-
-Needle RPM is continuous; speed digits are whole km/h. `QuantizedSpeedEstimator` smooths integer BYD (or SIM-rounded) speed before RPM/audio use.
-
-### 4.2 P / N / D
-
-| Position | Throttle drives wheels? | Auto shifts? | RPM model |
-| --- | --- | --- | --- |
-| **D** | Yes | Yes | Road-speed coupled |
-| **N** | No | No | Free-rev from pedal |
-| **P** | No | No | Free-rev; speed held at 0 |
-
-**Free-rev (N/P):**
-
-```
-targetRPM = idleRpm + filteredThrottle × (redlineRpm − idleRpm)
-```
-
-Rev-up time constant **0.55 s**, rev-down **0.90 s** (fixed in code).
-
-**Drive (D) — road-speed coupled:**
-
-```
-wheelRpm = vehicleSpeedMps / (2π × wheelRadiusMeters) × 60
-targetRPM = idleRpm + wheelRpm × evenlySpacedGearRatio(currentGearIndex)
-          clamped to [idleRpm .. limiterRpm]
-```
-
-Smoothed with `syntheticRpmResponseMs` (default **20 ms** in tuning).
-
-### 4.3 Equal-width speed bands
-
-Gear count = `profile.gearRatios.size` (often **7**).
-
-```
-upshiftSpeedKmh(g) = topSpeedKmh × (g + 1) / gearCount
-```
-
-Default `topSpeedKmh = 190`, 7 gears → ~**27.14 km/h** per band.
-
-At each band top, RPM targets **upshiftRpm**. Runtime derives:
-
-```
-evenlySpacedGearRatio(g) = (upshiftRpm − idleRpm) / boundaryWheelRpm(g)
-```
-
-The numeric values stored in `gearRatios` (e.g. Huracán `[3.75, 2.38, …]`) are used in the **TuningPanel gear graph**, not in this runtime ratio calculation.
-
-### 4.4 Shift logic (`EngineSimulation.kt`)
-
-| Constant | Value |
-| --- | --- |
-| Normal upshift throttle floor | **0.10** |
-| Emergency upshift RPM fraction | **0.98** of redline |
-| Downshift speed hysteresis | **4.0 km/h** |
-| Kickdown throttle | **> 0.78** |
-| Kickdown speed margin | **10.0 km/h** below remembered upshift boundary |
-| Shift dwell | **0.150 s** default |
-| Gear index swap during shift | progress **≥ 0.38** |
-
-**Normal upshift (D):** throttle > 0.10 and `speedKmh >= upshiftSpeedKmh(currentGearIndex)`.
-
-**Emergency upshift:** `rpmForSpeed(currentGear) >= redlineRpm × 0.98`.
-
-**Downshift:** speed ≤ remembered upshift boundary − 4 km/h (floor 2 km/h), or kickdown with throttle > 0.78 and speed below boundary − 10 km/h.
-
-Each upshift stores current speed as the downshift boundary for the target gear.
-
-Shift presentation: `shiftSerial` increments, `shiftDirection` UP/DOWN, durations from profile (e.g. Huracán 60 ms up / 150 ms down). RPM target blends between gears during the shift window.
-
-### 4.5 Integer speed smoothing
-
-`QuantizedSpeedEstimator` (`externalSpeedSmoothingMs`, default **120 ms**) sits between integer speed readings and simulation/audio.
-
----
-
-## 5. Audio: sample profiles (current implementation)
-
-### 5.1 Profile shape
-
-```kotlin
-EngineSampleProfile(
-    id, displayName,
-    assetDirectory,           // assets/sample_engine/{assetDirectory}/
-    previewAssetName,         // assets/car_previews/
-    outputSampleRate,         // authored WAV rate
-    playbackSampleRate,       // AudioTrack rate (may differ)
-    idleRpm, maximumRpm, redlineRpm, limiterRpm, upshiftRpm,
-    gearRatios,
-    layers: List<SampleLayerSpec>,
-    effects: List<SampleEffectSpec>,
-    ...
-)
-```
-
-Registry: `EngineSampleProfiles.all`.
-
-**Cars in repo today**
-
-| ID | Definition | Layers | Notes |
-| --- | --- | --- | --- |
-| `lamborghini_huracan_trofeo_evo2_cabin` | `HuracanProfile.kt` | 24 | FMOD-style curves; 44100 → 48000 playback |
-| `lamborghini_aventador_sv_cabin` | `AdditionalCarProfiles.kt` `bandProfile()` | 16 | Band factory; 48000 native |
-
-### 5.2 Layer roles
-
-| Role | Typical content |
-| --- | --- |
-| **IDLE** | Low-RPM loop |
-| **LOAD** | On-throttle body |
-| **COAST** | Lift-off / overrun |
-| **TEXTURE** | Noise fill |
-| **LIMITER** | Near redline |
-
-Each layer: looping WAV, `startRpm`/`endRpm`, `autopitchRootRpm`, automation curves.
-
-Varispeed: `playbackRatio = rpm / autopitchRootRpm` (clamped). Cubic interpolation; phase advances when inaudible (FMOD-style timeline continuity).
-
-WAVs are copied into assets by an explicit list in `mobile/build.gradle.kts` (`prepareSampleEngineAssets`); local sources live under `audio_samples/`.
-
----
-
-## 6. Two mix modes
-
-The renderer supports two paths, selected by `coastLayerMixEnabled` on `EngineAudioFrame` (from `AudioMixModeRepository`, **default ON**).
-
-### 6.1 Coast layer mix (default, app focus)
-
-When `coastLayerMixEnabled == true`:
-
-| Behavior | Detail |
-| --- | --- |
-| **LOAD** | Gain forced to 0 |
-| **COAST** | Full RPM-band gain; throttle curve ignored |
-| **IDLE** | Special amplitude fade ~1350–2950 RPM (`idleCoastMixAmplitude`) |
-| **Profile output gain** | Uses full-throttle curve point (`outputGainAt(1.0)`) |
-| **Idle layer fade time** | 120 ms (vs normal layer fade) |
-| **MIXER UI** | LOAD rows hidden; per-track **GAIN** sliders active |
-| **Layer mix volume** | User multiplier 0..8× applied |
-| **Asset load** | LOAD layer WAVs are not decoded into memory |
-
-This is the mix mode the project is oriented toward for new work.
-
-### 6.2 Legacy throttle mix
-
-When `coastLayerMixEnabled == false`:
-
-| Behavior | Detail |
-| --- | --- |
-| **LOAD / COAST / IDLE** | Original FMOD-style throttle + RPM automation |
-| **Profile output gain** | Follows live throttle |
-| **MIXER UI** | All layer rows visible; GAIN multipliers fixed at 1.0× |
-
-Toggle: DEBUG panel → **AUDIO MIX MODE**, or Gradle `coastLayerMixEnabledByDefault` / persisted pref `coast_layer_mix_enabled`. Header shows **LEGACY MIX** tag when legacy is active.
-
-Legacy pref key `coast_only_full_gain` is still read for migration.
-
----
-
-## 7. Mixing pipeline (`SampleEngineRenderer.render`)
-
-1. Smooth RPM and throttle (`AudioTuning`: 16 ms / 10 ms defaults).
-2. Per layer: `SampleLayerSpec.gainAt(rpm, throttle, coastLayerMixEnabled)` then user mute/solo/volume.
-3. Accumulate loop voices + effects; one-shots on triggers.
-4. Bus:
-
-```
-mixed = loopSum × continuousProgramGain + effectSum
-commonGain = 0.65 × masterGain × profileOutputGain × enabledGain
-output = hard clip at ±1.0 → PCM16
-```
-
-**Master gain:** per-car `CarMasterVolumeRepository` × global `AudioTuning.masterGain / 0.72`.
-
-**Effects triggers:**
-
-| Trigger | Fires when |
-| --- | --- |
-| `SHIFT_UP` / `SHIFT_DOWN` | `shiftSerial` changes |
-| `TRANSMISSION_LOOP` | Continuous if enabled |
-| `THROTTLE_LIFT` | Armed at throttle ≥ 0.35; fires once at ≤ 0.08 |
-
-**Solo effects mode:** mutes continuous loops; only checked effects play.
-
----
-
-## 8. What audio receives each frame
-
-`EngineAudioFrame` fields:
-
-| Field | Source |
-| --- | --- |
-| `rpm`, `throttle` | `drivetrain` |
-| `shiftSerial`, `shiftDirection` | shift state |
-| `layerMix`, `enabledEffectMask`, `soloEffects` | persisted per-car prefs |
-| `tuning` | `AudioTuning` + car master volume |
-| `coastLayerMixEnabled` | `AudioMixModeRepository` |
-
-Speed, gear index, and brake are not passed to the renderer in the current design. Shift sounds follow **`shiftSerial`**, not gear number.
-
----
-
-## 9. BYD input modes
-
-| Mode | Pedals | Speed | P/N/D |
-| --- | --- | --- | --- |
-| **AUTO** | BYD if valid, else SIM | BYD if valid | Manual UI |
-| **BYD LIVE** | BYD if valid | BYD if valid | Locked to BYD gearbox |
-| **SIMULATOR** | Sliders | Integrated physics | Manual UI |
-
-Gearbox: `BYDAutoGearboxDevice` via reflection; mapping in `BydGearboxMapping.kt`.
-
----
-
-## 10. How cars are registered today (reference)
-
-Current pattern when adding a profile to this repo:
-
-1. WAV files locally under `audio_samples/...`
-2. Each file listed in `mobile/build.gradle.kts` → `LocalEngineProfileAssets`
-3. Kotlin profile (`HuracanProfile.kt` full curves, or `bandProfile()` factory)
-4. Entry in `EngineSampleProfiles.all`
-5. Preview image in `car_previews/`
-
-**Authoring styles in code:**
-
-- **Full curves** — one `SampleLayerSpec` per recovered layer with explicit `AutomationCurve` lists.
-- **Band factory** — lists of `RootedSample(asset, rpm, gainDb)`; factory builds crossfaded RPM bands.
-
-Selecting a car → `DriveController.applySelectedCar()` reloads mix prefs, effect mask, tuning limits, restarts audio.
-
----
-
-## 11. Persistence
-
-| Pref file | Purpose |
-| --- | --- |
-| `selected_car` | Last car |
-| `car_master_volume` | Per-car master 0..1.2 (default 0.72) |
-| `sample_layer_mix` | Mixer mute/solo/volume per track |
-| `sample_sound_effects` | Effect toggles |
-| `engine_tuning` | TUNE panel |
-| `audio_experiments` | `coast_layer_mix_enabled` |
-
----
-
-## 12. Formulas (as implemented)
-
-```
-upshiftSpeedKmh(g) = topSpeedKmh × (g + 1) / gearCount
-ratio(g) = (upshiftRpm − idleRpm) / boundaryWheelRpm(g)
-
-D-mode:  targetRPM = idleRpm + wheelRpm × ratio(gear)
-N/P:     targetRPM = idleRpm + throttle × (redlineRpm − idleRpm)
-
-playbackRatio = rpm / autopitchRootRpm
-
-Normal upshift:     throttle > 0.10 AND speed ≥ upshiftSpeedKmh(g)
-Emergency upshift:  rpmForSpeed(g) ≥ redline × 0.98
-Downshift:          speed ≤ boundary − 4  OR  kickdown (throttle > 0.78, speed < boundary − 10)
-
-Smoothing: value += (target − value) × (1 − exp(−dt / τ))
-```
-
----
-
-## 13. Doc/code notes (as of this writing)
-
-1. `ui-display-and-simulation-decisions.md` §3.2 may still describe throttle-driven D RPM; runtime D-mode is road-speed coupled (§3.3 aligns with code).
-2. `gearRatios` numeric values are for tuning UI; runtime uses equal bands from `topSpeedKmh`.
-3. SIM coast regen is hardcoded in `EngineProfile` (2.5 m/s²), not exposed in TUNE UI.
-4. BYD gearbox mapping uses fallback constants if SDK fields are missing.
-
----
-
-## 14. Related external project
-
-**Assetto Corsa RPM simulator:** `C:\Users\Gabriel\Documents\ChatGPT\assettocorsa`
-
-That codebase may contain RPM curves, layer roots, and shift behavior used while authoring. This Android repo currently consumes **Kotlin profiles + packaged WAV assets**; there is no runtime link between the two.
-
----
-
-## 15. Useful source files to open
-
-- `EngineSampleProfile.kt`, `SampleEngineRenderer.kt`, `EngineSimulation.kt`
-- `HuracanProfile.kt` and `AdditionalCarProfiles.kt` (two profile styles)
-- `AudioMixModeRepository.kt` (coast vs legacy default)
-- `mobile/build.gradle.kts` (asset enumeration)
-- [sample-engine-audio.md](sample-engine-audio.md) (extraction history)
-
-Tests: `EngineSimulationTest.kt`, `SampleEngineRendererTest.kt`, `DriveControllerInputTest.kt`, `BydTransmissionControlTest.kt`.
+| Service/binder/lifecycle | `drive/DriveRuntimeService.kt`, `DriveRuntimeSessionStore.kt`, `DriveUiLifecycleGate.kt` |
+| Core coordination and snapshots | `drive/DriveController.kt`, `drive/DriveRuntimeDiagnostics.kt` |
+| EV and presentation gearbox | `simulation/EngineSimulation.kt` |
+| Catalog/import/schema | `catalog/OfficialCarIndex.kt`, `CarCatalog.kt`, `AclibPackImporter.kt`, `SoundFamilyManifestV1.kt` |
+| Decode and installed-pack loading | `audio/NativeFlacDecoder.kt`, `NativeSoundFamilyLoader.kt` |
+| Mixer/output/buffering | `audio/NativePcmMixer.kt`, `SampleEngineRenderer.kt`, `EngineAudioEngine.kt`, `AdaptiveAudioBuffer.kt`, `src/main/cpp/native_flac.cpp` |
+| UI selector/mixer/effects | `MainActivity.kt`, `DashboardScreens.kt`, `SoundEffectsPanel.kt`, `TuningPanel.kt` |

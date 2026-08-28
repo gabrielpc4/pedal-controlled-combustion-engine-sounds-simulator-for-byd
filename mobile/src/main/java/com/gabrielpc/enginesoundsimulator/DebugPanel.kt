@@ -2,7 +2,6 @@ package com.gabrielpc.enginesoundsimulator
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,11 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -38,7 +33,6 @@ import com.gabrielpc.enginesoundsimulator.telemetry.SignalValue
 import com.gabrielpc.enginesoundsimulator.telemetry.buildBydAvailabilityReport
 import com.gabrielpc.enginesoundsimulator.telemetry.formatTelemetryNumber
 import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
 
 private val DbgBackground = Color(0xFA03080E)
 private val DbgPanel = Color(0xFF091721)
@@ -50,25 +44,16 @@ private val DbgRed = Color(0xFFFF465C)
 private val DbgWhite = Color(0xFFF5FAFD)
 private val DbgMuted = Color(0xFF8CA7B5)
 
-private const val DEBUG_REFRESH_MS = 200L
-
 @Composable
 internal fun DebugPanel(
-    requestSnapshot: () -> DriveSnapshot,
+    state: DriveSnapshot,
     onRestartBydReader: () -> Unit,
     onRunSampleValidation: () -> Unit,
-    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
+    onMarkCrackle: () -> Unit,
+    onExportDiagnostics: () -> Unit,
     onClose: () -> Unit,
 ) {
-    var state by remember { mutableStateOf(requestSnapshot()) }
     val scroll = rememberScrollState()
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            state = requestSnapshot()
-            delay(DEBUG_REFRESH_MS)
-        }
-    }
 
     val report = remember(state.inputMode, state.telemetry) {
         buildBydAvailabilityReport(state.inputMode, state.telemetry)
@@ -89,15 +74,11 @@ internal fun DebugPanel(
         DebugHeader(
             onRestartBydReader = onRestartBydReader,
             onRunSampleValidation = onRunSampleValidation,
+            onMarkCrackle = onMarkCrackle,
+            onExportDiagnostics = onExportDiagnostics,
             onClose = onClose,
         )
         Spacer(Modifier.height(16.dp))
-
-        AudioMixModeSection(
-            coastLayerMixEnabled = state.coastLayerMixEnabled,
-            onCoastLayerMixEnabledChange = onCoastLayerMixEnabledChange,
-        )
-        Spacer(Modifier.height(14.dp))
 
         Column(
             modifier = Modifier
@@ -164,6 +145,21 @@ internal fun DebugPanel(
                 DebugLine("Loaded effects", state.audio.sampleLoadedEffects.toString())
                 DebugLine("Effect triggers", state.audio.sampleEffectTriggers.toString())
                 DebugLine("Active effects", state.audio.sampleActiveEffects)
+                DebugLine(
+                    "Global voices L/R/V",
+                    "${state.audio.sampleGlobalLogicalVoices}/" +
+                        "${state.audio.sampleGlobalRealVoices}/" +
+                        state.audio.sampleGlobalVirtualVoices,
+                )
+                DebugLine(
+                    "Global real budget",
+                    state.audio.sampleGlobalVoiceBudget.toString(),
+                )
+                DebugLine(
+                    "Global rejected / stolen",
+                    "${state.audio.sampleGlobalRejectedTriggers}/" +
+                        state.audio.sampleGlobalStolenLogicalVoices,
+                )
                 DebugLine("Decoded memory", "${(state.audio.sampleDecodedBytes / (1024 * 1024.0)).roundToInt()} MiB")
                 DebugLine("Target sample RPM", state.audio.sampleTargetRpm.toString())
                 DebugLine("Rendered sample RPM", state.audio.sampleRenderRpm.toString())
@@ -175,6 +171,27 @@ internal fun DebugPanel(
                 DebugLine("Loop wraps", state.audio.sampleLoopWraps.toString())
                 DebugLine("Output peak", "${(state.audio.samplePeak * 100.0).roundToInt()}%")
                 DebugLine("Over-range before limiter", state.audio.sampleOverRangeSamples.toString())
+                DebugLine("Target buffer", "${state.audio.targetBufferMilliseconds} ms")
+                DebugLine("Queued frames", state.audio.queuedFrames.toString())
+                DebugLine("Buffer adjustments", state.audio.bufferAdjustmentCount.toString())
+                DebugLine(
+                    "Render p99 (overall)",
+                    "${state.audio.renderP99LowerMicros}–${state.audio.renderP99Micros} µs " +
+                        "(${state.audio.renderSamples} bursts)",
+                )
+                DebugLine("Render max (overall)", "${state.audio.renderMaxMicros} µs")
+                DebugLine(
+                    "Render p99 (steady)",
+                    "${state.audio.steadyRenderP99LowerMicros}–${state.audio.steadyRenderP99Micros} µs " +
+                        "(${state.audio.steadyRenderSamples} bursts)",
+                )
+                DebugLine("Render max (steady)", "${state.audio.steadyRenderMaxMicros} µs")
+                DebugLine(
+                    "Render p99 (transition)",
+                    "${state.audio.transitionRenderP99LowerMicros}–${state.audio.transitionRenderP99Micros} µs " +
+                        "(${state.audio.transitionRenderSamples} bursts)",
+                )
+                DebugLine("Render max (transition)", "${state.audio.transitionRenderMaxMicros} µs")
                 DebugLine("Startup underruns", state.audio.startupUnderruns.toString())
                 DebugLine("New underruns", state.audio.steadyStateUnderruns.toString())
                 Text(
@@ -204,72 +221,11 @@ internal fun DebugPanel(
 }
 
 @Composable
-private fun AudioMixModeSection(
-    coastLayerMixEnabled: Boolean,
-    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
-) {
-    DebugSection(title = "AUDIO MIX MODE", accent = DbgAmber) {
-        Text(
-            "Coast layer mix (default): Load layers muted, Coast at full RPM-band level, per-track GAIN sliders in MIXER. " +
-                "Legacy throttle mix: original FMOD-style throttle crossfade between Load/Coast/Idle.",
-            color = DbgMuted,
-            fontSize = 12.sp,
-            lineHeight = 18.sp,
-        )
-        Spacer(Modifier.height(10.dp))
-        DebugLine("Active mix", if (coastLayerMixEnabled) "Coast layer mix" else "Legacy throttle mix")
-        if (coastLayerMixEnabled) {
-            Text(
-                "MIXER hides Load rows · GAIN sliders multiply dynamic level (1.0x = default)",
-                color = DbgGreen,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        ExperimentToggleButton(
-            label = if (coastLayerMixEnabled) {
-                "SWITCH TO LEGACY THROTTLE MIX"
-            } else {
-                "SWITCH TO COAST LAYER MIX"
-            },
-            accent = if (coastLayerMixEnabled) DbgAmber else DbgGreen,
-            onClick = { onCoastLayerMixEnabledChange(!coastLayerMixEnabled) },
-        )
-    }
-}
-
-@Composable
-private fun ExperimentToggleButton(
-    label: String,
-    accent: Color,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .background(accent.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-            .border(2.dp, accent.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            color = accent,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp,
-        )
-    }
-}
-
-@Composable
 private fun DebugHeader(
     onRestartBydReader: () -> Unit,
     onRunSampleValidation: () -> Unit,
+    onMarkCrackle: () -> Unit,
+    onExportDiagnostics: () -> Unit,
     onClose: () -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -293,6 +249,10 @@ private fun DebugHeader(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
+        DebugAction("MARK CRACKLE", DbgRed, onMarkCrackle)
+        Spacer(Modifier.width(10.dp))
+        DebugAction("EXPORT JSONL", DbgCyan, onExportDiagnostics)
+        Spacer(Modifier.width(10.dp))
         DebugAction("RUN AUDIO TEST", DbgGreen, onRunSampleValidation)
         Spacer(Modifier.width(10.dp))
         DebugAction("RETRY BYD", DbgAmber, onRestartBydReader)

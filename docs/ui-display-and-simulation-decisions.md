@@ -203,12 +203,13 @@ This target-seeking model is intentionally separate from the road-speed-coupled 
 
 ### 3.3 Speed-coupled Drive RPM model
 
-In **D**, continuous road speed is converted through the selected sample profile's derived
-equal-band ratio:
+In **D**, continuous road speed is converted through the selected car's imported forward ratio and
+the presentation-only final-drive normalization:
 
 ```text
 wheelRPM = roadSpeed / tireCircumference
-targetRPM = idleRPM + wheelRPM × equalBandGearRatio
+targetRPM = wheelRPM × importedGearRatio × presentationFinalDrive
+targetRPM = clamp(targetRPM, idleRPM, limiterRPM)
 rpm = exponentialFollow(rpm, targetRPM)
 ```
 
@@ -221,13 +222,17 @@ SIM passes its physical speed through the same whole-km/h reporting boundary bef
 making its audio-control path representative of BYD Live. The gauge's large digital readout displays
 the raw whole-number speed while the analog needle continues to display the reconstructed RPM.
 
-The sound gearbox divides configured top speed evenly by the selected sample bank's gear count and
-derives each ratio so the band ends at normal shift RPM.
+The sound gearbox uses the selected car's imported Assetto Corsa forward ratios. Its presentation
+final drive is normalized so the top ratio reaches normal shift RPM at configured top speed; the
+relative spacing between every adjacent pair of authored ratios is preserved.
 
-Each upshift remembers the road-speed boundary that actually selected its new gear. Downshifts use
-that remembered boundary with 4 km/h hysteresis. A road-speed near-redline guard
-can upshift without throttle so coasting or externally driven speed cannot strand the sound engine
-on its limiter. Presentation gears never feed back into the physical EV acceleration model.
+At each normal upshift, the expected RPM in the newly selected gear is calculated exactly as
+`upshiftRpm * nextRatio / currentRatio` and remembered for that gear. On released throttle, the
+higher gear downshifts as soon as its road-speed-coupled RPM reaches that calculated landing RPM.
+There is no 150 RPM compensation and no RPM-threshold hysteresis. The released-throttle gate and
+shift dwell prevent an immediate shift loop; demand kickdown and the near-redline safety upshift are
+separate automatic-transmission behaviors. Presentation gears never feed back into the physical EV
+acceleration model.
 
 **Tests:** `quantizedSpeedEstimatorMakesIntegerStepsContinuousInBothDirections`,
 `driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce`,

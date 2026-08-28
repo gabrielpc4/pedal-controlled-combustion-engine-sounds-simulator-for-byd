@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Engine Sounds Simulator</string>
+    <string name="drive_notification_channel_name">Driving audio</string>
+    <string name="drive_notification_channel_description">Keeps vehicle telemetry, simulation, and engine audio active in the background.</string>
+    <string name="drive_notification_running">Driving audio is running</string>
+    <string name="drive_notification_muted">Driving runtime active · sound muted</string>
+    <string name="drive_notification_mute">Mute</string>
+    <string name="drive_notification_unmute">Unmute</string>
+    <string name="drive_notification_stop">Stop</string>
 </resources>

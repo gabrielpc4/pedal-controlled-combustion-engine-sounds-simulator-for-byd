@@ -1,0 +1,13 @@
+---
+description: Always build and launch the Android app after code changes
+alwaysApply: true
+---
+
+# Android build and launch
+
+After any change to this project that affects the mobile app, always:
+
+1. Build and install: `.\gradlew :mobile:installDebug` (set `JAVA_HOME` to the Android Studio JBR if needed, e.g. `D:\Program Files\Android\Android Studio\jbr` on this machine)
+2. Launch on the connected emulator/device: `adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity`
+
+Do this before ending the turn, without waiting for the user to ask.
