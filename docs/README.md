@@ -1,6 +1,6 @@
 # BYD Motor Sound - Engineering Context
 
-Last updated: 2026-08-15
+Last updated: 2026-08-28
 
 This directory is the durable technical memory for the project. Future work should start here instead of repeating the original research or assuming that the BYD head unit behaves like a standard Android Automotive OS device.
 
@@ -49,7 +49,6 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 - [Electro APK analysis](electro-apk-analysis.md) - third-party signer, manifest permissions, and the ADB/debugging bootstrap evidence.
 - [POC implementation and test plan](poc-plan.md) - recommended project changes, runtime capability probe, callback implementation, diagnostics, latency measurement, success criteria, and fallbacks.
 - [Implemented diagnostic POC](poc-implementation.md) - current source layout, build artifact, behavior, limitations, and exact install/test commands.
-- [Persistent diagnostics](persistent-diagnostics.md) - bounded on-device event trail, crash retention, and safe ADB retrieval commands.
 - [Fresh-chat LLM handoff](llm-handoff.md) - source checkout, current state, architecture, validation workflow, constraints, and open vehicle work for a new agent.
 - [Source-material index](source-material/README.md) - provenance, local artifacts, URLs, hashes, and evidence-quality rules.
 
@@ -76,10 +75,9 @@ The source screenshot is `../reference/car_software_version.jpg`. It also contai
 
 ## Next action
 
-The complete simulator/audio dashboard is implemented and verified locally. Install the updated `mobile-debug.apk` and run the parked on-car validation checklists in both [the original POC notes](poc-implementation.md) and [the full implementation handoff](full-implementation.md). The second vehicle session should answer these questions:
+The complete simulator/audio dashboard is implemented and verified locally. Install the numbered debug APK and run the parked on-car validation checklist in [the full implementation handoff](full-implementation.md). The next vehicle session should answer these questions:
 
-- Does the diagnostics panel continue to report the real signature permission as denied while the restricted client context allows reads?
 - Do accelerator, brake, and speed getters return plausible values?
-- What polling cadence and getter-batch duration does the car report?
+- Does the header switch from simulator fallback to BYD pedal input?
 
-The initial APK deliberately uses 20 ms polling because the listener is an abstract BYD class and the current project has no trustworthy compile-only vendor SDK. The UI reports the listener signature found at runtime. If direct getters work, callback integration is the next iteration.
+The APK deliberately uses 20 ms polling because the listener is an abstract BYD class and the current project has no trustworthy compile-only vendor SDK. If direct getters work, callback integration is the next iteration.

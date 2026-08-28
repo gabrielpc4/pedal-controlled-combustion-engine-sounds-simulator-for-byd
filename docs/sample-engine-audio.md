@@ -72,8 +72,8 @@ Decoded recordings remain interleaved PCM16 in memory, matching the source repre
 of expanding every sample to a 32-bit float. Decoding writes directly into the retained sample
 array, so it does not also hold a full-size temporary data chunk. The realtime renderer converts
 only the cubic-interpolation taps it is actively reading. Its 48 kHz inner loop uses indexed voice
-traversal and reused output arrays; meters and immutable diagnostic snapshots are published at a
-lower rate outside the per-sample work. If `AudioTrack` reports a new underrun, the effective stream
+traversal and reused output arrays. Every third audio write copies primitive meter values into a
+preallocated cross-thread buffer; immutable UI state is built only on the Compose thread. If `AudioTrack` reports a new underrun, the effective stream
 buffer grows by one native burst up to its preallocated capacity. This preserves every layer
 selected by the active mix while reducing Java-heap occupancy, garbage collection, and deadline
 misses.
@@ -82,39 +82,9 @@ misses.
 
 The authored throttle routes deliberately crossfade between different recordings. Around 7,000 RPM, full load is dominated by `l2a`, `l2a_high`, `n_up`, and `sine`; lift-off instead emphasizes `c1`, `c2`, and `n2`. The original load group contained more noisy, overlapping high-frequency material, while the coast group had fewer and more tonally coherent harmonic loops. Consequently, lift-off sounded clearer and subjectively louder even when telemetry reported a lower PCM peak. The app now retains the C1/C2 tonal loops at a restrained `-9 dB` under load and reduces the always-running `engine_noise_7` layer by `3.1 dB`. This narrows the tonal difference without eliminating the intended load/coast response.
 
-The audio thread performs no file I/O or persistent logging. It publishes bounded in-memory
-diagnostics every 12 writes; the controller persists only low-rate summaries.
-
-## Persistent telemetry
-
-`drive_heartbeat` includes:
-
-- profile status and decoded layer count;
-- simulation RPM, requested sample RPM, rendered (smoothed) RPM, and delta;
-- rendered throttle;
-- the strongest active layer IDs with playback-rate and gain percentages;
-- rendered frames, authored loop wraps, peak, and pre-limiter over-range count;
-- startup and steady-state `AudioTrack` underruns.
-- enabled effect mask, loaded effect count, active effect voices, and cumulative one-shot trigger count.
-
-One-time events include `sample_engine_loaded`, `sample_engine_load_failed`, `audio_track_active`, `sound_effect_toggled`, and `sample_effect_triggered`, including profile ID, separate authored source/playback rates, native RPM domain, and effect trigger deltas.
-
-The log is `/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log`. For a debug install:
-
-```powershell
-adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log
-```
-
-## Code-driven on-device validation
-
-The diagnostics screen has `RUN AUDIO TEST`. It can also start without UI input:
-
-```powershell
-adb shell am force-stop com.gabrielpc.enginesoundsimulator
-adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity --ez run_sample_audio_validation true
-```
-
-The sequence selects simulator input, Drive, and sound, then applies 25%, 55%, 100%, and released-throttle stages. A valid run shows `sample_status=ACTIVE`, `sample_loops=24`, increasing frames/wraps, changing target/render RPM and active layers, and no renderer exception.
+The audio thread performs no file I/O, persistent logging, in-memory event logging, or diagnostic
+snapshot allocation. Renderer inspection objects exist only for JVM tests and are created only
+when a test explicitly requests one.
 
 ## Automated coverage
 

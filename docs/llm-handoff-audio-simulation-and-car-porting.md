@@ -234,7 +234,7 @@ When `coastLayerMixEnabled == false`:
 | **Profile output gain** | Follows live throttle |
 | **MIXER UI** | All layer rows visible; GAIN multipliers fixed at 1.0× |
 
-Toggle: DEBUG panel → **AUDIO MIX MODE**, or Gradle `coastLayerMixEnabledByDefault` / persisted pref `coast_layer_mix_enabled`. Header shows **LEGACY MIX** tag when legacy is active.
+The current UI has no debug/audio-mode toggle. The persisted `coast_layer_mix_enabled` preference and Gradle `coastLayerMixEnabledByDefault` determine the mode; the header shows **LEGACY MIX** when legacy is active.
 
 Legacy pref key `coast_only_full_gain` is still read for migration.
 

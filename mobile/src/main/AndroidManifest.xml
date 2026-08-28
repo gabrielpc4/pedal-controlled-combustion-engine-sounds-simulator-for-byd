@@ -8,7 +8,6 @@
     <uses-permission android:name="android.permission.BYDAUTO_GEARBOX_GET" />
 
     <application
-        android:name=".EngineSoundsSimulatorApplication"
         android:allowBackup="false"
         android:appCategory="audio"
         android:dataExtractionRules="@xml/data_extraction_rules"

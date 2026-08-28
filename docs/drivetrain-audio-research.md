@@ -107,7 +107,7 @@ The broader [Soundholder engine collection](https://sonniss.com/sound-effects-ta
 - [AOSP audio debugging](https://source.android.com/docs/core/audio/debugging) documents `dumpsys media.audio_flinger` for route/mixer diagnosis.
 - [Oboe low-latency guidance](https://developer.android.com/games/sdk/oboe/low-latency-audio) is the likely future native-audio path. Java `AudioTrack` remains simpler for the current API-25 logical-channel experiment.
 
-The renderer now gates startup on a granted focus request, updates diagnostic state on focus changes, smoothly ducks/mutes, and releases focus on shutdown or permanent loss. On-car testing must still verify the OEM focus policy alongside navigation, calls, ADAS, and warning audio; an application-level focus implementation cannot prove those system interactions by itself.
+The renderer now gates startup on a granted focus request, smoothly ducks/mutes on focus changes, and releases focus on shutdown or permanent loss. On-car testing must still verify the OEM focus policy alongside navigation, calls, ADAS, and warning audio; an application-level focus implementation cannot prove those system interactions by itself.
 
 The `mobile` module compiles against SDK 37 but deliberately targets SDK 25 to remain compatible with the legacy DiLink vendor framework and hidden boot-classpath API. This is a sideload-only engineering choice, not a Play-distribution configuration. Modern test devices may reject installation unless ADB's explicit low-target-SDK bypass is used.
 

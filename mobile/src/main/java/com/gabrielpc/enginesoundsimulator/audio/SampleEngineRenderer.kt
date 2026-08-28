@@ -42,20 +42,75 @@ internal class SampleEngineRenderer private constructor(
     private var framesRendered = 0L
     private var loopWraps = 0L
     private var overRangeSamples = 0L
-    private var renderedBlocks = 0L
     private var effectTriggers = 0L
     private var lastShiftSerial: Long? = null
     private var throttleLiftArmed = false
     private var anyLayerSolo = false
-    private var layerOutputMeters = emptyList<LayerOutputMeter>()
-    private var diagnostics = SampleRendererDiagnostics(
-        profileId = profile.id,
-        loadedLoops = voices.size,
-        loadedEffects = effectVoices.size,
-        decodedBytes = decodedBytes,
-    )
+    private var lastRequestedRpm = profile.idleRpm
+    private var lastBlockPeak = 0.0
+    private var lastTarget = EngineAudioFrame()
 
-    fun diagnostics(): SampleRendererDiagnostics = diagnostics
+    /** Built only when a test explicitly asks for it; production rendering stores no diagnostic snapshots. */
+    fun diagnostics(): SampleRendererDiagnostics {
+        val target = lastTarget
+        val activeLayers = if (target.soloEffects) {
+            "none (effects solo)"
+        } else {
+            voices.asSequence()
+                .filter { it.targetGain > 0.006 }
+                .sortedByDescending { it.targetGain }
+                .take(8)
+                .joinToString(",") { voice ->
+                    "${voice.spec.id}@${(voice.playbackRatio * 100.0).toInt()}%/${(voice.targetGain * 100.0).toInt()}%"
+                }
+                .ifBlank { "none" }
+        }
+        return SampleRendererDiagnostics(
+            profileId = profile.id,
+            loadedLoops = voices.size,
+            loadedEffects = effectVoices.size,
+            decodedBytes = decodedBytes,
+            targetRpm = lastRequestedRpm.toInt(),
+            renderRpm = smoothedRpm.toInt(),
+            throttle = smoothedThrottle,
+            activeLayers = activeLayers,
+            playingSamples = audiblePlayingSamples(target),
+            layerOutputMeters = buildLayerOutputMeters(target),
+            framesRendered = framesRendered,
+            loopWraps = loopWraps,
+            peak = lastBlockPeak,
+            overRangeSamples = overRangeSamples,
+            effectTriggers = effectTriggers,
+            activeEffects = effectVoices.asSequence()
+                .filter { it.isAudible || it.targetGain > SILENCE_GAIN }
+                .joinToString(",") { it.spec.id }
+                .ifBlank { "none" },
+        )
+    }
+
+    val meterTrackIds: List<String> = voices.map { it.spec.id } + effectVoices.map { it.spec.id }
+
+    /** Copies current gains into caller-owned storage without allocating on the audio thread. */
+    fun writeLayerOutputLevels(target: EngineAudioFrame, destination: DoubleArray) {
+        require(destination.size == meterTrackIds.size)
+        if (!isProgramAudible(target)) {
+            destination.fill(0.0)
+            return
+        }
+        val loopScale = if (target.soloEffects) 0.0 else continuousProgramGain
+        var index = 0
+        while (index < voices.size) {
+            destination[index] = (voices[index].gain * loopScale).coerceIn(0.0, 1.0)
+            index += 1
+        }
+        var effectIndex = 0
+        while (effectIndex < effectVoices.size) {
+            val voice = effectVoices[effectIndex]
+            destination[index] = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+            index += 1
+            effectIndex += 1
+        }
+    }
 
     fun render(target: EngineAudioFrame, output: ShortArray, gain: Double) {
         require(output.size % PROGRAM_CHANNELS == 0) { "Stereo render buffer must contain whole frames" }
@@ -150,39 +205,9 @@ internal class SampleEngineRenderer private constructor(
         }
 
         framesRendered += frameCount
-        renderedBlocks += 1
-        if (renderedBlocks % DIAGNOSTIC_BLOCK_INTERVAL == 0L || diagnostics.framesRendered == 0L) {
-            layerOutputMeters = buildLayerOutputMeters(target)
-            val playingSamples = audiblePlayingSamples(target)
-            val active = if (target.soloEffects) "none (effects solo)" else voices.asSequence()
-                .filter { it.targetGain > 0.006 }
-                .sortedByDescending { it.targetGain }
-                .take(8)
-                .joinToString(",") { voice ->
-                    "${voice.spec.id}@${(voice.playbackRatio * 100.0).toInt()}%/${(voice.targetGain * 100.0).toInt()}%"
-                }
-                .ifBlank { "none" }
-            diagnostics = SampleRendererDiagnostics(
-                profileId = profile.id,
-                loadedLoops = voices.size,
-                loadedEffects = effectVoices.size,
-                decodedBytes = decodedBytes,
-                targetRpm = requestedRpm.toInt(),
-                renderRpm = smoothedRpm.toInt(),
-                throttle = smoothedThrottle,
-                activeLayers = active,
-                playingSamples = playingSamples,
-                layerOutputMeters = layerOutputMeters,
-                framesRendered = framesRendered,
-                loopWraps = loopWraps,
-                peak = blockPeak,
-                overRangeSamples = overRangeSamples,
-                effectTriggers = effectTriggers,
-                activeEffects = effectVoices.filter { it.isAudible || it.targetGain > SILENCE_GAIN }
-                    .joinToString(",") { it.spec.id }
-                    .ifBlank { "none" },
-            )
-        }
+        lastRequestedRpm = requestedRpm
+        lastBlockPeak = blockPeak
+        lastTarget = target
     }
 
     /** Loop and effect WAV assets audibly contributing to the mixed output right now. */
@@ -520,7 +545,6 @@ internal class SampleEngineRenderer private constructor(
         private const val SAMPLE_HEADROOM = 0.65
         private const val PROGRAM_CHANNELS = 2
         private const val SILENCE_GAIN = 0.00001
-        private const val DIAGNOSTIC_BLOCK_INTERVAL = 12L
         private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
         private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
         private const val COAST_IDLE_LAYER_FADE_MS = 120.0

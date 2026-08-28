@@ -5,7 +5,7 @@
 > damped estimator before moving the tach or audio. The sound gearbox derives its shifts from each
 > equal-width road-speed bands and configured shift RPM without changing electric wheel force.
 
-Last verified: 2026-08-16
+Last verified: 2026-08-28
 
 This document is the durable implementation handoff for the interactive motor-sound application that followed the original pedal-telemetry POC. Read this together with [the BYD telemetry notes](research-findings.md), not instead of them.
 
@@ -19,7 +19,7 @@ The `mobile` module is now a complete, landscape dashboard application:
 - performs presentation-only automatic upshifts, braking downshifts, safe kickdowns, and ratio swaps without interrupting electric wheel torque;
 - renders the selected sample profile continuously from RPM and throttle using recovered per-layer bank automation;
 - experimentally requests stereo, quad, 5.1, or 7.1 logical PCM output and mirrors the same engine program to every initialized logical channel;
-- exposes live audio route, channel, buffer, sample-rate, session, and underrun diagnostics;
+- exposes the requested output mode and active logical channel count in the dashboard header;
 - renders the requested car-and-tachometer composition against the 1920 x 990 safe-area target measured on the emulator; the actual car dimensions and insets remain unmeasured.
 
 The road model is not a pedal-to-needle animation: throttle requests motor torque, and motor speed, the 390 kW ceiling, mass, traction, drag, rolling resistance, and braking determine vehicle acceleration. Fictional gears then turn road speed into the sound RPM shown on the gauge. Those gears never feed back into wheel torque.
@@ -31,15 +31,14 @@ The road model is not a pedal-to-needle animation: throttle requests motor torqu
 | `simulation/EngineSimulation.kt` | EV road state, 200 Hz motor/vehicle integration, continuous BYD-speed estimation, and speed-coupled sound gearbox |
 | `simulation/TransmissionPosition.kt` | `P` / `N` / `D` enum consumed by `DriverInput` |
 | `audio/EngineSampleProfile.kt` | Car-profile metadata, gearbox calibration, layers, and recovered control curves |
-| `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and telemetry |
+| `audio/SampleEngineRenderer.kt` | Allocation-free PCM loop mixer, varispeed, interpolation, and live meter output |
+| `audio/RealtimeLayerMeterBus.kt` | Allocation-free audio-thread to UI meter handoff |
 | `audio/WavPcmDecoder.kt` | PCM16 mono/stereo preservation and embedded loop-point decoding |
 | `audio/EngineAudioEngine.kt` | Audio focus, device inspection, channel negotiation, continuous `AudioTrack` writer |
 | `drive/DriveController.kt` | BYD/manual input selection and coordination of telemetry, simulation, and audio |
-| `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, diagnostics, and input controls |
+| `MainActivity.kt` | Full-screen Compose dashboard, gauge, pedals, mixer, tuning, and input controls |
 | `telemetry/BydSpeedReader.kt` | Read-only reflective DiLink capability probe and getter polling |
 | `telemetry/BydReadOnlyPermissionContext.kt` | Exact speed-read-only scope for BYD client-side permission checks |
-| `diagnostics/PersistentDiagnosticLog.kt` | Bounded, synced app-private transition/crash event trail |
-| `EngineSoundsSimulatorApplication.kt` | Early diagnostic installation and dashboard lifecycle events |
 | `simulation/EngineSimulationTest.kt` | EV envelope/acceleration, synthetic shift, braking, and idle behavior tests |
 | `audio/SampleEngineRendererTest.kt` | Profile integrity, decoder, curve, sweep, and runtime-telemetry tests |
 
@@ -53,7 +52,7 @@ BYD getters (when available)       Simulator touch / W-S keys
                   EngineSimulation
                     /           \
              UI snapshot      EngineAudioFrame
-                 30 Hz              |
+             display Hz             |
              Compose UI     SampleEngineRenderer
                                      |
                             stereo PCM16 program
@@ -68,12 +67,13 @@ Threads have intentionally separate duties:
 - the BYD reader owns its vendor-getter polling worker;
 - `DriveController` owns the fixed-step simulation worker;
 - `EngineAudioEngine` owns a high-priority audio writer;
-- the main thread samples immutable state approximately every 33 ms for Compose, while simulation and audio control remain at 200 Hz.
+- the main thread samples immutable state from `Choreographer` once per display frame (normally 60 Hz), while simulation and audio control remain at 200 Hz.
 
 The hot mix/write path retains decoded recordings as interleaved PCM16, reuses its output arrays,
-uses indexed voice traversal, and performs no file I/O or persistent logging. It refreshes bounded
-diagnostic and meter snapshots every 12 writes and route state every 48 writes rather than
-allocating state on every audio block. When `AudioTrack` reports a new underrun, its effective
+uses indexed voice traversal, and performs no file I/O, logging, or immutable-state publication.
+Every third write, it copies primitive gain values through a seqlock-style meter bus, which is
+approximately 60 Hz for a 256-frame buffer. The Compose thread alone converts those values to UI
+state. When `AudioTrack` reports a new underrun, its effective
 buffer grows by one native burst up to the already allocated capacity. This reduces heap/GC
 pressure without removing audible layers.
 
@@ -156,7 +156,7 @@ The setting cycles `AUTO -> 7.1 -> 5.1 -> QUAD -> STEREO`.
 
 The 5.1 and 7.1 experiments retain left/right on every matching front/rear/side pair and use the stereo midpoint for center and LFE. This is still not a conventional surround master. OEM bass management may filter, omit, or sum LFE, and a downmixer may combine correlated channels with unexpected gain. Keep test volume low. A production surround path should feed LFE a separately limited, low-pass signal after the actual HAL/downmix behavior is known.
 
-The application requests audio focus before creating the renderer. A denied request now prevents playback; duck, transient loss, recovery, and permanent loss update diagnostic state and use short gain ramps to avoid discontinuities. Shutdown and spontaneous renderer failure both release focus. Gain ramps are unit-tested and the lifecycle was exercised on the emulator, but platform focus acquisition/listener paths are not isolated behind a fake in the JVM suite. Actual coexistence with calls, navigation, ADAS, and system warnings still requires on-car policy testing.
+The application requests audio focus before creating the renderer. A denied request prevents playback; duck, transient loss, recovery, and permanent loss update gain without writing logs. Shutdown and spontaneous renderer failure both release focus. Gain ramps are unit-tested and the lifecycle was exercised on the emulator, but platform focus acquisition/listener paths are not isolated behind a fake in the JVM suite. Actual coexistence with calls, navigation, ADAS, and system warnings still requires on-car policy testing.
 
 Important: an 8-channel `AudioTrack` is not proof that eight physical BYD speakers receive discrete channels. Android applications submit logical channels. Audio policy selects a bus, and the BYD amplifier/DSP maps that bus to physical front/rear/center/subwoofer speakers. If the vehicle media bus is stereo, Android may downmix 5.1/7.1 before the BYD DSP distributes it across the cabin. Such downmixing can also disqualify the low-latency fast path.
 
@@ -166,7 +166,7 @@ Therefore the production preference is:
 2. retain 5.1/7.1 only when on-car AudioFlinger/audio-policy evidence confirms a matching HAL output;
 3. never claim physical speaker coverage based only on `AudioTrack.channelCount`.
 
-The header/footer show the requested mode, active logical channel count/layout, routed device, sample rate, buffer, session ID, and underruns. Output-device capability metadata is retained in `AudioOutputState.advertisedChannels` but is not currently rendered in the UI.
+The header shows the build number, requested mode, and active logical channel count. The former debug screen, route details, in-memory event history, and persistent file logs were removed to reduce heap churn and keep the mixer responsive.
 
 ## Head-unit UI and controls
 
@@ -211,7 +211,7 @@ Tests verify that:
 - the sound limiter uses hysteresis instead of buffer-rate chatter;
 - braking decelerates more strongly than coasting;
 - the stopped engine returns to the configured 950 RPM idle;
-- the sample renderer decodes PCM/loop metadata, evaluates recovered control curves, produces nonzero PCM throughout the operating range, advances loop cursors, reports runtime telemetry, and fails closed on an incomplete bank; tests do not establish perceived quality or cabin audibility;
+- the sample renderer decodes PCM/loop metadata, evaluates recovered control curves, produces nonzero PCM throughout the operating range, advances loop cursors, exposes test-only snapshots on demand, and fails closed on an incomplete bank; tests do not establish perceived quality or cabin audibility;
 - channel duplication writes exactly the same sample to every logical channel;
 - explicit BYD LIVE mode fails safe to zero pedals when telemetry is unavailable, while AUTO alone may use simulator fallback;
 - rapid controller lifecycle transitions cannot revive an obsolete simulation loop.
@@ -221,29 +221,28 @@ The automated suite covers drivetrain behavior, audio continuity/channel replica
 APK output:
 
 ```text
-mobile/build/outputs/apk/debug/mobile-debug.apk
+mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<build>-debug.apk
 ```
 
 ## Actual-car acceptance procedure
 
-Only test parked, or have a passenger operate diagnostics in a controlled environment. The debug build has no enforced drive lockout or calibrated maximum-volume ceiling. Synthetic audio can mask turn signals, ADAS warnings, navigation prompts, calls, emergency vehicles, and other safety cues; it is not approved for public-road use.
+Only test parked, or have a passenger operate the app in a controlled environment. The debug build has no enforced drive lockout or calibrated maximum-volume ceiling. Synthetic audio can mask turn signals, ADAS warnings, navigation prompts, calls, emergency vehicles, and other safety cues; it is not approved for public-road use.
 
 1. Install and launch the debug APK.
 2. Confirm `AUTO` changes from `SIM FALLBACK` to `BYD PEDALS` when the DiLink getter probe becomes active.
 3. Check accelerator and brake movement at rest and compare displayed response with physical pedal motion.
 4. Verify speed becomes the external-speed source during a safe passenger-operated test.
-5. Note the audio session ID and active logical layout from the footer.
-6. While audio is playing, capture on the host:
+5. While audio is playing, capture on the host if route analysis is needed:
 
 ```powershell
 adb shell dumpsys media.audio_flinger > byd_audio_flinger.txt
 adb shell dumpsys media.audio_policy > byd_audio_policy.txt
 ```
 
-7. Find the active track by session ID/PID. Compare its channel mask with the containing output thread/HAL channel mask. Track=7.1 plus output=stereo proves downmix; both 8-channel proves multichannel reaches the HAL, not the final physical speakers.
-8. Confirm physical cabin coverage by listening at low volume in every seating position. A later diagnostic should solo FL/FR/FC/BL/BR/SL/SR and use a separately level-limited, low-frequency LFE test tone. Listening is a practical end-to-end check, not the only possible proof: an OEM routing description, electrical measurement, or calibrated multichannel acoustic capture can provide stronger evidence. Bass management may deliberately redirect the LFE or main-channel bass.
-9. Watch `underruns`. If they rise, increase the effective buffer by one native burst.
-10. Measure pedal-to-acoustic latency externally. `AudioTimestamp` cannot include unknown amplifier/DSP delay.
+6. Find the active track by PID. Compare its channel mask with the containing output thread/HAL channel mask. Track=7.1 plus output=stereo proves downmix; both 8-channel proves multichannel reaches the HAL, not the final physical speakers.
+7. Confirm physical cabin coverage by listening at low volume in every seating position. Listening is a practical end-to-end check, not the only possible proof: an OEM routing description, electrical measurement, or calibrated multichannel acoustic capture can provide stronger evidence. Bass management may deliberately redirect the LFE or main-channel bass.
+8. Inspect underruns through `dumpsys media.audio_flinger`. If they rise, increase the effective buffer by one native burst.
+9. Measure pedal-to-acoustic latency externally. `AudioTimestamp` cannot include unknown amplifier/DSP delay.
 
 ## Known limitations and next work
 

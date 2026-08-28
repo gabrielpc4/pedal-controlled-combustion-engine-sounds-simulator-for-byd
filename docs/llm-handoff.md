@@ -54,10 +54,9 @@ modules, not the DiLink app.
 - a sample-only, profile-driven audio renderer: layered RPM/load/coast/idle WAV loops, persistent
   fractional cursors, cubic interpolation, stereo preservation, crossfades, optional effects, and
   no procedural synth fallback;
-- `AudioTrack` output with focus/lifecycle diagnostics and logical stereo/quad/5.1/7.1 modes.
+- `AudioTrack` output with focus/lifecycle handling and logical stereo/quad/5.1/7.1 modes;
   Logical multichannel does not prove discrete physical speaker access; stereo routed through the
   vehicle DSP is usually the safest low-latency default;
-- persistent diagnostics that survive app/process closure; and
 - read-only reflective BYD pedal/speed probing with 20 ms polling and simulator fallback.
 
 Car profiles are extensible data/configuration. A new profile needs its source files listed in
@@ -69,14 +68,14 @@ rights.
 
 | Area | Main files | Notes |
 | --- | --- | --- |
-| Dashboard/UI | `MainActivity.kt`, `TuningPanel.kt`, `SoundEffectsPanel.kt` | Compose layout, pedals, shifter, tuning, effects, diagnostics entry |
+| Dashboard/UI | `MainActivity.kt`, `TuningPanel.kt`, `SoundEffectsPanel.kt` | Compose layout, pedals, shifter, tuning, effects, and 60 Hz mixer |
 | Drive coordination | `drive/DriveController.kt` | 200 Hz loop, input arbitration, profile changes, telemetry/audio/simulation state |
 | Simulation | `simulation/EngineSimulation.kt`, `TransmissionPosition.kt` | D speed/RPM coupling, SIM road physics, P/N behavior, shifts |
 | Audio | `audio/EngineAudioEngine.kt`, `SampleEngineRenderer.kt`, `EngineSampleProfile.kt`, `WavPcmDecoder.kt` | track lifecycle, sample decode/mix, profile automation, source-rate handling |
 | Profile persistence | `audio/SelectedCarRepository.kt`, `SoundEffectsRepository.kt` | selected profile and per-profile effect state |
-| BYD telemetry | `telemetry/BydSpeedReader.kt`, `BydReadOnlyPermissionContext.kt` | reflection, permission diagnostics, read-only compatibility context |
+| BYD telemetry | `telemetry/BydSpeedReader.kt`, `BydReadOnlyPermissionContext.kt` | reflection, validation, read-only compatibility context |
 | Tuning | `tuning/TuningConfig.kt`, `TuningRepository.kt` | persisted, live-editable simulation/audio controls |
-| Diagnostics | `EngineSoundsSimulatorApplication.kt`, `diagnostics/PersistentDiagnosticLog.kt` | lifecycle/crash retention and bounded event log |
+| Meter bridge | `audio/RealtimeLayerMeterBus.kt` | preallocated audio-thread publication and per-frame UI snapshots |
 
 ## BYD input: evidence and current limitation
 
@@ -91,9 +90,9 @@ permissions or implements vehicle control. Community evidence indicates this byp
 client-side check on some DiLink versions. Firmware `2503` still requires an on-car retest to
 establish whether a second service/Binder-side enforcement blocks it.
 
-Do not claim live pedal support works until the diagnostics panel and persistent log show plausible
-accelerator/brake/speed values. If it is still denied, retain simulator input and record the exact
-failure; do not attempt root, `pm grant`, spoofed packages, or broader permissions.
+Do not claim live pedal support works until the header selects BYD pedals and the controls respond
+plausibly on the car. If it is still denied, retain simulator input; do not attempt root, `pm grant`,
+spoofed packages, or broader permissions.
 
 The listener class is abstract, so a standard Java dynamic proxy cannot instantiate it. Polling the
 getters every 20 ms is the current safe path. Do not add bytecode-generation/DexMaker listener
@@ -108,9 +107,10 @@ machinery without a compile-only vendor SDK and a specific on-car reason.
 - Decoded WAVs stay as interleaved PCM16 rather than expanded float arrays. The decoder writes
   directly into retained storage, and the 48 kHz inner mixer loop must remain allocation-free.
   Do not replace indexed per-frame voice traversal with collection iterators or publish immutable
-  UI/diagnostic state on every audio write; both create avoidable GC pressure.
-- Diagnostic/meter state is published every 12 writes, route information every 48 writes, and a
-  new `AudioTrack` underrun grows the effective buffer by one native burst up to capacity.
+  UI state on every audio write; both create avoidable GC pressure.
+- Meter primitives are published allocation-free every three writes (roughly 60 Hz at the normal
+  256-frame/48 kHz route). Compose consumes them from `Choreographer` once per display frame. A new
+  `AudioTrack` underrun still grows the effective buffer by one native burst up to capacity.
 - Sample profiles retain their authored RPM domain. Do not stretch the tach/sample axis simply to
   match a guessed engine redline.
 - The renderer performs app-side cubic resampling only where a profile's source rate differs from
@@ -118,36 +118,12 @@ machinery without a compile-only vendor SDK and a specific on-car reason.
   car-specific rate problems locally rather than changing every profile.
 - Effects are optional per profile. `SOLO CHECKED EFFECTS` intentionally mutes continuous engine
   layers and plays only checked effects; an empty checked set is silent.
-- Sample loading failures are visible in the app and persist `sample_engine_load_failed` diagnostics.
+- Sample loading failures stop playback and remain represented by the audio state; no file or in-memory event log exists.
 
 Read [sample-engine-audio.md](sample-engine-audio.md) before changing sample mappings. It records
 the recovery/reconstruction confidence and licensing boundary.
 
 **Audio / simulation context for other LLMs:** [llm-handoff-audio-simulation-and-car-porting.md](llm-handoff-audio-simulation-and-car-porting.md) describes the current WAV pipeline, coast vs legacy mix modes, tach/RPM/shift behavior, and how cars are registered today.
-
-## Diagnostics and scripted validation
-
-Persistent low-rate events are fsynced to:
-
-```text
-/data/user/0/com.gabrielpc.enginesoundsimulator/files/diagnostics/drive-events.log
-```
-
-At 256 KiB it rotates to `drive-events.previous.log`. It records lifecycle, crashes, telemetry
-probe/read changes, input-source changes, 1 Hz drive heartbeats, shifts, audio focus/track/error
-state, and sample load information. Never write on the 200 Hz simulation tick or audio buffer loop.
-
-Retrieve a debug build's log:
-
-```powershell
-$adb = 'D:\Users\sgabr\AppData\Local\Android\Sdk\platform-tools\adb.exe'
-& $adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log
-& $adb shell run-as com.gabrielpc.enginesoundsimulator cat files/diagnostics/drive-events.log |
-    Select-String 'drive_heartbeat|shift|byd|sample_engine'
-```
-
-`DriveControllerScriptedIntegrationTest` is the preferred no-UI test for input/shift/tach behavior.
-Use it before trying to diagnose timing with slow desktop UI automation.
 
 ## Build, install, run, and artifact identity
 
@@ -163,7 +139,7 @@ Set-Location $project
 ```
 
 Every assembly increments `mobile/build-number.properties`; the same number is embedded in
-`BuildConfig`, Android `versionCode`/`versionName`, the Diagnostics title, and the debug APK name:
+`BuildConfig`, Android `versionCode`/`versionName`, the dashboard header, and the debug APK name:
 
 ```text
 mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<build>-debug.apk
@@ -180,7 +156,7 @@ $apk = Get-ChildItem mobile\build\outputs\apk\debug\engine-sounds-simulator-buil
 & $adb shell dumpsys activity activities | Select-String 'topResumedActivity'
 ```
 
-The connected emulator is normally `emulator-5554`, AVD `BYD_Seal_1920x1080`, configured at
+The connected emulator is normally `emulator-5554`, AVD `Simple_Automotive`, configured at
 1920 x 1080 / 160 dpi. The app safe dashboard viewport is 1920 x 990. Because the app targets SDK
 25, recent emulator builds require `--bypass-low-target-sdk-block` for installation.
 
@@ -195,8 +171,7 @@ APK itself.
 4. [Sample engine audio](sample-engine-audio.md)
 5. [BYD Seal calibration](byd-seal-performance-calibration.md)
 6. [UI display and simulation decisions](ui-display-and-simulation-decisions.md)
-7. [Persistent diagnostics](persistent-diagnostics.md)
-8. [BYD API/research notes](byd-dilink-api-v1.0.5.md), [research findings](research-findings.md),
+7. [BYD API/research notes](byd-dilink-api-v1.0.5.md), [research findings](research-findings.md),
    and [Electro APK analysis](electro-apk-analysis.md)
 
 The emulator can validate UI, APK startup, sample decoding, renderer state, and deterministic

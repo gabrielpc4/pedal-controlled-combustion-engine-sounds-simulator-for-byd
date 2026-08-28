@@ -1,11 +1,9 @@
 package com.gabrielpc.enginesoundsimulator
 
-import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.view.Choreographer
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -107,14 +105,13 @@ private val Muted = Color(0xFF88A2B2)
 
 class MainActivity : ComponentActivity() {
     private lateinit var controller: DriveController
-    private val uiHandler = Handler(Looper.getMainLooper())
+    private val choreographer by lazy(LazyThreadSafetyMode.NONE) { Choreographer.getInstance() }
     private var driveState by mutableStateOf<DriveSnapshot?>(null)
 
-    private val refreshUi = object : Runnable {
-        override fun run() {
+    private val refreshUi = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
             driveState = controller.snapshot()
-            // Mixer meters feel best near 60 Hz; the simulation loop still runs at 200 Hz.
-            uiHandler.postDelayed(this, 16L)
+            choreographer.postFrameCallback(this)
         }
     }
 
@@ -140,8 +137,6 @@ class MainActivity : ComponentActivity() {
                         onCycleChannels = controller::cycleChannelMode,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
-                        onRestartBydReader = controller::restartVehicleReader,
-                        onRunSampleValidation = controller::runSampleAudioValidation,
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSelectCar = controller::selectCar,
@@ -150,41 +145,23 @@ class MainActivity : ComponentActivity() {
                         onLayerMixVolume = controller::setLayerMixVolume,
                         onSoundEffectChange = controller::setSoundEffectEnabled,
                         onSoloSoundEffectsChange = controller::setSoloSoundEffects,
-                        onRequestSnapshot = controller::snapshot,
-                        onDebugPanelVisible = controller::setDebugPanelVisible,
-                        onCoastLayerMixEnabledChange = controller::setCoastLayerMixEnabled,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
                     )
                 }
             }
-        }
-        maybeScheduleSampleValidation(intent)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        maybeScheduleSampleValidation(intent)
-    }
-
-    private fun maybeScheduleSampleValidation(intent: Intent?) {
-        if (!BuildConfig.DEBUG || intent == null) return
-        if (intent.getBooleanExtra(EXTRA_RUN_SAMPLE_VALIDATION, false)) {
-            intent.removeExtra(EXTRA_RUN_SAMPLE_VALIDATION)
-            uiHandler.postDelayed(controller::runSampleAudioValidation, 1_500L)
         }
     }
 
     override fun onStart() {
         super.onStart()
         controller.start()
-        uiHandler.removeCallbacks(refreshUi)
-        uiHandler.post(refreshUi)
+        choreographer.removeFrameCallback(refreshUi)
+        choreographer.postFrameCallback(refreshUi)
     }
 
     override fun onStop() {
         releaseManualControls()
-        uiHandler.removeCallbacks(refreshUi)
+        choreographer.removeFrameCallback(refreshUi)
         controller.stop()
         super.onStop()
     }
@@ -212,8 +189,6 @@ private fun MotorSoundDashboard(
     onCycleChannels: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
     onResetTuning: () -> Unit,
-    onRestartBydReader: () -> Unit,
-    onRunSampleValidation: () -> Unit,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
@@ -222,19 +197,12 @@ private fun MotorSoundDashboard(
     onLayerMixVolume: (String, Double) -> Unit,
     onSoundEffectChange: (String, Boolean) -> Unit,
     onSoloSoundEffectsChange: (Boolean) -> Unit,
-    onRequestSnapshot: () -> DriveSnapshot,
-    onDebugPanelVisible: (Boolean) -> Unit,
-    onCoastLayerMixEnabledChange: (Boolean) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
-    var debugOpen by remember { mutableStateOf(false) }
     var effectsOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(debugOpen) {
-        onDebugPanelVisible(debugOpen)
-    }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
         modifier = Modifier
@@ -242,7 +210,7 @@ private fun MotorSoundDashboard(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (tuningOpen || debugOpen || effectsOpen) return@onPreviewKeyEvent false
+                if (tuningOpen || effectsOpen) return@onPreviewKeyEvent false
                 val pressed = event.type == KeyEventType.KeyDown
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
@@ -289,7 +257,6 @@ private fun MotorSoundDashboard(
                         onToggleSound = onToggleSound,
                         onCycleChannels = onCycleChannels,
                         onOpenTuning = { tuningOpen = true },
-                        onOpenDebug = { debugOpen = true },
                         onOpenEffects = { effectsOpen = true },
                     )
 
@@ -352,16 +319,6 @@ private fun MotorSoundDashboard(
                     )
                 }
 
-                if (debugOpen) {
-                    DebugPanel(
-                        requestSnapshot = onRequestSnapshot,
-                        onRestartBydReader = onRestartBydReader,
-                        onRunSampleValidation = onRunSampleValidation,
-                        onCoastLayerMixEnabledChange = onCoastLayerMixEnabledChange,
-                        onClose = { debugOpen = false },
-                    )
-                }
-
                 if (effectsOpen) {
                     SoundEffectsPanel(
                         state = state,
@@ -384,8 +341,6 @@ private fun MotorSoundDashboard(
     }
 }
 
-private const val EXTRA_RUN_SAMPLE_VALIDATION = "run_sample_audio_validation"
-
 @Composable
 private fun DashboardHeader(
     state: DriveSnapshot,
@@ -395,7 +350,6 @@ private fun DashboardHeader(
     onToggleSound: () -> Unit,
     onCycleChannels: () -> Unit,
     onOpenTuning: () -> Unit,
-    onOpenDebug: () -> Unit,
     onOpenEffects: () -> Unit,
 ) {
     Row(
@@ -433,6 +387,7 @@ private fun DashboardHeader(
                 fontWeight = FontWeight.Light,
                 letterSpacing = 2.0.sp,
             )
+            StatusTag("BUILD ${AppBuildInfo.buildNumber}", Muted)
             StatusTag(state.activeInput, if (state.activeInput.startsWith("BYD")) Green else Cyan)
             if (state.legacyThrottleMixEnabled) {
                 StatusTag("LEGACY MIX", Amber)
@@ -443,12 +398,6 @@ private fun DashboardHeader(
             )
         }
 
-        HeaderButton(
-            primary = "DEBUG",
-            secondary = "BYD / LOGS",
-            accent = if (state.activeInput == "BYD UNAVAILABLE") Red else Cyan,
-            onClick = onOpenDebug,
-        )
         HeaderButton(
             primary = if (state.soundEffects.isEmpty()) "ENGINE" else "${state.soundEffects.count { it.enabled }}/${state.soundEffects.size} ON",
             secondary = "CAR EFFECTS",

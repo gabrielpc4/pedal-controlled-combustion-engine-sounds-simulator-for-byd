@@ -1,8 +1,6 @@
 package com.gabrielpc.enginesoundsimulator
 
-/**
- * Human-readable install stamp shown in diagnostics so on-car builds are easy to identify.
- */
+/** Human-readable install stamp shown in the dashboard header. */
 object AppBuildInfo {
     val buildNumber: Int = BuildConfig.BUILD_NUMBER
 
@@ -10,6 +8,4 @@ object AppBuildInfo {
 
     val builtAtUtc: String = BuildConfig.BUILD_TIME_UTC
 
-    val diagnosticTitleSuffix: String =
-        "#$buildNumber · $gitSha"
 }

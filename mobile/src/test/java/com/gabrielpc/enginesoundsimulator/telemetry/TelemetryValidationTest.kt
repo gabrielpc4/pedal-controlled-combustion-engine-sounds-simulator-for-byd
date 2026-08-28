@@ -42,25 +42,6 @@ class TelemetryValidationTest {
     }
 
     @Test
-    fun cadenceReportsMeasuredIntervalsWithoutInventingFirstRate() {
-        val tracker = CadenceTracker(capacity = 8)
-
-        val first = tracker.record(1_000_000_000L)
-        tracker.record(1_020_000_000L)
-        tracker.record(1_040_000_000L)
-        val fourth = tracker.record(1_080_000_000L)
-
-        assertEquals(1L, first.sampleCount)
-        assertNull(first.rateHz)
-        assertEquals(4L, fourth.sampleCount)
-        assertEquals(40.0, fourth.lastIntervalMs!!, 0.0)
-        assertEquals(26.666, fourth.meanIntervalMs!!, 0.01)
-        assertEquals(37.5, fourth.rateHz!!, 0.01)
-        assertEquals(40.0, fourth.p95IntervalMs!!, 0.0)
-        assertEquals(40.0, fourth.maxIntervalMs!!, 0.0)
-    }
-
-    @Test
     fun readOnlyCompatibilityPolicyAllowsOnlySpeedReadPermissions() {
         assertTrue(
             BydReadOnlyPermissionPolicy.treatAsGranted(

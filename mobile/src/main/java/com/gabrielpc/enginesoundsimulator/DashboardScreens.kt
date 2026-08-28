@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -138,11 +139,6 @@ internal fun MixerDashboardScreen(
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
         Spacer(Modifier.height(10.dp))
-        val visibleTracks = if (state.coastLayerMixEnabled) {
-            state.layerMixTracks.filter { track -> !track.isLoadLayer }
-        } else {
-            state.layerMixTracks
-        }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -152,7 +148,7 @@ internal fun MixerDashboardScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(visibleTracks, key = { it.id }) { track ->
+                items(state.layerMixTracks, key = { it.id }) { track ->
                     LayerMixTrackControl(
                         track = track,
                         coastLayerMixEnabled = coastLayerMixEnabled,
@@ -512,6 +508,13 @@ private fun LayerMixTrackControl(
     val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
     val showTrimSlider = coastLayerMixEnabled && track.showVolumeSlider
+    val meterLabelPaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textAlign = Paint.Align.RIGHT
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -535,13 +538,6 @@ private fun LayerMixTrackControl(
                 lineHeight = 13.sp,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "${(level * 100f).roundToInt()}%",
-                color = fillColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-            )
         }
         Spacer(Modifier.height(6.dp))
         Row(
@@ -549,7 +545,7 @@ private fun LayerMixTrackControl(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
+            Canvas(
                 modifier = Modifier
                     .weight(1f)
                     .height(22.dp)
@@ -558,19 +554,23 @@ private fun LayerMixTrackControl(
                     .border(1.dp, Line.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
             ) {
                 if (level > 0.002f) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(level)
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        fillColor.copy(alpha = 0.45f),
-                                        fillColor,
-                                        fillColor.copy(red = minOf(fillColor.red + 0.08f, 1f)),
-                                    ),
-                                ),
-                            ),
+                    drawRect(
+                        color = fillColor,
+                        size = androidx.compose.ui.geometry.Size(
+                            width = size.width * level,
+                            height = size.height,
+                        ),
+                        alpha = 0.88f,
+                    )
+                }
+                meterLabelPaint.textSize = size.height * 0.55f
+                meterLabelPaint.color = fillColor.toArgb()
+                drawIntoCanvas { canvas ->
+                    canvas.nativeCanvas.drawText(
+                        "${(level * 100f).roundToInt()}%",
+                        size.width - 8f,
+                        size.height * 0.70f,
+                        meterLabelPaint,
                     )
                 }
             }
