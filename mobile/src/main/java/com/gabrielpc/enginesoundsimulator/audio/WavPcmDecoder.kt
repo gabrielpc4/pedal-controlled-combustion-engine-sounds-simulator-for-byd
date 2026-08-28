@@ -6,13 +6,22 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 internal data class PcmLoopData(
-    val channelSamples: Array<FloatArray>,
+    val interleavedSamples: ShortArray,
+    val sourceChannels: Int,
     val sampleRate: Int,
     val loopStartFrame: Int = 0,
-    val loopEndFrameExclusive: Int = channelSamples.first().size,
+    val loopEndFrameExclusive: Int = interleavedSamples.size / sourceChannels,
 ) {
-    val sourceChannels: Int get() = channelSamples.size
-    val frameCount: Int get() = channelSamples.first().size
+    init {
+        require(sourceChannels in 1..2)
+        require(interleavedSamples.size % sourceChannels == 0)
+    }
+
+    val frameCount: Int get() = interleavedSamples.size / sourceChannels
+    val decodedBytes: Long get() = interleavedSamples.size.toLong() * Short.SIZE_BYTES
+
+    fun sampleAt(channel: Int, frame: Int): Float =
+        interleavedSamples[frame * sourceChannels + channel] / 32768.0f
 }
 
 internal object WavPcmDecoder {
@@ -25,7 +34,7 @@ internal object WavPcmDecoder {
         var channels = 0
         var sampleRate = 0
         var bitsPerSample = 0
-        var pcmBytes: ByteArray? = null
+        var pcmSamples: ShortArray? = null
         var smplLoopStart: Long? = null
         var smplLoopEndInclusive: Long? = null
 
@@ -43,7 +52,17 @@ internal object WavPcmDecoder {
                     bitsPerSample = stream.readUInt16Le()
                     stream.skipFully(chunkSize - 16)
                 }
-                "data" -> pcmBytes = stream.readExactly(chunkSize)
+                "data" -> {
+                    require(format == 1) { "WAV data appeared before a PCM format chunk" }
+                    require(channels in 1..2) { "Only mono/stereo WAV is supported (channels=$channels)" }
+                    require(bitsPerSample == 16) { "Only PCM16 WAV is supported (bits=$bitsPerSample)" }
+                    require(chunkSize % (channels * 2) == 0) { "Misaligned WAV PCM data" }
+                    val samples = ShortArray(chunkSize / Short.SIZE_BYTES)
+                    for (index in samples.indices) {
+                        samples[index] = stream.readUInt16Le().toShort()
+                    }
+                    pcmSamples = samples
+                }
                 "smpl" -> {
                     val bytes = stream.readExactly(chunkSize)
                     if (bytes.size >= 60) {
@@ -64,19 +83,8 @@ internal object WavPcmDecoder {
         require(channels in 1..2) { "Only mono/stereo WAV is supported (channels=$channels)" }
         require(sampleRate > 0) { "Invalid WAV sample rate" }
         require(bitsPerSample == 16) { "Only PCM16 WAV is supported (bits=$bitsPerSample)" }
-        val bytes = requireNotNull(pcmBytes) { "WAV has no data chunk" }
-        require(bytes.size % (channels * 2) == 0) { "Misaligned WAV PCM data" }
-
-        val frameCount = bytes.size / (channels * 2)
-        val decodedChannels = Array(channels) { FloatArray(frameCount) }
-        var byteIndex = 0
-        for (frame in 0 until frameCount) {
-            repeat(channels) { channel ->
-                val low = bytes[byteIndex++].toInt() and 0xff
-                val high = bytes[byteIndex++].toInt()
-                decodedChannels[channel][frame] = ((high shl 8) or low).toShort() / 32768.0f
-            }
-        }
+        val samples = requireNotNull(pcmSamples) { "WAV has no data chunk" }
+        val frameCount = samples.size / channels
         require(frameCount >= 32) { "WAV is too short to loop" }
         val loopStart = smplLoopStart?.toInt()?.coerceIn(0, frameCount - 1) ?: 0
         val loopEndExclusive = smplLoopEndInclusive
@@ -85,7 +93,7 @@ internal object WavPcmDecoder {
             ?.coerceIn(loopStart + 1, frameCount)
             ?: frameCount
         require(loopEndExclusive - loopStart >= 4) { "WAV loop is too short" }
-        PcmLoopData(decodedChannels, sampleRate, loopStart, loopEndExclusive)
+        PcmLoopData(samples, channels, sampleRate, loopStart, loopEndExclusive)
     }
 }
 

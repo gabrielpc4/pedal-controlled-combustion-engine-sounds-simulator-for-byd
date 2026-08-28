@@ -265,6 +265,18 @@ output = hard clip at ±1.0 → PCM16
 
 **Solo effects mode:** mutes continuous loops; only checked effects play.
 
+### Realtime memory/deadline rules
+
+- `WavPcmDecoder` retains interleaved PCM16, exactly two bytes per source sample. Do not expand the
+  whole bank to float arrays; conversion happens only for cubic taps being mixed.
+- The decoder streams the WAV data chunk directly into its retained `ShortArray`, avoiding a second
+  full-size byte buffer during profile startup.
+- The per-sample 48 kHz loop uses indexed traversal. Do not use `for (voice in voices)`, sequences,
+  collection transforms, logging, or immutable state updates inside that loop.
+- Meter/diagnostic snapshots publish every 12 AudioTrack writes; route queries publish every 48.
+- A rising underrun count increases the effective AudioTrack buffer by one native burst, capped by
+  its preallocated capacity. Preserve all layers selected by the active mix when optimizing.
+
 ---
 
 ## 8. What audio receives each frame

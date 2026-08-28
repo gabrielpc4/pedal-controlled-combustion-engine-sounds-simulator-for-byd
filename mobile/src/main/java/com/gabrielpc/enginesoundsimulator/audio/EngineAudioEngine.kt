@@ -396,6 +396,12 @@ class EngineAudioEngine(context: Context) {
             }
             var writes = 0
             var startupUnderruns = 0
+            var lastUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0
+            var effectiveBufferFrames = if (Build.VERSION.SDK_INT >= 24) {
+                track.bufferSizeInFrames
+            } else {
+                active.capacityFrames
+            }
             outputState.updateAndGet { previous ->
                 AudioOutputState(
                     running = true,
@@ -405,7 +411,7 @@ class EngineAudioEngine(context: Context) {
                     activeLayout = active.layout.label,
                     sampleRate = track.sampleRate,
                     framesPerWrite = active.framesPerWrite,
-                    bufferFrames = if (Build.VERSION.SDK_INT >= 24) track.bufferSizeInFrames else active.capacityFrames,
+                    bufferFrames = effectiveBufferFrames,
                     sessionId = track.audioSessionId,
                     routedDevice = routedDeviceName(track),
                     advertisedChannels = advertised.description,
@@ -424,18 +430,36 @@ class EngineAudioEngine(context: Context) {
                 mapStereoAcrossChannels(stereoProgram, interleaved, active.layout.channelCount)
                 if (!writeFully(track, interleaved, runId)) break
                 writes += 1
-                val liveMeters = sampleRenderer.diagnostics().layerOutputMeters
-                outputState.updateAndGet { it.copy(layerOutputMeters = liveMeters) }
-                if (writes % 48 == 0) {
+                if (writes % STATE_PUBLISH_WRITE_INTERVAL == 0) {
                     val sampleDiagnostics = sampleRenderer.diagnostics()
                     val currentUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0
-                    if (writes == 48) startupUnderruns = currentUnderruns
+                    if (Build.VERSION.SDK_INT >= 24 && currentUnderruns > lastUnderruns) {
+                        val requestedFrames = (effectiveBufferFrames + active.framesPerWrite)
+                            .coerceAtMost(active.capacityFrames)
+                        if (requestedFrames > effectiveBufferFrames) {
+                            val appliedFrames = runCatching {
+                                track.setBufferSizeInFrames(requestedFrames)
+                            }.getOrDefault(effectiveBufferFrames)
+                            if (appliedFrames > 0) effectiveBufferFrames = appliedFrames
+                        }
+                    }
+                    lastUnderruns = currentUnderruns
+                    if (writes == STARTUP_UNDERRUN_WRITE_COUNT) startupUnderruns = currentUnderruns
                     outputState.updateAndGet {
                         it.copy(
-                            routedDevice = routedDeviceName(track),
+                            routedDevice = if (writes % ROUTE_PUBLISH_WRITE_INTERVAL == 0) {
+                                routedDeviceName(track)
+                            } else {
+                                it.routedDevice
+                            },
+                            bufferFrames = effectiveBufferFrames,
                             underruns = currentUnderruns,
                             startupUnderruns = startupUnderruns,
-                            steadyStateUnderruns = (currentUnderruns - startupUnderruns).coerceAtLeast(0),
+                            steadyStateUnderruns = if (writes <= STARTUP_UNDERRUN_WRITE_COUNT) {
+                                0
+                            } else {
+                                (currentUnderruns - startupUnderruns).coerceAtLeast(0)
+                            },
                             sampleTargetRpm = sampleDiagnostics.targetRpm,
                             sampleRenderRpm = sampleDiagnostics.renderRpm,
                             sampleThrottle = sampleDiagnostics.throttle,
@@ -641,6 +665,9 @@ class EngineAudioEngine(context: Context) {
     private companion object {
         const val RENDER_JOIN_TIMEOUT_MS = 750L
         const val RENDER_FORCE_RELEASE_JOIN_MS = 250L
+        const val STATE_PUBLISH_WRITE_INTERVAL = 12
+        const val ROUTE_PUBLISH_WRITE_INTERVAL = 48
+        const val STARTUP_UNDERRUN_WRITE_COUNT = 48
         val LAYOUT_7_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, 8, "7.1 MIRROR")
         val LAYOUT_5_1 = ChannelLayout(AudioFormat.CHANNEL_OUT_5POINT1, 6, "5.1 MIRROR")
         val LAYOUT_QUAD = ChannelLayout(AudioFormat.CHANNEL_OUT_QUAD, 4, "QUAD MIRROR")
@@ -649,7 +676,7 @@ class EngineAudioEngine(context: Context) {
 }
 
 internal fun mapStereoAcrossChannels(stereo: ShortArray, output: ShortArray, channelCount: Int) {
-    require(channelCount in setOf(2, 4, 6, 8))
+    require(channelCount == 2 || channelCount == 4 || channelCount == 6 || channelCount == 8)
     require(stereo.size % 2 == 0)
     require(output.size >= stereo.size / 2 * channelCount)
     var outputIndex = 0

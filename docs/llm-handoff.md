@@ -105,6 +105,12 @@ machinery without a compile-only vendor SDK and a specific on-car reason.
   preview images into generated application assets.
 - The renderer preserves both source channels and mixes all layers/effects into one continuous
   `AudioTrack`; it does not depend on Assetto Corsa, FMOD, or the game at runtime.
+- Decoded WAVs stay as interleaved PCM16 rather than expanded float arrays. The decoder writes
+  directly into retained storage, and the 48 kHz inner mixer loop must remain allocation-free.
+  Do not replace indexed per-frame voice traversal with collection iterators or publish immutable
+  UI/diagnostic state on every audio write; both create avoidable GC pressure.
+- Diagnostic/meter state is published every 12 writes, route information every 48 writes, and a
+  new `AudioTrack` underrun grows the effective buffer by one native burst up to capacity.
 - Sample profiles retain their authored RPM domain. Do not stretch the tach/sample axis simply to
   match a guessed engine redline.
 - The renderer performs app-side cubic resampling only where a profile's source rate differs from
@@ -178,8 +184,8 @@ The connected emulator is normally `emulator-5554`, AVD `BYD_Seal_1920x1080`, co
 1920 x 1080 / 160 dpi. The app safe dashboard viewport is 1920 x 990. Because the app targets SDK
 25, recent emulator builds require `--bypass-low-target-sdk-block` for installation.
 
-Build output is not source control. Commit the updated `mobile/build-number.properties` after an
-assembly, but never the APK itself.
+Build output and `mobile/build-number.properties` are local/ignored state. Never commit them or the
+APK itself.
 
 ## Essential reading order
 

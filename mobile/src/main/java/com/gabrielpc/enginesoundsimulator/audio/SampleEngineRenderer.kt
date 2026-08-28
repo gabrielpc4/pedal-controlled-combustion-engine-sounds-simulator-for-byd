@@ -46,6 +46,7 @@ internal class SampleEngineRenderer private constructor(
     private var effectTriggers = 0L
     private var lastShiftSerial: Long? = null
     private var throttleLiftArmed = false
+    private var anyLayerSolo = false
     private var layerOutputMeters = emptyList<LayerOutputMeter>()
     private var diagnostics = SampleRendererDiagnostics(
         profileId = profile.id,
@@ -66,6 +67,7 @@ internal class SampleEngineRenderer private constructor(
         smoothedRpm += (requestedRpm - smoothedRpm) * rpmAlpha
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
 
+        anyLayerSolo = target.layerMix.values.any { control -> control.solo && !control.muted }
         updateVoiceTargets(smoothedRpm, smoothedThrottle, target.layerMix, target.coastLayerMixEnabled)
         updateEffectTargetsAndTriggers(target, target.layerMix)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
@@ -94,7 +96,9 @@ internal class SampleEngineRenderer private constructor(
             continuousProgramGain += (targetContinuousProgram - continuousProgramGain) * masterAlpha
             var loopLeft = 0.0
             var loopRight = 0.0
-            for (voice in voices) {
+            var voiceIndex = 0
+            while (voiceIndex < voices.size) {
+                val voice = voices[voiceIndex]
                 val voiceLayerAlpha = if (target.coastLayerMixEnabled && voice.spec.role == SampleLayerRole.IDLE) {
                     idleLayerAlpha
                 } else {
@@ -102,22 +106,28 @@ internal class SampleEngineRenderer private constructor(
                 }
                 voice.gain += (voice.targetGain - voice.gain) * voiceLayerAlpha
                 if (voice.gain > SILENCE_GAIN || voice.targetGain > SILENCE_GAIN) {
-                    loopLeft += voice.readCubic(0) * voice.gain
-                    loopRight += voice.readCubic(1) * voice.gain
+                    voice.readStereoCubic()
+                    loopLeft += voice.sampleLeft * voice.gain
+                    loopRight += voice.sampleRight * voice.gain
                 }
                 // FMOD timelines keep running even while a layer is inaudible. Doing the same
                 // prevents an audible sample restart when an RPM or throttle fade opens again.
                 if (voice.advance()) loopWraps += 1
+                voiceIndex += 1
             }
             var effectLeft = 0.0
             var effectRight = 0.0
-            for (voice in effectVoices) {
+            var effectIndex = 0
+            while (effectIndex < effectVoices.size) {
+                val voice = effectVoices[effectIndex]
                 voice.gain += (voice.targetGain - voice.gain) * layerAlpha
                 if (voice.isAudible) {
-                    effectLeft += voice.readCubic(0) * voice.gain
-                    effectRight += voice.readCubic(1) * voice.gain
+                    voice.readStereoCubic()
+                    effectLeft += voice.sampleLeft * voice.gain
+                    effectRight += voice.sampleRight * voice.gain
                 }
                 if (voice.advance()) loopWraps += 1
+                effectIndex += 1
             }
             masterGain += (targetMaster - masterGain) * masterAlpha
             profileOutputGain += (targetProfileOutputGain - profileOutputGain) * profileGainAlpha
@@ -141,9 +151,9 @@ internal class SampleEngineRenderer private constructor(
 
         framesRendered += frameCount
         renderedBlocks += 1
-        layerOutputMeters = buildLayerOutputMeters(target)
-        val playingSamples = audiblePlayingSamples(target)
         if (renderedBlocks % DIAGNOSTIC_BLOCK_INTERVAL == 0L || diagnostics.framesRendered == 0L) {
+            layerOutputMeters = buildLayerOutputMeters(target)
+            val playingSamples = audiblePlayingSamples(target)
             val active = if (target.soloEffects) "none (effects solo)" else voices.asSequence()
                 .filter { it.targetGain > 0.006 }
                 .sortedByDescending { it.targetGain }
@@ -172,24 +182,11 @@ internal class SampleEngineRenderer private constructor(
                     .joinToString(",") { it.spec.id }
                     .ifBlank { "none" },
             )
-        } else {
-            diagnostics = diagnostics.copy(
-                playingSamples = playingSamples,
-                layerOutputMeters = layerOutputMeters,
-                targetRpm = requestedRpm.toInt(),
-                renderRpm = smoothedRpm.toInt(),
-                throttle = smoothedThrottle,
-                framesRendered = framesRendered,
-                loopWraps = loopWraps,
-                peak = blockPeak,
-                overRangeSamples = overRangeSamples,
-            )
         }
     }
 
     /** Loop and effect WAV assets audibly contributing to the mixed output right now. */
     private fun audiblePlayingSamples(target: EngineAudioFrame): List<PlayingSampleLabel> = buildList {
-        val anyLayerSolo = target.layerMix.values.any { it.solo && !it.muted }
         if (isProgramAudible(target) && !target.soloEffects && continuousProgramGain > SILENCE_GAIN) {
             voices.asSequence()
                 .filter { voice ->
@@ -245,7 +242,9 @@ internal class SampleEngineRenderer private constructor(
             triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm, layerMix, target.coastLayerMixEnabled)
         }
 
-        for (voice in effectVoices) {
+        var effectIndex = 0
+        while (effectIndex < effectVoices.size) {
+            val voice = effectVoices[effectIndex]
             val authoredGain = when (voice.spec.trigger) {
                 SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     val enabled = mask and voice.spec.control.bit != 0L
@@ -268,6 +267,7 @@ internal class SampleEngineRenderer private constructor(
                 voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
                     (0.55 + normalizedRpm * 1.25)
             }
+            effectIndex += 1
         }
     }
 
@@ -295,11 +295,14 @@ internal class SampleEngineRenderer private constructor(
         layerMix: Map<String, LayerMixControl>,
         coastLayerMixEnabled: Boolean,
     ) {
-        for (voice in voices) {
+        var voiceIndex = 0
+        while (voiceIndex < voices.size) {
+            val voice = voices[voiceIndex]
             val authoredGain = voice.spec.gainAt(rpm, throttle, coastLayerMixEnabled)
             voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix, coastLayerMixEnabled)
             voice.playbackRatio = voice.spec.playbackRatio(rpm)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate * voice.playbackRatio
+            voiceIndex += 1
         }
     }
 
@@ -313,8 +316,7 @@ internal class SampleEngineRenderer private constructor(
         if (mix.muted) {
             return 0.0
         }
-        val anySolo = layerMix.values.any { control -> control.solo && !control.muted }
-        if (anySolo && !mix.solo) {
+        if (anyLayerSolo && !mix.solo) {
             return 0.0
         }
         val multiplier = if (coastLayerMixEnabled) {
@@ -348,20 +350,25 @@ internal class SampleEngineRenderer private constructor(
         var playbackRatio = 1.0
         var gain = 0.0
         var targetGain = 0.0
+        var sampleLeft = 0.0
+            private set
+        var sampleRight = 0.0
+            private set
         private var hasLooped = false
 
-        fun readCubic(outputChannel: Int): Double {
-            val sourceChannel = outputChannel.coerceAtMost(data.sourceChannels - 1)
+        fun readStereoCubic() {
             val frame = phase.toInt()
             val fraction = phase - frame
-            val y0 = sampleAt(sourceChannel, frame - 1).toDouble()
-            val y1 = sampleAt(sourceChannel, frame).toDouble()
-            val y2 = sampleAt(sourceChannel, frame + 1).toDouble()
-            val y3 = sampleAt(sourceChannel, frame + 2).toDouble()
-            val a0 = y3 - y2 - y0 + y1
-            val a1 = y0 - y1 - a0
-            val a2 = y2 - y0
-            return a0 * fraction * fraction * fraction + a1 * fraction * fraction + a2 * fraction + y1
+            val frame0 = resolveFrame(frame - 1)
+            val frame1 = resolveFrame(frame)
+            val frame2 = resolveFrame(frame + 1)
+            val frame3 = resolveFrame(frame + 2)
+            sampleLeft = data.interpolateCubic(0, frame0, frame1, frame2, frame3, fraction)
+            sampleRight = if (data.sourceChannels == 1) {
+                sampleLeft
+            } else {
+                data.interpolateCubic(1, frame0, frame1, frame2, frame3, fraction)
+            }
         }
 
         fun advance(): Boolean {
@@ -373,16 +380,15 @@ internal class SampleEngineRenderer private constructor(
             return true
         }
 
-        private fun sampleAt(channel: Int, index: Int): Float {
+        private fun resolveFrame(index: Int): Int {
             val start = data.loopStartFrame
             val end = data.loopEndFrameExclusive
             val length = end - start
-            val resolved = when {
+            return when {
                 index >= end -> start + (index - end) % length
                 hasLooped && index < start -> end - 1 - ((start - 1 - index) % length)
                 else -> index.coerceIn(0, data.frameCount - 1)
             }
-            return data.channelSamples[channel][resolved]
         }
     }
 
@@ -395,6 +401,10 @@ internal class SampleEngineRenderer private constructor(
         var phaseIncrement = 1.0
         var gain = 0.0
         var targetGain = 0.0
+        var sampleLeft = 0.0
+            private set
+        var sampleRight = 0.0
+            private set
         private var active = spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP
         private var hasLooped = false
         val baseGain = 10.0.pow(spec.baseGainDb / 20.0)
@@ -409,18 +419,19 @@ internal class SampleEngineRenderer private constructor(
             hasLooped = false
         }
 
-        fun readCubic(outputChannel: Int): Double {
-            val sourceChannel = outputChannel.coerceAtMost(data.sourceChannels - 1)
+        fun readStereoCubic() {
             val frame = phase.toInt()
             val fraction = phase - frame
-            val y0 = sampleAt(sourceChannel, frame - 1).toDouble()
-            val y1 = sampleAt(sourceChannel, frame).toDouble()
-            val y2 = sampleAt(sourceChannel, frame + 1).toDouble()
-            val y3 = sampleAt(sourceChannel, frame + 2).toDouble()
-            val a0 = y3 - y2 - y0 + y1
-            val a1 = y0 - y1 - a0
-            val a2 = y2 - y0
-            return a0 * fraction * fraction * fraction + a1 * fraction * fraction + a2 * fraction + y1
+            val frame0 = resolveFrame(frame - 1)
+            val frame1 = resolveFrame(frame)
+            val frame2 = resolveFrame(frame + 1)
+            val frame3 = resolveFrame(frame + 2)
+            sampleLeft = data.interpolateCubic(0, frame0, frame1, frame2, frame3, fraction)
+            sampleRight = if (data.sourceChannels == 1) {
+                sampleLeft
+            } else {
+                data.interpolateCubic(1, frame0, frame1, frame2, frame3, fraction)
+            }
         }
 
         fun advance(): Boolean {
@@ -441,19 +452,18 @@ internal class SampleEngineRenderer private constructor(
             return true
         }
 
-        private fun sampleAt(channel: Int, index: Int): Float {
+        private fun resolveFrame(index: Int): Int {
             if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
-                return data.channelSamples[channel][index.coerceIn(0, data.frameCount - 1)]
+                return index.coerceIn(0, data.frameCount - 1)
             }
             val start = data.loopStartFrame
             val end = data.loopEndFrameExclusive
             val length = end - start
-            val resolved = when {
+            return when {
                 index >= end -> start + (index - end) % length
                 hasLooped && index < start -> end - 1 - ((start - 1 - index) % length)
                 else -> index.coerceIn(0, data.frameCount - 1)
             }
-            return data.channelSamples[channel][resolved]
         }
     }
 
@@ -475,9 +485,7 @@ internal class SampleEngineRenderer private constructor(
             val effects = profile.effects.map { spec ->
                 EffectVoice(spec, requireNotNull(decoded[spec.assetName]), outputSampleRate)
             }
-            val decodedBytes = decoded.values.sumOf {
-                it.frameCount.toLong() * it.sourceChannels * Float.SIZE_BYTES
-            }
+            val decodedBytes = decoded.values.sumOf(PcmLoopData::decodedBytes)
             return SampleEngineRenderer(outputSampleRate, profile, voices, effects, decodedBytes)
         }
 
@@ -504,7 +512,7 @@ internal class SampleEngineRenderer private constructor(
                 effects,
                 profile.requiredAssets.sumOf { asset ->
                     val data = requireNotNull(decoded[asset]) { "Missing $asset" }
-                    data.frameCount.toLong() * data.sourceChannels * Float.SIZE_BYTES
+                    data.decodedBytes
                 },
             )
         }
@@ -512,11 +520,29 @@ internal class SampleEngineRenderer private constructor(
         private const val SAMPLE_HEADROOM = 0.65
         private const val PROGRAM_CHANNELS = 2
         private const val SILENCE_GAIN = 0.00001
-        private const val DIAGNOSTIC_BLOCK_INTERVAL = 10L
+        private const val DIAGNOSTIC_BLOCK_INTERVAL = 12L
         private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
         private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
         private const val COAST_IDLE_LAYER_FADE_MS = 120.0
     }
+}
+
+private fun PcmLoopData.interpolateCubic(
+    channel: Int,
+    frame0: Int,
+    frame1: Int,
+    frame2: Int,
+    frame3: Int,
+    fraction: Double,
+): Double {
+    val y0 = sampleAt(channel, frame0).toDouble()
+    val y1 = sampleAt(channel, frame1).toDouble()
+    val y2 = sampleAt(channel, frame2).toDouble()
+    val y3 = sampleAt(channel, frame3).toDouble()
+    val a0 = y3 - y2 - y0 + y1
+    val a1 = y0 - y1 - a0
+    val a2 = y2 - y0
+    return a0 * fraction * fraction * fraction + a1 * fraction * fraction + a2 * fraction + y1
 }
 
 private fun transparentLimit(value: Double): Double = value.coerceIn(-1.0, 1.0)

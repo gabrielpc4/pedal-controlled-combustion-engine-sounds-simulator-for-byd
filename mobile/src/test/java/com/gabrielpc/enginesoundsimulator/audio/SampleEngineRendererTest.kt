@@ -92,10 +92,11 @@ class SampleEngineRendererTest {
         assertEquals(40, decoded.frameCount)
         assertEquals(7, decoded.loopStartFrame)
         assertEquals(32, decoded.loopEndFrameExclusive)
-        assertEquals(12_000.0 / 32_768.0, decoded.channelSamples[0][0].toDouble(), 0.00001)
-        assertEquals(-4_000.0 / 32_768.0, decoded.channelSamples[1][0].toDouble(), 0.00001)
-        assertEquals(-16_000.0 / 32_768.0, decoded.channelSamples[0][1].toDouble(), 0.00001)
-        assertEquals(8_000.0 / 32_768.0, decoded.channelSamples[1][1].toDouble(), 0.00001)
+        assertEquals(12_000.0 / 32_768.0, decoded.sampleAt(0, 0).toDouble(), 0.00001)
+        assertEquals(-4_000.0 / 32_768.0, decoded.sampleAt(1, 0).toDouble(), 0.00001)
+        assertEquals(-16_000.0 / 32_768.0, decoded.sampleAt(0, 1).toDouble(), 0.00001)
+        assertEquals(8_000.0 / 32_768.0, decoded.sampleAt(1, 1).toDouble(), 0.00001)
+        assertEquals(40L * 2 * Short.SIZE_BYTES, decoded.decodedBytes)
     }
 
     @Test
@@ -389,7 +390,7 @@ class SampleEngineRendererTest {
     @Test
     fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
         val decoded = mapOf(
-            profile.requiredAssets.first() to PcmLoopData(arrayOf(FloatArray(32) { 0.1f }), 48_000, 1),
+            profile.requiredAssets.first() to PcmLoopData(ShortArray(32) { 3_277 }, 1, 48_000, 1),
         )
 
         val failure = runCatching { SampleEngineRenderer.fromDecoded(48_000, decoded, profile) }.exceptionOrNull()
@@ -414,11 +415,15 @@ class SampleEngineRendererTest {
 
     private fun testBank(): Map<String, PcmLoopData> = profile.requiredAssets.associateWith { asset ->
         val frequency = 70.0 + abs(asset.hashCode() % 220)
-        val left = FloatArray(2_048) { frame ->
-            (sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35).toFloat()
+        val samples = ShortArray(2_048 * 2) { sampleIndex ->
+            val frame = sampleIndex / 2
+            val left = sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35
+            val value = if (sampleIndex % 2 == 0) left else -left * 0.75
+            (value * Short.MAX_VALUE).toInt().toShort()
         }
         PcmLoopData(
-            channelSamples = arrayOf(left, FloatArray(left.size) { -left[it] * 0.75f }),
+            interleavedSamples = samples,
+            sourceChannels = 2,
             sampleRate = 44_100,
             loopStartFrame = 250,
             loopEndFrameExclusive = 1_900,

@@ -70,7 +70,12 @@ Threads have intentionally separate duties:
 - `EngineAudioEngine` owns a high-priority audio writer;
 - the main thread samples immutable state approximately every 33 ms for Compose, while simulation and audio control remain at 200 Hz.
 
-The hot mix/write path reuses its PCM arrays and performs no file I/O or persistent logging. It refreshes a bounded diagnostic snapshot and route/underrun state periodically; move framework route queries off the writer if profiling shows a real-time penalty.
+The hot mix/write path retains decoded recordings as interleaved PCM16, reuses its output arrays,
+uses indexed voice traversal, and performs no file I/O or persistent logging. It refreshes bounded
+diagnostic and meter snapshots every 12 writes and route state every 48 writes rather than
+allocating state on every audio block. When `AudioTrack` reports a new underrun, its effective
+buffer grows by one native burst up to the already allocated capacity. This reduces heap/GC
+pressure without removing audible layers.
 
 ## Input policy
 

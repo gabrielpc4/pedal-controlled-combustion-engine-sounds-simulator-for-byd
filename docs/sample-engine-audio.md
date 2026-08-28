@@ -68,11 +68,22 @@ The profile uses source-car data for idle (`1040 RPM`), limiter (`8350 RPM`), se
 6. Timelines advance while inaudible, matching an always-running FMOD event and avoiding restarts when a fade reopens.
 7. Layer, enable, focus, and master gains are smoothed. Calibrated mix headroom protects the output, while samples inside the PCM range remain linear and unchanged; limiting occurs only on a genuine full-scale overload.
 
+Decoded recordings remain interleaved PCM16 in memory, matching the source representation instead
+of expanding every sample to a 32-bit float. Decoding writes directly into the retained sample
+array, so it does not also hold a full-size temporary data chunk. The realtime renderer converts
+only the cubic-interpolation taps it is actively reading. Its 48 kHz inner loop uses indexed voice
+traversal and reused output arrays; meters and immutable diagnostic snapshots are published at a
+lower rate outside the per-sample work. If `AudioTrack` reports a new underrun, the effective stream
+buffer grows by one native burst up to its preallocated capacity. This preserves every layer
+selected by the active mix while reducing Java-heap occupancy, garbage collection, and deadline
+misses.
+
 ### Load versus lift-off tone
 
 The authored throttle routes deliberately crossfade between different recordings. Around 7,000 RPM, full load is dominated by `l2a`, `l2a_high`, `n_up`, and `sine`; lift-off instead emphasizes `c1`, `c2`, and `n2`. The original load group contained more noisy, overlapping high-frequency material, while the coast group had fewer and more tonally coherent harmonic loops. Consequently, lift-off sounded clearer and subjectively louder even when telemetry reported a lower PCM peak. The app now retains the C1/C2 tonal loops at a restrained `-9 dB` under load and reduces the always-running `engine_noise_7` layer by `3.1 dB`. This narrows the tonal difference without eliminating the intended load/coast response.
 
-The audio thread performs no file I/O or persistent logging. It publishes bounded diagnostics consumed by the 200 Hz drive controller once per second.
+The audio thread performs no file I/O or persistent logging. It publishes bounded in-memory
+diagnostics every 12 writes; the controller persists only low-rate summaries.
 
 ## Persistent telemetry
 

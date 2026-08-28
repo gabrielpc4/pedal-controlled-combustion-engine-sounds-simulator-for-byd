@@ -57,7 +57,10 @@ internal data class AutomationCurve(val points: List<CurvePoint>) {
     fun valueAt(input: Double): Double {
         if (input <= points.first().input) return points.first().output
         if (input >= points.last().input) return points.last().output
-        val rightIndex = points.indexOfFirst { input <= it.input }.coerceAtLeast(1)
+        var rightIndex = 1
+        while (rightIndex < points.size && input > points[rightIndex].input) {
+            rightIndex += 1
+        }
         val left = points[rightIndex - 1]
         val right = points[rightIndex]
         val fraction = (input - left.input) / (right.input - left.input)
@@ -96,12 +99,19 @@ internal data class SampleLayerSpec(
             if (amplitude <= 0.0) return 0.0
 
             val throttleGainContribution = throttleGainDb?.valueAt(throttle) ?: 0.0
+            var rpmGainDb = 0.0
+            for (index in rpmGainDbCurves.indices) {
+                rpmGainDb += rpmGainDbCurves[index].valueAt(rpm)
+            }
             val decibels = baseGainDb + IDLE_LAYER_GAIN_BOOST_DB + throttleGainContribution +
-                rpmGainDbCurves.sumOf { it.valueAt(rpm) }
+                rpmGainDb
             return amplitude * 10.0.pow(decibels / 20.0)
         }
 
-        val amplitude = rpmAmplitudeCurves.fold(1.0) { gain, curve -> gain * curve.valueAt(rpm) }
+        var amplitude = 1.0
+        for (index in rpmAmplitudeCurves.indices) {
+            amplitude *= rpmAmplitudeCurves[index].valueAt(rpm)
+        }
         if (amplitude <= 0.0) return 0.0
 
         if (coastLayerMixEnabled && role == SampleLayerRole.COAST) {
@@ -109,9 +119,12 @@ internal data class SampleLayerSpec(
         }
 
         val throttleGainContribution = throttleGainDb?.valueAt(throttle) ?: 0.0
+        var rpmGainDb = 0.0
+        for (index in rpmGainDbCurves.indices) {
+            rpmGainDb += rpmGainDbCurves[index].valueAt(rpm)
+        }
         val decibels = baseGainDb + (if (role == SampleLayerRole.IDLE) IDLE_LAYER_GAIN_BOOST_DB else 0.0) +
-            throttleGainContribution +
-            rpmGainDbCurves.sumOf { it.valueAt(rpm) }
+            throttleGainContribution + rpmGainDb
         return amplitude * 10.0.pow(decibels / 20.0)
     }
 
