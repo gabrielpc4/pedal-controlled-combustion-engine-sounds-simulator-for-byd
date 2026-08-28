@@ -48,8 +48,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -403,6 +405,7 @@ private fun DashboardHeader(
             onClick = onCycleInput,
         )
         MasterVolumeControls(
+            volume = state.carMasterVolume,
             muted = !state.engineSoundEnabled,
             onDecrease = onDecreaseMasterVolume,
             onIncrease = onIncreaseMasterVolume,
@@ -413,25 +416,46 @@ private fun DashboardHeader(
 
 @Composable
 private fun MasterVolumeControls(
+    volume: Double,
     muted: Boolean,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
     onToggleMute: () -> Unit,
 ) {
+    var volumeFeedbackGeneration by remember { mutableIntStateOf(0) }
+    val showVolumePercent = volumeFeedbackGeneration > 0
+    val volumeLabel = "${(volume * 100.0).roundToInt()}%"
+
+    LaunchedEffect(volumeFeedbackGeneration) {
+        if (volumeFeedbackGeneration == 0) {
+            return@LaunchedEffect
+        }
+        delay(1_500)
+        volumeFeedbackGeneration = 0
+    }
+
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HeaderIconButton(
+        VolumeStepButton(
             icon = Icons.AutoMirrored.Filled.VolumeDown,
+            sign = "−",
+            showPercent = showVolumePercent,
+            percentLabel = volumeLabel,
             contentDescription = "Decrease master volume",
-            secondary = "VOLUME",
-            accent = Cyan,
-            onClick = onDecrease,
+            onClick = {
+                onDecrease()
+                volumeFeedbackGeneration++
+            },
         )
-        HeaderIconButton(
+        VolumeStepButton(
             icon = Icons.AutoMirrored.Filled.VolumeUp,
+            sign = "+",
+            showPercent = showVolumePercent,
+            percentLabel = volumeLabel,
             contentDescription = "Increase master volume",
-            secondary = "VOLUME",
-            accent = Cyan,
-            onClick = onIncrease,
+            onClick = {
+                onIncrease()
+                volumeFeedbackGeneration++
+            },
         )
         HeaderButton(
             primary = if (muted) {
@@ -446,10 +470,12 @@ private fun MasterVolumeControls(
 }
 
 @Composable
-private fun HeaderIconButton(
+private fun VolumeStepButton(
     icon: ImageVector,
+    sign: String,
+    showPercent: Boolean,
+    percentLabel: String,
     contentDescription: String,
-    secondary: String,
     accent: Color = Cyan,
     onClick: () -> Unit,
 ) {
@@ -460,14 +486,32 @@ private fun HeaderIconButton(
         modifier = Modifier.height(52.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
     ) {
-        Column(horizontalAlignment = Alignment.Start) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = accent,
-                modifier = Modifier.size(18.dp),
+        if (showPercent) {
+            Text(
+                text = percentLabel,
+                color = accent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
             )
-            Text(secondary, color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, maxLines = 1)
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = accent,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = sign,
+                    color = accent,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
         }
     }
 }
