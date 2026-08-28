@@ -60,6 +60,8 @@ internal class SampleEngineRenderer private constructor(
     private var hasLastShiftSerial = false
     private var lastAuditionSerial = 0L
     private var hasLastAuditionSerial = false
+    private var lastEngineStartSerial = 0L
+    private var hasLastEngineStartSerial = false
     private var throttleLiftArmed = false
     private var limiterActive = false
     private var limiterFramesUntilPulse = 0
@@ -237,6 +239,7 @@ internal class SampleEngineRenderer private constructor(
         output: ShortArray,
         gain: Double,
         popsAndBangsAuditionSerial: Long = 0L,
+        engineStartSerial: Long = 0L,
         frameCount: Int = output.size / PROGRAM_CHANNELS,
     ) {
         require(frameCount >= 0 && output.size >= frameCount * PROGRAM_CHANNELS) {
@@ -298,8 +301,8 @@ internal class SampleEngineRenderer private constructor(
             smoothedRpm, smoothedThrottle, turboControllerGain, target.layerMix, anySolo,
         )
         updateEffectTargetsAndTriggers(
-            target, target.layerMix, anySolo, popsAndBangsAuditionSerial, frameCount,
-            turboControllerGain, controlsGas,
+            target, target.layerMix, anySolo, popsAndBangsAuditionSerial, engineStartSerial,
+            frameCount, turboControllerGain, controlsGas,
         )
         updatePolyphonicVoiceTargets(target, target.layerMix, anySolo, controlsGas)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
@@ -503,6 +506,7 @@ internal class SampleEngineRenderer private constructor(
         layerMix: Map<String, LayerMixControl>,
         anySolo: Boolean,
         popsAndBangsAuditionSerial: Long,
+        engineStartSerial: Long,
         renderedFrameCount: Int,
         turboGain: Double,
         physicalControlsGas: Double,
@@ -546,6 +550,24 @@ internal class SampleEngineRenderer private constructor(
             } else {
                 triggerMatchingOneShots(
                     trigger, false, mask, smoothedRpm, smoothedThrottle, layerMix, anySolo, false,
+                )
+            }
+        }
+
+        if (!hasLastEngineStartSerial) {
+            lastEngineStartSerial = engineStartSerial
+            hasLastEngineStartSerial = true
+        } else if (engineStartSerial != lastEngineStartSerial) {
+            lastEngineStartSerial = engineStartSerial
+            if (authoredOneShotPrograms.isNotEmpty()) {
+                triggerAuthoredPrograms(
+                    SampleEffectTrigger.ENGINE_START, false, mask, smoothedRpm, smoothedThrottle,
+                    smoothedDrivetrainRpm, 0.0, turboGain, layerMix, anySolo, false,
+                )
+            } else {
+                triggerMatchingOneShots(
+                    SampleEffectTrigger.ENGINE_START, false, mask, smoothedRpm, smoothedThrottle,
+                    layerMix, anySolo, false,
                 )
             }
         }
@@ -1319,7 +1341,8 @@ internal class SampleEngineRenderer private constructor(
                 anySolo = anySolo,
             )
             OneShotPolicyKind.SHIFT_UP,
-            OneShotPolicyKind.SHIFT_DOWN -> 0
+            OneShotPolicyKind.SHIFT_DOWN,
+            OneShotPolicyKind.ENGINE_START -> 0
         }
 
         private fun updateTurboEventProgram(

@@ -89,7 +89,7 @@ class SampleEngineRendererTest {
         val coast = profile.layers.first { it.id == "c2" }
         val broadbandNoise = profile.layers.first { it.id == "engine_noise_7" }
 
-        assertTrue(coast.gainAt(7_000.0, 0.0) > coast.gainAt(7_000.0, 1.0) * 2.5)
+        assertTrue(coast.gainAt(7_000.0, 0.0) > 0.10)
         assertTrue(coast.gainAt(7_000.0, 1.0) > 0.10)
         assertEquals(-0.5, broadbandNoise.baseGainDb, 0.0)
     }
@@ -1264,11 +1264,20 @@ class SampleEngineRendererTest {
         val idle = profile.layers.first { it.id == "idle_low" }
         val coastAtFullPedal = coast.gainAt(7_000.0, 1.0)
         val coastAtLiftOff = coast.gainAt(7_000.0, 0.0)
-        assertTrue(coastAtLiftOff > coastAtFullPedal)
+        assertTrue(coastAtLiftOff > 0.0)
         assertTrue(coastAtFullPedal > 0.0)
         assertEquals(10.0.pow(-14.5 / 20.0), idle.gainAt(1_000.0, 0.0), 0.000001)
         assertEquals(10.0.pow(-10.5 / 20.0), idle.gainAt(1_000.0, 1.0), 0.000001)
         assertTrue(idle.gainAt(1_000.0, 1.0) > idle.gainAt(1_000.0, 0.0))
+    }
+
+    @Test
+    fun coastPedalCurvesStayAudibleAtFullThrottleWithoutLoadTracks() {
+        val inverseCoast = AutomationCurve(listOf(CurvePoint(0.0, 1.0), CurvePoint(1.0, 0.0)))
+        assertEquals(0.0, inverseCoast.valueAt(1.0), 0.0)
+        assertEquals(1.0, pedalAmplitudeForLayerRole(SampleLayerRole.COAST, inverseCoast, 1.0), 0.0)
+        assertEquals(1.0, pedalAmplitudeForLayerRole(SampleLayerRole.COAST, inverseCoast, 0.0), 0.0)
+        assertEquals(0.0, pedalAmplitudeForLayerRole(SampleLayerRole.IDLE, inverseCoast, 1.0), 0.0)
     }
 
     @Test

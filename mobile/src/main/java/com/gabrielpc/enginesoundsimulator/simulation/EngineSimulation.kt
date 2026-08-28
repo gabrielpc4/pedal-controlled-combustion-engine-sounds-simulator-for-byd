@@ -204,6 +204,12 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var limiterLatched = false
     private var externalSpeedActive = false
     private var lastAcceleration = 0.0
+    private var engineStartPhase = EngineStartPhase.INACTIVE
+    private var engineStartElapsed = 0.0
+    private var engineStartCrankDurationSeconds = DEFAULT_ENGINE_START_DURATION_SECONDS
+    private var engineStartCoupleDurationSeconds = DEFAULT_ENGINE_START_COUPLE_SECONDS
+    private var engineStartTargetGearIndex = 0
+    private var engineStartTargetRpm = 0.0
     /** RPM at which each gear landed when it was selected by an upshift. */
     private var downshiftLandingRpmByGear = DoubleArray(profile.gearRatios.size)
     private val externalSpeedEstimator = QuantizedSpeedEstimator()
@@ -218,8 +224,12 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         // the same number of gears. Rebuild them and choose the appropriate gear
         // from road speed on every car/profile change.
         downshiftLandingRpmByGear = DoubleArray(profile.gearRatios.size)
-        synchronizeToRoadSpeed()
-        engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
+        if (engineStartPhase == EngineStartPhase.INACTIVE) {
+            synchronizeToRoadSpeed()
+            engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
+        } else {
+            refreshEngineStartTargets()
+        }
     }
 
     fun reset() {
@@ -236,8 +246,60 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         limiterLatched = false
         externalSpeedActive = false
         lastAcceleration = 0.0
+        engineStartPhase = EngineStartPhase.INACTIVE
+        engineStartElapsed = 0.0
         downshiftLandingRpmByGear.fill(0.0)
         externalSpeedEstimator.reset()
+    }
+
+    fun cancelEngineStart() {
+        if (engineStartPhase == EngineStartPhase.INACTIVE) {
+            return
+        }
+        engineStartPhase = EngineStartPhase.INACTIVE
+        engineStartElapsed = 0.0
+        synchronizeToRoadSpeed()
+    }
+
+    /**
+     * Crank/idle needle rise, then an instant road-correct gear and a fast RPM catch-up to
+     * the speed-coupled target — works stopped or rolling.
+     */
+    fun beginEngineStart(durationSeconds: Double = DEFAULT_ENGINE_START_DURATION_SECONDS) {
+        val total = durationSeconds.coerceIn(0.8, 4.0)
+        engineStartCrankDurationSeconds = total * ENGINE_START_CRANK_FRACTION
+        engineStartCoupleDurationSeconds = (total - engineStartCrankDurationSeconds)
+            .coerceAtLeast(DEFAULT_ENGINE_START_COUPLE_SECONDS)
+        engineStartPhase = EngineStartPhase.CRANK
+        engineStartElapsed = 0.0
+        refreshEngineStartTargets()
+        engineRpm = crankRpmForProfile()
+        activeShift = null
+        limiterLatched = false
+    }
+
+    private fun refreshEngineStartTargets() {
+        engineStartTargetGearIndex = roadCoupledGearIndex()
+        engineStartTargetRpm = rpmForSpeed(engineStartTargetGearIndex)
+    }
+
+    private fun crankRpmForProfile(): Double {
+        return (profile.idleRpm * ENGINE_CRANK_RPM_FRACTION).coerceAtLeast(120.0)
+            .coerceAtMost(profile.idleRpm * 0.85)
+    }
+
+    /** Highest safe gear for the current road speed, matching post-downshift sync logic. */
+    private fun roadCoupledGearIndex(): Int {
+        val safe = profile.gearRatios.indices.filter { rpmForSpeed(it) <= profile.redlineRpm * 0.92 }
+        var gearIndex = safe.firstOrNull() ?: profile.gearRatios.lastIndex
+        while (gearIndex < profile.gearRatios.lastIndex &&
+            vehicleSpeedMps * 3.6 >= upshiftSpeedKmh(gearIndex)
+        ) {
+            val nextGear = gearIndex + 1
+            downshiftLandingRpmByGear[nextGear] = calculatedUpshiftLandingRpm(profile, gearIndex)
+            gearIndex = nextGear
+        }
+        return gearIndex
     }
 
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
@@ -337,7 +399,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
         updateSampleRpm(dt, transmissionPosition)
         updateLimiterLatch()
-        if (activeShift == null && transmissionPosition == TransmissionPosition.DRIVE) {
+        if (activeShift == null && transmissionPosition == TransmissionPosition.DRIVE &&
+            engineStartPhase == EngineStartPhase.INACTIVE
+        ) {
             chooseAutomaticShift()
         }
     }
@@ -413,7 +477,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         )
         vehicleSpeedMps = continuousKmh / 3.6
         if (!externalSpeedActive) {
-            synchronizeToRoadSpeed()
+            if (engineStartPhase == EngineStartPhase.INACTIVE) {
+                synchronizeToRoadSpeed()
+            }
             lastAcceleration = 0.0
         } else {
             val measuredAcceleration = ((vehicleSpeedMps - previousSpeedMps) / max(dt, 0.001))
@@ -429,15 +495,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun synchronizeToRoadSpeed() {
-        val safe = profile.gearRatios.indices.filter { rpmForSpeed(it) <= profile.redlineRpm * 0.92 }
-        currentGearIndex = safe.firstOrNull() ?: profile.gearRatios.lastIndex
-        while (currentGearIndex < profile.gearRatios.lastIndex &&
-            vehicleSpeedMps * 3.6 >= upshiftSpeedKmh(currentGearIndex)
-        ) {
-            val nextGear = currentGearIndex + 1
-            downshiftLandingRpmByGear[nextGear] = calculatedUpshiftLandingRpm(profile, currentGearIndex)
-            currentGearIndex = nextGear
-        }
+        currentGearIndex = roadCoupledGearIndex()
         engineRpm = rpmForSpeed(currentGearIndex)
         activeShift = null
         limiterLatched = false
@@ -445,6 +503,42 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun updateSampleRpm(dt: Double, transmissionPosition: TransmissionPosition) {
+        when (engineStartPhase) {
+            EngineStartPhase.CRANK -> {
+                engineStartElapsed += dt
+                val progress = (engineStartElapsed / engineStartCrankDurationSeconds).coerceIn(0.0, 1.0)
+                val eased = progress * progress * (3.0 - 2.0 * progress)
+                val crankRpm = crankRpmForProfile()
+                engineRpm = crankRpm + (profile.idleRpm - crankRpm) * eased
+                if (progress >= 1.0) {
+                    refreshEngineStartTargets()
+                    currentGearIndex = engineStartTargetGearIndex
+                    engineStartPhase = EngineStartPhase.COUPLE
+                    engineStartElapsed = 0.0
+                }
+                return
+            }
+            EngineStartPhase.COUPLE -> {
+                engineStartElapsed += dt
+                refreshEngineStartTargets()
+                currentGearIndex = engineStartTargetGearIndex
+                val response = (engineStartCoupleDurationSeconds * 0.42).coerceAtLeast(0.08)
+                engineRpm = approachExp(
+                    engineRpm,
+                    engineStartTargetRpm,
+                    response,
+                    dt,
+                ).coerceIn(profile.idleRpm, profile.limiterRpm)
+                val rpmSettled = kotlin.math.abs(engineRpm - engineStartTargetRpm) <= ENGINE_START_COUPLE_RPM_TOLERANCE
+                if (rpmSettled || engineStartElapsed >= engineStartCoupleDurationSeconds) {
+                    engineRpm = engineStartTargetRpm
+                    engineStartPhase = EngineStartPhase.INACTIVE
+                }
+                return
+            }
+            EngineStartPhase.INACTIVE -> Unit
+        }
+
         val target = when (transmissionPosition) {
             TransmissionPosition.DRIVE -> {
                 val shift = activeShift
@@ -471,6 +565,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (secondsSinceShift < profile.shiftDwellSeconds) return
         val speedKmh = vehicleSpeedMps * 3.6
         if (currentGearIndex < profile.gearRatios.lastIndex &&
+            filteredThrottle > SHIFT_THROTTLE_THRESHOLD &&
             rpmForSpeed(currentGearIndex) >= profile.redlineRpm * EMERGENCY_UPSHIFT_RPM_FRACTION
         ) {
             beginShift(currentGearIndex + 1, ShiftDirection.UP)
@@ -593,6 +688,15 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
         /** Neutral/Park rev-down: coasting back toward idle after lift-off. */
         private const val NEUTRAL_REV_DOWN_RESPONSE_SECONDS = 0.90
+        const val DEFAULT_ENGINE_START_DURATION_SECONDS = 1.85
+        private const val DEFAULT_ENGINE_START_COUPLE_SECONDS = 0.45
+        private const val ENGINE_START_CRANK_FRACTION = 0.72
+        private const val ENGINE_START_COUPLE_RPM_TOLERANCE = 80.0
+        private const val ENGINE_CRANK_RPM_FRACTION = 0.22
+    }
+
+    private enum class EngineStartPhase {
+        INACTIVE, CRANK, COUPLE,
     }
 
     private data class ActiveShift(
@@ -615,14 +719,14 @@ internal const val TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH = 180.0
 
 /**
  * Scales the selected combustion car's real relative ratios onto the independent Seal road-speed
- * model. Top gear reaches the configured presentation upshift RPM at the configured top speed;
+ * model. Top gear reaches the configured presentation limiter RPM at the configured top speed;
  * every lower gear keeps the imported ratio spacing and therefore its real RPM drop.
  */
 internal fun presentationFinalDrive(profile: EngineProfile): Double {
     val topGear = profile.gearRatios.lastOrNull()?.coerceAtLeast(0.001) ?: 1.0
     val topSpeedMps = (profile.topSpeedKmh / 3.6).coerceAtLeast(0.001)
     val wheelRpm = topSpeedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
-    return profile.upshiftRpm.coerceAtLeast(profile.idleRpm) / (wheelRpm * topGear).coerceAtLeast(0.001)
+    return profile.limiterRpm.coerceAtLeast(profile.idleRpm) / (wheelRpm * topGear).coerceAtLeast(0.001)
 }
 
 internal fun presentationUpshiftSpeedKmh(profile: EngineProfile, gearIndex: Int): Double {
@@ -649,7 +753,7 @@ internal fun calculatedUpshiftLandingRpm(profile: EngineProfile, fromGearIndex: 
     val ratios = profile.gearRatios
     if (ratios.size < 2) return profile.idleRpm
     val from = fromGearIndex.coerceIn(0, ratios.lastIndex - 1)
-    return (profile.upshiftRpm * ratios[from + 1].coerceAtLeast(0.001) /
+    return (profile.limiterRpm * ratios[from + 1].coerceAtLeast(0.001) /
         ratios[from].coerceAtLeast(0.001)).coerceIn(profile.idleRpm, profile.limiterRpm)
 }
 

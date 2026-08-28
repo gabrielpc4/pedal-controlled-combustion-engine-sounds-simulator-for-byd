@@ -301,7 +301,8 @@ internal fun com.gabrielpc.enginesoundsimulator.catalog.SoundFamilyManifestV1.en
             PackTrackRole.POP,
             PackTrackRole.BANG,
             PackTrackRole.CRACK,
-            PackTrackRole.ENGINE_TRANSIENT -> effects +=
+            PackTrackRole.ENGINE_TRANSIENT,
+            PackTrackRole.ENGINE_START -> effects +=
                 track.toEffect(limiterPoliciesByTrackId[track.id])
         }
     }
@@ -484,6 +485,22 @@ private fun PackOneShotProgramV2.toRuntimeProgram(
                 coreProgram = turboPolicy.coreProgram,
             ),
         )
+    } else if (trigger == PackOneShotTrigger.ENGINE_START) {
+        require(policy == null) { "ENGINE_START must not have a per-car effect policy" }
+        OneShotTriggerPolicySpec(
+            kind = OneShotPolicyKind.ENGINE_START,
+            minimumRpm = 0.0,
+            maximumRpm = null,
+            armPedal = null,
+            firePedal = null,
+            armBoost = null,
+            initialPeakPedal = null,
+            initialArmPedal = null,
+            initialFirePedal = null,
+            minimumArmSeconds = 0.0,
+            cooldownSeconds = 0.0,
+            periodHz = null,
+        )
     } else {
         val effectPolicy = requireNotNull(policy) { "Missing trigger policy for $id" }
         OneShotTriggerPolicySpec(
@@ -494,6 +511,7 @@ private fun PackOneShotProgramV2.toRuntimeProgram(
             PackOneShotPolicyKind.LIMITER_EVENT -> OneShotPolicyKind.PERSISTENT_LIMITER_EVENT
             PackOneShotPolicyKind.SHIFT_UP -> OneShotPolicyKind.SHIFT_UP
             PackOneShotPolicyKind.SHIFT_DOWN -> OneShotPolicyKind.SHIFT_DOWN
+            PackOneShotPolicyKind.ENGINE_START -> OneShotPolicyKind.ENGINE_START
         },
         minimumRpm = effectPolicy.minimumRpm,
         maximumRpm = effectPolicy.maximumRpm,
@@ -646,6 +664,7 @@ private fun PackOneShotTrigger.toRuntimeTrigger(): SampleEffectTrigger = when (t
     PackOneShotTrigger.BOV_LIFT -> SampleEffectTrigger.BOV_LIFT
     PackOneShotTrigger.ENGINE_EVENT -> SampleEffectTrigger.ENGINE_EVENT
     PackOneShotTrigger.TURBO_EVENT -> SampleEffectTrigger.TURBO_EVENT
+    PackOneShotTrigger.ENGINE_START -> SampleEffectTrigger.ENGINE_START
 }
 
 private fun SoundTrackManifestV1.toEffect(
@@ -666,6 +685,7 @@ private fun SoundTrackManifestV1.toEffect(
         "overrunRelease", "pop", "bang", "crack" -> SampleEffectTrigger.THROTTLE_LIFT
         "engineEvent" -> SampleEffectTrigger.ENGINE_EVENT
         "turboEvent" -> SampleEffectTrigger.TURBO_EVENT
+        "engineStart" -> SampleEffectTrigger.ENGINE_START
         else -> error("Unsupported authored trigger $authoredTrigger")
     }
     val mapping = when (role) {
@@ -706,6 +726,10 @@ private fun SoundTrackManifestV1.toEffect(
             SampleEffectControls.coreEngine, runtimeTrigger, "Engine transient",
             coreEngineTransient = true,
         )
+        PackTrackRole.ENGINE_START -> EffectMapping(
+            SampleEffectControls.engineStart, runtimeTrigger, "Engine start",
+            engineStartEffect = true,
+        )
         else -> error("${role.name} is not an effect")
     }
     return SampleEffectSpec(
@@ -732,6 +756,7 @@ private fun SoundTrackManifestV1.toEffect(
             mapping.turboAudioResponse
         },
         coreEngineTransient = mapping.coreEngineTransient,
+        engineStartEffect = mapping.engineStartEffect,
         polyphonicTemplate = mapping.coreEngineTransient ||
             runtimeTrigger == SampleEffectTrigger.TURBO_EVENT ||
             (role == PackTrackRole.LIMITER && limiterPolicy?.programMode ==
@@ -756,6 +781,7 @@ private data class EffectMapping(
     val auditionable: Boolean = false,
     val turboAudioResponse: TurboAudioResponse = TurboAudioResponse.NONE,
     val coreEngineTransient: Boolean = false,
+    val engineStartEffect: Boolean = false,
 )
 
 internal fun CarEngineMetadata.toTurboControllerBank(): TurboControllerBankSpec? {

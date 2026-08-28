@@ -41,6 +41,12 @@ class CatalogValidationTest {
     }
 
     @Test
+    fun deriveCoreEffectAvailability_exposesEngineStartWhenTrackPresent() {
+        val effects = deriveCoreEffectAvailability(setOf(PackTrackRole.IDLE, PackTrackRole.ENGINE_START))
+        assertTrue(effects.engineStart)
+    }
+
+    @Test
     fun officialIndexContainsExactly178UniqueUsableCars() {
         assertEquals(178, OfficialCarIndex.cars.size)
         assertEquals(178, OfficialCarIndex.cars.map { it.id }.toSet().size)
@@ -1646,7 +1652,7 @@ class CatalogValidationTest {
                 "engine":{"idleRpm":1000,"redlineRpm":7000,"limiterRpm":7000,"limiterHz":20,"tachometerMaximumRpm":7500,"turboCount":0,"hybrid":false,"hybridConfig":null,"turboControllers":[]},
                 "gearbox":{"traction":"RWD","forwardRatios":[3.0,2.0],"reverseRatio":-3.0,"finalDrive":4.0,"upshiftRpm":6000,"downshiftLandingRpmByGear":{"2":4000},"upshiftTimeMs":100,"downshiftTimeMs":150,"alternateGearSets":[]}
               }],
-              "effects":{"idle":true,"coast":false,"texture":false,"intake":false,"exhaust":false,"turbo":false,"spool":false,"bov":false,"transmission":false,"limiter":false,"shift":false,"overrun":false,"popsBangsCracks":false},
+              "effects":{"idle":true,"coast":false,"texture":false,"intake":false,"exhaust":false,"turbo":false,"spool":false,"bov":false,"transmission":false,"limiter":false,"shift":false,"overrun":false,"popsBangsCracks":false,"engineStart":false},
               "quirks":["authoredBovLaneSilent"],
               "tracks":[{
                 "id":"idle","role":"IDLE","path":"audio/idle.flac","flacSha256":"$flac","pcmSha256":"$pcm",

@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -73,14 +74,19 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun soundGearsUseImportedRatioSpacingAndReachUpshiftRpm() {
+    fun soundGearsUseImportedRatioSpacingAndReachLimiterRpmAtShiftBoundaries() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE
         profile.gearRatios.indices.forEach { gearIndex ->
             val boundary = presentationUpshiftSpeedKmh(profile, gearIndex)
             val boundaryRpm = presentationRpmAtSpeed(profile, gearIndex, boundary)
-            assertEquals(profile.upshiftRpm, boundaryRpm, 0.001)
+            assertEquals(profile.limiterRpm, boundaryRpm, 0.001)
         }
         assertEquals(profile.topSpeedKmh, presentationUpshiftSpeedKmh(profile, profile.gearRatios.lastIndex), 0.0001)
+        assertEquals(
+            profile.limiterRpm,
+            presentationRpmAtSpeed(profile, profile.gearRatios.lastIndex, profile.topSpeedKmh),
+            0.001,
+        )
         assertTrue(
             "first gear must be shorter than second according to the imported ratios",
             presentationUpshiftSpeedKmh(profile, 0) < presentationUpshiftSpeedKmh(profile, 1),
@@ -91,7 +97,7 @@ class EngineSimulationTest {
     fun calculatedLandingRpmUsesAdjacentImportedRatiosWithoutCompensation() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE
         profile.gearRatios.dropLast(1).indices.forEach { gearIndex ->
-            val expected = profile.upshiftRpm *
+            val expected = profile.limiterRpm *
                 profile.gearRatios[gearIndex + 1] / profile.gearRatios[gearIndex]
             assertEquals(expected, calculatedUpshiftLandingRpm(profile, gearIndex), 0.0001)
         }
@@ -132,6 +138,37 @@ class EngineSimulationTest {
 
         val lifted = simulation.followIntegerSpeedRamp(75.0, 65.0, 3.0, 0.0)
         assertEquals("the exact remembered landing RPM must produce one stable downshift", 2, lifted.gear)
+    }
+
+    @Test
+    fun coastDownshiftFromTopGearDoesNotImmediatelyReUpshift() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
+        val simulation = EngineSimulation(profile)
+        simulation.followIntegerSpeedRamp(0.0, 185.0, 12.0, 1.0)
+        assertEquals(profile.gearRatios.size, simulation.state.gear)
+
+        var topGear = profile.gearRatios.size
+        var reUpshiftBounces = 0
+        for (kmh in 185 downTo 120) {
+            repeat(50) {
+                val previousGear = simulation.state.gear
+                simulation.update(
+                    DriverInput(throttle = 0.0, externalSpeedKmh = kmh.toDouble()),
+                    STEP,
+                )
+                val nextGear = simulation.state.gear
+                if (previousGear == topGear - 1 && nextGear == topGear) {
+                    reUpshiftBounces += 1
+                }
+                topGear = maxOf(topGear, nextGear)
+            }
+        }
+
+        assertEquals(
+            "released-throttle downshifts must not bounce back into top gear from emergency upshift",
+            0,
+            reUpshiftBounces,
+        )
     }
 
     @Test
@@ -229,4 +266,44 @@ class EngineSimulationTest {
     }
 
     private companion object { const val STEP = 1.0 / 200.0 }
+
+    @Test
+    fun beginEngineStart_animatesRpmFromCrankToIdleWhenStopped() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(idleRpm = 1_000.0, limiterRpm = 7_000.0)
+        val sim = EngineSimulation(profile)
+        sim.beginEngineStart(durationSeconds = 1.0)
+        var lastRpm = sim.state.rpm
+        assertTrue(lastRpm < 1_000.0)
+        repeat(200) {
+            sim.update(DriverInput(transmissionPosition = TransmissionPosition.PARK), STEP)
+        }
+        assertTrue(sim.state.rpm > lastRpm)
+        assertEquals(1_000.0, sim.state.rpm, 1.0)
+    }
+
+    @Test
+    fun beginEngineStart_couplesToRoadGearAndRpmWhileMoving() {
+        val ratios = doubleArrayOf(3.2, 2.1, 1.52, 1.18, 0.96, 0.80)
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
+            idleRpm = 1_000.0,
+            limiterRpm = 7_000.0,
+            redlineRpm = 6_800.0,
+            gearRatios = ratios,
+            topSpeedKmh = 190.0,
+        )
+        val sim = EngineSimulation(profile)
+        val highSpeedKmh = 165.0
+        sim.runForExternal(seconds = 2.0, speedKmh = highSpeedKmh, throttle = 0.0)
+        assertEquals(ratios.size, sim.state.gear)
+
+        sim.beginEngineStart(durationSeconds = 1.2)
+        repeat(360) {
+            sim.update(DriverInput(externalSpeedKmh = highSpeedKmh, transmissionPosition = TransmissionPosition.DRIVE), STEP)
+        }
+
+        assertEquals(ratios.size, sim.state.gear)
+        assertTrue(sim.state.rpm > profile.idleRpm + 500.0)
+        val expectedRpm = presentationRpmAtSpeed(profile, sim.state.gear - 1, sim.state.speedKmh)
+        assertEquals(expectedRpm, sim.state.rpm, 120.0)
+    }
 }

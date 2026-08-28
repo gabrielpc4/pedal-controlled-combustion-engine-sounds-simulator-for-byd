@@ -276,6 +276,8 @@ private fun BarTachometerHud(
     modifier: Modifier = Modifier,
 ) {
     val rpmFraction = (drivetrain.rpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    val rpmJitter = rememberLimiterGaugeRpmJitter(drivetrain.limiterActive, amplitudeFraction = 0.011f)
+    val displayedRpmFraction = (rpmFraction + rpmJitter).coerceIn(0f, 1f)
     val redlineFraction = (redlineRpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
     val speedKmh = drivetrain.rawSpeedKmh.roundToInt().coerceAtLeast(0)
     val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
@@ -346,7 +348,7 @@ private fun BarTachometerHud(
                 )
                 drawRect(
                     brush = Brush.horizontalGradient(listOf(Cyan.copy(alpha = 0.35f), Amber, Red)),
-                    size = androidx.compose.ui.geometry.Size(width * rpmFraction, height),
+                    size = androidx.compose.ui.geometry.Size(width * displayedRpmFraction, height),
                 )
                 drawLine(
                     color = Red,

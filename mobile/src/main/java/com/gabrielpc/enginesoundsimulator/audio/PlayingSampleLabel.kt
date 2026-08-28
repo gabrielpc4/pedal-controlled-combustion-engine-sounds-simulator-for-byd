@@ -29,5 +29,6 @@ internal fun SampleEffectSpec.playingRoleLabel(): String = when (trigger) {
     SampleEffectTrigger.THROTTLE_LIFT -> displayName
     SampleEffectTrigger.BOV_LIFT -> displayName
     SampleEffectTrigger.ENGINE_EVENT -> displayName
+    SampleEffectTrigger.ENGINE_START -> displayName
     SampleEffectTrigger.TURBO_EVENT -> displayName
 }

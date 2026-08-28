@@ -104,6 +104,8 @@ class EngineAudioEngine(context: Context) : Closeable {
     private val generation = AtomicLong(0)
     private val parameters = RealtimeEngineAudioParameters()
     private val popsAndBangsAuditionSerial = AtomicLong(0L)
+    private val engineStartSerial = AtomicLong(0L)
+    private val pendingEngineStart = AtomicBoolean(false)
     private val selectedProfile = AtomicReference(SILENT_CATALOG_PROFILE)
     private val focusGainBits = AtomicLong(0.0.toRawBits())
     private val focusHeld = AtomicBoolean(false)
@@ -273,6 +275,21 @@ class EngineAudioEngine(context: Context) : Closeable {
     /** Uses the same renderer trigger path as a naturally detected overrun event. */
     fun auditionPopsAndBangs() {
         popsAndBangsAuditionSerial.incrementAndGet()
+    }
+
+    /** Arms a one-shot engine-start trigger when the next decoded family activates on the audio thread. */
+    internal fun scheduleEngineStart() {
+        pendingEngineStart.set(true)
+    }
+
+    private fun maybeFireEngineStart(profile: EngineSampleProfile) {
+        if (!profile.hasEngineStart) {
+            pendingEngineStart.set(false)
+            return
+        }
+        if (pendingEngineStart.getAndSet(false)) {
+            engineStartSerial.incrementAndGet()
+        }
     }
 
     /** Queues one complete pack decode; the current renderer remains active until atomic activation. */
@@ -503,6 +520,7 @@ class EngineAudioEngine(context: Context) : Closeable {
             return@synchronized false
         }
         pendingNativeProfile.getAndSet(prepared)?.let(::releaseNativeProfile)
+        maybeFireEngineStart(prepared.profile)
         outputState.updateAndGet {
             it.copy(
                 packLoadStatus = "READY",
@@ -809,6 +827,7 @@ class EngineAudioEngine(context: Context) : Closeable {
                 val preparedPack = pendingNativeProfile.getAndSet(null)
                 val preparedSilent = pendingSilentRenderer.getAndSet(null)
                 if (preparedPack != null || preparedSilent != null) {
+                    preparedPack?.profile?.let(::maybeFireEngineStart)
                     swapOldNative?.let(::retireNativeProfile)
                     swapOldRenderer = renderer
                     swapOldNative = nativeProfile
@@ -827,6 +846,7 @@ class EngineAudioEngine(context: Context) : Closeable {
                     stereoProgram,
                     focusGain(),
                     popsAndBangsAuditionSerial.get(),
+                    engineStartSerial.get(),
                 )
                 val fadingRenderer = swapOldRenderer
                 if (swapFramesRemaining > 0 && fadingRenderer != null) {
@@ -835,6 +855,7 @@ class EngineAudioEngine(context: Context) : Closeable {
                         swapScratch,
                         focusGain(),
                         popsAndBangsAuditionSerial.get(),
+                        engineStartSerial.get(),
                         active.framesPerWrite,
                     )
                     val fadeStart = PACK_SWAP_FADE_FRAMES - swapFramesRemaining

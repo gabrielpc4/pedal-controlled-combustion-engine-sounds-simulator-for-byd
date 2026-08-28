@@ -397,6 +397,7 @@ class DriveController(
     }
 
     private fun applySelectedCar(selected: CarCatalogEntry, family: InstalledSoundFamily?) {
+        val previousCarId = selectedCatalogEntry.get().id
         val sampleProfile = profileFor(selected, family)
         selectedCatalogEntry.set(selected)
         selectedSampleProfile.set(sampleProfile)
@@ -408,6 +409,14 @@ class DriveController(
         val tuning = tuningConfig.get().withSampleProfile(sampleProfile)
         tuningConfig.set(tuning)
         tuningRepository.save(tuning)
+        if (previousCarId != selected.id) {
+            if (sampleProfile.hasEngineStart) {
+                simulation.beginEngineStart()
+                audioEngine.scheduleEngineStart()
+            } else {
+                simulation.cancelEngineStart()
+            }
+        }
         if (DriveAudioResourcePolicy.shouldPrepareSelectedProfile(audioRuntimeStarted.get())) {
             selectAudioProfile(sampleProfile, family)
         }

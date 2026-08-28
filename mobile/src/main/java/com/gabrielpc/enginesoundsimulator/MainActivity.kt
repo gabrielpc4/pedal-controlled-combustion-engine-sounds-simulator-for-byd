@@ -16,6 +16,12 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
@@ -692,6 +698,8 @@ private fun MotorSoundDashboard(
                                 maxRpm = state.tuning.engine.maxRpm,
                                 redlineRpm = state.tuning.engine.redlineRpm,
                                 upshiftRpm = state.tuning.engine.upshiftRpm,
+                                limiterRpm = state.tuning.engine.limiterRpm,
+                                gearCount = state.tuning.engine.gearRatios.size,
                                 modifier = Modifier
                                     .weight(0.88f)
                                     .fillMaxHeight()
@@ -918,10 +926,13 @@ private fun CarStage(
     onNextCar: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier = modifier) {
+    Column(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Column(
             modifier = Modifier
-                .align(Alignment.TopStart)
+                .fillMaxWidth()
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text(
@@ -937,56 +948,60 @@ private fun CarStage(
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
             )
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusTag("${formatWhole(state.drivetrain.accelerationMps2 / 9.81)} G", Amber)
-            }
         }
 
-        CarPreviewImage(
-            absolutePath = selectedCatalogEntry?.previewFile?.absolutePath,
-            assetFallback = state.selectedCarPreviewAsset,
-            contentDescription = state.selectedCarName,
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.88f)
-                .fillMaxHeight(0.65f)
-                .align(Alignment.Center)
-                .offset(y = 18.dp),
-        )
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            CarPreviewImage(
+                absolutePath = selectedCatalogEntry?.previewFile?.absolutePath,
+                assetFallback = state.selectedCarPreviewAsset,
+                contentDescription = state.selectedCarName,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .align(Alignment.Center),
+            )
 
-        CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
-        CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
+            CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
+            CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
+        }
 
         Row(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.Bottom,
         ) {
-            PedalControl(
-                label = "BRAKE",
-                value = state.brake,
-                accent = Red,
-                width = 92.dp,
-                height = 154.dp,
-                onValue = onBrake,
-            )
-            PedalControl(
-                label = "THROTTLE",
-                value = state.throttle,
-                accent = Green,
-                width = 84.dp,
-                height = 202.dp,
-                onValue = onThrottle,
-            )
-            TransmissionShifter(
-                position = state.transmissionPosition,
-                onPositionChange = onTransmissionChange,
-                lockedToVehicle = state.transmissionLockedToVehicle,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                PedalControl(
+                    label = "BRAKE",
+                    value = state.brake,
+                    accent = Red,
+                    width = 92.dp,
+                    height = 154.dp,
+                    onValue = onBrake,
+                )
+                PedalControl(
+                    label = "THROTTLE",
+                    value = state.throttle,
+                    accent = Green,
+                    width = 84.dp,
+                    height = 202.dp,
+                    onValue = onThrottle,
+                )
+                TransmissionShifter(
+                    position = state.transmissionPosition,
+                    onPositionChange = onTransmissionChange,
+                    lockedToVehicle = state.transmissionLockedToVehicle,
+                )
+            }
         }
-
     }
 }
 
@@ -1195,6 +1210,8 @@ private fun Tachometer(
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
+    limiterRpm: Double,
+    gearCount: Int,
     modifier: Modifier = Modifier,
 ) {
     TachometerGauge(
@@ -1203,7 +1220,70 @@ private fun Tachometer(
         maxRpm = maxRpm,
         redlineRpm = redlineRpm,
         upshiftRpm = upshiftRpm,
+        limiterRpm = limiterRpm,
+        gearCount = gearCount,
         modifier = modifier,
+    )
+}
+
+@Composable
+private fun GearShiftIndicatorBar(
+    rpm: Double,
+    upshiftRpm: Double,
+    redlineRpm: Double,
+    limiterRpm: Double,
+    limiterActive: Boolean,
+    transmissionPosition: TransmissionPosition,
+    currentGear: Int,
+    gearCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val canUpshift = transmissionPosition == TransmissionPosition.DRIVE && currentGear < gearCount
+    val shiftWindowStartRpm = upshiftRpm - TACH_UPSHIFT_WINDOW_START_OFFSET_RPM
+    val approachWindowStartRpm = shiftWindowStartRpm - TACH_SHIFT_APPROACH_WINDOW_RPM
+    val inShiftWindow = canUpshift &&
+        rpm >= shiftWindowStartRpm &&
+        rpm < redlineRpm
+    val inApproachWindow = canUpshift &&
+        rpm >= approachWindowStartRpm &&
+        rpm < shiftWindowStartRpm
+    val isRedlining = limiterActive || rpm >= redlineRpm - 40.0 || rpm >= limiterRpm - 40.0
+    val showIndicator = isRedlining || inApproachWindow || inShiftWindow
+
+    if (!showIndicator) {
+        return
+    }
+
+    val transition = rememberInfiniteTransition(label = "redlineShiftBarFlash")
+    val flashAlpha by transition.animateFloat(
+        initialValue = 0.42f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 360, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "flashAlpha",
+    )
+
+    val activeColor = when {
+        isRedlining -> Red.copy(alpha = flashAlpha)
+        inShiftWindow -> Green
+        else -> Cyan
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0f to activeColor.copy(alpha = 0f),
+                        0.12f to activeColor,
+                        0.88f to activeColor,
+                        1f to activeColor.copy(alpha = 0f),
+                    ),
+                ),
+            ),
     )
 }
 
@@ -1214,12 +1294,16 @@ private fun TachometerGauge(
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
+    limiterRpm: Double,
+    gearCount: Int,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val gaugeSize = if (maxWidth < maxHeight) maxWidth else maxHeight
         val gaugeMaxRpm = ceil(maxRpm.coerceAtLeast(1_000.0) / 1_000.0) * 1_000.0
         val majorIntervals = (gaugeMaxRpm / 1_000.0).roundToInt().coerceAtLeast(1)
+        val limiterActive = drivetrain.limiterActive
+        val rpmJitter = rememberLimiterGaugeRpmJitter(limiterActive)
         Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
             Canvas(Modifier.fillMaxSize()) {
                 val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
@@ -1227,7 +1311,7 @@ private fun TachometerGauge(
                 val stroke = radius * 0.012f
                 val startAngle = 135f
                 val sweepAngle = 270f
-                val rpmFraction = (drivetrain.rpm / gaugeMaxRpm).toFloat().coerceIn(0f, 1f)
+                val rpmFraction = ((drivetrain.rpm / gaugeMaxRpm).toFloat() + rpmJitter).coerceIn(0f, 1f)
 
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -1333,14 +1417,13 @@ private fun TachometerGauge(
                 )
                 drawCircle(Color(0xFF07141F), radius * 0.14f, center)
                 drawCircle(Cyan, radius * 0.14f, center, style = Stroke(radius * 0.008f))
-                if (drivetrain.isShifting) {
-                    drawCircle(Green.copy(alpha = 0.55f), radius * 0.985f, center, style = Stroke(radius * 0.018f))
-                }
             }
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.offset(y = (-2).dp),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = (-2).dp),
             ) {
                 Text(
                     text = if (transmissionPosition == TransmissionPosition.DRIVE) drivetrain.gear.toString() else transmissionPosition.displayName,
@@ -1350,6 +1433,22 @@ private fun TachometerGauge(
                     fontWeight = FontWeight.Black,
                 )
             }
+
+            GearShiftIndicatorBar(
+                rpm = drivetrain.rpm,
+                upshiftRpm = upshiftRpm,
+                redlineRpm = redlineRpm,
+                limiterRpm = limiterRpm,
+                limiterActive = limiterActive,
+                transmissionPosition = transmissionPosition,
+                currentGear = drivetrain.gear,
+                gearCount = gearCount,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = -gaugeSize * 0.155f)
+                    .width(gaugeSize * 0.10f)
+                    .height(9.dp),
+            )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -1367,19 +1466,12 @@ private fun TachometerGauge(
                 )
                 Text("KM/H", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
             }
-            if (drivetrain.isShifting) {
-                Text(
-                    text = if (drivetrain.shiftDirection.name == "UP") "SHIFT" else "DOWNSHIFT",
-                    color = Green,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.4.sp,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = gaugeSize * 0.08f),
-                )
-            }
         }
     }
 }
+
+private const val TACH_UPSHIFT_WINDOW_START_OFFSET_RPM = 250.0
+private const val TACH_SHIFT_APPROACH_WINDOW_RPM = 350.0
 
 private fun polar(
     center: androidx.compose.ui.geometry.Offset,

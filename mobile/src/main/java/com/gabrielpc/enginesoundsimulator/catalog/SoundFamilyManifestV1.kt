@@ -24,6 +24,8 @@ internal enum class PackTrackRole(val loops: Boolean, val requiresRootRpm: Boole
     CRACK(false, false),
     // Source-bound pitchTreatment decides whether an engine transient uses RPM/root or baked 1x.
     ENGINE_TRANSIENT(false, false),
+    /** Event-start crank/ignition one-shot captured from engine_int; optional per family. */
+    ENGINE_START(false, false),
 }
 
 internal data class CurvePointV1(val input: Double, val output: Double)
@@ -75,7 +77,7 @@ internal enum class PackOneShotTrigger {
     /** Schema-v1 compatibility only. */
     LIMITER,
     LIMITER_EVENT,
-    SHIFT_UP, SHIFT_DOWN, THROTTLE_LIFT, BOV_LIFT, ENGINE_EVENT, TURBO_EVENT,
+    SHIFT_UP, SHIFT_DOWN, THROTTLE_LIFT, BOV_LIFT, ENGINE_EVENT, TURBO_EVENT, ENGINE_START,
 }
 
 internal enum class PackOneShotPolicyKind {
@@ -83,7 +85,7 @@ internal enum class PackOneShotPolicyKind {
     /** Schema-v1 compatibility only. */
     LIMITER,
     LIMITER_EVENT,
-    SHIFT_UP, SHIFT_DOWN,
+    SHIFT_UP, SHIFT_DOWN, ENGINE_START,
 }
 
 internal enum class PackOneShotPlayMode {
@@ -592,6 +594,7 @@ internal data class CoreEffectAvailability(
     val shift: Boolean,
     val overrun: Boolean,
     val popsBangsCracks: Boolean,
+    val engineStart: Boolean,
 )
 
 internal data class SoundFamilyManifestV1(
@@ -1276,7 +1279,7 @@ internal data class SoundFamilyManifestV1(
             val effects = value.asObject("effects")
             val keys = setOf(
                 "idle", "coast", "texture", "intake", "exhaust", "turbo", "spool", "bov",
-                "transmission", "limiter", "shift", "overrun", "popsBangsCracks",
+                "transmission", "limiter", "shift", "overrun", "popsBangsCracks", "engineStart",
             )
             effects.requireExactKeys("effects", keys)
             fun flag(name: String) = effects.getRequired(name).asBoolean("effects.$name")
@@ -1285,7 +1288,7 @@ internal data class SoundFamilyManifestV1(
                 intake = flag("intake"), exhaust = flag("exhaust"), turbo = flag("turbo"),
                 spool = flag("spool"), bov = flag("bov"), transmission = flag("transmission"),
                 limiter = flag("limiter"), shift = flag("shift"), overrun = flag("overrun"),
-                popsBangsCracks = flag("popsBangsCracks"),
+                popsBangsCracks = flag("popsBangsCracks"), engineStart = flag("engineStart"),
             )
             if (!result.idle) throw JsonValidationException("effects.idle must be available")
             return result
@@ -3316,6 +3319,14 @@ internal data class SoundFamilyManifestV1(
                     ) {
                         throw JsonValidationException("$policyLabel has invalid shift timing")
                     }
+                    PackOneShotPolicyKind.ENGINE_START -> if (
+                        armPedal != null || firePedal != null || armBoost != null ||
+                        initialPeakPedal != null || initialArmPedal != null ||
+                        initialFirePedal != null || periodHz != null ||
+                        maximumRpm != null
+                    ) {
+                        throw JsonValidationException("$policyLabel has invalid engine-start timing")
+                    }
                 }
                 PackOneShotTriggerPolicyV2(
                     kind, minimumRpm, maximumRpm, armPedal, firePedal, armBoost,
@@ -3334,7 +3345,8 @@ internal data class SoundFamilyManifestV1(
             val programKinds = programs.asSequence()
                 .filter {
                     it.trigger != PackOneShotTrigger.ENGINE_EVENT &&
-                        it.trigger != PackOneShotTrigger.TURBO_EVENT
+                        it.trigger != PackOneShotTrigger.TURBO_EVENT &&
+                        it.trigger != PackOneShotTrigger.ENGINE_START
                 }
                 .associate { it.id to expectedPolicyKind(it.trigger) }
             cars.forEach { car ->
@@ -3370,6 +3382,9 @@ internal data class SoundFamilyManifestV1(
             PackOneShotTrigger.TURBO_EVENT -> throw JsonValidationException(
                 "TURBO_EVENT uses its strict family-level policy",
             )
+            PackOneShotTrigger.ENGINE_START -> throw JsonValidationException(
+                "ENGINE_START uses no per-car effect policy",
+            )
         }
 
         private fun oneShotTriggerMatches(role: PackTrackRole, trigger: PackOneShotTrigger): Boolean =
@@ -3383,6 +3398,7 @@ internal data class SoundFamilyManifestV1(
                 PackTrackRole.OVERRUN, PackTrackRole.POP,
                 PackTrackRole.BANG, PackTrackRole.CRACK -> trigger == PackOneShotTrigger.THROTTLE_LIFT
                 PackTrackRole.ENGINE_TRANSIENT -> trigger == PackOneShotTrigger.ENGINE_EVENT
+                PackTrackRole.ENGINE_START -> trigger == PackOneShotTrigger.ENGINE_START
                 else -> false
             }
 
@@ -3430,6 +3446,7 @@ internal data class SoundFamilyManifestV1(
             PackTrackRole.BANG to setOf("bang"),
             PackTrackRole.CRACK to setOf("crack"),
             PackTrackRole.ENGINE_TRANSIENT to setOf("engineEvent"),
+            PackTrackRole.ENGINE_START to setOf("engineStart"),
         )
         private val CERTIFIED_SILENT_SOURCE_ROLES = setOf(
             PackTrackRole.LIMITER,
@@ -3849,6 +3866,7 @@ internal data class SoundFamilyManifestV1(
             PackTrackRole.TRANSMISSION,
             PackTrackRole.LIMITER,
             PackTrackRole.ENGINE_TRANSIENT -> FMOD_AUTHORED_ENGINE_PRIORITY
+            PackTrackRole.ENGINE_START -> FMOD_AUTHORED_ENGINE_PRIORITY
 
             else -> FMOD_DEFAULT_EVENT_PRIORITY
         }
@@ -3931,6 +3949,7 @@ internal fun deriveCoreEffectAvailability(roles: Set<PackTrackRole>): CoreEffect
             it == PackTrackRole.OVERRUN || it == PackTrackRole.POP ||
                 it == PackTrackRole.BANG || it == PackTrackRole.CRACK
         },
+        engineStart = PackTrackRole.ENGINE_START in roles,
     )
 
 private fun ByteArray.toLowerHexString(): String {

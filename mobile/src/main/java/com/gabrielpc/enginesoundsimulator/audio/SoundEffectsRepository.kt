@@ -5,9 +5,16 @@ import android.content.Context
 internal class SoundEffectsRepository(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    fun loadEnabledMask(profile: EngineSampleProfile): Long = profile.effectControls.fold(0L) { mask, control ->
-        val key = key(profile.id, control.id)
-        if (preferences.getBoolean(key, true)) mask or control.bit else mask
+    fun loadEnabledMask(profile: EngineSampleProfile): Long {
+        val userMask = profile.effectControls.fold(0L) { mask, control ->
+            val key = key(profile.id, control.id)
+            if (preferences.getBoolean(key, true)) mask or control.bit else mask
+        }
+        return if (profile.hasEngineStart) {
+            userMask or SampleEffectControls.engineStart.bit
+        } else {
+            userMask
+        }
     }
 
     fun setEnabled(profile: EngineSampleProfile, controlId: String, enabled: Boolean): Long {

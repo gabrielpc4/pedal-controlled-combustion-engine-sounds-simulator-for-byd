@@ -6,9 +6,35 @@ internal enum class SampleLayerRole {
     IDLE, COAST, TEXTURE, INTAKE, EXHAUST, TURBO, SPOOL, LIMITER,
 }
 
+/** Roles whose authored pedal curves describe coast-side routing; without LOAD packs they must
+ * still respond at full throttle via the mirrored pedal position. */
+private val LOAD_COMPLEMENT_PEDAL_ROLES = setOf(
+    SampleLayerRole.COAST,
+    SampleLayerRole.EXHAUST,
+    SampleLayerRole.INTAKE,
+    SampleLayerRole.TEXTURE,
+)
+
+internal fun pedalAmplitudeForLayerRole(
+    role: SampleLayerRole,
+    curve: AutomationCurve?,
+    throttle: Double,
+): Double {
+    if (curve == null) {
+        return 1.0
+    }
+    val clamped = throttle.coerceIn(0.0, 1.0)
+    val direct = curve.valueAt(clamped)
+    if (role !in LOAD_COMPLEMENT_PEDAL_ROLES) {
+        return direct
+    }
+    val loadPedal = curve.valueAt(1.0 - clamped)
+    return maxOf(direct, loadPedal)
+}
+
 internal enum class SampleEffectTrigger {
     CONTINUOUS_LOOP, TRANSMISSION_LOOP, LIMITER, SHIFT_UP, SHIFT_DOWN, THROTTLE_LIFT, BOV_LIFT,
-    ENGINE_EVENT, LIMITER_EVENT, TURBO_EVENT,
+    ENGINE_EVENT, LIMITER_EVENT, TURBO_EVENT, ENGINE_START,
 }
 
 /** Compatibility defaults for schema-v1 packs and direct test fixtures. Schema-v2 packs supply
@@ -36,7 +62,7 @@ internal enum class OneShotGateControl {
 
 internal enum class OneShotPolicyKind {
     AC_BACKFIRE, BOV_LIFT, LIMITER, SHIFT_UP, SHIFT_DOWN, ENGINE_EVENT_REGION,
-    PERSISTENT_LIMITER_EVENT, TURBO_EVENT_PROGRAM,
+    PERSISTENT_LIMITER_EVENT, TURBO_EVENT_PROGRAM, ENGINE_START,
 }
 
 internal data class OneShotParameterGateSpec(
@@ -376,6 +402,13 @@ internal object SampleEffectControls {
         description = "Authored exhaust transients on overrun",
         bit = 1L shl 5,
     )
+    /** Internal routing for optional car-select engine-start one-shots; never shown in the mixer. */
+    val engineStart = SampleEffectControlSpec(
+        id = "engine_start",
+        displayName = "Engine start",
+        description = "Authored crank/ignition one-shot on car selection",
+        bit = 1L shl 7,
+    )
 }
 
 internal data class SampleEffectSpec(
@@ -395,6 +428,7 @@ internal data class SampleEffectSpec(
     val authoredRelativeRateCurve: AutomationCurve? = null,
     val turboAudioResponse: TurboAudioResponse = TurboAudioResponse.NONE,
     val coreEngineTransient: Boolean = false,
+    val engineStartEffect: Boolean = false,
     val polyphonicTemplate: Boolean = coreEngineTransient,
     val softwareVoicePriority: Int = defaultSoftwareVoicePriority(trigger),
     val looping: Boolean = trigger == SampleEffectTrigger.CONTINUOUS_LOOP ||
@@ -490,7 +524,7 @@ internal data class SampleLayerSpec(
         if (rpm !in startRpm..endRpm) return 0.0
 
         var amplitude = 1.0
-        amplitude *= throttleAmplitudeCurve?.valueAt(throttle) ?: 1.0
+        amplitude *= pedalAmplitudeForLayerRole(role, throttleAmplitudeCurve, throttle)
         var amplitudeIndex = 0
         while (amplitudeIndex < rpmAmplitudeCurves.size) {
             amplitude *= rpmAmplitudeCurves[amplitudeIndex].valueAt(rpm)
@@ -549,10 +583,13 @@ internal data class EngineSampleProfile(
 
     val effectControls: List<SampleEffectControlSpec> = effects.asSequence()
         .filterNot(SampleEffectSpec::coreEngineTransient)
+        .filterNot(SampleEffectSpec::engineStartEffect)
         .map(SampleEffectSpec::control)
         .distinctBy(SampleEffectControlSpec::id)
         .toList()
-    val defaultEffectMask: Long = effectControls.fold(0L) { mask, control -> mask or control.bit }
+    val hasEngineStart: Boolean = effects.any(SampleEffectSpec::engineStartEffect)
+    val defaultEffectMask: Long = effectControls.fold(0L) { mask, control -> mask or control.bit } or
+        if (hasEngineStart) SampleEffectControls.engineStart.bit else 0L
     val auditionEffectMask: Long = effects.asSequence().filter { it.auditionable }
         .fold(0L) { mask, effect -> mask or effect.control.bit }
 

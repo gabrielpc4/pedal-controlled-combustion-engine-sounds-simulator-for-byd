@@ -65,6 +65,7 @@ internal fun SampleEffectSpec.mixerDisplayName(): String = playingRoleLabel()
 
 internal fun SampleEffectTrigger.mixerSortGroup(): Int = when (this) {
     SampleEffectTrigger.ENGINE_EVENT -> 7
+    SampleEffectTrigger.ENGINE_START -> 7
     SampleEffectTrigger.TURBO_EVENT -> 8
     SampleEffectTrigger.CONTINUOUS_LOOP -> 8
     SampleEffectTrigger.TRANSMISSION_LOOP -> 9
