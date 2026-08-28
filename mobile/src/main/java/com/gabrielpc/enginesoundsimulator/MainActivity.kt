@@ -48,7 +48,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
@@ -86,6 +85,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -422,39 +422,44 @@ private fun MasterVolumeControls(
     onIncrease: () -> Unit,
     onToggleMute: () -> Unit,
 ) {
-    var volumeFeedbackGeneration by remember { mutableIntStateOf(0) }
-    val showVolumePercent = volumeFeedbackGeneration > 0
-    val volumeLabel = "${(volume * 100.0).roundToInt()}%"
+    var activeFeedback by remember { mutableStateOf<VolumeStep?>(null) }
+    var feedbackPercentLabel by remember { mutableStateOf("") }
 
-    LaunchedEffect(volumeFeedbackGeneration) {
-        if (volumeFeedbackGeneration == 0) {
+    LaunchedEffect(activeFeedback) {
+        if (activeFeedback == null) {
             return@LaunchedEffect
         }
         delay(1_500)
-        volumeFeedbackGeneration = 0
+        activeFeedback = null
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         VolumeStepButton(
             icon = Icons.AutoMirrored.Filled.VolumeDown,
             sign = "−",
-            showPercent = showVolumePercent,
-            percentLabel = volumeLabel,
+            showPercent = activeFeedback == VolumeStep.DOWN,
+            percentLabel = feedbackPercentLabel,
             contentDescription = "Decrease master volume",
             onClick = {
                 onDecrease()
-                volumeFeedbackGeneration++
+                val updatedVolume = (volume - MASTER_VOLUME_HEADER_STEP)
+                    .coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX)
+                feedbackPercentLabel = "${(updatedVolume * 100.0).roundToInt()}%"
+                activeFeedback = VolumeStep.DOWN
             },
         )
         VolumeStepButton(
             icon = Icons.AutoMirrored.Filled.VolumeUp,
             sign = "+",
-            showPercent = showVolumePercent,
-            percentLabel = volumeLabel,
+            showPercent = activeFeedback == VolumeStep.UP,
+            percentLabel = feedbackPercentLabel,
             contentDescription = "Increase master volume",
             onClick = {
                 onIncrease()
-                volumeFeedbackGeneration++
+                val updatedVolume = (volume + MASTER_VOLUME_HEADER_STEP)
+                    .coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX)
+                feedbackPercentLabel = "${(updatedVolume * 100.0).roundToInt()}%"
+                activeFeedback = VolumeStep.UP
             },
         )
         HeaderButton(
@@ -468,6 +473,13 @@ private fun MasterVolumeControls(
         )
     }
 }
+
+private enum class VolumeStep {
+    DOWN,
+    UP,
+}
+
+private const val MASTER_VOLUME_HEADER_STEP = 0.10
 
 @Composable
 private fun VolumeStepButton(
