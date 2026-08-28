@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -36,12 +39,12 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +90,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
+import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -106,18 +111,26 @@ private val Line = Color(0xFF1A3C4A)
 private val Cyan = Color(0xFF35E8F2)
 private val CyanSoft = Color(0xFF5FBAC7)
 private val Green = Color(0xFF38E58C)
+private val RealPedalsAccent = Color(0xFF43BD84)
 private val Red = Color(0xFFFF394F)
 private val Amber = Color(0xFFFFC456)
 private val White = Color(0xFFF5FAFD)
 private val Muted = Color(0xFF88A2B2)
 
 class MainActivity : ComponentActivity() {
-    private lateinit var controller: DriveController
+    private val controller: DriveController
+        get() = (application as EngineSoundsApplication).driveController
+
     private val choreographer by lazy(LazyThreadSafetyMode.NONE) { Choreographer.getInstance() }
     private var driveState by mutableStateOf<DriveSnapshot?>(null)
+    private var uiMonitoringActive by mutableStateOf(false)
 
     private val refreshUi = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
+            if (!uiMonitoringActive) {
+                return
+            }
+
             driveState = controller.snapshot()
             choreographer.postFrameCallback(this)
         }
@@ -125,9 +138,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        controller = DriveController(applicationContext)
         driveState = controller.snapshot()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
@@ -137,13 +148,16 @@ class MainActivity : ComponentActivity() {
                 driveState?.let { state ->
                     MotorSoundDashboard(
                         state = state,
-                        onThrottle = controller::setManualThrottle,
-                        onBrake = controller::setManualBrake,
-                        onCycleInput = controller::toggleInputSource,
+                        uiMonitoringActive = uiMonitoringActive,
+                        onThrottle = controller::setSimulatedPedalThrottle,
+                        onBrake = controller::setSimulatedPedalBrake,
+                        onSelectSimulatedPedals = controller::selectSimulatedPedals,
+                        onSelectRealPedals = controller::selectRealPedals,
+                        onToggleInputSource = controller::toggleInputSource,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
-                        onDecreaseMasterVolume = controller::decreaseCarMasterVolume,
-                        onIncreaseMasterVolume = controller::increaseCarMasterVolume,
+                        onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
+                        onIncreaseMasterVolume = controller::increaseAppMasterVolume,
                         onConfigChange = controller::setTuning,
                         onResetTuning = controller::resetTuning,
                         onPreviousCar = controller::selectPreviousCar,
@@ -161,16 +175,33 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        controller.start()
+        stopService(EngineRuntimeService.stopIntent(this))
+        controller.setUiActive(true)
+        uiMonitoringActive = true
+        if (!controller.isRunning()) {
+            controller.start()
+        }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         choreographer.removeFrameCallback(refreshUi)
         choreographer.postFrameCallback(refreshUi)
+        driveState = controller.snapshot()
     }
 
     override fun onStop() {
         releaseManualControls()
+        uiMonitoringActive = false
+        controller.setUiActive(false)
         choreographer.removeFrameCallback(refreshUi)
-        controller.stop()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        startService(EngineRuntimeService.startIntent(this))
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) {
+            (application as EngineSoundsApplication).shutdownEngine()
+        }
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -179,8 +210,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun releaseManualControls() {
-        controller.setManualThrottle(0.0)
-        controller.setManualBrake(0.0)
+        controller.setSimulatedPedalThrottle(0.0)
+        controller.setSimulatedPedalBrake(0.0)
     }
 
 }
@@ -188,9 +219,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MotorSoundDashboard(
     state: DriveSnapshot,
+    uiMonitoringActive: Boolean,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
-    onCycleInput: () -> Unit,
+    onSelectSimulatedPedals: () -> Unit,
+    onSelectRealPedals: () -> Unit,
+    onToggleInputSource: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
@@ -207,6 +241,7 @@ private fun MotorSoundDashboard(
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
+    var mixerLoading by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
@@ -255,9 +290,15 @@ private fun MotorSoundDashboard(
                 Column(modifier = Modifier.fillMaxSize()) {
                     DashboardHeader(
                         state = state,
+                        uiMonitoringActive = uiMonitoringActive,
                         mainScreen = mainScreen,
-                        onMainScreenChange = { mainScreen = it },
-                        onCycleInput = onCycleInput,
+                        onMainScreenChange = { screen ->
+                            mainScreen = screen
+                            mixerLoading = false
+                        },
+                        onSelectSimulatedPedals = onSelectSimulatedPedals,
+                        onSelectRealPedals = onSelectRealPedals,
+                        onToggleInputSource = onToggleInputSource,
                         onToggleSound = onToggleSound,
                         onDecreaseMasterVolume = onDecreaseMasterVolume,
                         onIncreaseMasterVolume = onIncreaseMasterVolume,
@@ -304,6 +345,18 @@ private fun MotorSoundDashboard(
                                     .align(Alignment.BottomCenter)
                                     .padding(bottom = 12.dp),
                             )
+                            if (!mixerLoading) {
+                                DashboardMixerLauncherButton(
+                                    isLoading = false,
+                                    onClick = {
+                                        mixerLoading = true
+                                        mainScreen = DashboardMainScreen.MIXER
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(end = 4.dp, bottom = 12.dp),
+                                )
+                            }
                         }
                         DashboardMainScreen.MIXER -> MixerDashboardScreen(
                             state = state,
@@ -315,12 +368,23 @@ private fun MotorSoundDashboard(
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
+                            onReady = { mixerLoading = false },
                             coastLayerMixEnabled = state.coastLayerMixEnabled,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
                         )
                     }
+                }
+
+                if (mixerLoading) {
+                    DashboardMixerLauncherButton(
+                        isLoading = true,
+                        onClick = {},
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 38.dp, bottom = 18.dp),
+                    )
                 }
 
                 if (tuningOpen) {
@@ -340,14 +404,66 @@ private fun MotorSoundDashboard(
 @Composable
 private fun DashboardHeader(
     state: DriveSnapshot,
+    uiMonitoringActive: Boolean,
     mainScreen: DashboardMainScreen,
     onMainScreenChange: (DashboardMainScreen) -> Unit,
-    onCycleInput: () -> Unit,
+    onSelectSimulatedPedals: () -> Unit,
+    onSelectRealPedals: () -> Unit,
+    onToggleInputSource: () -> Unit,
     onToggleSound: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
     onOpenTuning: () -> Unit,
 ) {
+    var memoryLabels by remember {
+        mutableStateOf(MemoryHeaderLabels(usageLabel = "— MB", availableLabel = "— MB left"))
+    }
+    var cpuLabel by remember { mutableStateOf("—% CPU") }
+    val context = LocalContext.current
+
+    LaunchedEffect(uiMonitoringActive, Unit) {
+        if (!uiMonitoringActive) {
+            return@LaunchedEffect
+        }
+
+        val startupBurstEndsAtMs = System.currentTimeMillis() + HEADER_MEMORY_STARTUP_BURST_MS
+        while (uiMonitoringActive) {
+            memoryLabels = AppMemoryUsage.readHeaderLabels(context)
+            val refreshMs = if (System.currentTimeMillis() < startupBurstEndsAtMs) {
+                HEADER_MEMORY_STARTUP_REFRESH_MS
+            } else {
+                HEADER_MEMORY_REFRESH_MS
+            }
+            delay(refreshMs)
+        }
+    }
+
+    LaunchedEffect(uiMonitoringActive, Unit) {
+        if (!uiMonitoringActive) {
+            return@LaunchedEffect
+        }
+
+        AppCpuUsage.primeSample()
+        while (uiMonitoringActive) {
+            delay(HEADER_CPU_REFRESH_MS)
+            cpuLabel = AppCpuUsage.sampleLabel()
+        }
+    }
+
+    LaunchedEffect(uiMonitoringActive, state.selectedCarId, state.carAudioReady, state.engineSoundEnabled) {
+        if (!uiMonitoringActive) {
+            return@LaunchedEffect
+        }
+
+        val carLoadSettled = !state.engineSoundEnabled || state.carAudioReady
+        if (!carLoadSettled) {
+            return@LaunchedEffect
+        }
+
+        withFrameNanos { }
+        memoryLabels = AppMemoryUsage.readHeaderLabels(context)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -363,34 +479,63 @@ private fun DashboardHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(11.dp)
-                    .clip(CircleShape)
-                    .background(if (state.engineSoundEnabled) Green else Red),
-            )
+            if (mainScreen == DashboardMainScreen.MIXER) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to classic dashboard",
+                    tint = Cyan,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            onMainScreenChange(DashboardMainScreen.CLASSIC)
+                        },
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(11.dp)
+                        .clip(CircleShape)
+                        .background(if (state.engineSoundEnabled) Green else Red),
+                )
+            }
             Text(
-                text = "MOTOR",
+                text = "ENGINE",
                 color = White,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 2.0.sp,
             )
             Text(
-                text = "// SAMPLE",
+                text = "// SIMULATOR",
                 color = Cyan,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Light,
                 letterSpacing = 2.0.sp,
             )
-            StatusTag("BUILD ${AppBuildInfo.buildNumber}", Muted)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatusTag(memoryLabels.usageLabel, Muted)
+                Text(
+                    text = memoryLabels.availableLabel,
+                    color = Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                )
+                Text(
+                    text = cpuLabel,
+                    color = Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                )
+            }
             if (state.legacyThrottleMixEnabled) {
                 StatusTag("LEGACY MIX", Amber)
             }
-            DashboardScreenSwitcher(
-                selected = mainScreen,
-                onSelect = onMainScreenChange,
-            )
         }
 
         HeaderButton(
@@ -399,15 +544,14 @@ private fun DashboardHeader(
             accent = Amber,
             onClick = onOpenTuning,
         )
-        HeaderButton(
-            primary = state.inputSourceName,
-            secondary = "INPUT",
-            accent = if (state.inputSourceName == InputMode.PREFER_BYD.displayName) Green else Cyan,
-            contentAlpha = if (state.inputSourceFaded) 0.42f else 1f,
-            onClick = onCycleInput,
+        PedalsInputHeaderControl(
+            state = state,
+            onSelectSimulated = onSelectSimulatedPedals,
+            onSelectReal = onSelectRealPedals,
+            onToggle = onToggleInputSource,
         )
         MasterVolumeControls(
-            volume = state.carMasterVolume,
+            volume = state.appMasterVolume,
             muted = !state.engineSoundEnabled,
             onDecrease = onDecreaseMasterVolume,
             onIncrease = onIncreaseMasterVolume,
@@ -445,7 +589,7 @@ private fun MasterVolumeControls(
             onClick = {
                 onDecrease()
                 val updatedVolume = (volume - MASTER_VOLUME_HEADER_STEP)
-                    .coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX)
+                    .coerceIn(AppMasterVolumeRepository.MIN, AppMasterVolumeRepository.MAX)
                 feedbackPercentLabel = "${(updatedVolume * 100.0).roundToInt()}%"
                 activeFeedback = VolumeStep.DOWN
             },
@@ -459,7 +603,7 @@ private fun MasterVolumeControls(
             onClick = {
                 onIncrease()
                 val updatedVolume = (volume + MASTER_VOLUME_HEADER_STEP)
-                    .coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX)
+                    .coerceIn(AppMasterVolumeRepository.MIN, AppMasterVolumeRepository.MAX)
                 feedbackPercentLabel = "${(updatedVolume * 100.0).roundToInt()}%"
                 activeFeedback = VolumeStep.UP
             },
@@ -482,6 +626,122 @@ private enum class VolumeStep {
 }
 
 private const val MASTER_VOLUME_HEADER_STEP = 0.10
+private const val HEADER_MEMORY_STARTUP_BURST_MS = 10_000L
+private const val HEADER_MEMORY_STARTUP_REFRESH_MS = 250L
+private const val HEADER_MEMORY_REFRESH_MS = 15_000L
+private const val HEADER_CPU_REFRESH_MS = 1_000L
+
+@Composable
+private fun PedalsInputHeaderControl(
+    state: DriveSnapshot,
+    onSelectSimulated: () -> Unit,
+    onSelectReal: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Panel)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "${InputMode.SimulatedPedals.secondaryLabel}:",
+            color = Muted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+        )
+        Text(
+            text = InputMode.SimulatedPedals.primaryLabel,
+            color = Cyan,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.clickable(onClick = onSelectSimulated),
+        )
+        PedalsInputToggle(
+            realSelected = state.inputSourceIsRealPedals,
+            realPedalsActive = state.inputSourceIsRealPedals,
+            enabled = !state.inputSourceFaded,
+            onToggle = onToggle,
+        )
+        Text(
+            text = InputMode.RealPedals.primaryLabel,
+            color = RealPedalsAccent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier
+                .alpha(if (state.inputSourceFaded) {
+                    0.42f
+                } else {
+                    1f
+                })
+                .clickable(
+                    enabled = !state.inputSourceFaded,
+                    onClick = onSelectReal,
+                ),
+        )
+    }
+}
+
+@Composable
+private fun PedalsInputToggle(
+    realSelected: Boolean,
+    realPedalsActive: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val thumbProgress by animateFloatAsState(
+        targetValue = if (realSelected) {
+            1f
+        } else {
+            0f
+        },
+        animationSpec = tween(durationMillis = 180),
+        label = "pedalsInputToggle",
+    )
+    val trackWidth = 46.dp
+    val trackHeight = 24.dp
+    val thumbSize = 18.dp
+    val trackInset = 3.dp
+    val trackColor = if (realPedalsActive) {
+        RealPedalsAccent
+    } else {
+        Line
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .width(trackWidth)
+            .height(trackHeight)
+            .alpha(if (enabled) {
+                1f
+            } else {
+                0.42f
+            })
+            .clip(RoundedCornerShape(50))
+            .background(trackColor)
+            .clickable(
+                enabled = enabled,
+                onClick = onToggle,
+            ),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val travel = maxWidth - thumbSize - trackInset * 2
+        Box(
+            modifier = Modifier
+                .padding(start = trackInset)
+                .offset(x = travel * thumbProgress)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(White),
+        )
+    }
+}
 
 @Composable
 private fun VolumeStepButton(
@@ -497,35 +757,52 @@ private fun VolumeStepButton(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = White),
-        modifier = Modifier.height(52.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+        modifier = Modifier
+            .height(52.dp)
+            .width(50.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
     ) {
-        if (showPercent) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                modifier = Modifier.alpha(if (showPercent) {
+                    0f
+                } else {
+                    1f
+                }),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = accent,
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    text = sign,
+                    color = accent,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
             Text(
                 text = percentLabel,
                 color = accent,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .alpha(if (showPercent) {
+                        1f
+                    } else {
+                        0f
+                    })
+                    .fillMaxWidth(),
             )
-        } else {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = contentDescription,
-                    tint = accent,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    text = sign,
-                    color = accent,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Black,
-                )
-            }
         }
     }
 }
@@ -545,7 +822,7 @@ private fun HeaderButton(
         modifier = Modifier
             .height(52.dp)
             .alpha(contentAlpha),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
     ) {
         Column(horizontalAlignment = Alignment.Start) {
             Text(primary, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
@@ -571,6 +848,11 @@ private fun StatusTag(text: String, color: Color) {
             .padding(horizontal = 12.dp, vertical = 6.dp),
     )
 }
+
+private const val CLASSIC_DRIVE_CONTROL_SCALE = 0.7f
+private const val MIXER_DRIVE_CONTROL_SCALE = 0.60f
+
+private fun Float.scaledDp(base: Int): Dp = (base * this).dp
 
 @Composable
 private fun ClassicDriveControls(
@@ -612,9 +894,45 @@ private fun ClassicDriveControls(
     }
 }
 
-private const val CLASSIC_DRIVE_CONTROL_SCALE = 0.7f
-
-private fun Float.scaledDp(base: Int): Dp = (base * this).dp
+@Composable
+internal fun MixerDriveControls(
+    state: DriveSnapshot,
+    onThrottle: (Double) -> Unit,
+    onBrake: (Double) -> Unit,
+    onTransmissionChange: (TransmissionPosition) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(12)),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        PedalControl(
+            label = "BRAKE",
+            value = state.brake,
+            accent = Red,
+            width = MIXER_DRIVE_CONTROL_SCALE.scaledDp(92),
+            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(154),
+            contentScale = MIXER_DRIVE_CONTROL_SCALE,
+            onValue = onBrake,
+        )
+        PedalControl(
+            label = "THROTTLE",
+            value = state.throttle,
+            accent = Green,
+            width = MIXER_DRIVE_CONTROL_SCALE.scaledDp(84),
+            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(202),
+            contentScale = MIXER_DRIVE_CONTROL_SCALE,
+            onValue = onThrottle,
+        )
+        TransmissionShifter(
+            position = state.transmissionPosition,
+            onPositionChange = onTransmissionChange,
+            lockedToVehicle = state.transmissionLockedToVehicle,
+            scale = MIXER_DRIVE_CONTROL_SCALE,
+        )
+    }
+}
 
 @Composable
 private fun CarStage(
@@ -630,17 +948,19 @@ private fun CarStage(
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text(
-                state.selectedCarName.uppercase(),
+                text = state.selectedCarName.uppercase(),
                 color = White,
                 fontSize = 34.sp,
+                lineHeight = 42.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.2.sp,
             )
             Text(
-                EngineSampleProfiles.specificationsFor(state.selectedCarId).summary(),
+                text = EngineSampleProfiles.specificationsFor(state.selectedCarId).summary(),
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
 
@@ -720,14 +1040,14 @@ internal fun TransmissionShifter(
                     .clip(RoundedCornerShape((10f * scale).dp))
                     .background(
                         if (selected) {
-                            Amber.copy(alpha = 0.22f)
+                            Cyan.copy(alpha = 0.22f)
                         } else {
                             Color.Transparent
                         },
                     )
                     .border(
                         width = if (selected) (2f * scale).dp else (1f * scale).dp,
-                        color = if (selected) Amber else Color(0xFF4A5A66),
+                        color = if (selected) Cyan else Color(0xFF4A5A66),
                         shape = RoundedCornerShape((10f * scale).dp),
                     )
                     .then(
@@ -741,7 +1061,7 @@ internal fun TransmissionShifter(
             ) {
                 Text(
                     text = option.displayName,
-                    color = if (selected) Amber else Muted,
+                    color = if (selected) Cyan else Muted,
                     fontSize = (22f * scale).sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.0.sp,
@@ -923,27 +1243,37 @@ private fun TachometerGauge(
                     useCenter = false,
                     topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
                     size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                    style = Stroke(stroke * 1.8f, cap = StrokeCap.Round),
+                    style = Stroke(stroke * 1.8f, cap = StrokeCap.Butt),
                 )
 
                 // Perfect full-throttle shift band and red zone.
+                val zoneBandStroke = radius * 0.024f
+                val zoneBandRadius = radius * 0.96f
+                val zoneBandDiameter = zoneBandRadius * 2f
+                val zoneBandTopLeft = androidx.compose.ui.geometry.Offset(
+                    center.x - zoneBandRadius,
+                    center.y - zoneBandRadius,
+                )
+                val zoneBandSize = androidx.compose.ui.geometry.Size(zoneBandDiameter, zoneBandDiameter)
+                val zoneBandStyle = Stroke(zoneBandStroke, cap = StrokeCap.Butt)
+
                 drawArc(
                     color = Green,
                     startAngle = startAngle + sweepAngle * ((upshiftRpm - 250.0) / gaugeMaxRpm).toFloat().coerceIn(0f, 1f),
                     sweepAngle = sweepAngle * (350.0 / gaugeMaxRpm).toFloat(),
                     useCenter = false,
-                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.96f, center.y - radius * 0.96f),
-                    size = androidx.compose.ui.geometry.Size(radius * 1.92f, radius * 1.92f),
-                    style = Stroke(radius * 0.022f, cap = StrokeCap.Round),
+                    topLeft = zoneBandTopLeft,
+                    size = zoneBandSize,
+                    style = zoneBandStyle,
                 )
                 drawArc(
                     color = Red,
                     startAngle = startAngle + sweepAngle * (redlineRpm / gaugeMaxRpm).toFloat().coerceIn(0f, 1f),
                     sweepAngle = sweepAngle * ((maxRpm - redlineRpm) / gaugeMaxRpm).toFloat().coerceAtLeast(0f),
                     useCenter = false,
-                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.96f, center.y - radius * 0.96f),
-                    size = androidx.compose.ui.geometry.Size(radius * 1.92f, radius * 1.92f),
-                    style = Stroke(radius * 0.026f, cap = StrokeCap.Round),
+                    topLeft = zoneBandTopLeft,
+                    size = zoneBandSize,
+                    style = zoneBandStyle,
                 )
 
                 val tickCount = majorIntervals * 5

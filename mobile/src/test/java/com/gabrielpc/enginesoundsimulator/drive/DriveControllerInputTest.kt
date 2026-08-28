@@ -1,5 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.drive
 
+import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.telemetry.ReaderState
 import com.gabrielpc.enginesoundsimulator.telemetry.SignalValue
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
@@ -11,7 +12,7 @@ import org.junit.Test
 
 class DriveControllerInputTest {
     @Test
-    fun preferBydFallsBackToSimulatorWhenPedalsAreUnavailable() {
+    fun realPedalsFallsBackToSimulatedPedalsWhenVehiclePedalsAreUnavailable() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 65.0, value = null, issue = "permission denied"),
@@ -19,37 +20,37 @@ class DriveControllerInputTest {
         )
 
         val result = resolveDriveInput(
-            mode = InputMode.PREFER_BYD,
+            mode = InputMode.RealPedals,
             telemetry = telemetry,
-            simulatorThrottle = 1.0,
-            simulatorBrake = 0.75,
+            simulatedPedalThrottle = 1.0,
+            simulatedPedalBrake = 0.75,
         )
 
         assertEquals(1.0, result.throttle, 0.0)
         assertEquals(0.75, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
-        assertEquals("SIM PEDALS", result.label)
-        assertEquals(true, result.isSimulator)
+        assertEquals(InputMode.SimulatedPedals.displayName, result.label)
+        assertEquals(true, result.usesSimulatedPedals)
     }
 
     @Test
-    fun preferBydUsesSimulatorOnlyWhenVehiclePedalsAreUnavailable() {
+    fun realPedalsUsesSimulatedPedalsOnlyWhenVehiclePedalsAreUnavailable() {
         val result = resolveDriveInput(
-            mode = InputMode.PREFER_BYD,
+            mode = InputMode.RealPedals,
             telemetry = TelemetrySnapshot(readerState = ReaderState.UNAVAILABLE),
-            simulatorThrottle = 1.4,
-            simulatorBrake = -0.2,
+            simulatedPedalThrottle = 1.4,
+            simulatedPedalBrake = -0.2,
         )
 
         assertEquals(1.0, result.throttle, 0.0)
         assertEquals(0.0, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
-        assertEquals("SIM PEDALS", result.label)
-        assertEquals(true, result.isSimulator)
+        assertEquals(InputMode.SimulatedPedals.displayName, result.label)
+        assertEquals(true, result.usesSimulatedPedals)
     }
 
     @Test
-    fun validVehiclePedalsWinWhenPreferBydAndInvalidSpeedIsNotForwarded() {
+    fun validVehiclePedalsWinWhenRealPedalsAndInvalidSpeedIsNotForwarded() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 47.0, value = 47.0),
@@ -58,21 +59,21 @@ class DriveControllerInputTest {
         )
 
         val result = resolveDriveInput(
-            mode = InputMode.PREFER_BYD,
+            mode = InputMode.RealPedals,
             telemetry = telemetry,
-            simulatorThrottle = 0.9,
-            simulatorBrake = 0.8,
+            simulatedPedalThrottle = 0.9,
+            simulatedPedalBrake = 0.8,
         )
 
         assertEquals(0.47, result.throttle, 0.0)
         assertEquals(0.12, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
-        assertEquals("BYD PEDALS", result.label)
-        assertEquals(false, result.isSimulator)
+        assertEquals(InputMode.RealPedals.displayName, result.label)
+        assertEquals(false, result.usesSimulatedPedals)
     }
 
     @Test
-    fun simulatorModeIgnoresOtherwiseValidVehiclePedals() {
+    fun simulatedPedalsModeIgnoresOtherwiseValidVehiclePedals() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 100.0, value = 100.0),
@@ -81,40 +82,88 @@ class DriveControllerInputTest {
         )
 
         val result = resolveDriveInput(
-            mode = InputMode.SIMULATOR,
+            mode = InputMode.SimulatedPedals,
             telemetry = telemetry,
-            simulatorThrottle = 0.3,
-            simulatorBrake = 0.1,
+            simulatedPedalThrottle = 0.3,
+            simulatedPedalBrake = 0.1,
         )
 
         assertEquals(0.3, result.throttle, 0.0)
         assertEquals(0.1, result.brake, 0.0)
         assertNull(result.externalSpeedKmh)
-        assertEquals("SIM PEDALS", result.label)
-        assertEquals(true, result.isSimulator)
+        assertEquals(InputMode.SimulatedPedals.displayName, result.label)
+        assertEquals(true, result.usesSimulatedPedals)
     }
 
     @Test
-    fun inputUiShowsFadedBydLiveDuringUnavailablePreview() {
+    fun inputUiFadesRealPedalsWhenVehicleIsUnavailable() {
         val ui = resolveInputSourceUi(
-            mode = InputMode.SIMULATOR,
+            selectedMode = InputMode.SimulatedPedals,
             vehicleAvailable = false,
-            previewActive = true,
         )
 
-        assertEquals("BYD LIVE", ui.displayName)
+        assertEquals(InputMode.SimulatedPedals.primaryLabel, ui.primaryLabel)
+        assertEquals(InputMode.SimulatedPedals.secondaryLabel, ui.secondaryLabel)
+        assertFalse(ui.isRealPedals)
         assertTrue(ui.faded)
     }
 
     @Test
-    fun inputUiShowsSimWhenPreferBydButVehicleIsUnavailable() {
+    fun inputUiShowsSimulatedPedalsWhenRealPedalsPreferredButVehicleIsUnavailable() {
         val ui = resolveInputSourceUi(
-            mode = InputMode.PREFER_BYD,
+            selectedMode = InputMode.RealPedals,
             vehicleAvailable = false,
-            previewActive = false,
         )
 
-        assertEquals("SIM", ui.displayName)
+        assertEquals(InputMode.SimulatedPedals.primaryLabel, ui.primaryLabel)
+        assertEquals(InputMode.SimulatedPedals.secondaryLabel, ui.secondaryLabel)
+        assertFalse(ui.isRealPedals)
+        assertTrue(ui.faded)
+    }
+
+    @Test
+    fun inputUiShowsRealPedalsWhenVehicleIsAvailable() {
+        val ui = resolveInputSourceUi(
+            selectedMode = InputMode.RealPedals,
+            vehicleAvailable = true,
+        )
+
+        assertEquals(InputMode.RealPedals.primaryLabel, ui.primaryLabel)
+        assertTrue(ui.isRealPedals)
         assertFalse(ui.faded)
+    }
+
+    @Test
+    fun interruptionResumeVolumeCapsHighSavedVolume() {
+        val volume = resolveInterruptionResumeVolume(
+            savedVolume = 1.0,
+            resumeCap = 0.25,
+        )
+
+        assertEquals(0.25, volume, 0.0)
+    }
+
+    @Test
+    fun interruptionResumeVolumeKeepsLowSavedVolume() {
+        val volume = resolveInterruptionResumeVolume(
+            savedVolume = 0.15,
+            resumeCap = 0.25,
+        )
+
+        assertEquals(0.15, volume, 0.0)
+    }
+
+    @Test
+    fun interruptionResumeVolumeUsesDefaultWhenSavedVolumeMissing() {
+        val volume = resolveInterruptionResumeVolume(
+            savedVolume = null,
+            resumeCap = 0.25,
+        )
+
+        assertEquals(
+            minOf(AppMasterVolumeRepository.DEFAULT, 0.25),
+            volume,
+            0.0,
+        )
     }
 }

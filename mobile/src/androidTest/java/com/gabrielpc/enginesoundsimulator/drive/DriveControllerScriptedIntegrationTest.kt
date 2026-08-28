@@ -18,9 +18,9 @@ class DriveControllerScriptedIntegrationTest {
         val controller = DriveController(context)
         try {
             controller.toggleSound()
-            controller.setInputMode(InputMode.SIMULATOR)
+            controller.setInputMode(InputMode.SimulatedPedals)
             controller.start()
-            controller.setManualThrottle(1.0)
+            controller.setSimulatedPedalThrottle(1.0)
 
             assertTrue(
                 "scripted full throttle did not build road speed and coupled RPM",
@@ -38,7 +38,7 @@ class DriveControllerScriptedIntegrationTest {
             )
 
             val beforeLift = controller.snapshot().drivetrain
-            controller.setManualThrottle(0.0)
+            controller.setSimulatedPedalThrottle(0.0)
             assertTrue(
                 "scripted lift-off did not reduce both road speed and coupled RPM",
                 waitUntil(timeoutMs = 1_500L) {

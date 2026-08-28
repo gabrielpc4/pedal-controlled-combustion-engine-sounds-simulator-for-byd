@@ -7,7 +7,10 @@
     <uses-permission android:name="android.permission.BYDAUTO_SPEED_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_GEARBOX_GET" />
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
     <application
+        android:name=".EngineSoundsApplication"
         android:allowBackup="false"
         android:appCategory="audio"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -32,6 +35,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".EngineRuntimeService"
+            android:exported="false" />
     </application>
 
 </manifest>

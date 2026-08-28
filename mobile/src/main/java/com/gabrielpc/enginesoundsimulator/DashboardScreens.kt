@@ -20,20 +20,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,28 +75,34 @@ enum class DashboardMainScreen(val title: String, val subtitle: String) {
 }
 
 @Composable
-internal fun DashboardScreenSwitcher(
-    selected: DashboardMainScreen,
-    onSelect: (DashboardMainScreen) -> Unit,
+internal fun DashboardMixerLauncherButton(
+    isLoading: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        DashboardMainScreen.entries.forEach { screen ->
-            val active = screen == selected
-            Column(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (active) PanelBright else Panel)
-                    .border(1.dp, if (active) Cyan else Line.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-                    .clickable { onSelect(screen) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            ) {
-                Text(screen.title, color = if (active) Cyan else White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                Text(screen.subtitle, color = Muted, fontSize = 8.sp, letterSpacing = 0.6.sp)
-            }
-        }
+    if (isLoading) {
+        CircularProgressIndicator(
+            modifier = modifier
+                .padding(10.dp)
+                .size(44.dp),
+            color = Cyan,
+            strokeWidth = 3.dp,
+        )
+        return
     }
+
+    Icon(
+        imageVector = Icons.Default.Tune,
+        contentDescription = "Mixer",
+        tint = Cyan,
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(10.dp)
+            .size(44.dp),
+    )
 }
+
+internal const val MIXER_SCREEN_HORIZONTAL_PADDING = 20
 
 @Composable
 internal fun MixerDashboardScreen(
@@ -103,13 +115,23 @@ internal fun MixerDashboardScreen(
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
+    onReady: () -> Unit,
     coastLayerMixEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val groupedTracks = remember(state.layerMixTracks) {
+        groupMixerTracks(state.layerMixTracks)
+    }
+
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        onReady()
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 4.dp),
+            .padding(horizontal = MIXER_SCREEN_HORIZONTAL_PADDING.dp, vertical = 4.dp),
     ) {
         MixerHeaderRow(
             drivetrain = state.drivetrain,
@@ -124,58 +146,101 @@ internal fun MixerDashboardScreen(
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
         Spacer(Modifier.height(10.dp))
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            MixerTrackColumn(
+                tracks = groupedTracks.coast,
+                coastLayerMixEnabled = coastLayerMixEnabled,
+                onLayerMuted = onLayerMuted,
+                onLayerSolo = onLayerSolo,
+                onLayerVolume = onLayerVolume,
+                modifier = Modifier.weight(1f),
+            )
+            MixerTrackColumn(
+                tracks = groupedTracks.middle,
+                coastLayerMixEnabled = coastLayerMixEnabled,
+                onLayerMuted = onLayerMuted,
+                onLayerSolo = onLayerSolo,
+                onLayerVolume = onLayerVolume,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(end = 250.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .weight(1f)
+                    .fillMaxHeight(),
             ) {
-                items(state.layerMixTracks, key = { it.id }) { track ->
-                    LayerMixTrackControl(
-                        track = track,
-                        coastLayerMixEnabled = coastLayerMixEnabled,
-                        onMuted = { onLayerMuted(track.id, it) },
-                        onSolo = { onLayerSolo(track.id, it) },
-                        onVolume = { onLayerVolume(track.id, it) },
-                    )
-                }
+                MixerTrackColumn(
+                    tracks = groupedTracks.texture,
+                    coastLayerMixEnabled = coastLayerMixEnabled,
+                    onLayerMuted = onLayerMuted,
+                    onLayerSolo = onLayerSolo,
+                    onLayerVolume = onLayerVolume,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = MIXER_PEDALS_OVERLAY_HEIGHT),
+                )
+                MixerDriveControls(
+                    state = state,
+                    onThrottle = onThrottle,
+                    onBrake = onBrake,
+                    onTransmissionChange = onTransmissionChange,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 2.dp),
+                )
             }
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 4.dp, bottom = 8.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    PedalControl(
-                        label = "BRAKE",
-                        value = state.brake,
-                        accent = Red,
-                        width = 86.dp,
-                        height = 140.dp,
-                        onValue = onBrake,
-                    )
-                    PedalControl(
-                        label = "THROTTLE",
-                        value = state.throttle,
-                        accent = Green,
-                        width = 78.dp,
-                        height = 178.dp,
-                        onValue = onThrottle,
-                    )
-                    TransmissionShifter(
-                        position = state.transmissionPosition,
-                        onPositionChange = onTransmissionChange,
-                        lockedToVehicle = state.transmissionLockedToVehicle,
-                    )
-                }
-            }
+        }
+    }
+}
+
+private val MIXER_PEDALS_OVERLAY_HEIGHT = 132.dp
+
+private data class GroupedMixerTracks(
+    val coast: List<LayerMixTrackState>,
+    val middle: List<LayerMixTrackState>,
+    val texture: List<LayerMixTrackState>,
+)
+
+private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTracks {
+    val idle = tracks.filter { it.sortGroup == 0 }
+    val coast = tracks.filter { it.sortGroup == 1 }
+    val texture = tracks.filter { it.sortGroup == 3 }
+    val middle = tracks.filter { track ->
+        track.sortGroup != 0 && track.sortGroup != 1 && track.sortGroup != 3
+    }
+    return GroupedMixerTracks(
+        coast = idle + coast,
+        middle = middle,
+        texture = texture,
+    )
+}
+
+@Composable
+private fun MixerTrackColumn(
+    tracks: List<LayerMixTrackState>,
+    coastLayerMixEnabled: Boolean,
+    onLayerMuted: (String, Boolean) -> Unit,
+    onLayerSolo: (String, Boolean) -> Unit,
+    onLayerVolume: (String, Double) -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxHeight(),
+        contentPadding = contentPadding,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(tracks, key = { it.id }) { track ->
+            LayerMixTrackControl(
+                track = track,
+                coastLayerMixEnabled = coastLayerMixEnabled,
+                onMuted = { onLayerMuted(track.id, it) },
+                onSolo = { onLayerSolo(track.id, it) },
+                onVolume = { onLayerVolume(track.id, it) },
+            )
         }
     }
 }
@@ -362,6 +427,7 @@ private fun CarDropdownSelector(
                         text = selectedCarName,
                         color = White,
                         fontSize = 16.sp,
+                        lineHeight = 20.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

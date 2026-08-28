@@ -8,7 +8,7 @@ import org.junit.Test
 
 class BydTransmissionControlTest {
     @Test
-    fun preferBydWithLivePedalsKeepsManualTransmission() {
+    fun realPedalsWithLiveVehiclePedalsKeepsManualTransmission() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 10.0, value = 10.0),
@@ -17,7 +17,7 @@ class BydTransmissionControlTest {
         )
 
         val result = resolveTransmissionControl(
-            mode = InputMode.PREFER_BYD,
+            mode = InputMode.RealPedals,
             telemetry = telemetry,
             manualPosition = TransmissionPosition.DRIVE,
         )
@@ -27,7 +27,7 @@ class BydTransmissionControlTest {
     }
 
     @Test
-    fun simulatorModeKeepsManualTransmission() {
+    fun simulatedPedalsModeKeepsManualTransmission() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,
             accelerator = SignalValue(raw = 100.0, value = 100.0),
@@ -36,7 +36,7 @@ class BydTransmissionControlTest {
         )
 
         val result = resolveTransmissionControl(
-            mode = InputMode.SIMULATOR,
+            mode = InputMode.SimulatedPedals,
             telemetry = telemetry,
             manualPosition = TransmissionPosition.NEUTRAL,
         )

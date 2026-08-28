@@ -12,6 +12,13 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.max
 
+enum class AudioFocusEvent {
+    TRANSIENT_LOSS,
+    TRANSIENT_GAIN,
+    TRANSIENT_DUCK,
+    PERMANENT_LOSS,
+}
+
 /** Streams the stereo sample-bank program to the vehicle media route. */
 class EngineAudioEngine(context: Context) {
     private val appContext = context.applicationContext
@@ -21,6 +28,7 @@ class EngineAudioEngine(context: Context) {
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
     private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
+    private val loadedSampleProfileId = AtomicReference<String?>(null)
     private val coastLayerMixEnabled = AtomicBoolean(true)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
@@ -30,23 +38,30 @@ class EngineAudioEngine(context: Context) {
     @Volatile
     private var layerMeterBus: RealtimeLayerMeterBus? = null
 
+    @Volatile
+    private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
+
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 if (focusHeld.get() && running.get()) {
+                    focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_GAIN)
                     focusMultiplier.set(1.0)
                 }
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_DUCK)
                 focusMultiplier.set(0.20)
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_LOSS)
                 focusMultiplier.set(0.0)
             }
 
             AudioManager.AUDIOFOCUS_LOSS -> {
+                focusChangeListener?.invoke(AudioFocusEvent.PERMANENT_LOSS)
                 focusMultiplier.set(0.0)
                 focusHeld.set(false)
                 synchronized(lifecycleLock) {
@@ -60,8 +75,14 @@ class EngineAudioEngine(context: Context) {
 
     fun layerOutputMeters(): List<LayerOutputMeter> = layerMeterBus?.snapshot().orEmpty()
 
+    fun loadedSampleProfileId(): String? = loadedSampleProfileId.get()
+
     fun update(frame: EngineAudioFrame) {
         parameters.set(frame)
+    }
+
+    fun setFocusChangeListener(listener: ((AudioFocusEvent) -> Unit)?) {
+        focusChangeListener = listener
     }
 
     fun start() {
@@ -94,6 +115,7 @@ class EngineAudioEngine(context: Context) {
         synchronized(lifecycleLock) {
             val changed = selectedProfile.getAndSet(profile).id != profile.id
             if (!changed) return
+            loadedSampleProfileId.set(null)
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
             if (shouldRestart && stopLocked()) startLocked()
         }
@@ -165,6 +187,7 @@ class EngineAudioEngine(context: Context) {
 
         focusMultiplier.set(0.0)
         layerMeterBus = null
+        loadedSampleProfileId.set(null)
         abandonFocusIfHeld()
         return stopped
     }
@@ -191,6 +214,7 @@ class EngineAudioEngine(context: Context) {
             val warmup = ShortArray(512)
             repeat(3) { sampleRenderer.render(parameters.get(), warmup, gain = 0.0) }
             if (!isCurrent(runId)) return
+            loadedSampleProfileId.set(sampleProfile.id)
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             val active = openTrack(sampleRate) ?: return
             opened = active

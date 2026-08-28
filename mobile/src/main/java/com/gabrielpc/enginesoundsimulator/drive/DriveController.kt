@@ -6,6 +6,8 @@ import android.os.SystemClock
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
+import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
+import com.gabrielpc.enginesoundsimulator.audio.AudioFocusEvent
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
@@ -35,14 +37,20 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
 
-enum class InputMode(val displayName: String) {
-    PREFER_BYD("BYD LIVE"),
-    SIMULATOR("SIM"),
+enum class InputMode(val primaryLabel: String, val secondaryLabel: String = "PEDALS") {
+    RealPedals("REAL"),
+    SimulatedPedals("SIMULATED"),
+    ;
+
+    val displayName: String
+        get() = "$primaryLabel $secondaryLabel"
 }
 
 data class DriveSnapshot(
     val drivetrain: DrivetrainState,
-    val inputSourceName: String,
+    val inputSourcePrimary: String,
+    val inputSourceSecondary: String,
+    val inputSourceIsRealPedals: Boolean,
     val inputSourceFaded: Boolean,
     val throttle: Double,
     val brake: Double,
@@ -57,8 +65,10 @@ data class DriveSnapshot(
     val layerMixTracks: List<LayerMixTrackState> = emptyList(),
     val coastLayerMixEnabled: Boolean = true,
     val legacyThrottleMixEnabled: Boolean = false,
+    val appMasterVolume: Double = AppMasterVolumeRepository.DEFAULT,
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
     val transmissionLockedToVehicle: Boolean = false,
+    val carAudioReady: Boolean = false,
 )
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
@@ -66,12 +76,14 @@ class DriveController(context: Context) {
     private val tuningRepository = TuningRepository(context.applicationContext)
     private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
     private val layerMixRepository = LayerMixRepository(context.applicationContext)
+    private val appMasterVolumeRepository = AppMasterVolumeRepository(context.applicationContext)
     private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
     private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
     private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
+    private val appMasterVolume = AtomicReference(appMasterVolumeRepository.load())
     private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(selectedCarRepository.load().id))
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
@@ -81,11 +93,13 @@ class DriveController(context: Context) {
     private val lifecycleLock = Any()
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
-    private val manualInput = AtomicReference(ManualInput())
-    private val selectedInputMode = AtomicReference(InputMode.PREFER_BYD)
-    private val vehiclePreviewUntilElapsedMs = AtomicLong(0L)
+    private val simulatedPedalInput = AtomicReference(SimulatedPedalInput())
+    private val selectedInputMode = AtomicReference(InputMode.RealPedals)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val soundEnabled = AtomicBoolean(true)
+    private val uiActive = AtomicBoolean(false)
+    private val audioInterrupted = AtomicBoolean(false)
+    private val preInterruptionMasterVolume = AtomicReference<Double?>(null)
 
     @Volatile
     private var loopThread: Thread? = null
@@ -93,7 +107,9 @@ class DriveController(context: Context) {
     @Volatile
     private var latest = DriveSnapshot(
         drivetrain = simulation.state,
-        inputSourceName = "SIM",
+        inputSourcePrimary = InputMode.SimulatedPedals.primaryLabel,
+        inputSourceSecondary = InputMode.SimulatedPedals.secondaryLabel,
+        inputSourceIsRealPedals = false,
         inputSourceFaded = false,
         throttle = 0.0,
         brake = 0.0,
@@ -107,16 +123,29 @@ class DriveController(context: Context) {
         availableCarCount = EngineSampleProfiles.all.size,
         coastLayerMixEnabled = coastLayerMixEnabled.get(),
         legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
+        appMasterVolume = appMasterVolume.get(),
         carMasterVolume = carMasterVolume.get(),
     )
 
     init {
         audioEngine.setCoastLayerMixEnabled(coastLayerMixEnabled.get())
         audioEngine.setSampleProfile(selectedSampleProfile.get())
+        audioEngine.setFocusChangeListener(::handleAudioFocusChange)
+    }
+
+    fun isRunning(): Boolean = running.get()
+
+    fun setUiActive(active: Boolean) {
+        uiActive.set(active)
     }
 
     fun snapshot(): DriveSnapshot {
         val base = latest
+        if (!uiActive.get()) {
+            return base
+        }
+
+        val selectedId = selectedSampleProfile.get().id
         return base.copy(
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
@@ -124,6 +153,8 @@ class DriveController(context: Context) {
                 audioEngine.layerOutputMeters(),
                 coastLayerMixEnabled.get(),
             ),
+            carAudioReady = audioEngine.loadedSampleProfileId() == selectedId,
+            appMasterVolume = appMasterVolume.get(),
         )
     }
 
@@ -165,16 +196,16 @@ class DriveController(context: Context) {
             if (thread == null || joinLoop(thread)) loopThread = null
             vehicleReader.stop()
             audioEngine.stop()
-            manualInput.set(ManualInput())
+            simulatedPedalInput.set(SimulatedPedalInput())
         }
     }
 
-    fun setManualThrottle(value: Double) {
-        manualInput.updateAndGet { it.copy(throttle = value.coerceIn(0.0, 1.0)) }
+    fun setSimulatedPedalThrottle(value: Double) {
+        simulatedPedalInput.updateAndGet { it.copy(throttle = value.coerceIn(0.0, 1.0)) }
     }
 
-    fun setManualBrake(value: Double) {
-        manualInput.updateAndGet { it.copy(brake = value.coerceIn(0.0, 1.0)) }
+    fun setSimulatedPedalBrake(value: Double) {
+        simulatedPedalInput.updateAndGet { it.copy(brake = value.coerceIn(0.0, 1.0)) }
     }
 
     fun setInputMode(mode: InputMode) {
@@ -223,17 +254,21 @@ class DriveController(context: Context) {
         audioEngine.setCoastLayerMixEnabled(enabled)
     }
 
+    fun setAppMasterVolume(volume: Double) {
+        appMasterVolume.set(appMasterVolumeRepository.save(volume))
+    }
+
+    fun decreaseAppMasterVolume() {
+        setAppMasterVolume(appMasterVolume.get() - MASTER_VOLUME_STEP)
+    }
+
+    fun increaseAppMasterVolume() {
+        setAppMasterVolume(appMasterVolume.get() + MASTER_VOLUME_STEP)
+    }
+
     fun setCarMasterVolume(volume: Double) {
         val profileId = selectedSampleProfile.get().id
         carMasterVolume.set(carMasterVolumeRepository.save(profileId, volume))
-    }
-
-    fun decreaseCarMasterVolume() {
-        setCarMasterVolume(carMasterVolume.get() - MASTER_VOLUME_STEP)
-    }
-
-    fun increaseCarMasterVolume() {
-        setCarMasterVolume(carMasterVolume.get() + MASTER_VOLUME_STEP)
     }
 
     fun resetAllCarMasterVolumes() {
@@ -259,32 +294,25 @@ class DriveController(context: Context) {
         audioEngine.setSampleProfile(selected)
     }
 
+    fun selectSimulatedPedals() {
+        selectedInputMode.set(InputMode.SimulatedPedals)
+    }
+
+    fun selectRealPedals() {
+        if (vehicleReader.snapshot().vehiclePedalsAvailable()) {
+            selectedInputMode.set(InputMode.RealPedals)
+        }
+    }
+
     fun toggleInputSource() {
-        val telemetry = vehicleReader.snapshot()
-        val vehicleAvailable = telemetry.vehiclePedalsAvailable()
-        val now = SystemClock.elapsedRealtime()
-        val previewActive = vehiclePreviewUntilElapsedMs.get() > now
-
-        if (previewActive) {
-            vehiclePreviewUntilElapsedMs.set(0L)
+        if (selectedInputMode.get() == InputMode.SimulatedPedals) {
+            if (vehicleReader.snapshot().vehiclePedalsAvailable()) {
+                selectedInputMode.set(InputMode.RealPedals)
+            }
             return
         }
 
-        if (vehicleAvailable) {
-            selectedInputMode.set(
-                if (selectedInputMode.get() == InputMode.SIMULATOR) {
-                    InputMode.PREFER_BYD
-                } else {
-                    InputMode.SIMULATOR
-                },
-            )
-            return
-        }
-
-        if (!vehicleAvailable) {
-            vehiclePreviewUntilElapsedMs.set(now + VEHICLE_INPUT_PREVIEW_MS)
-            return
-        }
+        selectedInputMode.set(InputMode.SimulatedPedals)
     }
 
     fun setTransmissionPosition(position: TransmissionPosition) {
@@ -309,6 +337,11 @@ class DriveController(context: Context) {
         var accumulatorSeconds = 0.0
 
         while (isCurrent(runId)) {
+            if (audioInterrupted.get()) {
+                LockSupport.parkNanos(INTERRUPTED_IDLE_NANOS)
+                continue
+            }
+
             val nowNanos = SystemClock.elapsedRealtimeNanos()
             val elapsedSeconds = ((nowNanos - previousNanos) / 1_000_000_000.0).coerceIn(0.0, 0.050)
             previousNanos = nowNanos
@@ -343,11 +376,10 @@ class DriveController(context: Context) {
             simulation.updateProfile(profile)
             appliedTuning = tuning
         }
-        clearExpiredVehiclePreview()
         val telemetry = vehicleReader.snapshot()
         val mode = selectedInputMode.get()
-        val manual = manualInput.get()
-        val input = resolveDriveInput(mode, telemetry, manual.throttle, manual.brake)
+        val simulatedPedals = simulatedPedalInput.get()
+        val input = resolveDriveInput(mode, telemetry, simulatedPedals.throttle, simulatedPedals.brake)
         val transmissionControl = resolveTransmissionControl(
             mode = mode,
             telemetry = telemetry,
@@ -363,7 +395,7 @@ class DriveController(context: Context) {
                 brake = input.brake,
                 externalSpeedKmh = input.externalSpeedKmh,
                 // Use the resolved source, not just the selected mode, for coast/regen behavior.
-                simulateCoastRegen = input.isSimulator,
+                simulateCoastRegen = input.usesSimulatedPedals,
                 transmissionPosition = transmissionControl.position,
             ),
             dt,
@@ -387,55 +419,98 @@ class DriveController(context: Context) {
         )
         val selectedCar = selectedSampleProfile.get()
         val vehicleAvailable = telemetry.vehiclePedalsAvailable()
-        val previewActive = vehiclePreviewUntilElapsedMs.get() > SystemClock.elapsedRealtime()
         val inputUi = resolveInputSourceUi(
-            mode = mode,
+            selectedMode = mode,
             vehicleAvailable = vehicleAvailable,
-            previewActive = previewActive,
         )
-        latest = DriveSnapshot(
-            drivetrain = drivetrain,
-            inputSourceName = inputUi.displayName,
-            inputSourceFaded = inputUi.faded,
-            throttle = input.throttle,
-            brake = input.brake,
-            transmissionPosition = transmissionControl.position,
-            engineSoundEnabled = enabled,
-            tuning = tuning,
-            selectedCarId = selectedCar.id,
-            selectedCarName = selectedCar.displayName,
-            selectedCarPreviewAsset = selectedCar.previewAssetName,
-            selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
-            availableCarCount = EngineSampleProfiles.all.size,
-            coastLayerMixEnabled = coastLayerMixEnabled.get(),
-        legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
-            carMasterVolume = carMasterVolume.get(),
-            transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
+        if (uiActive.get()) {
+            latest = DriveSnapshot(
+                drivetrain = drivetrain,
+                inputSourcePrimary = inputUi.primaryLabel,
+                inputSourceSecondary = inputUi.secondaryLabel,
+                inputSourceIsRealPedals = inputUi.isRealPedals,
+                inputSourceFaded = inputUi.faded,
+                throttle = input.throttle,
+                brake = input.brake,
+                transmissionPosition = transmissionControl.position,
+                engineSoundEnabled = enabled,
+                tuning = tuning,
+                selectedCarId = selectedCar.id,
+                selectedCarName = selectedCar.displayName,
+                selectedCarPreviewAsset = selectedCar.previewAssetName,
+                selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
+                availableCarCount = EngineSampleProfiles.all.size,
+                coastLayerMixEnabled = coastLayerMixEnabled.get(),
+                legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
+                appMasterVolume = appMasterVolume.get(),
+                carMasterVolume = carMasterVolume.get(),
+                transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
+            )
+        }
+    }
+
+    private fun handleAudioFocusChange(event: AudioFocusEvent) {
+        when (event) {
+            AudioFocusEvent.TRANSIENT_LOSS,
+            AudioFocusEvent.TRANSIENT_DUCK,
+            -> enterAudioInterruption()
+
+            AudioFocusEvent.TRANSIENT_GAIN -> exitAudioInterruption()
+
+            AudioFocusEvent.PERMANENT_LOSS -> {
+                enterAudioInterruption()
+                preInterruptionMasterVolume.set(null)
+            }
+        }
+    }
+
+    private fun enterAudioInterruption() {
+        if (audioInterrupted.compareAndSet(false, true)) {
+            preInterruptionMasterVolume.compareAndSet(null, appMasterVolume.get())
+        }
+    }
+
+    private fun exitAudioInterruption() {
+        if (!audioInterrupted.compareAndSet(true, false)) {
+            return
+        }
+
+        val restoredVolume = resolveInterruptionResumeVolume(
+            savedVolume = preInterruptionMasterVolume.get(),
+            resumeCap = INTERRUPTION_RESUME_VOLUME,
         )
+        preInterruptionMasterVolume.set(null)
+        appMasterVolume.set(restoredVolume)
     }
 
     private fun effectiveAudioTuning(tuning: TuningConfig) = tuning.audio.copy(
         masterGain = (
-            carMasterVolume.get() * tuning.audio.masterGain / CarMasterVolumeRepository.DEFAULT
+            (appMasterVolume.get() / AppMasterVolumeRepository.DEFAULT) *
+                (carMasterVolume.get() * tuning.audio.masterGain / CarMasterVolumeRepository.DEFAULT)
             ).coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX),
     )
 
-    private data class ManualInput(val throttle: Double = 0.0, val brake: Double = 0.0)
-
-    private fun clearExpiredVehiclePreview() {
-        val deadline = vehiclePreviewUntilElapsedMs.get()
-        if (deadline in 1..SystemClock.elapsedRealtime()) {
-            vehiclePreviewUntilElapsedMs.set(0L)
-        }
-    }
+    private data class SimulatedPedalInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
     private companion object {
         const val FIXED_STEP_SECONDS = 1.0 / 200.0
         const val FIXED_STEP_NANOS = 5_000_000L
+        const val INTERRUPTED_IDLE_NANOS = 50_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
         const val MASTER_VOLUME_STEP = 0.10
-        const val VEHICLE_INPUT_PREVIEW_MS = 2_000L
+        const val INTERRUPTION_RESUME_VOLUME = 0.25
     }
+}
+
+internal fun resolveInterruptionResumeVolume(
+    savedVolume: Double?,
+    resumeCap: Double,
+): Double {
+    val baseline = savedVolume ?: AppMasterVolumeRepository.DEFAULT
+    return minOf(baseline, resumeCap).coerceIn(
+        AppMasterVolumeRepository.MIN,
+        AppMasterVolumeRepository.MAX,
+    )
 }
 
 private fun buildLayerMixTracks(
@@ -519,63 +594,57 @@ internal data class ResolvedDriveInput(
     val brake: Double,
     val externalSpeedKmh: Double?,
     val label: String,
-    val isSimulator: Boolean,
+    val usesSimulatedPedals: Boolean,
 )
 
 /** Pure input arbitration kept separate so unavailable vehicle data can be fail-safe tested. */
 internal fun resolveDriveInput(
     mode: InputMode,
     telemetry: TelemetrySnapshot,
-    simulatorThrottle: Double,
-    simulatorBrake: Double,
+    simulatedPedalThrottle: Double,
+    simulatedPedalBrake: Double,
 ): ResolvedDriveInput {
     val vehicleAvailable = telemetry.vehiclePedalsAvailable()
 
-    if (vehicleAvailable && mode == InputMode.PREFER_BYD) {
+    if (vehicleAvailable && mode == InputMode.RealPedals) {
         return ResolvedDriveInput(
             throttle = (telemetry.accelerator.value!! / 100.0).coerceIn(0.0, 1.0),
             brake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0),
             externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid },
-            label = "BYD PEDALS",
-            isSimulator = false,
+            label = InputMode.RealPedals.displayName,
+            usesSimulatedPedals = false,
         )
     }
 
     return ResolvedDriveInput(
-        throttle = simulatorThrottle.coerceIn(0.0, 1.0),
-        brake = simulatorBrake.coerceIn(0.0, 1.0),
+        throttle = simulatedPedalThrottle.coerceIn(0.0, 1.0),
+        brake = simulatedPedalBrake.coerceIn(0.0, 1.0),
         externalSpeedKmh = null,
-        label = "SIM PEDALS",
-        isSimulator = true,
+        label = InputMode.SimulatedPedals.displayName,
+        usesSimulatedPedals = true,
     )
 }
 
 internal data class InputSourceUiState(
-    val displayName: String,
+    val primaryLabel: String,
+    val secondaryLabel: String,
+    val isRealPedals: Boolean,
     val faded: Boolean,
 )
 
 internal fun resolveInputSourceUi(
-    mode: InputMode,
+    selectedMode: InputMode,
     vehicleAvailable: Boolean,
-    previewActive: Boolean,
 ): InputSourceUiState {
-    if (previewActive) {
-        return InputSourceUiState(
-            displayName = InputMode.PREFER_BYD.displayName,
-            faded = true,
-        )
-    }
-
-    if (mode == InputMode.PREFER_BYD && vehicleAvailable) {
-        return InputSourceUiState(
-            displayName = InputMode.PREFER_BYD.displayName,
-            faded = false,
-        )
+    val activeMode = when {
+        selectedMode == InputMode.RealPedals && vehicleAvailable -> InputMode.RealPedals
+        else -> InputMode.SimulatedPedals
     }
 
     return InputSourceUiState(
-        displayName = InputMode.SIMULATOR.displayName,
-        faded = false,
+        primaryLabel = activeMode.primaryLabel,
+        secondaryLabel = activeMode.secondaryLabel,
+        isRealPedals = activeMode == InputMode.RealPedals,
+        faded = !vehicleAvailable,
     )
 }
