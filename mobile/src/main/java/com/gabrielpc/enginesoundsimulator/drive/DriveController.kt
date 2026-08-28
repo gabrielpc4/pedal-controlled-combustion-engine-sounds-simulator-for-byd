@@ -16,7 +16,6 @@ import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
 import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
 import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
-import com.gabrielpc.enginesoundsimulator.audio.SoundEffectsRepository
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
@@ -56,8 +55,6 @@ data class DriveSnapshot(
     val selectedCarPreviewAsset: String,
     val selectedCarIndex: Int,
     val availableCarCount: Int,
-    val soundEffects: List<SoundEffectOption>,
-    val soloSoundEffects: Boolean,
     val layerMixTracks: List<LayerMixTrackState> = emptyList(),
     val coastLayerMixEnabled: Boolean = true,
     val legacyThrottleMixEnabled: Boolean = false,
@@ -65,29 +62,16 @@ data class DriveSnapshot(
     val transmissionLockedToVehicle: Boolean = false,
 )
 
-data class SoundEffectOption(
-    val id: String,
-    val displayName: String,
-    val description: String,
-    val enabled: Boolean,
-)
-
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
 class DriveController(context: Context) {
     private val tuningRepository = TuningRepository(context.applicationContext)
     private val selectedCarRepository = SelectedCarRepository(context.applicationContext)
-    private val soundEffectsRepository = SoundEffectsRepository(context.applicationContext)
     private val layerMixRepository = LayerMixRepository(context.applicationContext)
     private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
     private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
     private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
-    private val enabledEffectMask = AtomicLong(soundEffectsRepository.loadEnabledMask(selectedSampleProfile.get()))
-    private val currentSoundEffectOptions = AtomicReference(
-        soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
-    )
-    private val soloEffects = AtomicBoolean(soundEffectsRepository.loadSoloEffects(selectedSampleProfile.get()))
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(selectedCarRepository.load().id))
     private var appliedTuning = tuningConfig.get()
@@ -121,8 +105,6 @@ class DriveController(context: Context) {
         selectedCarPreviewAsset = selectedSampleProfile.get().previewAssetName,
         selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
         availableCarCount = EngineSampleProfiles.all.size,
-        soundEffects = soundEffectOptions(selectedSampleProfile.get(), enabledEffectMask.get()),
-        soloSoundEffects = soloEffects.get(),
         coastLayerMixEnabled = coastLayerMixEnabled.get(),
         legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
         carMasterVolume = carMasterVolume.get(),
@@ -251,19 +233,6 @@ class DriveController(context: Context) {
         carMasterVolume.set(carMasterVolumeRepository.load(selectedSampleProfile.get().id))
     }
 
-    fun setSoundEffectEnabled(controlId: String, enabled: Boolean) {
-        val selected = selectedSampleProfile.get()
-        val updatedMask = soundEffectsRepository.setEnabled(selected, controlId, enabled)
-        enabledEffectMask.set(updatedMask)
-        currentSoundEffectOptions.set(soundEffectOptions(selected, updatedMask))
-    }
-
-    fun setSoloSoundEffects(enabled: Boolean) {
-        val selected = selectedSampleProfile.get()
-        soundEffectsRepository.setSoloEffects(selected, enabled)
-        soloEffects.set(enabled)
-    }
-
     private fun selectAdjacentCar(offset: Int) {
         val previous = selectedSampleProfile.get()
         val selected = EngineSampleProfiles.adjacent(previous.id, offset)
@@ -273,10 +242,6 @@ class DriveController(context: Context) {
 
     private fun applySelectedCar(selected: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile) {
         selectedSampleProfile.set(selected)
-        val selectedEffectMask = soundEffectsRepository.loadEnabledMask(selected)
-        enabledEffectMask.set(selectedEffectMask)
-        currentSoundEffectOptions.set(soundEffectOptions(selected, selectedEffectMask))
-        soloEffects.set(soundEffectsRepository.loadSoloEffects(selected))
         layerMixControls.set(layerMixRepository.load(selected))
         carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
         selectedCarRepository.save(selected)
@@ -379,8 +344,6 @@ class DriveController(context: Context) {
                 rpm = drivetrain.rpm,
                 throttle = drivetrain.smoothedThrottle,
                 enabled = enabled,
-                enabledEffectMask = enabledEffectMask.get(),
-                soloEffects = soloEffects.get(),
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
                     ShiftDirection.UP -> 1
@@ -407,8 +370,6 @@ class DriveController(context: Context) {
             selectedCarPreviewAsset = selectedCar.previewAssetName,
             selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
             availableCarCount = EngineSampleProfiles.all.size,
-            soundEffects = currentSoundEffectOptions.get(),
-            soloSoundEffects = soloEffects.get(),
             coastLayerMixEnabled = coastLayerMixEnabled.get(),
         legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
             carMasterVolume = carMasterVolume.get(),
@@ -429,18 +390,6 @@ class DriveController(context: Context) {
         const val FIXED_STEP_NANOS = 5_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
     }
-}
-
-private fun soundEffectOptions(
-    profile: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile,
-    mask: Long,
-): List<SoundEffectOption> = profile.effectControls.map { control ->
-    SoundEffectOption(
-        id = control.id,
-        displayName = control.displayName,
-        description = control.description,
-        enabled = mask and control.bit != 0L,
-    )
 }
 
 private fun buildLayerMixTracks(

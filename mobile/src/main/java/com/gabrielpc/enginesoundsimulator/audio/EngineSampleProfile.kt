@@ -183,8 +183,6 @@ internal data class EngineSampleProfile(
         loopLayersForLoad(coastLayerMixEnabled).mapTo(this) { it.assetName }
         effects.mapTo(this) { it.assetName }
     }
-    val effectControls: List<SampleEffectControlSpec> = effects.map { it.control }.distinctBy { it.id }
-    val defaultEffectMask: Long = effectControls.fold(0L) { mask, control -> mask or control.bit }
 
     fun outputGainAt(throttle: Double): Double =
         10.0.pow((throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0)

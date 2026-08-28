@@ -164,14 +164,13 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun effectMaskControlsTransmissionAndShiftEventsWithoutASecondAudioPath() {
-        val enabled = SampleEffectControls.transmission.bit or SampleEffectControls.gearChanges.bit
+    fun shiftEventsTriggerThroughTheSameLayerMixPath() {
         val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
         val output = ShortArray(1_920)
 
         repeat(10) {
             renderer.render(
-                EngineAudioFrame(rpm = 4_500.0, throttle = 0.6, enabledEffectMask = enabled),
+                EngineAudioFrame(rpm = 4_500.0, throttle = 0.6),
                 output,
                 gain = 0.6,
             )
@@ -180,7 +179,6 @@ class SampleEngineRendererTest {
             EngineAudioFrame(
                 rpm = 7_800.0,
                 throttle = 1.0,
-                enabledEffectMask = enabled,
                 shiftSerial = 1,
                 shiftDirection = 1,
             ),
@@ -192,7 +190,6 @@ class SampleEngineRendererTest {
                 EngineAudioFrame(
                     rpm = 6_000.0,
                     throttle = 0.7,
-                    enabledEffectMask = enabled,
                     shiftSerial = 1,
                     shiftDirection = 1,
                 ),
@@ -208,52 +205,30 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun disabledEffectDoesNotTriggerOnShift() {
+    fun mutedShiftEffectsDoNotTriggerOnShift() {
         val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
         val output = ShortArray(1_920)
-        renderer.render(EngineAudioFrame(shiftSerial = 0), output, gain = 0.5)
-        renderer.render(EngineAudioFrame(shiftSerial = 1, shiftDirection = 1), output, gain = 0.5)
-        repeat(8) { renderer.render(EngineAudioFrame(shiftSerial = 1), output, gain = 0.5) }
+        val mutedShifts = mapOf(
+            "shift_up" to LayerMixControl(muted = true),
+            "shift_down" to LayerMixControl(muted = true),
+        )
+        renderer.render(EngineAudioFrame(shiftSerial = 0, layerMix = mutedShifts), output, gain = 0.5)
+        renderer.render(
+            EngineAudioFrame(shiftSerial = 1, shiftDirection = 1, layerMix = mutedShifts),
+            output,
+            gain = 0.5,
+        )
+        repeat(8) {
+            renderer.render(EngineAudioFrame(shiftSerial = 1, layerMix = mutedShifts), output, gain = 0.5)
+        }
 
         assertEquals(0L, renderer.diagnostics().effectTriggers)
-        assertEquals("none", renderer.diagnostics().activeEffects)
-    }
-
-    @Test
-    fun soloEffectsMutesEngineLoopsetAndKeepsCheckedEffectAudible() {
-        val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
-        val output = ShortArray(1_920)
-        repeat(30) {
-            renderer.render(
-                EngineAudioFrame(rpm = 4_500.0, throttle = 0.6, soloEffects = true),
-                output,
-                gain = 0.7,
-            )
-        }
-        assertTrue("unchecked solo must mute the continuous engine", output.maxOf { abs(it.toInt()) } <= 1)
-
-        repeat(30) {
-            renderer.render(
-                EngineAudioFrame(
-                    rpm = 4_500.0,
-                    throttle = 0.6,
-                    enabledEffectMask = SampleEffectControls.transmission.bit,
-                    soloEffects = true,
-                ),
-                output,
-                gain = 0.7,
-            )
-        }
-        assertTrue("checked transmission effect must remain audible in solo", output.maxOf { abs(it.toInt()) } > 20)
-        assertTrue(renderer.diagnostics().activeEffects.contains("transmission_loop"))
-        assertTrue(renderer.diagnostics().activeLayers.contains("effects solo"))
     }
 
     @Test
     fun layerMixSoloMutesNonSoloLoopsAndBlocksShiftEffects() {
         val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
         val output = ShortArray(1_920)
-        val allEffects = profile.effectControls.fold(0L) { mask, control -> mask or control.bit }
         val soloCoast = mapOf(
             "c1" to LayerMixControl(volume = 1.0, solo = true),
         )
@@ -262,7 +237,6 @@ class SampleEngineRendererTest {
                 EngineAudioFrame(
                     rpm = 6_500.0,
                     throttle = 0.0,
-                    enabledEffectMask = allEffects,
                     layerMix = soloCoast,
                 ),
                 output,
@@ -276,7 +250,6 @@ class SampleEngineRendererTest {
             EngineAudioFrame(
                 rpm = 6_500.0,
                 throttle = 0.0,
-                enabledEffectMask = allEffects,
                 shiftSerial = 1,
                 shiftDirection = -1,
                 layerMix = soloCoast,
@@ -289,7 +262,6 @@ class SampleEngineRendererTest {
                 EngineAudioFrame(
                     rpm = 6_500.0,
                     throttle = 0.0,
-                    enabledEffectMask = allEffects,
                     shiftSerial = 1,
                     shiftDirection = -1,
                     layerMix = soloCoast,
@@ -345,7 +317,6 @@ class SampleEngineRendererTest {
         val frame = EngineAudioFrame(
             rpm = 5_500.0,
             throttle = 0.8,
-            enabledEffectMask = profile.defaultEffectMask,
             coastLayerMixEnabled = true,
         )
         repeat(24) {

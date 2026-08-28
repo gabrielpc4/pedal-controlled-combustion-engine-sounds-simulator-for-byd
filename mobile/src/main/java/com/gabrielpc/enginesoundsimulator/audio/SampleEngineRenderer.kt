@@ -53,18 +53,14 @@ internal class SampleEngineRenderer private constructor(
     /** Built only when a test explicitly asks for it; production rendering stores no diagnostic snapshots. */
     fun diagnostics(): SampleRendererDiagnostics {
         val target = lastTarget
-        val activeLayers = if (target.soloEffects) {
-            "none (effects solo)"
-        } else {
-            voices.asSequence()
-                .filter { it.targetGain > 0.006 }
-                .sortedByDescending { it.targetGain }
-                .take(8)
-                .joinToString(",") { voice ->
-                    "${voice.spec.id}@${(voice.playbackRatio * 100.0).toInt()}%/${(voice.targetGain * 100.0).toInt()}%"
-                }
-                .ifBlank { "none" }
-        }
+        val activeLayers = voices.asSequence()
+            .filter { it.targetGain > 0.006 }
+            .sortedByDescending { it.targetGain }
+            .take(8)
+            .joinToString(",") { voice ->
+                "${voice.spec.id}@${(voice.playbackRatio * 100.0).toInt()}%/${(voice.targetGain * 100.0).toInt()}%"
+            }
+            .ifBlank { "none" }
         return SampleRendererDiagnostics(
             profileId = profile.id,
             loadedLoops = voices.size,
@@ -97,7 +93,7 @@ internal class SampleEngineRenderer private constructor(
             destination.fill(0.0)
             return
         }
-        val loopScale = if (target.soloEffects) 0.0 else continuousProgramGain
+        val loopScale = continuousProgramGain
         var index = 0
         while (index < voices.size) {
             destination[index] = (voices[index].gain * loopScale).coerceIn(0.0, 1.0)
@@ -132,7 +128,7 @@ internal class SampleEngineRenderer private constructor(
             profile.outputGainAt(smoothedThrottle)
         }
         val targetEnabled = if (target.enabled) 1.0 else 0.0
-        val targetContinuousProgram = if (target.soloEffects) 0.0 else 1.0
+        val targetContinuousProgram = 1.0
         val programFadeSeconds = target.tuning.programFadeMs / 1_000.0
         val masterAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
         val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
@@ -212,7 +208,7 @@ internal class SampleEngineRenderer private constructor(
 
     /** Loop and effect WAV assets audibly contributing to the mixed output right now. */
     private fun audiblePlayingSamples(target: EngineAudioFrame): List<PlayingSampleLabel> = buildList {
-        if (isProgramAudible(target) && !target.soloEffects && continuousProgramGain > SILENCE_GAIN) {
+        if (isProgramAudible(target) && continuousProgramGain > SILENCE_GAIN) {
             voices.asSequence()
                 .filter { voice ->
                     voice.gain > SILENCE_GAIN &&
@@ -243,7 +239,6 @@ internal class SampleEngineRenderer private constructor(
         target.enabled && enabledGain > SILENCE_GAIN && masterGain > SILENCE_GAIN
 
     private fun updateEffectTargetsAndTriggers(target: EngineAudioFrame, layerMix: Map<String, LayerMixControl>) {
-        val mask = target.enabledEffectMask
         val normalizedRpm = ((smoothedRpm - profile.idleRpm) / (profile.limiterRpm - profile.idleRpm))
             .coerceIn(0.0, 1.0)
 
@@ -254,7 +249,6 @@ internal class SampleEngineRenderer private constructor(
             lastShiftSerial = target.shiftSerial
             triggerOneShots(
                 if (target.shiftDirection > 0) SampleEffectTrigger.SHIFT_UP else SampleEffectTrigger.SHIFT_DOWN,
-                mask,
                 smoothedRpm,
                 layerMix,
                 target.coastLayerMixEnabled,
@@ -264,7 +258,7 @@ internal class SampleEngineRenderer private constructor(
         if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
         if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
             throttleLiftArmed = false
-            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, mask, smoothedRpm, layerMix, target.coastLayerMixEnabled)
+            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, smoothedRpm, layerMix, target.coastLayerMixEnabled)
         }
 
         var effectIndex = 0
@@ -272,12 +266,7 @@ internal class SampleEngineRenderer private constructor(
             val voice = effectVoices[effectIndex]
             val authoredGain = when (voice.spec.trigger) {
                 SampleEffectTrigger.TRANSMISSION_LOOP -> {
-                    val enabled = mask and voice.spec.control.bit != 0L
-                    if (!enabled) {
-                        0.0
-                    } else {
-                        voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
-                    }
+                    voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
                 }
                 else -> {
                     if (voice.isOneShotActive) {
@@ -298,13 +287,12 @@ internal class SampleEngineRenderer private constructor(
 
     private fun triggerOneShots(
         trigger: SampleEffectTrigger,
-        mask: Long,
         rpm: Double,
         layerMix: Map<String, LayerMixControl>,
         coastLayerMixEnabled: Boolean,
     ) {
         effectVoices.filter {
-            it.spec.trigger == trigger && mask and it.spec.control.bit != 0L && rpm >= it.spec.minimumRpm
+            it.spec.trigger == trigger && rpm >= it.spec.minimumRpm
         }.forEach { voice ->
             val authoredGain = voice.baseGain
             if (applyLayerMix(voice.spec.id, authoredGain, layerMix, coastLayerMixEnabled) > SILENCE_GAIN) {
@@ -356,7 +344,7 @@ internal class SampleEngineRenderer private constructor(
         if (!isProgramAudible(target)) {
             return emptyList()
         }
-        val loopScale = if (target.soloEffects) 0.0 else continuousProgramGain
+        val loopScale = continuousProgramGain
         val meters = buildList {
             voices.forEach { voice ->
                 add(LayerOutputMeter(voice.spec.id, (voice.gain * loopScale).coerceIn(0.0, 1.0)))

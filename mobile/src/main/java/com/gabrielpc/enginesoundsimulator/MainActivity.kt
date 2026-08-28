@@ -142,8 +142,6 @@ class MainActivity : ComponentActivity() {
                         onLayerMixMuted = controller::setLayerMixMuted,
                         onLayerMixSolo = controller::setLayerMixSolo,
                         onLayerMixVolume = controller::setLayerMixVolume,
-                        onSoundEffectChange = controller::setSoundEffectEnabled,
-                        onSoloSoundEffectsChange = controller::setSoloSoundEffects,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
                     )
                 }
@@ -193,12 +191,9 @@ private fun MotorSoundDashboard(
     onLayerMixMuted: (String, Boolean) -> Unit,
     onLayerMixSolo: (String, Boolean) -> Unit,
     onLayerMixVolume: (String, Double) -> Unit,
-    onSoundEffectChange: (String, Boolean) -> Unit,
-    onSoloSoundEffectsChange: (Boolean) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
-    var effectsOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -208,7 +203,7 @@ private fun MotorSoundDashboard(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (tuningOpen || effectsOpen) return@onPreviewKeyEvent false
+                if (tuningOpen) return@onPreviewKeyEvent false
                 val pressed = event.type == KeyEventType.KeyDown
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
@@ -254,7 +249,6 @@ private fun MotorSoundDashboard(
                         onCycleInput = onCycleInput,
                         onToggleSound = onToggleSound,
                         onOpenTuning = { tuningOpen = true },
-                        onOpenEffects = { effectsOpen = true },
                     )
 
                     when (mainScreen) {
@@ -316,14 +310,6 @@ private fun MotorSoundDashboard(
                     )
                 }
 
-                if (effectsOpen) {
-                    SoundEffectsPanel(
-                        state = state,
-                        onEffectChange = onSoundEffectChange,
-                        onSoloChange = onSoloSoundEffectsChange,
-                        onClose = { effectsOpen = false },
-                    )
-                }
             }
         }
 
@@ -346,7 +332,6 @@ private fun DashboardHeader(
     onCycleInput: () -> Unit,
     onToggleSound: () -> Unit,
     onOpenTuning: () -> Unit,
-    onOpenEffects: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -394,12 +379,6 @@ private fun DashboardHeader(
             )
         }
 
-        HeaderButton(
-            primary = if (state.soundEffects.isEmpty()) "ENGINE" else "${state.soundEffects.count { it.enabled }}/${state.soundEffects.size} ON",
-            secondary = "CAR EFFECTS",
-            accent = if (state.soundEffects.any { it.enabled }) Green else Muted,
-            onClick = onOpenEffects,
-        )
         HeaderButton(
             primary = "TUNE",
             secondary = "ENGINE PROFILE",
