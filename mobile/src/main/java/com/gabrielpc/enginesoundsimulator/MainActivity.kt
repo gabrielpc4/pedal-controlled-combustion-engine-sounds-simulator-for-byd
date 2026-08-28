@@ -439,7 +439,6 @@ private fun MasterVolumeControls(
             } else {
                 "MUTE"
             },
-            secondary = "MASTER",
             accent = if (muted) Green else Red,
             onClick = onToggleMute,
         )
@@ -476,7 +475,7 @@ private fun HeaderIconButton(
 @Composable
 private fun HeaderButton(
     primary: String,
-    secondary: String,
+    secondary: String? = null,
     accent: Color = Cyan,
     onClick: () -> Unit,
 ) {
@@ -489,7 +488,9 @@ private fun HeaderButton(
     ) {
         Column(horizontalAlignment = Alignment.Start) {
             Text(primary, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
-            Text(secondary, color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, maxLines = 1)
+            if (secondary != null) {
+                Text(secondary, color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, maxLines = 1)
+            }
         }
     }
 }
