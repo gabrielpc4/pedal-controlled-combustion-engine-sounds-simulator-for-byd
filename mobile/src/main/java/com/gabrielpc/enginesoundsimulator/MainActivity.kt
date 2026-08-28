@@ -488,32 +488,39 @@ private fun ClassicDriveControls(
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(18)),
         verticalAlignment = Alignment.Bottom,
     ) {
         PedalControl(
             label = "BRAKE",
             value = state.brake,
             accent = Red,
-            width = 92.dp,
-            height = 154.dp,
+            width = CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(92),
+            height = CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(154),
+            contentScale = CLASSIC_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
         PedalControl(
             label = "THROTTLE",
             value = state.throttle,
             accent = Green,
-            width = 84.dp,
-            height = 202.dp,
+            width = CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(84),
+            height = CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(202),
+            contentScale = CLASSIC_DRIVE_CONTROL_SCALE,
             onValue = onThrottle,
         )
         TransmissionShifter(
             position = state.transmissionPosition,
             onPositionChange = onTransmissionChange,
             lockedToVehicle = state.transmissionLockedToVehicle,
+            scale = CLASSIC_DRIVE_CONTROL_SCALE,
         )
     }
 }
+
+private const val CLASSIC_DRIVE_CONTROL_SCALE = 0.7f
+
+private fun Float.scaledDp(base: Int): Dp = (base * this).dp
 
 @Composable
 private fun CarStage(
@@ -581,29 +588,30 @@ internal fun TransmissionShifter(
     position: TransmissionPosition,
     onPositionChange: (TransmissionPosition) -> Unit,
     lockedToVehicle: Boolean = false,
+    scale: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
-            .width(58.dp)
-            .height(202.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .width((58f * scale).dp)
+            .height((202f * scale).dp)
+            .clip(RoundedCornerShape((16f * scale).dp))
             .background(
                 Brush.verticalGradient(
                     listOf(Color(0xFF5B6670), Color(0xFF232D35), Color(0xFF11181E)),
                 ),
             )
-            .border(2.dp, if (lockedToVehicle) Green.copy(alpha = 0.75f) else Color(0xFF60717D), RoundedCornerShape(16.dp))
-            .padding(8.dp)
+            .border((2f * scale).dp, if (lockedToVehicle) Green.copy(alpha = 0.75f) else Color(0xFF60717D), RoundedCornerShape((16f * scale).dp))
+            .padding((8f * scale).dp)
             .alpha(if (lockedToVehicle) 0.88f else 1f),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy((6f * scale).dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (lockedToVehicle) {
             Text(
                 text = "BYD",
                 color = Green,
-                fontSize = 8.sp,
+                fontSize = (8f * scale).sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 0.8.sp,
             )
@@ -614,8 +622,8 @@ internal fun TransmissionShifter(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .height((52f * scale).dp)
+                    .clip(RoundedCornerShape((10f * scale).dp))
                     .background(
                         if (selected) {
                             Amber.copy(alpha = 0.22f)
@@ -624,9 +632,9 @@ internal fun TransmissionShifter(
                         },
                     )
                     .border(
-                        width = if (selected) 2.dp else 1.dp,
+                        width = if (selected) (2f * scale).dp else (1f * scale).dp,
                         color = if (selected) Amber else Color(0xFF4A5A66),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape((10f * scale).dp),
                     )
                     .then(
                         if (lockedToVehicle) {
@@ -640,7 +648,7 @@ internal fun TransmissionShifter(
                 Text(
                     text = option.displayName,
                     color = if (selected) Amber else Muted,
-                    fontSize = 22.sp,
+                    fontSize = (22f * scale).sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.0.sp,
                 )
@@ -684,18 +692,19 @@ internal fun PedalControl(
     width: Dp,
     height: Dp,
     onValue: (Double) -> Unit,
+    contentScale: Float = 1f,
 ) {
     Box(
         modifier = Modifier
             .width(width)
             .height(height)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape((16f * contentScale).dp))
             .background(
                 Brush.verticalGradient(
                     listOf(Color(0xFF5B6670), Color(0xFF232D35), Color(0xFF11181E)),
                 ),
             )
-            .border(2.dp, if (value > 0.01) accent else Color(0xFF60717D), RoundedCornerShape(16.dp))
+            .border((2f * contentScale).dp, if (value > 0.01) accent else Color(0xFF60717D), RoundedCornerShape((16f * contentScale).dp))
             .pointerInput(onValue) {
                 awaitEachGesture {
                     try {
@@ -729,7 +738,7 @@ internal fun PedalControl(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 14.dp),
+                .padding(horizontal = (12f * contentScale).dp, vertical = (14f * contentScale).dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -737,7 +746,7 @@ internal fun PedalControl(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(6.dp)
+                        .height((6f * contentScale).dp)
                         .clip(RoundedCornerShape(50))
                         .background(Color.Black.copy(alpha = 0.55f)),
                 )
@@ -745,10 +754,10 @@ internal fun PedalControl(
             Text(
                 text = "${(value * 100).roundToInt()}%",
                 color = if (value > 0.01) accent else White,
-                fontSize = 15.sp,
+                fontSize = (15f * contentScale).sp,
                 fontWeight = FontWeight.Black,
             )
-            Text(label, color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
+            Text(label, color = Muted, fontSize = (9f * contentScale).sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
         }
     }
 }

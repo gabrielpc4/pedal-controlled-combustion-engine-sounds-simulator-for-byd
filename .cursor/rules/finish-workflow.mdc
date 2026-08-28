@@ -5,23 +5,18 @@ alwaysApply: true
 
 # Finish workflow
 
-When a coding task is complete, always run this delivery sequence before ending the turn:
+When a coding task is complete:
 
 1. Commit the task-related changes if not already committed.
-2. Build the debug APK:
-   ```powershell
-   .\gradlew.bat :mobile:assembleDebug --no-daemon
-   ```
-3. Install the newest generated APK on the `Simple_Automotive` emulator when available:
-   ```powershell
-   adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\engine-sounds-simulator-build-<number>-debug.apk
-   ```
-4. Bring the app to the foreground:
-   ```powershell
-   adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
-   ```
+2. Do **not** build, install, or bump the APK build number unless the user explicitly asks for an APK for the real car.
 
-Use the newest `engine-sounds-simulator-build-*-debug.apk` in `mobile/build/outputs/apk/debug/`.
-If the emulator is unavailable, report that and continue after build/commit.
+Normal task completion stops after commit. The build number only increments when assembling with `-PcarApk=true`:
+
+```powershell
+$env:JAVA_HOME = '<Android Studio JBR path>'
+.\gradlew.bat :mobile:assembleDebug -PcarApk=true --no-daemon
+```
+
+Only after that car APK request: install the newest debug APK on the `Simple_Automotive` emulator when available and bring `MainActivity` to the foreground.
 
 Do not commit APKs, build output, raw samples, or private reference material.

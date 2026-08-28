@@ -17,9 +17,10 @@ if (buildNumberFile.exists()) {
 val isAssembling = gradle.startParameter.taskNames.any { taskName ->
     taskName.contains("assemble", ignoreCase = true)
 }
+val stampCarBuild = gradle.startParameter.projectProperties["carApk"] == "true"
 
 val storedBuildNumber = buildNumberProperties.getProperty("buildNumber", "1").toInt()
-val stampedBuildNumber = if (isAssembling) storedBuildNumber + 1 else storedBuildNumber
+val stampedBuildNumber = if (isAssembling && stampCarBuild) storedBuildNumber + 1 else storedBuildNumber
 val coastLayerMixEnabledByDefault =
     (project.findProperty("coastLayerMixEnabledByDefault") as String?)?.toBooleanStrictOrNull()
         ?: (project.findProperty("coastOnlyFullGainExperiment") as String?)?.toBooleanStrictOrNull()
@@ -104,7 +105,7 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
     into(generatedSampleEngineAssets)
 }
 
-if (isAssembling) {
+if (isAssembling && stampCarBuild) {
     val nextBuildNumber = stampedBuildNumber
     val targetBuildNumberFile = buildNumberFile
     tasks.register("persistBuildNumber") {
