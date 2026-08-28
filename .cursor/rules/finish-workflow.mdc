@@ -1,0 +1,27 @@
+---
+description: End-of-task delivery workflow for this Android project
+alwaysApply: true
+---
+
+# Finish workflow
+
+When a coding task is complete, always run this delivery sequence before ending the turn:
+
+1. Commit the task-related changes if not already committed.
+2. Build the debug APK:
+   ```powershell
+   .\gradlew.bat :mobile:assembleDebug --no-daemon
+   ```
+3. Install the newest generated APK on the `Simple_Automotive` emulator when available:
+   ```powershell
+   adb install --bypass-low-target-sdk-block -r mobile\build\outputs\apk\debug\engine-sounds-simulator-build-<number>-debug.apk
+   ```
+4. Bring the app to the foreground:
+   ```powershell
+   adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
+   ```
+
+Use the newest `engine-sounds-simulator-build-*-debug.apk` in `mobile/build/outputs/apk/debug/`.
+If the emulator is unavailable, report that and continue after build/commit.
+
+Do not commit APKs, build output, raw samples, or private reference material.
