@@ -236,6 +236,46 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun firstGearPartialThrottleUpshiftsAtConfiguredRpm() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val profile = simulation.profile
+        val triggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, profile.firstToSecondPartialThrottleUpshiftRpm)
+
+        simulation.followIntegerSpeedRamp(0.0, triggerSpeedKmh - 3.0, 4.0, 0.5)
+        assertEquals(1, simulation.state.gear)
+
+        simulation.followIntegerSpeedRamp(triggerSpeedKmh - 3.0, triggerSpeedKmh + 2.0, 2.0, 0.5)
+        assertEquals(
+            "partial throttle must upshift 1→2 at the configured partial-shift RPM",
+            2,
+            simulation.state.gear,
+        )
+    }
+
+    @Test
+    fun firstGearFullThrottleWaitsForNormalUpshiftRpm() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val profile = simulation.profile
+        val partialTriggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, profile.firstToSecondPartialThrottleUpshiftRpm)
+        val normalTriggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, upshiftTriggerRpmForProfile(profile))
+
+        simulation.followIntegerSpeedRamp(0.0, partialTriggerSpeedKmh + 2.0, 5.0, 1.0)
+        assertEquals(
+            "full throttle should stay in 1st past the partial-throttle upshift point",
+            1,
+            simulation.state.gear,
+        )
+
+        simulation.followIntegerSpeedRamp(partialTriggerSpeedKmh + 2.0, normalTriggerSpeedKmh + 2.0, 5.0, 1.0)
+        assertTrue(
+            "full throttle must upshift only after the normal shift RPM: gear=${simulation.state.gear}",
+            simulation.state.gear >= 2,
+        )
+    }
+
+    @Test
     fun integerNoiseNearThresholdDoesNotCauseShiftHunting() {
         val simulation = EngineSimulation()
         simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 0.45)

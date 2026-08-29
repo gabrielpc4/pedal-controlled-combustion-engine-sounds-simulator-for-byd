@@ -31,10 +31,22 @@ class AudioMixModeRepository(context: Context) {
             .apply()
     }
 
+    fun isPopsAndBangsEnabled(): Boolean {
+        return preferences.getBoolean(KEY_POPS_AND_BANGS_ENABLED, DEFAULT_POPS_AND_BANGS_ENABLED)
+    }
+
+    fun setPopsAndBangsEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_POPS_AND_BANGS_ENABLED, enabled)
+            .apply()
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "audio_experiments"
         const val KEY_COAST_LAYER_MIX_ENABLED = "coast_layer_mix_enabled"
         const val KEY_COAST_ONLY_FULL_GAIN_LEGACY = "coast_only_full_gain"
+        const val KEY_POPS_AND_BANGS_ENABLED = "pops_and_bangs_enabled"
         const val DEFAULT_COAST_LAYER_MIX_ENABLED = true
+        const val DEFAULT_POPS_AND_BANGS_ENABLED = false
     }
 }

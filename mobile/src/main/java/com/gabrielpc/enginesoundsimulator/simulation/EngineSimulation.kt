@@ -47,6 +47,8 @@ data class EngineProfile(
     val downshiftDurationSeconds: Double = 0.340,
     val shiftDwellSeconds: Double = 0.150,
     val secondToFirstDownshiftRpm: Double = EngineTuning.DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
+    /** 1st → 2nd upshift RPM when throttle is below [FULL_THROTTLE_UPSHIFT_THRESHOLD]. */
+    val firstToSecondPartialThrottleUpshiftRpm: Double = EngineTuning.DEFAULT_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM,
 ) {
     companion object {
         private val bank = EngineSampleProfiles.default
@@ -448,7 +450,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
                 when {
                     shift?.gearChanged == true -> shift.targetRpm
                     shift?.direction == ShiftDirection.UP -> {
-                        min(rpmForSpeed(currentGearIndex), upshiftTriggerRpm())
+                        min(rpmForSpeed(currentGearIndex), upshiftTriggerRpm(currentGearIndex))
                     }
                     else -> rpmForSpeed(currentGearIndex)
                 }
@@ -479,7 +481,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (currentGearIndex < profile.gearRatios.lastIndex &&
             filteredThrottle > SHIFT_THROTTLE_THRESHOLD &&
             (
-                rpmForSpeed(currentGearIndex) >= upshiftTriggerRpm() ||
+                rpmForSpeed(currentGearIndex) >= upshiftTriggerRpm(currentGearIndex) ||
                     speedKmh >= upshiftTriggerSpeedKmh(currentGearIndex)
                 )
         ) {
@@ -510,12 +512,24 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         return evenlySpacedUpshiftSpeedKmh(profile, gearIndex)
     }
 
-    /** Upshift as late as each car allows — just below its limiter latch, never above [EngineProfile.upshiftRpm]. */
-    private fun upshiftTriggerRpm(): Double = upshiftTriggerRpmForProfile(profile)
+    /**
+     * Upshift as late as each car allows — just below its limiter latch, never above [EngineProfile.upshiftRpm].
+     * In 1st gear with partial throttle, uses [EngineProfile.firstToSecondPartialThrottleUpshiftRpm] instead.
+     */
+    private fun upshiftTriggerRpm(gearIndex: Int): Double {
+        val normalTrigger = upshiftTriggerRpmForProfile(profile)
+        if (gearIndex == 0 && filteredThrottle < FULL_THROTTLE_UPSHIFT_THRESHOLD) {
+            return profile.firstToSecondPartialThrottleUpshiftRpm
+                .coerceAtMost(normalTrigger)
+                .coerceAtLeast(profile.idleRpm + 500.0)
+        }
+
+        return normalTrigger
+    }
 
     private fun upshiftTriggerSpeedKmh(gearIndex: Int): Double {
         val rpmSpan = (profile.upshiftRpm - profile.idleRpm).coerceAtLeast(1.0)
-        val triggerFraction = (upshiftTriggerRpm() - profile.idleRpm) / rpmSpan
+        val triggerFraction = (upshiftTriggerRpm(gearIndex) - profile.idleRpm) / rpmSpan
         return upshiftSpeedKmh(gearIndex) * triggerFraction.coerceIn(0.0, 1.0)
     }
 
@@ -602,6 +616,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0
         private const val PEDAL_RELEASE_THRESHOLD = 0.001
         private const val SHIFT_THROTTLE_THRESHOLD = 0.10
+        /** Pedal above this uses the car's normal upshift RPM even in 1st gear. */
+        private const val FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
         internal const val UPSHIFT_LIMITER_HEADROOM_RPM = 12.0
         /** Shift this many RPM before each car's configured upshift point so the run-up stays off the limiter layer. */
         internal const val UPSHIFT_EARLY_MARGIN_RPM = 80.0

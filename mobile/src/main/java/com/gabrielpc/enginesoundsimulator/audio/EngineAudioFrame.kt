@@ -14,4 +14,6 @@ data class EngineAudioFrame(
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** When true, mute Load layers and ignore throttle in layer/output gain (RPM crossfades only). */
     val coastLayerMixEnabled: Boolean = true,
+    /** When true, play the shared recorded pops on throttle lift and mute each car's native overrun. */
+    val popsAndBangsEnabled: Boolean = false,
 )

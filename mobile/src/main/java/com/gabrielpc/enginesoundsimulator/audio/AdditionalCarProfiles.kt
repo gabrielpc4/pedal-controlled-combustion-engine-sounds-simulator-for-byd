@@ -31,7 +31,6 @@ internal fun lamborghiniAventadorSvProfile() = bandProfile(
         SampleEffectSpec("transmission_loop", SampleEffectControls.transmission, "fx_transmission.wav", SampleEffectTrigger.TRANSMISSION_LOOP, -17.0),
         SampleEffectSpec("shift_up", SampleEffectControls.gearChanges, "fx_shift.wav", SampleEffectTrigger.SHIFT_UP, -8.0),
         SampleEffectSpec("shift_down", SampleEffectControls.gearChanges, "fx_shift.wav", SampleEffectTrigger.SHIFT_DOWN, -10.0),
-        SampleEffectSpec("overrun", SampleEffectControls.exhaustOverrun, "fx_overrun.wav", SampleEffectTrigger.THROTTLE_LIFT, -11.0, 2_800.0),
     ),
 )
 

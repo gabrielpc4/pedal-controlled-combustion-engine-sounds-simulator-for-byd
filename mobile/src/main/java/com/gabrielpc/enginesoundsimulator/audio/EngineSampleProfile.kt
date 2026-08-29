@@ -44,7 +44,20 @@ internal data class SampleEffectSpec(
     val trigger: SampleEffectTrigger,
     val baseGainDb: Double = 0.0,
     val minimumRpm: Double = 0.0,
-)
+    /** Extra one-shot assets selected at trigger time (FMOD SMART_RANDOM-style). */
+    val variantAssetNames: List<String> = emptyList(),
+) {
+    val allAssetNames: List<String> = buildList {
+        add(assetName)
+        addAll(variantAssetNames)
+    }
+
+    fun isNativeExhaustOverrun(): Boolean {
+        return trigger == SampleEffectTrigger.THROTTLE_LIFT &&
+            control.id == SampleEffectControls.exhaustOverrun.id &&
+            id != SharedPopsAndBangs.EFFECT_ID
+    }
+}
 
 internal data class CurvePoint(val input: Double, val output: Double)
 
@@ -169,7 +182,7 @@ internal data class EngineSampleProfile(
 ) {
     val requiredAssets: Set<String> = linkedSetOf<String>().apply {
         layers.mapTo(this) { it.assetName }
-        effects.mapTo(this) { it.assetName }
+        effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
     fun loopLayersForLoad(coastLayerMixEnabled: Boolean): List<SampleLayerSpec> {
@@ -181,7 +194,7 @@ internal data class EngineSampleProfile(
 
     fun requiredAssetsForLoad(coastLayerMixEnabled: Boolean): Set<String> = linkedSetOf<String>().apply {
         loopLayersForLoad(coastLayerMixEnabled).mapTo(this) { it.assetName }
-        effects.mapTo(this) { it.assetName }
+        effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
     fun outputGainAt(throttle: Double): Double =

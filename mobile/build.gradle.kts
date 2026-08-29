@@ -78,7 +78,7 @@ val localEngineProfiles = listOf(
     LocalEngineProfileAssets(
         assetDirectory = "lamborghini_aventador_sv",
         sourceDirectory = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted"),
-        assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav", "fx_transmission.wav", "fx_shift.wav", "fx_overrun.wav"),
+        assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav", "fx_transmission.wav", "fx_shift.wav"),
         previewSource = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/preview1.jpg"),
         previewAssetName = "lamborghini_aventador_sv.jpg",
     ),
@@ -101,6 +101,15 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
     from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted_exterior")) {
         include("s013_ex_idle.wav")
         into("sample_engine/lamborghini_huracan_trofeo_evo2")
+    }
+    from(rootProject.file("reference/alfa_romeo_4c_exhaust_effects/01_backfire_internal")) {
+        include(
+            "backfire_1.wav",
+            "backfire_2.wav",
+            "backfire_3.wav",
+            "backfire_4.wav",
+        )
+        into("sample_engine/shared/pops_and_bangs")
     }
     into(generatedSampleEngineAssets)
 }

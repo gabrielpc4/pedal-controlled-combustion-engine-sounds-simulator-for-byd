@@ -39,6 +39,8 @@ data class EngineTuning(
     val shiftDwellMs: Double = 150.0,
     /** Fixed coupled-RPM threshold for the 2nd → 1st downshift only. */
     val secondToFirstDownshiftRpm: Double = DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
+    /** Fixed coupled-RPM threshold for the 1st → 2nd upshift when throttle is not floored. */
+    val firstToSecondPartialThrottleUpshiftRpm: Double = DEFAULT_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -81,6 +83,10 @@ data class EngineTuning(
             downshiftDurationMs = downshiftDurationMs.coerceIn(60.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
             secondToFirstDownshiftRpm = secondToFirstDownshiftRpm.coerceIn(cleanIdle + 200.0, cleanUpshift),
+            firstToSecondPartialThrottleUpshiftRpm = firstToSecondPartialThrottleUpshiftRpm.coerceIn(
+                cleanIdle + 200.0,
+                cleanUpshift,
+            ),
             gearRatios = sanitizeGears(gearRatios),
             frontWheelTorqueCurve = sanitizeCurve(
                 frontWheelTorqueCurve,
@@ -98,6 +104,7 @@ data class EngineTuning(
 
     companion object {
         const val DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
+        const val DEFAULT_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM = 6_400.0
         val DEFAULT_GEARS = EngineSampleProfiles.default.gearRatios
         val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),

@@ -56,10 +56,15 @@ internal object WavPcmDecoder {
                     require(format == 1) { "WAV data appeared before a PCM format chunk" }
                     require(channels in 1..2) { "Only mono/stereo WAV is supported (channels=$channels)" }
                     require(bitsPerSample == 16) { "Only PCM16 WAV is supported (bits=$bitsPerSample)" }
-                    require(chunkSize % (channels * 2) == 0) { "Misaligned WAV PCM data" }
-                    val samples = ShortArray(chunkSize / Short.SIZE_BYTES)
+                    val frameBytes = channels * 2
+                    val alignedChunkSize = chunkSize - (chunkSize % frameBytes)
+                    require(alignedChunkSize > 0) { "Misaligned WAV PCM data" }
+                    val samples = ShortArray(alignedChunkSize / Short.SIZE_BYTES)
                     for (index in samples.indices) {
                         samples[index] = stream.readUInt16Le().toShort()
+                    }
+                    if (alignedChunkSize < chunkSize) {
+                        stream.skipFully(chunkSize - alignedChunkSize)
                     }
                     pcmSamples = samples
                 }

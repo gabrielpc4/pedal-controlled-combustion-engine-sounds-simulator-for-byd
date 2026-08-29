@@ -30,6 +30,7 @@ class EngineAudioEngine(context: Context) {
     private val parameters = AtomicReference(EngineAudioFrame())
     private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
     private val loadedSampleProfileId = AtomicReference<String?>(null)
+    private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
     private val coastLayerMixEnabled = AtomicBoolean(true)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
@@ -77,6 +78,9 @@ class EngineAudioEngine(context: Context) {
     fun layerOutputMeters(): List<LayerOutputMeter> = layerMeterBus?.snapshot().orEmpty()
 
     fun loadedSampleProfileId(): String? = loadedSampleProfileId.get()
+
+    /** Returns and clears the profile id when the most recent render loop failed before playback. */
+    internal fun consumeLoadFailure(): AudioLoadFailure? = loadFailure.getAndSet(null)
 
     fun isAudioActive(): Boolean = synchronized(lifecycleLock) {
         running.get() && renderThread.get()?.isAlive == true
@@ -143,11 +147,16 @@ class EngineAudioEngine(context: Context) {
         val focusGranted = focusResult.getOrDefault(false)
         if (!focusGranted) {
             running.set(false)
+            reportLoadFailure(
+                sampleProfile.id,
+                focusResult.exceptionOrNull()?.message ?: "Audio focus was not granted by the system.",
+            )
             return
         }
 
         focusHeld.set(true)
         focusMultiplier.set(1.0)
+        loadFailure.set(null)
         running.set(true)
         val runId = generation.incrementAndGet()
         val thread = Thread({ renderLoop(runId, sampleProfile) }, "engine-audio-renderer").apply { isDaemon = true }
@@ -158,6 +167,7 @@ class EngineAudioEngine(context: Context) {
             renderThread.compareAndSet(thread, null)
             running.set(false)
             focusMultiplier.set(0.0)
+            reportLoadFailure(sampleProfile.id, "Could not start the audio renderer thread.")
             abandonFocusIfHeld()
         }
     }
@@ -213,6 +223,7 @@ class EngineAudioEngine(context: Context) {
                 )
             } catch (throwable: Throwable) {
                 Log.e(TAG, "Failed to decode ${sampleProfile.id} sample bank", throwable)
+                reportLoadFailure(sampleProfile.id, formatLoadFailureDetail(throwable))
                 return
             }
             // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
@@ -224,6 +235,10 @@ class EngineAudioEngine(context: Context) {
             val active = openTrack(sampleRate)
             if (active == null) {
                 Log.e(TAG, "AudioTrack failed to initialize for ${sampleProfile.id} at ${sampleRate}Hz")
+                reportLoadFailure(
+                    sampleProfile.id,
+                    "Audio output could not be opened at ${sampleRate} Hz.",
+                )
                 return
             }
             opened = active
@@ -278,6 +293,9 @@ class EngineAudioEngine(context: Context) {
             }
         } catch (throwable: Throwable) {
             Log.e(TAG, "Engine audio render loop stopped for ${sampleProfile.id}", throwable)
+            if (loadedSampleProfileId.get() != sampleProfile.id) {
+                reportLoadFailure(sampleProfile.id, formatLoadFailureDetail(throwable))
+            }
         } finally {
             loadedSampleProfileId.set(null)
             opened?.track?.let { track ->
@@ -404,6 +422,19 @@ class EngineAudioEngine(context: Context) {
         val framesPerWrite: Int,
         val capacityFrames: Int,
     )
+
+    private fun reportLoadFailure(profileId: String, detail: String) {
+        loadFailure.set(AudioLoadFailure(profileId, detail))
+    }
+
+    private fun formatLoadFailureDetail(throwable: Throwable): String {
+        val message = throwable.message?.trim().orEmpty()
+        if (message.isNotEmpty()) {
+            return message
+        }
+        return throwable::class.java.simpleName
+    }
+
     private companion object {
         const val TAG = "EngineAudioEngine"
         const val RENDER_JOIN_TIMEOUT_MS = 750L
@@ -413,3 +444,8 @@ class EngineAudioEngine(context: Context) {
         const val STEREO_CHANNEL_COUNT = 2
     }
 }
+
+internal data class AudioLoadFailure(
+    val profileId: String,
+    val detail: String,
+)

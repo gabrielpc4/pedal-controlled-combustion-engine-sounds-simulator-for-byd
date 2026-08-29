@@ -44,10 +44,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -93,6 +95,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
@@ -167,6 +170,7 @@ class MainActivity : ComponentActivity() {
                         onToggleInputSource = controller::toggleInputSource,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
+                        onTogglePopsAndBangs = controller::togglePopsAndBangs,
                         onToggleAppMute = controller::toggleAppMute,
                         onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
                         onIncreaseMasterVolume = controller::increaseAppMasterVolume,
@@ -179,6 +183,7 @@ class MainActivity : ComponentActivity() {
                         onLayerMixSolo = controller::setLayerMixSolo,
                         onLayerMixVolume = controller::setLayerMixVolume,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
+                        onDismissUserMessage = controller::dismissUserMessage,
                     )
                 }
             }
@@ -239,6 +244,7 @@ private fun MotorSoundDashboard(
     onToggleInputSource: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
+    onTogglePopsAndBangs: () -> Unit,
     onToggleAppMute: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
@@ -251,6 +257,7 @@ private fun MotorSoundDashboard(
     onLayerMixSolo: (String, Boolean) -> Unit,
     onLayerMixVolume: (String, Double) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
+    onDismissUserMessage: () -> Unit,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
@@ -316,6 +323,16 @@ private fun MotorSoundDashboard(
                         onOpenTuning = { tuningOpen = true },
                     )
 
+                    state.userMessage?.let { message ->
+                        DismissableUserMessageBanner(
+                            message = message,
+                            onDismiss = onDismissUserMessage,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 34.dp, vertical = 8.dp),
+                        )
+                    }
+
                     when (mainScreen) {
                         DashboardMainScreen.CLASSIC -> Box(
                             modifier = Modifier
@@ -347,23 +364,37 @@ private fun MotorSoundDashboard(
                                         .padding(start = 16.dp, bottom = 6.dp),
                                 )
                             }
-                            ClassicDriveControls(
-                                state = state,
-                                onThrottle = onThrottle,
-                                onBrake = onBrake,
-                                onTransmissionChange = onTransmissionChange,
+                            Row(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
-                                    .padding(bottom = 12.dp),
-                            )
-                            EngineStartStopButton(
-                                running = state.engineSoundEnabled,
-                                loading = state.engineStartLoading,
-                                onClick = onToggleSound,
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(start = 4.dp, bottom = 12.dp),
-                            )
+                                    .fillMaxWidth()
+                                    .padding(start = 4.dp, end = 4.dp, bottom = 12.dp),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
+                                EngineStartStopButton(
+                                    running = state.engineSoundEnabled,
+                                    loading = state.engineStartLoading,
+                                    onClick = onToggleSound,
+                                )
+                                PopsAndBangsToggle(
+                                    enabled = state.popsAndBangsEnabled,
+                                    onToggle = onTogglePopsAndBangs,
+                                    modifier = Modifier.padding(start = 10.dp, bottom = 8.dp),
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth(),
+                                    contentAlignment = Alignment.BottomCenter,
+                                ) {
+                                    ClassicDriveControls(
+                                        state = state,
+                                        onThrottle = onThrottle,
+                                        onBrake = onBrake,
+                                        onTransmissionChange = onTransmissionChange,
+                                    )
+                                }
+                            }
                             DashboardMixerLauncherButton(
                                 onClick = { mainScreen = DashboardMainScreen.MIXER },
                                 modifier = Modifier
@@ -1178,6 +1209,113 @@ internal fun PedalControl(
 }
 
 @Composable
+private fun DismissableUserMessageBanner(
+    message: UserVisibleMessage,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(StartStopRedBody.copy(alpha = 0.94f))
+            .border(1.dp, Red.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = message.title,
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = message.detail,
+                color = Muted,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+        }
+        IconButton(onClick = onDismiss) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Dismiss message",
+                tint = White,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PopsAndBangsToggle(
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val trackColor = if (enabled) {
+        Amber.copy(alpha = 0.92f)
+    } else {
+        Line
+    }
+    val thumbProgress by animateFloatAsState(
+        targetValue = if (enabled) {
+            1f
+        } else {
+            0f
+        },
+        animationSpec = tween(durationMillis = 180),
+        label = "popsAndBangsToggle",
+    )
+    val trackWidth = 46.dp
+    val trackHeight = 24.dp
+    val thumbSize = 18.dp
+    val trackInset = 3.dp
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Pops & Bangs",
+            color = if (enabled) {
+                Amber
+            } else {
+                Muted
+            },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.4.sp,
+            textAlign = TextAlign.Center,
+            lineHeight = 12.sp,
+            modifier = Modifier.width(72.dp),
+        )
+        BoxWithConstraints(
+            modifier = Modifier
+                .width(trackWidth)
+                .height(trackHeight)
+                .clip(RoundedCornerShape(50))
+                .background(trackColor)
+                .clickable(onClick = onToggle),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            val travel = maxWidth - thumbSize - trackInset * 2
+            Box(
+                modifier = Modifier
+                    .padding(start = trackInset)
+                    .offset(x = travel * thumbProgress)
+                    .size(thumbSize)
+                    .clip(CircleShape)
+                    .background(White),
+            )
+        }
+    }
+}
+
+@Composable
 private fun EngineStartStopButton(
     running: Boolean,
     loading: Boolean,
@@ -1525,16 +1663,6 @@ private fun TachometerGauge(
                     letterSpacing = 2.sp,
                 )
                 Text("KM/H", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-            }
-            if (drivetrain.isShifting) {
-                Text(
-                    text = if (drivetrain.shiftDirection.name == "UP") "SHIFT" else "DOWNSHIFT",
-                    color = Green,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.4.sp,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = gaugeSize * 0.08f),
-                )
             }
         }
     }

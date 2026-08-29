@@ -21,7 +21,11 @@ class SampleEngineRendererTest {
         EngineSampleProfiles.all.forEach { candidate ->
             assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())
             assertTrue(candidate.requiredAssets.containsAll(candidate.layers.map { it.assetName }))
-            assertTrue(candidate.requiredAssets.containsAll(candidate.effects.map { it.assetName }))
+            assertTrue(
+                candidate.requiredAssets.containsAll(
+                    candidate.effects.flatMap { effect -> effect.allAssetNames },
+                ),
+            )
             assertTrue(candidate.outputSampleRate == 44_100 || candidate.outputSampleRate == 48_000)
             for (rpm in candidate.idleRpm.toInt()..candidate.limiterRpm.toInt() step 25) {
                 val onLoad = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0, coastLayerMixEnabled = false) }
@@ -97,6 +101,22 @@ class SampleEngineRendererTest {
         assertEquals(-16_000.0 / 32_768.0, decoded.sampleAt(0, 1).toDouble(), 0.00001)
         assertEquals(8_000.0 / 32_768.0, decoded.sampleAt(1, 1).toDouble(), 0.00001)
         assertEquals(40L * 2 * Short.SIZE_BYTES, decoded.decodedBytes)
+    }
+
+    @Test
+    fun wavDecoderToleratesTrailingPartialStereoFrameFromFsbExports() {
+        val wav = pcm16Wav(
+            sampleRate = 44_100,
+            channels = 2,
+            interleaved = shortArrayOf(12_000, -4_000, -16_000, 8_000).repeatFrames(20),
+            loopStart = 0,
+            loopEndInclusive = 39,
+            dataBytes = 40 * 2 * Short.SIZE_BYTES + 2,
+        )
+
+        val decoded = WavPcmDecoder.decode(ByteArrayInputStream(wav))
+
+        assertEquals(40, decoded.frameCount)
     }
 
     @Test
@@ -249,6 +269,61 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun sharedPopsAndBangsUsesRecordedAlfaBackfireVariantsWithoutAttenuation() {
+        assertEquals(0.0, SharedPopsAndBangs.effectSpec.baseGainDb, 0.0)
+        assertEquals(4, SharedPopsAndBangs.assetNames.size)
+        assertEquals(SampleEffectTrigger.THROTTLE_LIFT, SharedPopsAndBangs.effectSpec.trigger)
+        assertTrue(SharedPopsAndBangs.assetNames.all { name -> name.startsWith("backfire_") })
+    }
+
+    @Test
+    fun sharedPopsAndBangsOverridesNativeOverrunWhenEnabled() {
+        val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
+        val decoded = aventador.requiredAssets.associateWith { asset ->
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        } + SharedPopsAndBangs.assetNames.associateWith {
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        }
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, aventador)
+        val output = ShortArray(1_920)
+        val frame = EngineAudioFrame(
+            rpm = 4_000.0,
+            throttle = 0.0,
+            popsAndBangsEnabled = true,
+        )
+
+        renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5, popsAndBangsEnabled = true), output, gain = 0.7)
+        renderer.render(frame, output, gain = 0.7)
+        assertEquals(1L, renderer.diagnostics().effectTriggers)
+        assertTrue(renderer.diagnostics().activeEffects.contains(SharedPopsAndBangs.EFFECT_ID))
+    }
+
+    @Test
+    fun throttleLiftOverrunDoesNotRetriggerWhileSampleIsStillPlaying() {
+        val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
+        val decoded = aventador.requiredAssets.associateWith { asset ->
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        } + SharedPopsAndBangs.assetNames.associateWith {
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        }
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, aventador)
+        val output = ShortArray(1_920)
+        val enabled = EngineAudioFrame(rpm = 4_000.0, popsAndBangsEnabled = true)
+
+        renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5, popsAndBangsEnabled = true), output, gain = 0.7)
+        renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.0, popsAndBangsEnabled = true), output, gain = 0.7)
+        assertEquals(1L, renderer.diagnostics().effectTriggers)
+
+        renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5, popsAndBangsEnabled = true), output, gain = 0.7)
+        renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.0, popsAndBangsEnabled = true), output, gain = 0.7)
+        assertEquals(1L, renderer.diagnostics().effectTriggers)
+
+        repeat(4) {
+            renderer.render(enabled.copy(throttle = 0.0), output, gain = 0.7)
+        }
+    }
+
+    @Test
     fun layerMixSoloMutesNonSoloLoopsAndBlocksShiftEffects() {
         val renderer = SampleEngineRenderer.fromDecoded(48_000, testBank(), profile)
         val output = ShortArray(1_920)
@@ -396,6 +471,16 @@ class SampleEngineRendererTest {
     private fun strongestGain(rpm: Double, throttle: Double): Double =
         profile.layers.maxOf { it.gainAt(rpm, throttle, coastLayerMixEnabled = false) }
 
+    private fun shortLoopSample(frameCount: Int, sampleRate: Int): PcmLoopData {
+        return PcmLoopData(
+            interleavedSamples = ShortArray(frameCount * 2) { 1_000 },
+            sourceChannels = 2,
+            sampleRate = sampleRate,
+            loopStartFrame = 0,
+            loopEndFrameExclusive = frameCount,
+        )
+    }
+
     private fun testBank(): Map<String, PcmLoopData> = profile.requiredAssets.associateWith { asset ->
         val frequency = 70.0 + abs(asset.hashCode() % 220)
         val samples = ShortArray(2_048 * 2) { sampleIndex ->
@@ -422,8 +507,9 @@ class SampleEngineRendererTest {
         interleaved: ShortArray,
         loopStart: Int,
         loopEndInclusive: Int,
+        dataBytes: Int = interleaved.size * 2,
     ): ByteArray {
-        val dataBytes = interleaved.size * 2
+        require(dataBytes >= interleaved.size * 2) { "dataBytes must cover interleaved PCM" }
         val smplBytes = 60
         return ByteArrayOutputStream().apply {
             write("RIFF".toByteArray())
@@ -439,6 +525,9 @@ class SampleEngineRendererTest {
             write("data".toByteArray())
             writeLe32(dataBytes)
             interleaved.forEach { sample -> writeLe16(sample.toInt()) }
+            if (dataBytes > interleaved.size * 2) {
+                write(ByteArray(dataBytes - interleaved.size * 2))
+            }
             write("smpl".toByteArray())
             writeLe32(smplBytes)
             repeat(7) { writeLe32(0) }

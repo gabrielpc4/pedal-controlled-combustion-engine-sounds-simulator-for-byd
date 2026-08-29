@@ -5,6 +5,7 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.pow
+import kotlin.random.Random
 
 internal data class SampleRendererDiagnostics(
     val profileId: String = EngineSampleProfiles.default.id,
@@ -31,6 +32,7 @@ internal class SampleEngineRenderer private constructor(
     private val profile: EngineSampleProfile,
     private val voices: List<LoopVoice>,
     private val effectVoices: List<EffectVoice>,
+    private val popsAndBangsVoice: EffectVoice?,
     private val decodedBytes: Long,
 ) {
     private var smoothedRpm = profile.idleRpm
@@ -64,7 +66,7 @@ internal class SampleEngineRenderer private constructor(
         return SampleRendererDiagnostics(
             profileId = profile.id,
             loadedLoops = voices.size,
-            loadedEffects = effectVoices.size,
+            loadedEffects = effectVoices.size + if (popsAndBangsVoice != null) 1 else 0,
             decodedBytes = decodedBytes,
             targetRpm = lastRequestedRpm.toInt(),
             renderRpm = smoothedRpm.toInt(),
@@ -77,14 +79,26 @@ internal class SampleEngineRenderer private constructor(
             peak = lastBlockPeak,
             overRangeSamples = overRangeSamples,
             effectTriggers = effectTriggers,
-            activeEffects = effectVoices.asSequence()
-                .filter { it.isAudible || it.targetGain > SILENCE_GAIN }
-                .joinToString(",") { it.spec.id }
-                .ifBlank { "none" },
+            activeEffects = buildList {
+                effectVoices.asSequence()
+                    .filter { it.isAudible || it.targetGain > SILENCE_GAIN }
+                    .mapTo(this) { it.spec.id }
+                popsAndBangsVoice?.let { voice ->
+                    if (voice.isAudible || voice.targetGain > SILENCE_GAIN) {
+                        add(voice.spec.id)
+                    }
+                }
+            }.joinToString(",").ifBlank { "none" },
         )
     }
 
-    val meterTrackIds: List<String> = voices.map { it.spec.id } + effectVoices.map { it.spec.id }
+    val meterTrackIds: List<String> = buildList {
+        addAll(voices.map { it.spec.id })
+        addAll(effectVoices.map { it.spec.id })
+        if (popsAndBangsVoice != null) {
+            add(popsAndBangsVoice.spec.id)
+        }
+    }
 
     /** Copies current gains into caller-owned storage without allocating on the audio thread. */
     fun writeLayerOutputLevels(target: EngineAudioFrame, destination: DoubleArray) {
@@ -105,6 +119,9 @@ internal class SampleEngineRenderer private constructor(
             destination[index] = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
             index += 1
             effectIndex += 1
+        }
+        popsAndBangsVoice?.let { voice ->
+            destination[index] = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
         }
     }
 
@@ -173,18 +190,27 @@ internal class SampleEngineRenderer private constructor(
             }
             var effectLeft = 0.0
             var effectRight = 0.0
-            var effectIndex = 0
-            while (effectIndex < effectVoices.size) {
-                val voice = effectVoices[effectIndex]
-                voice.gain += (voice.targetGain - voice.gain) * layerAlpha
-                if (voice.isAudible) {
-                    voice.readStereoCubic()
-                    effectLeft += voice.sampleLeft * voice.gain
-                    effectRight += voice.sampleRight * voice.gain
-                }
-                if (voice.advance()) loopWraps += 1
-                effectIndex += 1
+        var effectIndex = 0
+        while (effectIndex < effectVoices.size) {
+            val voice = effectVoices[effectIndex]
+            voice.gain += (voice.targetGain - voice.gain) * layerAlpha
+            if (voice.isAudible) {
+                voice.readStereoCubic()
+                effectLeft += voice.sampleLeft * voice.gain
+                effectRight += voice.sampleRight * voice.gain
             }
+            if (voice.advance()) loopWraps += 1
+            effectIndex += 1
+        }
+        popsAndBangsVoice?.let { voice ->
+            voice.gain += (voice.targetGain - voice.gain) * layerAlpha
+            if (voice.isAudible) {
+                voice.readStereoCubic()
+                effectLeft += voice.sampleLeft * voice.gain
+                effectRight += voice.sampleRight * voice.gain
+            }
+            if (voice.advance()) loopWraps += 1
+        }
             masterGain += (targetMaster - masterGain) * masterAlpha
             profileOutputGain += (targetProfileOutputGain - profileOutputGain) * profileGainAlpha
             enabledGain += (targetEnabled - enabledGain) * enabledAlpha
@@ -237,6 +263,15 @@ internal class SampleEngineRenderer private constructor(
                     PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName)
                 }
                 .forEach(::add)
+            popsAndBangsVoice?.let { voice ->
+                if (
+                    voice.isAudible &&
+                    voice.gain > SILENCE_GAIN &&
+                    (!anyLayerSolo || target.layerMix[voice.spec.id]?.solo == true)
+                ) {
+                    add(PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName))
+                }
+            }
         }
     }
 
@@ -263,14 +298,15 @@ internal class SampleEngineRenderer private constructor(
         if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
         if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
             throttleLiftArmed = false
-            triggerOneShots(SampleEffectTrigger.THROTTLE_LIFT, smoothedRpm, layerMix, target.coastLayerMixEnabled)
+            triggerThrottleLiftOneShots(smoothedRpm, layerMix, target)
         }
 
         var effectIndex = 0
         while (effectIndex < effectVoices.size) {
             val voice = effectVoices[effectIndex]
-            val authoredGain = when (voice.spec.trigger) {
-                SampleEffectTrigger.TRANSMISSION_LOOP -> {
+            val authoredGain = when {
+                voice.spec.isNativeExhaustOverrun() && target.popsAndBangsEnabled -> 0.0
+                voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
                 }
                 else -> {
@@ -283,10 +319,63 @@ internal class SampleEngineRenderer private constructor(
             }
             voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix, target.coastLayerMixEnabled)
             if (voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP) {
-                voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate *
+                voice.phaseIncrement = voice.sampleRate.toDouble() / outputSampleRate *
                     (0.55 + normalizedRpm * 1.25)
             }
             effectIndex += 1
+        }
+        popsAndBangsVoice?.let { voice ->
+            val authoredGain = if (target.popsAndBangsEnabled && voice.isOneShotActive) {
+                voice.baseGain
+            } else {
+                0.0
+            }
+            voice.targetGain = applyLayerMix(
+                voice.spec.id,
+                authoredGain,
+                layerMix,
+                target.coastLayerMixEnabled,
+            )
+        }
+    }
+
+    private fun triggerThrottleLiftOneShots(
+        rpm: Double,
+        layerMix: Map<String, LayerMixControl>,
+        target: EngineAudioFrame,
+    ) {
+        if (rpm < SharedPopsAndBangs.effectSpec.minimumRpm) {
+            return
+        }
+        if (isThrottleLiftOneShotActive()) {
+            return
+        }
+
+        if (target.popsAndBangsEnabled) {
+            val voice = popsAndBangsVoice ?: return
+            val authoredGain = voice.baseGain
+            if (applyLayerMix(voice.spec.id, authoredGain, layerMix, target.coastLayerMixEnabled) > SILENCE_GAIN) {
+                if (voice.trigger()) {
+                    effectTriggers += 1
+                }
+            }
+            return
+        }
+
+        triggerOneShots(
+            SampleEffectTrigger.THROTTLE_LIFT,
+            rpm,
+            layerMix,
+            target.coastLayerMixEnabled,
+        )
+    }
+
+    private fun isThrottleLiftOneShotActive(): Boolean {
+        if (popsAndBangsVoice?.isOneShotActive == true) {
+            return true
+        }
+        return effectVoices.any { voice ->
+            voice.spec.trigger == SampleEffectTrigger.THROTTLE_LIFT && voice.isOneShotActive
         }
     }
 
@@ -301,8 +390,9 @@ internal class SampleEngineRenderer private constructor(
         }.forEach { voice ->
             val authoredGain = voice.baseGain
             if (applyLayerMix(voice.spec.id, authoredGain, layerMix, coastLayerMixEnabled) > SILENCE_GAIN) {
-                voice.trigger()
-                effectTriggers += 1
+                if (voice.trigger()) {
+                    effectTriggers += 1
+                }
             }
         }
     }
@@ -355,6 +445,10 @@ internal class SampleEngineRenderer private constructor(
                 add(LayerOutputMeter(voice.spec.id, (voice.gain * loopScale).coerceIn(0.0, 1.0)))
             }
             effectVoices.forEach { voice ->
+                val level = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+                add(LayerOutputMeter(voice.spec.id, level))
+            }
+            popsAndBangsVoice?.let { voice ->
                 val level = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
                 add(LayerOutputMeter(voice.spec.id, level))
             }
@@ -412,7 +506,7 @@ internal class SampleEngineRenderer private constructor(
 
     private class EffectVoice(
         val spec: SampleEffectSpec,
-        val data: PcmLoopData,
+        private val sampleVariants: List<PcmLoopData>,
         private val outputSampleRate: Int,
     ) {
         var phase = 0.0
@@ -423,18 +517,39 @@ internal class SampleEngineRenderer private constructor(
             private set
         var sampleRight = 0.0
             private set
+        private var activeSample = sampleVariants.first()
         private var active = spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP
         private var hasLooped = false
+        private var lastVariantIndex = -1
+        val sampleRate = sampleVariants.first().sampleRate
         val baseGain = 10.0.pow(spec.baseGainDb / 20.0)
         val isOneShotActive: Boolean
             get() = spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP && active
         val isAudible: Boolean get() = active && gain > SILENCE_GAIN
 
-        fun trigger() {
+        fun trigger(): Boolean {
+            if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP && active) {
+                return false
+            }
+            activeSample = pickVariantSample()
             phase = 0.0
-            phaseIncrement = data.sampleRate.toDouble() / outputSampleRate
+            phaseIncrement = activeSample.sampleRate.toDouble() / outputSampleRate
             active = true
             hasLooped = false
+            return true
+        }
+
+        private fun pickVariantSample(): PcmLoopData {
+            if (sampleVariants.size == 1) {
+                lastVariantIndex = 0
+                return sampleVariants.first()
+            }
+            var candidateIndex = Random.nextInt(sampleVariants.size)
+            while (candidateIndex == lastVariantIndex) {
+                candidateIndex = Random.nextInt(sampleVariants.size)
+            }
+            lastVariantIndex = candidateIndex
+            return sampleVariants[candidateIndex]
         }
 
         fun readStereoCubic() {
@@ -444,11 +559,11 @@ internal class SampleEngineRenderer private constructor(
             val frame1 = resolveFrame(frame)
             val frame2 = resolveFrame(frame + 1)
             val frame3 = resolveFrame(frame + 2)
-            sampleLeft = data.interpolateCubic(0, frame0, frame1, frame2, frame3, fraction)
-            sampleRight = if (data.sourceChannels == 1) {
+            sampleLeft = activeSample.interpolateCubic(0, frame0, frame1, frame2, frame3, fraction)
+            sampleRight = if (activeSample.sourceChannels == 1) {
                 sampleLeft
             } else {
-                data.interpolateCubic(1, frame0, frame1, frame2, frame3, fraction)
+                activeSample.interpolateCubic(1, frame0, frame1, frame2, frame3, fraction)
             }
         }
 
@@ -456,31 +571,31 @@ internal class SampleEngineRenderer private constructor(
             if (!active) return false
             phase += phaseIncrement
             if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
-                if (phase >= data.frameCount - 1) {
+                if (phase >= activeSample.frameCount - 1) {
                     active = false
                     gain = 0.0
                     targetGain = 0.0
                 }
                 return false
             }
-            if (phase < data.loopEndFrameExclusive) return false
-            val loopLength = data.loopEndFrameExclusive - data.loopStartFrame
-            phase = data.loopStartFrame + (phase - data.loopEndFrameExclusive) % loopLength
+            if (phase < activeSample.loopEndFrameExclusive) return false
+            val loopLength = activeSample.loopEndFrameExclusive - activeSample.loopStartFrame
+            phase = activeSample.loopStartFrame + (phase - activeSample.loopEndFrameExclusive) % loopLength
             hasLooped = true
             return true
         }
 
         private fun resolveFrame(index: Int): Int {
             if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
-                return index.coerceIn(0, data.frameCount - 1)
+                return index.coerceIn(0, activeSample.frameCount - 1)
             }
-            val start = data.loopStartFrame
-            val end = data.loopEndFrameExclusive
+            val start = activeSample.loopStartFrame
+            val end = activeSample.loopEndFrameExclusive
             val length = end - start
             return when {
                 index >= end -> start + (index - end) % length
                 hasLooped && index < start -> end - 1 - ((start - 1 - index) % length)
-                else -> index.coerceIn(0, data.frameCount - 1)
+                else -> index.coerceIn(0, activeSample.frameCount - 1)
             }
         }
     }
@@ -501,10 +616,19 @@ internal class SampleEngineRenderer private constructor(
                 LoopVoice(spec, requireNotNull(decoded[spec.assetName]))
             }
             val effects = profile.effects.map { spec ->
-                EffectVoice(spec, requireNotNull(decoded[spec.assetName]), outputSampleRate)
+                val samples = spec.allAssetNames.map { assetName ->
+                    requireNotNull(decoded[assetName])
+                }
+                EffectVoice(spec, samples, outputSampleRate)
             }
-            val decodedBytes = decoded.values.sumOf(PcmLoopData::decodedBytes)
-            return SampleEngineRenderer(outputSampleRate, profile, voices, effects, decodedBytes)
+            val popsSamples = SharedPopsAndBangs.assetNames.map { assetName ->
+                assetManager.open(SharedPopsAndBangs.assetPath(assetName), AssetManager.ACCESS_STREAMING)
+                    .use(WavPcmDecoder::decode)
+            }
+            val popsVoice = EffectVoice(SharedPopsAndBangs.effectSpec, popsSamples, outputSampleRate)
+            val decodedBytes = decoded.values.sumOf(PcmLoopData::decodedBytes) +
+                popsSamples.sumOf(PcmLoopData::decodedBytes)
+            return SampleEngineRenderer(outputSampleRate, profile, voices, effects, popsVoice, decodedBytes)
         }
 
         internal fun fromDecoded(
@@ -517,21 +641,27 @@ internal class SampleEngineRenderer private constructor(
                 LoopVoice(spec, requireNotNull(decoded[spec.assetName]) { "Missing ${spec.assetName}" })
             }
             val effects = profile.effects.map { spec ->
-                EffectVoice(
-                    spec,
-                    requireNotNull(decoded[spec.assetName]) { "Missing ${spec.assetName}" },
-                    outputSampleRate,
-                )
+                val samples = spec.allAssetNames.map { assetName ->
+                    requireNotNull(decoded[assetName]) { "Missing $assetName" }
+                }
+                EffectVoice(spec, samples, outputSampleRate)
             }
+            val popsVoice = SharedPopsAndBangs.assetNames
+                .mapNotNull { assetName -> decoded[assetName] }
+                .takeIf { it.size == SharedPopsAndBangs.assetNames.size }
+                ?.let { samples ->
+                    EffectVoice(SharedPopsAndBangs.effectSpec, samples, outputSampleRate)
+                }
             return SampleEngineRenderer(
                 outputSampleRate,
                 profile,
                 voices,
                 effects,
+                popsVoice,
                 profile.requiredAssets.sumOf { asset ->
                     val data = requireNotNull(decoded[asset]) { "Missing $asset" }
                     data.decodedBytes
-                },
+                } + (popsVoice?.let { SharedPopsAndBangs.assetNames.sumOf { name -> decoded[name]!!.decodedBytes } } ?: 0L),
             )
         }
 

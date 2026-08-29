@@ -253,6 +253,14 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             ) {
                 onChange(config.copy(engine = engine.copy(secondToFirstDownshiftRpm = it)))
             }
+            ParameterSlider(
+                "1→2 PARTIAL RPM",
+                engine.firstToSecondPartialThrottleUpshiftRpm,
+                (engine.idleRpm + 200.0)..engine.upshiftRpm,
+                "%.0f RPM",
+            ) {
+                onChange(config.copy(engine = engine.copy(firstToSecondPartialThrottleUpshiftRpm = it)))
+            }
         }
         PanelCard("AUDIO SMOOTHING", "Small fades that keep the sample-bank output seamless", Modifier.weight(1.15f)) {
             ParameterSlider("RPM FOLLOW", audio.rpmSmoothingMs, 1.0..300.0, "%.0f ms") {

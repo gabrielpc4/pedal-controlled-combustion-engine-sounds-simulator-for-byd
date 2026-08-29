@@ -72,6 +72,8 @@ data class DriveSnapshot(
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
     val engineStartLoading: Boolean = false,
+    val popsAndBangsEnabled: Boolean = false,
+    val userMessage: UserVisibleMessage? = null,
 )
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
@@ -85,6 +87,7 @@ class DriveController(context: Context) {
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
     private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
+    private val popsAndBangsEnabled = AtomicBoolean(audioMixModeRepository.isPopsAndBangsEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private val appMasterVolume = AtomicReference(appMasterVolumeRepository.load())
     private val appMasterVolumeBeforeMute = AtomicReference<Double?>(null)
@@ -113,6 +116,9 @@ class DriveController(context: Context) {
     private var postLoadEngineStartDelaySeconds = 0.0
 
     @Volatile
+    private var userVisibleMessage: UserVisibleMessage? = null
+
+    @Volatile
     private var loopThread: Thread? = null
 
     @Volatile
@@ -134,6 +140,7 @@ class DriveController(context: Context) {
         availableCarCount = EngineSampleProfiles.all.size,
         coastLayerMixEnabled = coastLayerMixEnabled.get(),
         legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
+        popsAndBangsEnabled = popsAndBangsEnabled.get(),
         appMasterVolume = appMasterVolume.get(),
         carMasterVolume = carMasterVolume.get(),
     )
@@ -154,12 +161,16 @@ class DriveController(context: Context) {
         val base = latest
         val ignitionActive = simulation.isEngineEngagedForUi()
         if (!uiActive.get()) {
-            return base.copy(engineSoundEnabled = ignitionActive)
+            return base.copy(
+                engineSoundEnabled = ignitionActive,
+                popsAndBangsEnabled = popsAndBangsEnabled.get(),
+            )
         }
 
         val selectedId = selectedSampleProfile.get().id
         return base.copy(
             engineSoundEnabled = ignitionActive,
+            popsAndBangsEnabled = popsAndBangsEnabled.get(),
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
                 layerMixControls.get(),
@@ -168,6 +179,7 @@ class DriveController(context: Context) {
             ),
             carAudioReady = audioEngine.loadedSampleProfileId() == selectedId,
             engineStartLoading = engineStartLoading.get(),
+            userMessage = userVisibleMessage,
             appMasterVolume = appMasterVolume.get(),
             appMuted = appMasterVolumeBeforeMute.get() != null,
         )
@@ -268,6 +280,15 @@ class DriveController(context: Context) {
         audioEngine.setCoastLayerMixEnabled(enabled)
     }
 
+    fun setPopsAndBangsEnabled(enabled: Boolean) {
+        audioMixModeRepository.setPopsAndBangsEnabled(enabled)
+        popsAndBangsEnabled.set(enabled)
+    }
+
+    fun togglePopsAndBangs() {
+        setPopsAndBangsEnabled(!popsAndBangsEnabled.get())
+    }
+
     fun setAppMasterVolume(volume: Double) {
         appMasterVolumeBeforeMute.set(null)
         appMasterVolume.set(appMasterVolumeRepository.save(volume))
@@ -357,6 +378,12 @@ class DriveController(context: Context) {
             return
         }
         transmissionPosition.set(position)
+    }
+
+    fun dismissUserMessage() {
+        synchronized(lifecycleLock) {
+            userVisibleMessage = null
+        }
     }
 
     fun toggleSound() {
@@ -544,6 +571,7 @@ class DriveController(context: Context) {
                 }
             }
         }
+        handleAudioLoadFailures()
         if (postLoadEngineStartDelaySeconds > 0.0) {
             synchronized(lifecycleLock) {
                 advancePostLoadEngineStartDelay(dt)
@@ -596,6 +624,7 @@ class DriveController(context: Context) {
                 tuning = effectiveAudioTuning(tuning, simulation.ignitionAudioGain()),
                 layerMix = layerMixControls.get(),
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
+                popsAndBangsEnabled = popsAndBangsEnabled.get(),
             ),
         )
         val selectedCar = selectedSampleProfile.get()
@@ -623,12 +652,32 @@ class DriveController(context: Context) {
                 availableCarCount = EngineSampleProfiles.all.size,
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
                 legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
+                popsAndBangsEnabled = popsAndBangsEnabled.get(),
                 appMasterVolume = appMasterVolume.get(),
                 appMuted = appMasterVolumeBeforeMute.get() != null,
                 carMasterVolume = carMasterVolume.get(),
                 transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
                 carAudioReady = isSelectedCarAudioLoaded(),
                 engineStartLoading = engineStartLoading.get(),
+                userMessage = userVisibleMessage,
+            )
+        }
+    }
+
+    private fun handleAudioLoadFailures() {
+        val failure = audioEngine.consumeLoadFailure() ?: return
+        if (failure.profileId != selectedSampleProfile.get().id) {
+            return
+        }
+
+        synchronized(lifecycleLock) {
+            if (awaitingFirstAudioLoad.get()) {
+                cancelPendingFirstAudioLoad()
+            }
+            userVisibleMessage = UserVisibleMessage(
+                id = SystemClock.elapsedRealtime(),
+                title = "Engine audio failed to load",
+                detail = "${selectedSampleProfile.get().displayName}: ${failure.detail}",
             )
         }
     }
@@ -644,6 +693,13 @@ class DriveController(context: Context) {
             AudioFocusEvent.PERMANENT_LOSS -> {
                 enterAudioInterruption()
                 preInterruptionMasterVolume.set(null)
+                synchronized(lifecycleLock) {
+                    userVisibleMessage = UserVisibleMessage(
+                        id = SystemClock.elapsedRealtime(),
+                        title = "Engine audio interrupted",
+                        detail = "Another app took permanent control of audio output.",
+                    )
+                }
             }
         }
     }
@@ -775,6 +831,7 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         downshiftDurationSeconds = engine.downshiftDurationMs / 1_000.0,
         shiftDwellSeconds = engine.shiftDwellMs / 1_000.0,
         secondToFirstDownshiftRpm = engine.secondToFirstDownshiftRpm,
+        firstToSecondPartialThrottleUpshiftRpm = engine.firstToSecondPartialThrottleUpshiftRpm,
     )
 }
 
