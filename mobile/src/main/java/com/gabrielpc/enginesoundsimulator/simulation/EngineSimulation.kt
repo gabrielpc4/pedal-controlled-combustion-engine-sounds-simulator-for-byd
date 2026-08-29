@@ -46,6 +46,7 @@ data class EngineProfile(
     val upshiftDurationSeconds: Double = 0.270,
     val downshiftDurationSeconds: Double = 0.340,
     val shiftDwellSeconds: Double = 0.150,
+    val secondToFirstDownshiftRpm: Double = EngineTuning.DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
 ) {
     companion object {
         private val bank = EngineSampleProfiles.default
@@ -117,7 +118,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var ignitionState = EngineIgnitionState.OFF
     private var ignitionElapsedSeconds = 0.0
     private var shutdownElapsedSeconds = 0.0
-    private var shutdownAudioCutoffSeconds = 0.0
     private var engineRpm = 0.0
     private var vehicleSpeedMps = 0.0
     private var simulatedPhysicalSpeedMps = 0.0
@@ -131,6 +131,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var limiterLatched = false
     private var externalSpeedActive = false
     private var downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
+    private var downshiftHysteresisKmhByGear = sortedDownshiftHysteresisKmhByGear(profile.gearRatios.size)
     private val externalSpeedEstimator = QuantizedSpeedEstimator()
 
     val state: DrivetrainState get() = snapshot()
@@ -145,29 +146,15 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     fun isShutdownPending(): Boolean = ignitionState == EngineIgnitionState.STOPPING
 
-    fun isEngineAudioAudible(): Boolean {
+    fun isEngineAudioAudible(): Boolean = ignitionAudioGain() > 0.01
+
+    fun ignitionAudioGain(): Double {
         return when (ignitionState) {
-            EngineIgnitionState.OFF -> false
-            EngineIgnitionState.STARTING, EngineIgnitionState.RUNNING -> true
-            EngineIgnitionState.STOPPING -> shutdownElapsedSeconds < shutdownAudioCutoffSeconds
+            EngineIgnitionState.OFF -> 0.0
+            EngineIgnitionState.STARTING -> startupIgnitionAudioGain(ignitionElapsedSeconds)
+            EngineIgnitionState.RUNNING -> 1.0
+            EngineIgnitionState.STOPPING -> shutdownIgnitionAudioGain(shutdownElapsedSeconds)
         }
-    }
-
-    fun shutdownAudioGain(): Double {
-        if (ignitionState != EngineIgnitionState.STOPPING) {
-            return 1.0
-        }
-
-        if (shutdownElapsedSeconds >= shutdownAudioCutoffSeconds) {
-            return 0.0
-        }
-
-        val remainingAudibleSeconds = shutdownAudioCutoffSeconds - shutdownElapsedSeconds
-        if (remainingAudibleSeconds >= SHUTDOWN_AUDIO_FADE_SECONDS) {
-            return 1.0
-        }
-
-        return (remainingAudibleSeconds / SHUTDOWN_AUDIO_FADE_SECONDS).coerceIn(0.0, 1.0)
     }
 
     fun startIgnition() {
@@ -178,7 +165,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionState = EngineIgnitionState.STARTING
         ignitionElapsedSeconds = 0.0
         shutdownElapsedSeconds = 0.0
-        shutdownAudioCutoffSeconds = 0.0
         engineRpm = 0.0
         limiterLatched = false
     }
@@ -188,7 +174,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionState = EngineIgnitionState.RUNNING
         ignitionElapsedSeconds = 0.0
         shutdownElapsedSeconds = 0.0
-        shutdownAudioCutoffSeconds = 0.0
         engineRpm = profile.idleRpm
         limiterLatched = false
     }
@@ -202,12 +187,12 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
         ignitionState = EngineIgnitionState.STOPPING
         shutdownElapsedSeconds = 0.0
-        val secondsUntilZero = shutdownSecondsUntilZeroRpm(
-            startRpm = engineRpm,
-            decaySeconds = SHUTDOWN_RPM_DECAY_SECONDS,
-            epsilon = SHUTDOWN_RPM_EPSILON,
-        )
-        shutdownAudioCutoffSeconds = (secondsUntilZero - SHUTDOWN_AUDIO_EARLY_CUT_SECONDS).coerceAtLeast(0.0)
+        currentGearIndex = 0
+        activeShift = null
+        shiftSerial += 1
+        secondsSinceShift = 10.0
+        downshiftBoundaryKmhByGear.fill(0.0)
+        limiterLatched = false
     }
 
     /** @return true when shutdown finished and ignition returned to OFF. */
@@ -233,8 +218,15 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
                 shutdownElapsedSeconds += dt
                 engineRpm = approachExp(engineRpm, 0.0, SHUTDOWN_RPM_DECAY_SECONDS, dt).coerceAtLeast(0.0)
                 limiterLatched = false
-                if (engineRpm <= SHUTDOWN_RPM_EPSILON) {
+                val speedSettled = externalSpeedActive ||
+                    simulatedPhysicalSpeedMps <= SHUTDOWN_SPEED_EPSILON_MPS
+                if (engineRpm <= SHUTDOWN_RPM_EPSILON && speedSettled) {
                     engineRpm = 0.0
+                    if (!externalSpeedActive) {
+                        simulatedPhysicalSpeedMps = 0.0
+                        vehicleSpeedMps = 0.0
+                        rawExternalSpeedKmh = 0.0
+                    }
                     ignitionState = EngineIgnitionState.OFF
                     return true
                 }
@@ -249,6 +241,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size) {
             downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
+            downshiftHysteresisKmhByGear = sortedDownshiftHysteresisKmhByGear(profile.gearRatios.size)
         }
         engineRpm = when (ignitionState) {
             EngineIgnitionState.OFF -> 0.0
@@ -263,7 +256,6 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionState = EngineIgnitionState.OFF
         ignitionElapsedSeconds = 0.0
         shutdownElapsedSeconds = 0.0
-        shutdownAudioCutoffSeconds = 0.0
         engineRpm = 0.0
         vehicleSpeedMps = 0.0
         simulatedPhysicalSpeedMps = 0.0
@@ -298,7 +290,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         )
 
         val externalKmh = input.externalSpeedKmh?.coerceAtLeast(0.0)
-        if (externalKmh != null) {
+        if (ignitionState == EngineIgnitionState.STOPPING && !externalSpeedActive && externalKmh == null) {
+            applyShutdownBraking(dt)
+            applyQuantizedSimulatorSpeed(dt)
+        } else if (externalKmh != null) {
             applyExternalSpeed(externalKmh, dt)
         } else {
             if (externalSpeedActive) {
@@ -319,9 +314,11 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
 
         activeShift?.let { updateShift(it, dt) }
-        if (activeShift == null) secondsSinceShift += dt
+        if (activeShift == null) {
+            secondsSinceShift += dt
+        }
 
-        val shutdownFinished =         advanceIgnition(dt)
+        advanceIgnition(dt)
         if (ignitionState == EngineIgnitionState.RUNNING) {
             updateSampleRpm(dt, input.transmissionPosition)
             updateLimiterLatch()
@@ -382,6 +379,23 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
     }
 
+    /** Full-service-brake deceleration while the engine shuts down. */
+    private fun applyShutdownBraking(dt: Double) {
+        val serviceBrakeForce = profile.vehicleMassKg * MAX_SERVICE_BRAKE_MPS2
+        val aerodynamicDrag = 0.5 * AIR_DENSITY_KG_M3 * profile.dragAreaM2 * simulatedPhysicalSpeedMps.pow(2)
+        val rollingResistance = if (simulatedPhysicalSpeedMps > 0.05) {
+            profile.vehicleMassKg * GRAVITY_MPS2 * profile.rollingResistanceCoefficient
+        } else {
+            0.0
+        }
+        val acceleration = -(serviceBrakeForce + aerodynamicDrag + rollingResistance) /
+            (profile.vehicleMassKg * profile.rotationalMassFactor)
+        simulatedPhysicalSpeedMps = (simulatedPhysicalSpeedMps + acceleration * dt).coerceAtLeast(0.0)
+        if (simulatedPhysicalSpeedMps < 0.04) {
+            simulatedPhysicalSpeedMps = 0.0
+        }
+    }
+
     /** Feeds SIM through the same whole-km/h boundary exposed by the BYD framework. */
     private fun applyQuantizedSimulatorSpeed(dt: Double) {
         rawExternalSpeedKmh = (simulatedPhysicalSpeedMps * 3.6).roundToInt().toDouble()
@@ -431,7 +445,13 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         val target = when (transmissionPosition) {
             TransmissionPosition.DRIVE -> {
                 val shift = activeShift
-                if (shift?.gearChanged == true) shift.targetRpm else rpmForSpeed(currentGearIndex)
+                when {
+                    shift?.gearChanged == true -> shift.targetRpm
+                    shift?.direction == ShiftDirection.UP -> {
+                        min(rpmForSpeed(currentGearIndex), upshiftTriggerRpm())
+                    }
+                    else -> rpmForSpeed(currentGearIndex)
+                }
             }
             TransmissionPosition.NEUTRAL, TransmissionPosition.PARK -> freeRevRpmTarget()
         }
@@ -451,17 +471,17 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun chooseAutomaticShift() {
-        if (secondsSinceShift < profile.shiftDwellSeconds) return
-        val speedKmh = vehicleSpeedMps * 3.6
-        if (currentGearIndex < profile.gearRatios.lastIndex &&
-            rpmForSpeed(currentGearIndex) >= profile.redlineRpm * EMERGENCY_UPSHIFT_RPM_FRACTION
-        ) {
-            beginShift(currentGearIndex + 1, ShiftDirection.UP)
+        if (secondsSinceShift < profile.shiftDwellSeconds) {
             return
         }
+
+        val speedKmh = vehicleSpeedMps * 3.6
         if (currentGearIndex < profile.gearRatios.lastIndex &&
             filteredThrottle > SHIFT_THROTTLE_THRESHOLD &&
-            speedKmh >= upshiftSpeedKmh(currentGearIndex)
+            (
+                rpmForSpeed(currentGearIndex) >= upshiftTriggerRpm() ||
+                    speedKmh >= upshiftTriggerSpeedKmh(currentGearIndex)
+                )
         ) {
             beginShift(currentGearIndex + 1, ShiftDirection.UP)
             return
@@ -470,10 +490,17 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             val previousUpshift = downshiftBoundaryKmhByGear[currentGearIndex]
                 .takeIf { it > 0.0 }
                 ?: upshiftSpeedKmh(currentGearIndex - 1)
-            val downshiftSpeed = (previousUpshift - DOWNSHIFT_SPEED_HYSTERESIS_KMH).coerceAtLeast(2.0)
             val demandDownshift = filteredThrottle > 0.78 &&
                 speedKmh < previousUpshift - KICKDOWN_SPEED_MARGIN_KMH
-            if (speedKmh <= downshiftSpeed || demandDownshift) {
+            val shouldDownshift = if (currentGearIndex == 1) {
+                // 2nd → 1st only: ignore the equal-band speed boundary and downshift at a fixed RPM.
+                rpmForSpeed(currentGearIndex) <= profile.secondToFirstDownshiftRpm || demandDownshift
+            } else {
+                val hysteresisKmh = downshiftHysteresisKmhByGear[currentGearIndex]
+                val downshiftSpeed = (previousUpshift - hysteresisKmh.toDouble()).coerceAtLeast(2.0)
+                speedKmh <= downshiftSpeed || demandDownshift
+            }
+            if (shouldDownshift) {
                 beginShift(currentGearIndex - 1, ShiftDirection.DOWN)
             }
         }
@@ -481,6 +508,15 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     private fun upshiftSpeedKmh(gearIndex: Int): Double {
         return evenlySpacedUpshiftSpeedKmh(profile, gearIndex)
+    }
+
+    /** Upshift as late as each car allows — just below its limiter latch, never above [EngineProfile.upshiftRpm]. */
+    private fun upshiftTriggerRpm(): Double = upshiftTriggerRpmForProfile(profile)
+
+    private fun upshiftTriggerSpeedKmh(gearIndex: Int): Double {
+        val rpmSpan = (profile.upshiftRpm - profile.idleRpm).coerceAtLeast(1.0)
+        val triggerFraction = (upshiftTriggerRpm() - profile.idleRpm) / rpmSpan
+        return upshiftSpeedKmh(gearIndex) * triggerFraction.coerceIn(0.0, 1.0)
     }
 
     private fun beginShift(targetGearIndex: Int, direction: ShiftDirection) {
@@ -512,6 +548,11 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun updateLimiterLatch() {
+        if (activeShift?.direction == ShiftDirection.UP) {
+            limiterLatched = false
+            return
+        }
+
         limiterLatched = if (limiterLatched) {
             engineRpm > profile.limiterRpm - LIMITER_RELEASE_HYSTERESIS_RPM
         } else {
@@ -557,21 +598,22 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val AIR_DENSITY_KG_M3 = 1.225
         private const val GRAVITY_MPS2 = 9.81
         private const val MAX_SERVICE_BRAKE_MPS2 = 11.2
-        private const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
+        internal const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0
         private const val PEDAL_RELEASE_THRESHOLD = 0.001
         private const val SHIFT_THROTTLE_THRESHOLD = 0.10
-        private const val EMERGENCY_UPSHIFT_RPM_FRACTION = 0.98
-        private const val DOWNSHIFT_SPEED_HYSTERESIS_KMH = 4.0
+        internal const val UPSHIFT_LIMITER_HEADROOM_RPM = 12.0
+        /** Shift this many RPM before each car's configured upshift point so the run-up stays off the limiter layer. */
+        internal const val UPSHIFT_EARLY_MARGIN_RPM = 80.0
         private const val KICKDOWN_SPEED_MARGIN_KMH = 10.0
+        internal const val DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH = 4
         /** Neutral/Park rev-up: engine inertia spooling with no wheel load. */
         private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
         /** Neutral/Park rev-down: coasting back toward idle after lift-off. */
         private const val NEUTRAL_REV_DOWN_RESPONSE_SECONDS = 0.90
         private const val SHUTDOWN_RPM_DECAY_SECONDS = 0.58
-        private const val SHUTDOWN_AUDIO_EARLY_CUT_SECONDS = 0.50
-        private const val SHUTDOWN_AUDIO_FADE_SECONDS = 0.35
         private const val SHUTDOWN_RPM_EPSILON = 12.0
+        private const val SHUTDOWN_SPEED_EPSILON_MPS = 0.12
     }
 
     private data class ActiveShift(
@@ -596,6 +638,50 @@ internal const val TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH = 180.0
 internal fun evenlySpacedUpshiftSpeedKmh(profile: EngineProfile, gearIndex: Int): Double {
     val gearCount = profile.gearRatios.size.coerceAtLeast(1)
     return profile.topSpeedKmh * (gearIndex + 1).coerceIn(1, gearCount) / gearCount
+}
+
+/**
+ * Upshift RPM for a car profile: each bank's shift point, nudged slightly early and capped below the limiter latch.
+ */
+internal fun upshiftTriggerRpmForProfile(profile: EngineProfile): Double {
+    val latchRpm = profile.limiterRpm - EngineSimulation.LIMITER_TRIGGER_MARGIN_RPM
+    val maxBeforeLimiter = latchRpm - EngineSimulation.UPSHIFT_LIMITER_HEADROOM_RPM
+    val earlyShiftRpm = profile.upshiftRpm - EngineSimulation.UPSHIFT_EARLY_MARGIN_RPM
+
+    return earlyShiftRpm
+        .coerceAtMost(maxBeforeLimiter)
+        .coerceAtLeast(profile.idleRpm + 500.0)
+}
+
+/** Speed (km/h) where [gearIndex] reaches [targetRpm] under the coupled synthetic tach model. */
+internal fun speedKmhForCoupledRpm(profile: EngineProfile, gearIndex: Int, targetRpm: Double): Double {
+    val ratio = evenlySpacedGearRatio(profile, gearIndex)
+    val wheelRpm = (targetRpm - profile.idleRpm).coerceAtLeast(0.0) / ratio.coerceAtLeast(0.001)
+    return wheelRpm * (2.0 * PI * profile.wheelRadiusMeters) / 60.0 * 3.6
+}
+
+/**
+ * High gears keep no margin; lower gears keep up to the full 4 km/h.
+ */
+internal fun sortedDownshiftHysteresisKmhByGear(gearCount: Int): IntArray {
+    val count = gearCount.coerceAtLeast(1)
+    val hysteresis = IntArray(count)
+    val downshiftCount = count - 1
+    if (downshiftCount <= 0) {
+        return hysteresis
+    }
+
+    for (gearIndex in 1 until count) {
+        val downshiftIndex = gearIndex - 1
+        val stepsFromHighestGear = downshiftCount - 1 - downshiftIndex
+        hysteresis[gearIndex] = if (downshiftCount == 1) {
+            EngineSimulation.DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH
+        } else {
+            (stepsFromHighestGear * EngineSimulation.DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH) / (downshiftCount - 1)
+        }
+    }
+
+    return hysteresis
 }
 
 /** Makes each gear reach the normal shift RPM at the end of its equal-width speed band. */

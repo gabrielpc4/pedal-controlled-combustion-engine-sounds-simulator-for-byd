@@ -164,6 +164,29 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun limiterLayerAudibleInTopGearAtVmax() {
+        val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
+        val output = ShortArray(1_920)
+
+        repeat(12) {
+            renderer.render(
+                EngineAudioFrame(
+                    rpm = profile.limiterRpm,
+                    throttle = 1.0,
+                ),
+                output,
+                gain = 1.0,
+            )
+        }
+
+        val limiterLevel = renderer.diagnostics().layerOutputMeters
+            .firstOrNull { it.id == "limiter" }
+            ?.outputLevel ?: 0.0
+
+        assertTrue(limiterLevel > 0.01)
+    }
+
+    @Test
     fun shiftEventsTriggerThroughTheSameLayerMixPath() {
         val renderer = SampleEngineRenderer.fromDecoded(44_100, testBank(), profile)
         val output = ShortArray(1_920)

@@ -245,6 +245,14 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             ParameterSlider("SHIFT COOLDOWN", engine.shiftDwellMs, 100.0..1_500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(shiftDwellMs = it)))
             }
+            ParameterSlider(
+                "2→1 DOWNSHIFT RPM",
+                engine.secondToFirstDownshiftRpm,
+                (engine.idleRpm + 200.0)..engine.upshiftRpm,
+                "%.0f RPM",
+            ) {
+                onChange(config.copy(engine = engine.copy(secondToFirstDownshiftRpm = it)))
+            }
         }
         PanelCard("AUDIO SMOOTHING", "Small fades that keep the sample-bank output seamless", Modifier.weight(1.15f)) {
             ParameterSlider("RPM FOLLOW", audio.rpmSmoothingMs, 1.0..300.0, "%.0f ms") {

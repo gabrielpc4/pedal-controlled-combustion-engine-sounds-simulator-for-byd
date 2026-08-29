@@ -119,7 +119,12 @@ internal class SampleEngineRenderer private constructor(
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
 
         anyLayerSolo = target.layerMix.values.any { control -> control.solo && !control.muted }
-        updateVoiceTargets(smoothedRpm, smoothedThrottle, target.layerMix, target.coastLayerMixEnabled)
+        updateVoiceTargets(
+            smoothedRpm,
+            smoothedThrottle,
+            target.layerMix,
+            target.coastLayerMixEnabled,
+        )
         updateEffectTargetsAndTriggers(target, target.layerMix)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
         val targetProfileOutputGain = if (target.coastLayerMixEnabled) {

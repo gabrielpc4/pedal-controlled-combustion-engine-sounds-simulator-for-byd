@@ -1,5 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -78,6 +79,26 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun shutdownResetsGearAndBrakesToStop() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        repeat(600) {
+            simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
+        }
+        assertTrue(simulation.state.speedKmh > 20.0)
+        assertTrue(simulation.state.gear > 1)
+
+        simulation.requestShutdown()
+        repeat(1_200) {
+            simulation.update(DriverInput(throttle = 0.0, simulateCoastRegen = true), STEP)
+        }
+
+        assertEquals(EngineIgnitionState.OFF, simulation.ignition)
+        assertEquals(1, simulation.state.gear)
+        assertEquals(0.0, simulation.state.speedKmh, 0.5)
+    }
+
+    @Test
     fun engageAtIdleSkipsStarterRevSequence() {
         val simulation = EngineSimulation()
         simulation.engageAtIdle()
@@ -126,6 +147,59 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun downshiftHysteresisIsSortedIntBetweenZeroAndFour() {
+        val hysteresis = sortedDownshiftHysteresisKmhByGear(EngineProfile.SAMPLE_BANK_ENGINE.gearRatios.size)
+        val perDownshift = hysteresis.drop(1)
+
+        assertTrue(perDownshift.isNotEmpty())
+        perDownshift.forEach { value ->
+            assertTrue(value in 0..EngineSimulation.DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH)
+        }
+        assertEquals(perDownshift, perDownshift.sortedDescending())
+        assertEquals(0, perDownshift.last())
+        assertEquals(EngineSimulation.DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH, perDownshift.first())
+    }
+
+    @Test
+    fun upshiftTriggersBeforeLimiterEngages() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        var sawUpshift = false
+        var limiterDuringUpshift = false
+        repeat(2_000) {
+            val state = simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), STEP)
+            if (state.isShifting && state.shiftDirection == ShiftDirection.UP) {
+                sawUpshift = true
+                if (state.limiterActive) {
+                    limiterDuringUpshift = true
+                }
+            }
+        }
+        assertTrue("expected at least one upshift under full throttle", sawUpshift)
+        assertFalse("upshift must stay below the limiter latch", limiterDuringUpshift)
+    }
+
+    @Test
+    fun upshiftTriggerUsesEachCarsShiftAndLimiterRpm() {
+        EngineSampleProfiles.all.forEach { sample ->
+            val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
+                idleRpm = sample.idleRpm,
+                limiterRpm = sample.limiterRpm,
+                upshiftRpm = sample.upshiftRpm,
+            )
+            val trigger = upshiftTriggerRpmForProfile(profile)
+            val latchRpm = sample.limiterRpm - EngineSimulation.LIMITER_TRIGGER_MARGIN_RPM
+
+            assertEquals(
+                sample.upshiftRpm - EngineSimulation.UPSHIFT_EARLY_MARGIN_RPM,
+                trigger,
+                0.001,
+            )
+            assertTrue(trigger <= latchRpm - EngineSimulation.UPSHIFT_LIMITER_HEADROOM_RPM + 0.001)
+        }
+    }
+
+    @Test
     fun downshiftUsesTheBoundaryThatSelectedTheGear() {
         val simulation = EngineSimulation()
         val launched = simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 1.0)
@@ -133,6 +207,32 @@ class EngineSimulationTest {
 
         val lifted = simulation.followIntegerSpeedRamp(65.0, 45.0, 3.0, 0.0)
         assertEquals("the remembered boundary must produce one stable downshift", 2, lifted.gear)
+    }
+
+    @Test
+    fun secondToFirstDownshiftUsesFixedFourThousandRpm() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
+        simulation.followIntegerSpeedRamp(0.0, 40.0, 5.0, 0.5)
+        assertEquals(2, simulation.state.gear)
+
+        val triggerSpeedKmh = speedKmhForCoupledRpm(profile, 1, profile.secondToFirstDownshiftRpm)
+        val speedBoundaryDownshiftKmh = evenlySpacedUpshiftSpeedKmh(profile, 0) -
+            sortedDownshiftHysteresisKmhByGear(profile.gearRatios.size)[1]
+        assertTrue(
+            "2→1 must downshift at a lower speed than the normal speed boundary",
+            triggerSpeedKmh < speedBoundaryDownshiftKmh,
+        )
+
+        simulation.update(
+            DriverInput(throttle = 0.5, externalSpeedKmh = triggerSpeedKmh + 4.0),
+            STEP,
+        )
+        assertEquals("still above the configured 2→1 RPM coupled point", 2, simulation.state.gear)
+
+        simulation.followIntegerSpeedRamp(triggerSpeedKmh + 4.0, triggerSpeedKmh - 2.0, 3.0, 0.5)
+        assertEquals("must downshift to 1st once coupled RPM falls through the configured threshold", 1, simulation.state.gear)
     }
 
     @Test
@@ -145,7 +245,7 @@ class EngineSimulationTest {
             simulation.update(DriverInput(throttle = 0.45, externalSpeedKmh = raw), STEP)
         }
         assertTrue(simulation.state.gear >= 2)
-        assertEquals("4 km/h hysteresis must prevent a shift loop", serialBeforeNoise, simulation.state.shiftSerial)
+        assertEquals("shift dwell must prevent a shift loop", serialBeforeNoise, simulation.state.shiftSerial)
     }
 
     @Test

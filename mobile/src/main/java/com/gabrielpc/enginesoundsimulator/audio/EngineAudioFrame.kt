@@ -9,6 +9,7 @@ data class EngineAudioFrame(
     val enabled: Boolean = true,
     val shiftSerial: Long = 0L,
     val shiftDirection: Int = 0,
+    val isShifting: Boolean = false,
     val tuning: AudioTuning = AudioTuning(),
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** When true, mute Load layers and ignore throttle in layer/output gain (RPM crossfades only). */

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -253,7 +254,6 @@ private fun MotorSoundDashboard(
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
-    var mixerLoading by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
@@ -306,7 +306,6 @@ private fun MotorSoundDashboard(
                         mainScreen = mainScreen,
                         onMainScreenChange = { screen ->
                             mainScreen = screen
-                            mixerLoading = false
                         },
                         onSelectSimulatedPedals = onSelectSimulatedPedals,
                         onSelectRealPedals = onSelectRealPedals,
@@ -359,23 +358,18 @@ private fun MotorSoundDashboard(
                             )
                             EngineStartStopButton(
                                 running = state.engineSoundEnabled,
+                                loading = state.engineStartLoading,
                                 onClick = onToggleSound,
                                 modifier = Modifier
                                     .align(Alignment.BottomStart)
                                     .padding(start = 4.dp, bottom = 12.dp),
                             )
-                            if (!mixerLoading) {
-                                DashboardMixerLauncherButton(
-                                    isLoading = false,
-                                    onClick = {
-                                        mixerLoading = true
-                                        mainScreen = DashboardMainScreen.MIXER
-                                    },
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(end = 4.dp, bottom = 12.dp),
-                                )
-                            }
+                            DashboardMixerLauncherButton(
+                                onClick = { mainScreen = DashboardMainScreen.MIXER },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(end = 4.dp, bottom = 12.dp),
+                            )
                         }
                         DashboardMainScreen.MIXER -> MixerDashboardScreen(
                             state = state,
@@ -387,23 +381,12 @@ private fun MotorSoundDashboard(
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
-                            onReady = { mixerLoading = false },
                             coastLayerMixEnabled = state.coastLayerMixEnabled,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
                         )
                     }
-                }
-
-                if (mixerLoading) {
-                    DashboardMixerLauncherButton(
-                        isLoading = true,
-                        onClick = {},
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 38.dp, bottom = 18.dp),
-                    )
                 }
 
                 if (tuningOpen) {
@@ -1197,6 +1180,7 @@ internal fun PedalControl(
 @Composable
 private fun EngineStartStopButton(
     running: Boolean,
+    loading: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1204,7 +1188,7 @@ private fun EngineStartStopButton(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressDepth by animateFloatAsState(
-        targetValue = if (pressed) 1f else 0f,
+        targetValue = if (pressed && !loading) 1f else 0f,
         animationSpec = tween(durationMillis = 140),
         label = "startStopPressDepth",
     )
@@ -1260,26 +1244,39 @@ private fun EngineStartStopButton(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(58.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = centerShineAlpha),
-                                Color.White.copy(alpha = centerShineAlpha * 0.35f),
-                                Color.Transparent,
+            if (loading) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color.Black.copy(alpha = 0.42f)),
+                )
+                CircularProgressIndicator(
+                    modifier = Modifier.size(34.dp),
+                    color = Cyan,
+                    strokeWidth = 3.dp,
+                )
+            }
+            if (!loading) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(58.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = centerShineAlpha),
+                                    Color.White.copy(alpha = centerShineAlpha * 0.35f),
+                                    Color.Transparent,
+                                ),
                             ),
                         ),
-                    ),
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
-            ) {
+                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                ) {
                 Box(
                     modifier = Modifier
                         .width(34.dp)
@@ -1336,6 +1333,7 @@ private fun EngineStartStopButton(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.1.sp,
                 )
+                }
             }
         }
     }
@@ -1419,26 +1417,15 @@ private fun TachometerGauge(
                     style = Stroke(stroke * 1.8f, cap = StrokeCap.Butt),
                 )
 
-                // Perfect full-throttle shift band and red zone.
                 val zoneBandStroke = radius * 0.024f
                 val zoneBandRadius = radius * 0.96f
-                val zoneBandDiameter = zoneBandRadius * 2f
                 val zoneBandTopLeft = androidx.compose.ui.geometry.Offset(
                     center.x - zoneBandRadius,
                     center.y - zoneBandRadius,
                 )
-                val zoneBandSize = androidx.compose.ui.geometry.Size(zoneBandDiameter, zoneBandDiameter)
+                val zoneBandSize = androidx.compose.ui.geometry.Size(zoneBandRadius * 2f, zoneBandRadius * 2f)
                 val zoneBandStyle = Stroke(zoneBandStroke, cap = StrokeCap.Butt)
 
-                drawArc(
-                    color = Green,
-                    startAngle = startAngle + sweepAngle * ((upshiftRpm - 250.0) / gaugeMaxRpm).toFloat().coerceIn(0f, 1f),
-                    sweepAngle = sweepAngle * (350.0 / gaugeMaxRpm).toFloat(),
-                    useCenter = false,
-                    topLeft = zoneBandTopLeft,
-                    size = zoneBandSize,
-                    style = zoneBandStyle,
-                )
                 drawArc(
                     color = Red,
                     startAngle = startAngle + sweepAngle * (redlineRpm / gaugeMaxRpm).toFloat().coerceIn(0f, 1f),

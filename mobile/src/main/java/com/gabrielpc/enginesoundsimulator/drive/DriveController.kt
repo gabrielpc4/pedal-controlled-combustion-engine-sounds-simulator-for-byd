@@ -71,6 +71,7 @@ data class DriveSnapshot(
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
+    val engineStartLoading: Boolean = false,
 )
 
 /** Coordinates BYD/manual inputs, fixed-step drivetrain simulation, and the audio renderer. */
@@ -103,6 +104,13 @@ class DriveController(context: Context) {
     private val audioInterrupted = AtomicBoolean(false)
     private val preInterruptionMasterVolume = AtomicReference<Double?>(null)
     private val lastAudioStartAttemptMs = AtomicLong(0L)
+    /** First engine start in this app process waits for sample decode before ignition/rev logic. */
+    private val sessionFirstStartPending = AtomicBoolean(true)
+    private val awaitingFirstAudioLoad = AtomicBoolean(false)
+    private val engineStartLoading = AtomicBoolean(false)
+
+    @Volatile
+    private var postLoadEngineStartDelaySeconds = 0.0
 
     @Volatile
     private var loopThread: Thread? = null
@@ -117,7 +125,7 @@ class DriveController(context: Context) {
         throttle = 0.0,
         brake = 0.0,
         transmissionPosition = TransmissionPosition.DRIVE,
-        engineSoundEnabled = true,
+        engineSoundEnabled = false,
         tuning = appliedTuning,
         selectedCarId = selectedSampleProfile.get().id,
         selectedCarName = selectedSampleProfile.get().displayName,
@@ -134,7 +142,6 @@ class DriveController(context: Context) {
         audioEngine.setCoastLayerMixEnabled(coastLayerMixEnabled.get())
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
         audioEngine.setSampleProfile(selectedSampleProfile.get())
-        simulation.engageAtIdle()
     }
 
     fun isRunning(): Boolean = running.get()
@@ -160,6 +167,7 @@ class DriveController(context: Context) {
                 coastLayerMixEnabled.get(),
             ),
             carAudioReady = audioEngine.loadedSampleProfileId() == selectedId,
+            engineStartLoading = engineStartLoading.get(),
             appMasterVolume = appMasterVolume.get(),
             appMuted = appMasterVolumeBeforeMute.get() != null,
         )
@@ -181,8 +189,6 @@ class DriveController(context: Context) {
             loopThread = thread
             try {
                 vehicleReader.start()
-                audioEngine.setSampleProfile(selectedSampleProfile.get())
-                audioEngine.start()
                 thread.start()
             } catch (throwable: Throwable) {
                 running.set(false)
@@ -355,11 +361,103 @@ class DriveController(context: Context) {
 
     fun toggleSound() {
         synchronized(lifecycleLock) {
-            if (!simulation.isIgnitionActive()) {
-                simulation.startIgnition()
-                ensureAudioEngineRunning(force = true)
-            } else if (!simulation.isShutdownPending()) {
+            if (isDeferringFirstSessionEngineStart()) {
+                cancelPendingFirstAudioLoad()
+                return
+            }
+            if (simulation.isEngineEngagedForUi() && !simulation.isShutdownPending()) {
                 simulation.requestShutdown()
+            } else {
+                requestEngineStart(fromStartStopButton = true)
+            }
+        }
+    }
+
+    private fun requestEngineStart(fromStartStopButton: Boolean = false) {
+        if (simulation.isEngineEngagedForUi() || simulation.isShutdownPending()) {
+            return
+        }
+
+        if (sessionFirstStartPending.get()) {
+            if (isDeferringFirstSessionEngineStart()) {
+                if (fromStartStopButton) {
+                    engineStartLoading.set(true)
+                }
+                return
+            }
+
+            if (isSelectedCarAudioLoaded()) {
+                if (fromStartStopButton) {
+                    engineStartLoading.set(true)
+                }
+                beginPostLoadEngineStartDelay()
+                return
+            }
+
+            if (fromStartStopButton) {
+                engineStartLoading.set(true)
+            }
+            awaitingFirstAudioLoad.set(true)
+            ensureAudioEngineRunning(force = true)
+            return
+        }
+
+        startEngine(forceAudio = true)
+    }
+
+    private fun beginPostLoadEngineStartDelay() {
+        awaitingFirstAudioLoad.set(false)
+        postLoadEngineStartDelaySeconds = FIRST_START_POST_LOAD_DELAY_SECONDS
+    }
+
+    private fun advancePostLoadEngineStartDelay(dt: Double) {
+        if (postLoadEngineStartDelaySeconds <= 0.0) {
+            return
+        }
+
+        postLoadEngineStartDelaySeconds = (postLoadEngineStartDelaySeconds - dt).coerceAtLeast(0.0)
+        if (postLoadEngineStartDelaySeconds <= 0.0) {
+            completeDeferredEngineStart()
+        }
+    }
+
+    private fun completeDeferredEngineStart() {
+        awaitingFirstAudioLoad.set(false)
+        postLoadEngineStartDelaySeconds = 0.0
+        engineStartLoading.set(false)
+        sessionFirstStartPending.set(false)
+        startEngine(forceAudio = true)
+    }
+
+    private fun cancelPendingFirstAudioLoad() {
+        awaitingFirstAudioLoad.set(false)
+        postLoadEngineStartDelaySeconds = 0.0
+        engineStartLoading.set(false)
+    }
+
+    private fun isDeferringFirstSessionEngineStart(): Boolean {
+        return awaitingFirstAudioLoad.get() || postLoadEngineStartDelaySeconds > 0.0
+    }
+
+    private fun isSelectedCarAudioLoaded(): Boolean {
+        return audioEngine.loadedSampleProfileId() == selectedSampleProfile.get().id
+    }
+
+    private fun startEngine(forceAudio: Boolean) {
+        simulation.startIgnition()
+        if (forceAudio) {
+            ensureAudioEngineRunning(force = true)
+        }
+    }
+
+    private fun maybeAutoStartEngineFromThrottle(throttle: Double) {
+        if (throttle <= AUTO_START_THROTTLE_THRESHOLD) {
+            return
+        }
+
+        synchronized(lifecycleLock) {
+            if (simulation.ignition == EngineIgnitionState.OFF) {
+                requestEngineStart(fromStartStopButton = false)
             }
         }
     }
@@ -428,7 +526,6 @@ class DriveController(context: Context) {
     }
 
     private fun step(dt: Double) {
-        ensureAudioEngineRunning()
         val tuning = tuningConfig.get()
         if (tuning !== appliedTuning) {
             profile = tuning.toEngineProfile(selectedSampleProfile.get())
@@ -439,6 +536,24 @@ class DriveController(context: Context) {
         val mode = selectedInputMode.get()
         val simulatedPedals = simulatedPedalInput.get()
         val input = resolveDriveInput(mode, telemetry, simulatedPedals.throttle, simulatedPedals.brake)
+        maybeAutoStartEngineFromThrottle(input.throttle)
+        if (awaitingFirstAudioLoad.get() && isSelectedCarAudioLoaded()) {
+            synchronized(lifecycleLock) {
+                if (awaitingFirstAudioLoad.get() && isSelectedCarAudioLoaded()) {
+                    beginPostLoadEngineStartDelay()
+                }
+            }
+        }
+        if (postLoadEngineStartDelaySeconds > 0.0) {
+            synchronized(lifecycleLock) {
+                advancePostLoadEngineStartDelay(dt)
+            }
+        }
+        if (simulation.isIgnitionActive()) {
+            ensureAudioEngineRunning()
+        } else if (audioEngine.isAudioActive() && !isDeferringFirstSessionEngineStart()) {
+            audioEngine.stop()
+        }
         val transmissionControl = resolveTransmissionControl(
             mode = mode,
             telemetry = telemetry,
@@ -459,7 +574,8 @@ class DriveController(context: Context) {
             ),
             dt,
         )
-        val audioEnabled = simulation.isEngineAudioAudible()
+        val audioEnabled = simulation.ignition == EngineIgnitionState.STOPPING ||
+            simulation.isEngineAudioAudible()
         val startupThrottle = if (simulation.ignition == EngineIgnitionState.STARTING) {
             (drivetrain.rpm / profile.redlineRpm.coerceAtLeast(1.0)).coerceIn(0.0, 1.0) * 0.9
         } else {
@@ -476,7 +592,8 @@ class DriveController(context: Context) {
                     ShiftDirection.DOWN -> -1
                     ShiftDirection.NONE -> 0
                 },
-                tuning = effectiveAudioTuning(tuning, simulation.shutdownAudioGain()),
+                isShifting = drivetrain.isShifting,
+                tuning = effectiveAudioTuning(tuning, simulation.ignitionAudioGain()),
                 layerMix = layerMixControls.get(),
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
             ),
@@ -510,6 +627,8 @@ class DriveController(context: Context) {
                 appMuted = appMasterVolumeBeforeMute.get() != null,
                 carMasterVolume = carMasterVolume.get(),
                 transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
+                carAudioReady = isSelectedCarAudioLoaded(),
+                engineStartLoading = engineStartLoading.get(),
             )
         }
     }
@@ -566,6 +685,8 @@ class DriveController(context: Context) {
         const val MASTER_VOLUME_STEP = 0.10
         const val INTERRUPTION_RESUME_VOLUME = 0.25
         const val AUDIO_RESTART_COOLDOWN_MS = 2_000L
+        const val AUTO_START_THROTTLE_THRESHOLD = 0.10
+        const val FIRST_START_POST_LOAD_DELAY_SECONDS = 2.0
     }
 }
 
@@ -653,6 +774,7 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         upshiftDurationSeconds = engine.upshiftDurationMs / 1_000.0,
         downshiftDurationSeconds = engine.downshiftDurationMs / 1_000.0,
         shiftDwellSeconds = engine.shiftDwellMs / 1_000.0,
+        secondToFirstDownshiftRpm = engine.secondToFirstDownshiftRpm,
     )
 }
 

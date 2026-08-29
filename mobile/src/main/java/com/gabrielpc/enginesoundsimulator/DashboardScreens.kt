@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenuItem
@@ -34,12 +33,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,21 +75,9 @@ enum class DashboardMainScreen(val title: String, val subtitle: String) {
 
 @Composable
 internal fun DashboardMixerLauncherButton(
-    isLoading: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (isLoading) {
-        CircularProgressIndicator(
-            modifier = modifier
-                .padding(10.dp)
-                .size(44.dp),
-            color = Cyan,
-            strokeWidth = 3.dp,
-        )
-        return
-    }
-
     Icon(
         imageVector = Icons.Default.Tune,
         contentDescription = "Mixer",
@@ -117,17 +102,11 @@ internal fun MixerDashboardScreen(
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
-    onReady: () -> Unit,
     coastLayerMixEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val groupedTracks = remember(state.layerMixTracks) {
         groupMixerTracks(state.layerMixTracks)
-    }
-
-    LaunchedEffect(Unit) {
-        withFrameNanos { }
-        onReady()
     }
 
     Column(

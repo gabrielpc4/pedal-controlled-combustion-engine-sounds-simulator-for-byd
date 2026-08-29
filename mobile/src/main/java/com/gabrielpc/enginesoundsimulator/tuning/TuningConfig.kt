@@ -37,6 +37,8 @@ data class EngineTuning(
     val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
     val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
     val shiftDwellMs: Double = 150.0,
+    /** Fixed coupled-RPM threshold for the 2nd → 1st downshift only. */
+    val secondToFirstDownshiftRpm: Double = DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -78,6 +80,7 @@ data class EngineTuning(
             upshiftDurationMs = upshiftDurationMs.coerceIn(40.0, 900.0),
             downshiftDurationMs = downshiftDurationMs.coerceIn(60.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
+            secondToFirstDownshiftRpm = secondToFirstDownshiftRpm.coerceIn(cleanIdle + 200.0, cleanUpshift),
             gearRatios = sanitizeGears(gearRatios),
             frontWheelTorqueCurve = sanitizeCurve(
                 frontWheelTorqueCurve,
@@ -94,6 +97,7 @@ data class EngineTuning(
     }
 
     companion object {
+        const val DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
         val DEFAULT_GEARS = EngineSampleProfiles.default.gearRatios
         val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),
@@ -214,6 +218,10 @@ class TuningRepository(context: Context) {
             upshiftDurationMs = number(KEY_UPSHIFT_DURATION, defaults.engine.upshiftDurationMs),
             downshiftDurationMs = number(KEY_DOWNSHIFT_DURATION, defaults.engine.downshiftDurationMs),
             shiftDwellMs = number(KEY_SHIFT_DWELL, defaults.engine.shiftDwellMs),
+            secondToFirstDownshiftRpm = number(
+                KEY_SECOND_TO_FIRST_DOWNSHIFT_RPM,
+                defaults.engine.secondToFirstDownshiftRpm,
+            ),
             gearRatios = decodeNumbers(preferences.getString(KEY_GEARS, null), defaults.engine.gearRatios),
             frontWheelTorqueCurve = decodeCurve(
                 preferences.getString(KEY_FRONT_WHEEL_TORQUE_CURVE, null),
@@ -270,6 +278,7 @@ class TuningRepository(context: Context) {
             .putString(KEY_UPSHIFT_DURATION, clean.engine.upshiftDurationMs.toString())
             .putString(KEY_DOWNSHIFT_DURATION, clean.engine.downshiftDurationMs.toString())
             .putString(KEY_SHIFT_DWELL, clean.engine.shiftDwellMs.toString())
+            .putString(KEY_SECOND_TO_FIRST_DOWNSHIFT_RPM, clean.engine.secondToFirstDownshiftRpm.toString())
             .putString(KEY_GEARS, encodeNumbers(clean.engine.gearRatios))
             .putString(KEY_FRONT_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.frontWheelTorqueCurve))
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
@@ -321,6 +330,7 @@ class TuningRepository(context: Context) {
         const val KEY_UPSHIFT_DURATION = "upshift_duration"
         const val KEY_DOWNSHIFT_DURATION = "downshift_duration"
         const val KEY_SHIFT_DWELL = "shift_dwell"
+        const val KEY_SECOND_TO_FIRST_DOWNSHIFT_RPM = "second_to_first_downshift_rpm"
         const val KEY_GEARS = "gear_ratios"
         const val KEY_FRONT_WHEEL_TORQUE_CURVE = "front_wheel_torque_curve"
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
