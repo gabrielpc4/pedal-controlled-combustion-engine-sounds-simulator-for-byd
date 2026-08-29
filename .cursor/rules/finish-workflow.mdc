@@ -5,12 +5,12 @@ alwaysApply: true
 
 # Finish workflow
 
-When a coding task is complete:
+When a coding task is complete, **always build and run the app on the emulator** (unless adb reports no device):
 
 1. Commit the task-related changes if not already committed.
 2. Build the debug APK **without** bumping the build number:
    ```powershell
-   $env:JAVA_HOME = '<Android Studio JBR path>'
+   $env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
    .\gradlew.bat :mobile:assembleDebug --no-daemon
    ```
 3. Install the newest generated APK on the `Simple_Automotive` emulator when available:
@@ -21,6 +21,8 @@ When a coding task is complete:
    ```powershell
    adb shell am start -n com.gabrielpc.enginesoundsimulator/.MainActivity
    ```
+
+Never skip steps 2–4 after code changes. Do not leave the task "done" with only a compile or unit-test run.
 
 Use the newest `engine-sounds-simulator-build-*-debug.apk` in `mobile/build/outputs/apk/debug/`.
 

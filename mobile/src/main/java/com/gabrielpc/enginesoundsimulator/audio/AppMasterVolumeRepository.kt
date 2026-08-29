@@ -23,6 +23,6 @@ internal class AppMasterVolumeRepository(context: Context) {
         private const val KEY_APP_MASTER_GAIN = "app.master_gain"
         const val DEFAULT = CarMasterVolumeRepository.DEFAULT
         const val MIN = CarMasterVolumeRepository.MIN
-        const val MAX = CarMasterVolumeRepository.MAX
+        const val MAX = 1.0
     }
 }

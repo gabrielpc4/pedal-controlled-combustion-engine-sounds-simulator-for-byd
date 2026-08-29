@@ -114,7 +114,11 @@ data class DrivetrainState(
 class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK_ENGINE) {
     var profile: EngineProfile = initialProfile
         private set
-    private var engineRpm = profile.idleRpm
+    private var ignitionState = EngineIgnitionState.OFF
+    private var ignitionElapsedSeconds = 0.0
+    private var shutdownElapsedSeconds = 0.0
+    private var shutdownAudioCutoffSeconds = 0.0
+    private var engineRpm = 0.0
     private var vehicleSpeedMps = 0.0
     private var simulatedPhysicalSpeedMps = 0.0
     private var rawExternalSpeedKmh = 0.0
@@ -131,19 +135,136 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     val state: DrivetrainState get() = snapshot()
 
+    val ignition: EngineIgnitionState get() = ignitionState
+
+    fun isIgnitionActive(): Boolean = ignitionState != EngineIgnitionState.OFF
+
+    fun isEngineEngagedForUi(): Boolean {
+        return ignitionState == EngineIgnitionState.STARTING || ignitionState == EngineIgnitionState.RUNNING
+    }
+
+    fun isShutdownPending(): Boolean = ignitionState == EngineIgnitionState.STOPPING
+
+    fun isEngineAudioAudible(): Boolean {
+        return when (ignitionState) {
+            EngineIgnitionState.OFF -> false
+            EngineIgnitionState.STARTING, EngineIgnitionState.RUNNING -> true
+            EngineIgnitionState.STOPPING -> shutdownElapsedSeconds < shutdownAudioCutoffSeconds
+        }
+    }
+
+    fun shutdownAudioGain(): Double {
+        if (ignitionState != EngineIgnitionState.STOPPING) {
+            return 1.0
+        }
+
+        if (shutdownElapsedSeconds >= shutdownAudioCutoffSeconds) {
+            return 0.0
+        }
+
+        val remainingAudibleSeconds = shutdownAudioCutoffSeconds - shutdownElapsedSeconds
+        if (remainingAudibleSeconds >= SHUTDOWN_AUDIO_FADE_SECONDS) {
+            return 1.0
+        }
+
+        return (remainingAudibleSeconds / SHUTDOWN_AUDIO_FADE_SECONDS).coerceIn(0.0, 1.0)
+    }
+
+    fun startIgnition() {
+        if (ignitionState == EngineIgnitionState.RUNNING || ignitionState == EngineIgnitionState.STARTING) {
+            return
+        }
+
+        ignitionState = EngineIgnitionState.STARTING
+        ignitionElapsedSeconds = 0.0
+        shutdownElapsedSeconds = 0.0
+        shutdownAudioCutoffSeconds = 0.0
+        engineRpm = 0.0
+        limiterLatched = false
+    }
+
+    /** Engage the engine at idle with no starter rev sequence (app launch, car swap). */
+    fun engageAtIdle() {
+        ignitionState = EngineIgnitionState.RUNNING
+        ignitionElapsedSeconds = 0.0
+        shutdownElapsedSeconds = 0.0
+        shutdownAudioCutoffSeconds = 0.0
+        engineRpm = profile.idleRpm
+        limiterLatched = false
+    }
+
+    fun isVehicleThrottleActive(): Boolean = ignitionState == EngineIgnitionState.RUNNING
+
+    fun requestShutdown() {
+        if (ignitionState == EngineIgnitionState.OFF || ignitionState == EngineIgnitionState.STOPPING) {
+            return
+        }
+
+        ignitionState = EngineIgnitionState.STOPPING
+        shutdownElapsedSeconds = 0.0
+        val secondsUntilZero = shutdownSecondsUntilZeroRpm(
+            startRpm = engineRpm,
+            decaySeconds = SHUTDOWN_RPM_DECAY_SECONDS,
+            epsilon = SHUTDOWN_RPM_EPSILON,
+        )
+        shutdownAudioCutoffSeconds = (secondsUntilZero - SHUTDOWN_AUDIO_EARLY_CUT_SECONDS).coerceAtLeast(0.0)
+    }
+
+    /** @return true when shutdown finished and ignition returned to OFF. */
+    fun advanceIgnition(dt: Double): Boolean {
+        when (ignitionState) {
+            EngineIgnitionState.OFF -> {
+                engineRpm = 0.0
+                limiterLatched = false
+            }
+
+            EngineIgnitionState.STARTING -> {
+                ignitionElapsedSeconds += dt
+                engineRpm = engineStartRpmAt(ignitionElapsedSeconds, profile.idleRpm)
+                if (engineStartSettled(ignitionElapsedSeconds)) {
+                    ignitionState = EngineIgnitionState.RUNNING
+                    engineRpm = profile.idleRpm
+                }
+            }
+
+            EngineIgnitionState.RUNNING -> Unit
+
+            EngineIgnitionState.STOPPING -> {
+                shutdownElapsedSeconds += dt
+                engineRpm = approachExp(engineRpm, 0.0, SHUTDOWN_RPM_DECAY_SECONDS, dt).coerceAtLeast(0.0)
+                limiterLatched = false
+                if (engineRpm <= SHUTDOWN_RPM_EPSILON) {
+                    engineRpm = 0.0
+                    ignitionState = EngineIgnitionState.OFF
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
     fun updateProfile(updated: EngineProfile) {
         profile = updated
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size) {
             downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
         }
-        engineRpm = engineRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
+        engineRpm = when (ignitionState) {
+            EngineIgnitionState.OFF -> 0.0
+            EngineIgnitionState.STOPPING -> engineRpm.coerceAtLeast(0.0)
+            else -> engineRpm.coerceIn(0.0, profile.limiterRpm)
+        }
         vehicleSpeedMps = vehicleSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
         simulatedPhysicalSpeedMps = simulatedPhysicalSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
     }
 
     fun reset() {
-        engineRpm = profile.idleRpm
+        ignitionState = EngineIgnitionState.OFF
+        ignitionElapsedSeconds = 0.0
+        shutdownElapsedSeconds = 0.0
+        shutdownAudioCutoffSeconds = 0.0
+        engineRpm = 0.0
         vehicleSpeedMps = 0.0
         simulatedPhysicalSpeedMps = 0.0
         rawExternalSpeedKmh = 0.0
@@ -200,9 +321,14 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         activeShift?.let { updateShift(it, dt) }
         if (activeShift == null) secondsSinceShift += dt
 
-        updateSampleRpm(dt, input.transmissionPosition)
-        updateLimiterLatch()
-        if (activeShift == null && input.transmissionPosition == TransmissionPosition.DRIVE) {
+        val shutdownFinished =         advanceIgnition(dt)
+        if (ignitionState == EngineIgnitionState.RUNNING) {
+            updateSampleRpm(dt, input.transmissionPosition)
+            updateLimiterLatch()
+        }
+        if (activeShift == null && input.transmissionPosition == TransmissionPosition.DRIVE &&
+            ignitionState == EngineIgnitionState.RUNNING
+        ) {
             chooseAutomaticShift()
         }
         return snapshot()
@@ -215,7 +341,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     ) {
         val axleTorque = axleWheelTorqueAtSpeed(profile, simulatedPhysicalSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
-        val throttleConnected = transmissionPosition == TransmissionPosition.DRIVE
+        val throttleConnected = transmissionPosition == TransmissionPosition.DRIVE && isVehicleThrottleActive()
         val requestedWheelTorque = if (throttleConnected) {
             axleTorque.totalNm * filteredThrottle * brakeOverride
         } else {
@@ -281,6 +407,11 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun synchronizeToRoadSpeed() {
+        if (ignitionState == EngineIgnitionState.OFF) {
+            engineRpm = 0.0
+            return
+        }
+
         val safe = profile.gearRatios.indices.filter { rpmForSpeed(it) <= profile.redlineRpm * 0.92 }
         currentGearIndex = safe.firstOrNull() ?: profile.gearRatios.lastIndex
         while (currentGearIndex < profile.gearRatios.lastIndex &&
@@ -437,6 +568,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
         /** Neutral/Park rev-down: coasting back toward idle after lift-off. */
         private const val NEUTRAL_REV_DOWN_RESPONSE_SECONDS = 0.90
+        private const val SHUTDOWN_RPM_DECAY_SECONDS = 0.58
+        private const val SHUTDOWN_AUDIO_EARLY_CUT_SECONDS = 0.50
+        private const val SHUTDOWN_AUDIO_FADE_SECONDS = 0.35
+        private const val SHUTDOWN_RPM_EPSILON = 12.0
     }
 
     private data class ActiveShift(

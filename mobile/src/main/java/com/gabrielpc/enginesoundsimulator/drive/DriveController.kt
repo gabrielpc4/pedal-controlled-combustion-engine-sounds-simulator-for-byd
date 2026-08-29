@@ -21,6 +21,7 @@ import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
+import com.gabrielpc.enginesoundsimulator.simulation.EngineIgnitionState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -66,6 +67,7 @@ data class DriveSnapshot(
     val coastLayerMixEnabled: Boolean = true,
     val legacyThrottleMixEnabled: Boolean = false,
     val appMasterVolume: Double = AppMasterVolumeRepository.DEFAULT,
+    val appMuted: Boolean = false,
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
@@ -84,6 +86,7 @@ class DriveController(context: Context) {
     private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private val appMasterVolume = AtomicReference(appMasterVolumeRepository.load())
+    private val appMasterVolumeBeforeMute = AtomicReference<Double?>(null)
     private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(selectedCarRepository.load().id))
     private var appliedTuning = tuningConfig.get()
     private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
@@ -96,10 +99,10 @@ class DriveController(context: Context) {
     private val simulatedPedalInput = AtomicReference(SimulatedPedalInput())
     private val selectedInputMode = AtomicReference(InputMode.RealPedals)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
-    private val soundEnabled = AtomicBoolean(true)
     private val uiActive = AtomicBoolean(false)
     private val audioInterrupted = AtomicBoolean(false)
     private val preInterruptionMasterVolume = AtomicReference<Double?>(null)
+    private val lastAudioStartAttemptMs = AtomicLong(0L)
 
     @Volatile
     private var loopThread: Thread? = null
@@ -129,8 +132,9 @@ class DriveController(context: Context) {
 
     init {
         audioEngine.setCoastLayerMixEnabled(coastLayerMixEnabled.get())
-        audioEngine.setSampleProfile(selectedSampleProfile.get())
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
+        audioEngine.setSampleProfile(selectedSampleProfile.get())
+        simulation.engageAtIdle()
     }
 
     fun isRunning(): Boolean = running.get()
@@ -141,12 +145,14 @@ class DriveController(context: Context) {
 
     fun snapshot(): DriveSnapshot {
         val base = latest
+        val ignitionActive = simulation.isEngineEngagedForUi()
         if (!uiActive.get()) {
-            return base
+            return base.copy(engineSoundEnabled = ignitionActive)
         }
 
         val selectedId = selectedSampleProfile.get().id
         return base.copy(
+            engineSoundEnabled = ignitionActive,
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
                 layerMixControls.get(),
@@ -155,6 +161,7 @@ class DriveController(context: Context) {
             ),
             carAudioReady = audioEngine.loadedSampleProfileId() == selectedId,
             appMasterVolume = appMasterVolume.get(),
+            appMuted = appMasterVolumeBeforeMute.get() != null,
         )
     }
 
@@ -174,7 +181,8 @@ class DriveController(context: Context) {
             loopThread = thread
             try {
                 vehicleReader.start()
-                if (soundEnabled.get()) audioEngine.start()
+                audioEngine.setSampleProfile(selectedSampleProfile.get())
+                audioEngine.start()
                 thread.start()
             } catch (throwable: Throwable) {
                 running.set(false)
@@ -255,6 +263,7 @@ class DriveController(context: Context) {
     }
 
     fun setAppMasterVolume(volume: Double) {
+        appMasterVolumeBeforeMute.set(null)
         appMasterVolume.set(appMasterVolumeRepository.save(volume))
     }
 
@@ -264,6 +273,18 @@ class DriveController(context: Context) {
 
     fun increaseAppMasterVolume() {
         setAppMasterVolume(appMasterVolume.get() + MASTER_VOLUME_STEP)
+    }
+
+    fun toggleAppMute() {
+        val savedBeforeMute = appMasterVolumeBeforeMute.get()
+        if (savedBeforeMute != null) {
+            appMasterVolumeBeforeMute.set(null)
+            appMasterVolume.set(appMasterVolumeRepository.save(savedBeforeMute))
+            return
+        }
+
+        appMasterVolumeBeforeMute.set(appMasterVolume.get())
+        appMasterVolume.set(AppMasterVolumeRepository.MIN)
     }
 
     fun setCarMasterVolume(volume: Double) {
@@ -284,14 +305,23 @@ class DriveController(context: Context) {
     }
 
     private fun applySelectedCar(selected: com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile) {
-        selectedSampleProfile.set(selected)
-        layerMixControls.set(layerMixRepository.load(selected))
-        carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
-        selectedCarRepository.save(selected)
-        val tuning = tuningConfig.get().withSampleProfile(selected)
-        tuningConfig.set(tuning)
-        tuningRepository.save(tuning)
-        audioEngine.setSampleProfile(selected)
+        synchronized(lifecycleLock) {
+            val keepEngineRunning = simulation.isEngineEngagedForUi()
+
+            selectedSampleProfile.set(selected)
+            layerMixControls.set(layerMixRepository.load(selected))
+            carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
+            selectedCarRepository.save(selected)
+            val tuning = tuningConfig.get().withSampleProfile(selected)
+            tuningConfig.set(tuning)
+            tuningRepository.save(tuning)
+            profile = tuning.toEngineProfile(selected)
+            simulation.updateProfile(profile)
+            if (keepEngineRunning) {
+                simulation.engageAtIdle()
+            }
+            audioEngine.setSampleProfile(selected)
+        }
     }
 
     fun selectSimulatedPedals() {
@@ -325,9 +355,37 @@ class DriveController(context: Context) {
 
     fun toggleSound() {
         synchronized(lifecycleLock) {
-            val enable = !soundEnabled.get()
-            soundEnabled.set(enable)
-            if (enable && running.get()) audioEngine.start() else audioEngine.stop()
+            if (!simulation.isIgnitionActive()) {
+                simulation.startIgnition()
+                ensureAudioEngineRunning(force = true)
+            } else if (!simulation.isShutdownPending()) {
+                simulation.requestShutdown()
+            }
+        }
+    }
+
+    private fun ensureAudioEngineRunning(force: Boolean = false) {
+        if (!running.get()) {
+            return
+        }
+
+        if (audioEngine.isAudioActive()) {
+            return
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastAudioStartAttemptMs.get() < AUDIO_RESTART_COOLDOWN_MS) {
+            return
+        }
+
+        synchronized(lifecycleLock) {
+            if (!running.get() || audioEngine.isAudioActive()) {
+                return
+            }
+
+            lastAudioStartAttemptMs.set(now)
+            audioEngine.setSampleProfile(selectedSampleProfile.get())
+            audioEngine.start()
         }
     }
 
@@ -370,6 +428,7 @@ class DriveController(context: Context) {
     }
 
     private fun step(dt: Double) {
+        ensureAudioEngineRunning()
         val tuning = tuningConfig.get()
         if (tuning !== appliedTuning) {
             profile = tuning.toEngineProfile(selectedSampleProfile.get())
@@ -400,19 +459,24 @@ class DriveController(context: Context) {
             ),
             dt,
         )
-        val enabled = soundEnabled.get()
+        val audioEnabled = simulation.isEngineAudioAudible()
+        val startupThrottle = if (simulation.ignition == EngineIgnitionState.STARTING) {
+            (drivetrain.rpm / profile.redlineRpm.coerceAtLeast(1.0)).coerceIn(0.0, 1.0) * 0.9
+        } else {
+            drivetrain.smoothedThrottle
+        }
         audioEngine.update(
             EngineAudioFrame(
                 rpm = drivetrain.rpm,
-                throttle = drivetrain.smoothedThrottle,
-                enabled = enabled,
+                throttle = startupThrottle,
+                enabled = audioEnabled,
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
                     ShiftDirection.UP -> 1
                     ShiftDirection.DOWN -> -1
                     ShiftDirection.NONE -> 0
                 },
-                tuning = effectiveAudioTuning(tuning),
+                tuning = effectiveAudioTuning(tuning, simulation.shutdownAudioGain()),
                 layerMix = layerMixControls.get(),
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
             ),
@@ -433,7 +497,7 @@ class DriveController(context: Context) {
                 throttle = input.throttle,
                 brake = input.brake,
                 transmissionPosition = transmissionControl.position,
-                engineSoundEnabled = enabled,
+                engineSoundEnabled = simulation.isEngineEngagedForUi(),
                 tuning = tuning,
                 selectedCarId = selectedCar.id,
                 selectedCarName = selectedCar.displayName,
@@ -443,6 +507,7 @@ class DriveController(context: Context) {
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
                 legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
                 appMasterVolume = appMasterVolume.get(),
+                appMuted = appMasterVolumeBeforeMute.get() != null,
                 carMasterVolume = carMasterVolume.get(),
                 transmissionLockedToVehicle = transmissionControl.lockedToVehicle,
             )
@@ -483,10 +548,11 @@ class DriveController(context: Context) {
         appMasterVolume.set(restoredVolume)
     }
 
-    private fun effectiveAudioTuning(tuning: TuningConfig) = tuning.audio.copy(
+    private fun effectiveAudioTuning(tuning: TuningConfig, shutdownGain: Double = 1.0) = tuning.audio.copy(
         masterGain = (
             (appMasterVolume.get() / AppMasterVolumeRepository.DEFAULT) *
-                (carMasterVolume.get() * tuning.audio.masterGain / CarMasterVolumeRepository.DEFAULT)
+                (carMasterVolume.get() * tuning.audio.masterGain / CarMasterVolumeRepository.DEFAULT) *
+                shutdownGain.coerceIn(0.0, 1.0)
             ).coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX),
     )
 
@@ -499,6 +565,7 @@ class DriveController(context: Context) {
         const val LOOP_JOIN_TIMEOUT_MS = 500L
         const val MASTER_VOLUME_STEP = 0.10
         const val INTERRUPTION_RESUME_VOLUME = 0.25
+        const val AUDIO_RESTART_COOLDOWN_MS = 2_000L
     }
 }
 

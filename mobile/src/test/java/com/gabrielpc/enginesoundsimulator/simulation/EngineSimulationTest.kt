@@ -9,12 +9,28 @@ import kotlin.math.roundToInt
 
 class EngineSimulationTest {
     @Test
-    fun sampleProfileStartsAtItsOwnIdleInFirstGear() {
+    fun engineStartsAtZeroRpmUntilIgnition() {
         val simulation = EngineSimulation()
-        assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 0.0)
+        assertEquals(0.0, simulation.state.rpm, 0.0)
+        assertEquals(EngineIgnitionState.OFF, simulation.ignition)
         assertEquals(1, simulation.state.gear)
         assertFalse(simulation.state.isShifting)
         assertEquals(0L, simulation.state.shiftSerial)
+    }
+
+    @Test
+    fun ignitionStartRevvesThenSettlesAtIdle() {
+        val simulation = EngineSimulation()
+        simulation.startIgnition()
+        var peakRpm = 0.0
+        repeat(500) {
+            val state = simulation.update(DriverInput(), STEP)
+            peakRpm = maxOf(peakRpm, state.rpm)
+        }
+        assertTrue("start sequence must blip toward 5000 rpm", peakRpm > simulation.profile.idleRpm * 2.5)
+        assertTrue(peakRpm >= ENGINE_START_PEAK_RPM * 0.95)
+        assertEquals(EngineIgnitionState.RUNNING, simulation.ignition)
+        assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 1.0)
     }
 
     @Test
@@ -37,6 +53,7 @@ class EngineSimulationTest {
     @Test
     fun simulatorReportsWholeKmhWhileDrivingAudioFromContinuousEstimate() {
         val simulation = EngineSimulation()
+        simulation.engageAtIdle()
         var observedInterpolatedFrame = false
         repeat((1.5 / STEP).toInt()) {
             val state = simulation.update(
@@ -49,6 +66,23 @@ class EngineSimulationTest {
             }
         }
         assertTrue("SIM must reconstruct motion between whole-km/h reports", observedInterpolatedFrame)
+    }
+
+    @Test
+    fun throttleDoesNotIncreaseSpeedWhileEngineOff() {
+        val simulation = EngineSimulation()
+        repeat(400) {
+            simulation.update(DriverInput(throttle = 1.0, simulateCoastRegen = true), 0.005)
+        }
+        assertTrue(simulation.state.speedKmh < 1.0)
+    }
+
+    @Test
+    fun engageAtIdleSkipsStarterRevSequence() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        assertEquals(EngineIgnitionState.RUNNING, simulation.ignition)
+        assertEquals(simulation.profile.idleRpm, simulation.state.rpm, 1.0)
     }
 
     @Test
@@ -130,6 +164,7 @@ class EngineSimulationTest {
     @Test
     fun fullThrottleAccelerationTargetsClaimedZeroToHundredWindow() {
         val simulation = EngineSimulation()
+        simulation.engageAtIdle()
         var elapsedSeconds = 0.0
         var state = simulation.state
         while (state.speedKmh < 100.0 && elapsedSeconds < 6.0) {
@@ -157,6 +192,18 @@ class EngineSimulationTest {
         assertEquals(0.0, state.speedKmh, 0.001)
     }
 
+    private fun EngineSimulation.ensureIgnitionRunning() {
+        if (!isIgnitionActive()) {
+            startIgnition()
+        }
+        repeat(500) {
+            if (ignition == EngineIgnitionState.RUNNING) {
+                return
+            }
+            update(DriverInput(), STEP)
+        }
+    }
+
     private fun EngineSimulation.runFor(
         seconds: Double,
         throttle: Double = 0.0,
@@ -164,6 +211,7 @@ class EngineSimulationTest {
         sim: Boolean = false,
         position: TransmissionPosition = TransmissionPosition.DRIVE,
     ): DrivetrainState {
+        ensureIgnitionRunning()
         var result = state
         repeat((seconds / STEP).toInt()) {
             result = update(DriverInput(throttle, brake, simulateCoastRegen = sim, transmissionPosition = position), STEP)
@@ -172,6 +220,7 @@ class EngineSimulationTest {
     }
 
     private fun EngineSimulation.runForExternal(seconds: Double, speedKmh: Double, throttle: Double): DrivetrainState {
+        ensureIgnitionRunning()
         var result = state
         repeat((seconds / STEP).toInt()) {
             result = update(DriverInput(throttle = throttle, externalSpeedKmh = speedKmh), STEP)
@@ -185,6 +234,7 @@ class EngineSimulationTest {
         seconds: Double,
         throttle: Double,
     ): DrivetrainState {
+        ensureIgnitionRunning()
         var result = state
         val frames = (seconds / STEP).toInt()
         repeat(frames) { frame ->

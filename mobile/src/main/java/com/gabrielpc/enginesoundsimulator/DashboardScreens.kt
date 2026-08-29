@@ -57,7 +57,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
@@ -297,6 +299,13 @@ private fun BarTachometerHud(
 ) {
     val rpmFraction = (drivetrain.rpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
     val redlineFraction = (redlineRpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    val shakeIntensity = redlineShakeIntensity(
+        rpm = drivetrain.rpm,
+        redlineRpm = redlineRpm,
+        maxRpm = maxRpm,
+        limiterActive = drivetrain.limiterActive,
+    )
+    val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
     val speedKmh = drivetrain.rawSpeedKmh.roundToInt().coerceAtLeast(0)
     val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
         drivetrain.gear.toString()
@@ -359,15 +368,22 @@ private fun BarTachometerHud(
                 val width = size.width
                 val height = size.height
                 val redlineX = width * redlineFraction
-                drawRect(
-                    color = Red.copy(alpha = 0.18f),
-                    topLeft = Offset(redlineX, 0f),
-                    size = androidx.compose.ui.geometry.Size(width - redlineX, height),
-                )
-                drawRect(
-                    brush = Brush.horizontalGradient(listOf(Cyan.copy(alpha = 0.35f), Amber, Red)),
-                    size = androidx.compose.ui.geometry.Size(width * rpmFraction, height),
-                )
+                val shakeOffset = redlineShake.interiorTranslation
+
+                clipRect(0f, 0f, width, height) {
+                    translate(shakeOffset.x, shakeOffset.y) {
+                        drawRect(
+                            color = Red.copy(alpha = 0.18f),
+                            topLeft = Offset(redlineX, 0f),
+                            size = androidx.compose.ui.geometry.Size(width - redlineX, height),
+                        )
+                        drawRect(
+                            brush = Brush.horizontalGradient(listOf(Cyan.copy(alpha = 0.35f), Amber, Red)),
+                            size = androidx.compose.ui.geometry.Size(width * rpmFraction, height),
+                        )
+                    }
+                }
+
                 drawLine(
                     color = Red,
                     start = Offset(redlineX, 0f),

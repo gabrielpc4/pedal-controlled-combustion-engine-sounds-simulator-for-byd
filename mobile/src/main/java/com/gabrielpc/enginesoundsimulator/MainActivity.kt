@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +60,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -116,6 +119,13 @@ private val Red = Color(0xFFFF394F)
 private val Amber = Color(0xFFFFC456)
 private val White = Color(0xFFF5FAFD)
 private val Muted = Color(0xFF88A2B2)
+private val StartStopRedHighlight = Color(0xFF9E1E28)
+private val StartStopRedBody = Color(0xFF6E1018)
+private val StartStopRedShadow = Color(0xFF3A070D)
+private val StartStopGreenDark = Color(0xFF0E8F42)
+private val StartStopGreenGlow = Color(0xFF34F07A)
+private val StartStopGreenHot = Color(0xFF5CFF9A)
+private val StartStopIndicatorOff = Color(0xFF2E080E)
 
 class MainActivity : ComponentActivity() {
     private val controller: DriveController
@@ -156,6 +166,7 @@ class MainActivity : ComponentActivity() {
                         onToggleInputSource = controller::toggleInputSource,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
+                        onToggleAppMute = controller::toggleAppMute,
                         onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
                         onIncreaseMasterVolume = controller::increaseAppMasterVolume,
                         onConfigChange = controller::setTuning,
@@ -227,6 +238,7 @@ private fun MotorSoundDashboard(
     onToggleInputSource: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
+    onToggleAppMute: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
@@ -299,7 +311,7 @@ private fun MotorSoundDashboard(
                         onSelectSimulatedPedals = onSelectSimulatedPedals,
                         onSelectRealPedals = onSelectRealPedals,
                         onToggleInputSource = onToggleInputSource,
-                        onToggleSound = onToggleSound,
+                        onToggleAppMute = onToggleAppMute,
                         onDecreaseMasterVolume = onDecreaseMasterVolume,
                         onIncreaseMasterVolume = onIncreaseMasterVolume,
                         onOpenTuning = { tuningOpen = true },
@@ -344,6 +356,13 @@ private fun MotorSoundDashboard(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
                                     .padding(bottom = 12.dp),
+                            )
+                            EngineStartStopButton(
+                                running = state.engineSoundEnabled,
+                                onClick = onToggleSound,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(start = 4.dp, bottom = 12.dp),
                             )
                             if (!mixerLoading) {
                                 DashboardMixerLauncherButton(
@@ -410,7 +429,7 @@ private fun DashboardHeader(
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
-    onToggleSound: () -> Unit,
+    onToggleAppMute: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
     onOpenTuning: () -> Unit,
@@ -450,13 +469,12 @@ private fun DashboardHeader(
         }
     }
 
-    LaunchedEffect(uiMonitoringActive, state.selectedCarId, state.carAudioReady, state.engineSoundEnabled) {
+    LaunchedEffect(uiMonitoringActive, state.selectedCarId, state.carAudioReady) {
         if (!uiMonitoringActive) {
             return@LaunchedEffect
         }
 
-        val carLoadSettled = !state.engineSoundEnabled || state.carAudioReady
-        if (!carLoadSettled) {
+        if (!state.carAudioReady) {
             return@LaunchedEffect
         }
 
@@ -552,10 +570,10 @@ private fun DashboardHeader(
         )
         MasterVolumeControls(
             volume = state.appMasterVolume,
-            muted = !state.engineSoundEnabled,
+            muted = state.appMuted,
             onDecrease = onDecreaseMasterVolume,
             onIncrease = onIncreaseMasterVolume,
-            onToggleMute = onToggleSound,
+            onToggleMute = onToggleAppMute,
         )
     }
 }
@@ -1177,6 +1195,153 @@ internal fun PedalControl(
 }
 
 @Composable
+private fun EngineStartStopButton(
+    running: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val buttonSize = 92.dp
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressDepth by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = tween(durationMillis = 140),
+        label = "startStopPressDepth",
+    )
+    val shadowLift = ((1f - pressDepth) * 3f).dp
+    val faceOffsetY = (pressDepth * 2.5f).dp
+    val faceScale = 1f - (pressDepth * 0.035f)
+    val topHighlight = StartStopRedHighlight.copy(alpha = 0.72f + (0.28f * (1f - pressDepth)))
+    val centerShineAlpha = 0.10f + (0.10f * (1f - pressDepth))
+
+    Box(
+        modifier = modifier.size(buttonSize),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .offset(y = shadowLift)
+                .clip(CircleShape)
+                .background(StartStopRedShadow.copy(alpha = 0.55f + (0.45f * (1f - pressDepth)))),
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .offset(y = faceOffsetY)
+                .scale(faceScale)
+                .clip(CircleShape)
+                .background(
+                    Brush.verticalGradient(
+                        colors = if (pressDepth > 0.01f) {
+                            listOf(
+                                StartStopRedShadow,
+                                StartStopRedBody,
+                                StartStopRedHighlight.copy(alpha = 0.85f),
+                            )
+                        } else {
+                            listOf(
+                                topHighlight,
+                                StartStopRedBody,
+                                StartStopRedShadow,
+                            )
+                        },
+                    ),
+                )
+                .border(
+                    width = (1.5f + pressDepth).dp,
+                    color = StartStopRedShadow.copy(alpha = 0.85f + (0.15f * pressDepth)),
+                    shape = CircleShape,
+                )
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(58.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = centerShineAlpha),
+                                Color.White.copy(alpha = centerShineAlpha * 0.35f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(34.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            if (running) {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        StartStopGreenHot,
+                                        StartStopGreenGlow,
+                                        StartStopGreenDark,
+                                    ),
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        StartStopIndicatorOff,
+                                        StartStopRedShadow,
+                                    ),
+                                )
+                            },
+                        )
+                        .border(
+                            width = 0.5.dp,
+                            color = if (running) {
+                                StartStopGreenGlow.copy(alpha = 0.95f)
+                            } else {
+                                StartStopRedShadow
+                            },
+                            shape = RoundedCornerShape(50),
+                        ),
+                )
+                Spacer(modifier = Modifier.height(7.dp))
+                Text(
+                    text = "START",
+                    color = White.copy(alpha = 0.96f - (0.08f * pressDepth)),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.1.sp,
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(1.5.dp)
+                        .background(White.copy(alpha = 0.55f - (0.15f * pressDepth))),
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = "STOP",
+                    color = White.copy(alpha = 0.88f - (0.10f * pressDepth)),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.1.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun Tachometer(
     drivetrain: DrivetrainState,
     transmissionPosition: TransmissionPosition,
@@ -1204,6 +1369,14 @@ private fun TachometerGauge(
     upshiftRpm: Double,
     modifier: Modifier = Modifier,
 ) {
+    val shakeIntensity = redlineShakeIntensity(
+        rpm = drivetrain.rpm,
+        redlineRpm = redlineRpm,
+        maxRpm = maxRpm,
+        limiterActive = drivetrain.limiterActive,
+    )
+    val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
+
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val gaugeSize = if (maxWidth < maxHeight) maxWidth else maxHeight
         val gaugeMaxRpm = ceil(maxRpm.coerceAtLeast(1_000.0) / 1_000.0) * 1_000.0
@@ -1307,10 +1480,11 @@ private fun TachometerGauge(
                     }
                 }
 
-                val needleAngle = startAngle + sweepAngle * rpmFraction
-                val needleTip = polar(center, radius * 0.77f, needleAngle)
-                val angleRadians = Math.toRadians(needleAngle.toDouble())
-                val perpendicular = angleRadians + PI / 2.0
+                val nominalNeedleAngle = startAngle + sweepAngle * rpmFraction
+                val tipAngle = nominalNeedleAngle + redlineShake.needleTipAngleJitterDegrees
+                val needleTip = polar(center, radius * 0.77f, tipAngle)
+                val baseAngleRadians = Math.toRadians(nominalNeedleAngle.toDouble())
+                val perpendicular = baseAngleRadians + PI / 2.0
                 val baseHalfWidth = radius * 0.027f
                 val baseA = androidx.compose.ui.geometry.Offset(
                     center.x + (cos(perpendicular) * baseHalfWidth).toFloat(),

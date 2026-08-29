@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
 import android.os.Process
+import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -76,6 +77,10 @@ class EngineAudioEngine(context: Context) {
     fun layerOutputMeters(): List<LayerOutputMeter> = layerMeterBus?.snapshot().orEmpty()
 
     fun loadedSampleProfileId(): String? = loadedSampleProfileId.get()
+
+    fun isAudioActive(): Boolean = synchronized(lifecycleLock) {
+        running.get() && renderThread.get()?.isAlive == true
+    }
 
     fun update(frame: EngineAudioFrame) {
         parameters.set(frame)
@@ -206,7 +211,8 @@ class EngineAudioEngine(context: Context) {
                     sampleProfile,
                     coastLayerMixEnabled = coastLayerMixEnabled.get(),
                 )
-            } catch (_: Throwable) {
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "Failed to decode ${sampleProfile.id} sample bank", throwable)
                 return
             }
             // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
@@ -214,9 +220,12 @@ class EngineAudioEngine(context: Context) {
             val warmup = ShortArray(512)
             repeat(3) { sampleRenderer.render(parameters.get(), warmup, gain = 0.0) }
             if (!isCurrent(runId)) return
-            loadedSampleProfileId.set(sampleProfile.id)
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-            val active = openTrack(sampleRate) ?: return
+            val active = openTrack(sampleRate)
+            if (active == null) {
+                Log.e(TAG, "AudioTrack failed to initialize for ${sampleProfile.id} at ${sampleRate}Hz")
+                return
+            }
             opened = active
             if (!activeTrack.compareAndSet(null, active.track)) {
                 throw IllegalStateException("another AudioTrack is still active")
@@ -231,6 +240,7 @@ class EngineAudioEngine(context: Context) {
             if (active.track.playState != AudioTrack.PLAYSTATE_PLAYING) {
                 throw IllegalStateException("AudioTrack did not enter PLAYING state")
             }
+            loadedSampleProfileId.set(sampleProfile.id)
 
             val track = active.track
             val stereoProgram = ShortArray(active.framesPerWrite * STEREO_CHANNEL_COUNT)
@@ -266,8 +276,10 @@ class EngineAudioEngine(context: Context) {
                     lastUnderruns = currentUnderruns
                 }
             }
-        } catch (_: Throwable) {
+        } catch (throwable: Throwable) {
+            Log.e(TAG, "Engine audio render loop stopped for ${sampleProfile.id}", throwable)
         } finally {
+            loadedSampleProfileId.set(null)
             opened?.track?.let { track ->
                 activeTrack.compareAndSet(track, null)
                 releaseTrack(track)
@@ -302,7 +314,7 @@ class EngineAudioEngine(context: Context) {
         val capacityFrames = max(minimumFrames, framesPerBurst * 4)
 
         val attributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_GAME)
+            .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .apply {
                 if (Build.VERSION.SDK_INT in 24..25) setFlags(AudioAttributes.FLAG_LOW_LATENCY)
@@ -393,6 +405,7 @@ class EngineAudioEngine(context: Context) {
         val capacityFrames: Int,
     )
     private companion object {
+        const val TAG = "EngineAudioEngine"
         const val RENDER_JOIN_TIMEOUT_MS = 750L
         const val RENDER_FORCE_RELEASE_JOIN_MS = 250L
         const val METER_PUBLISH_WRITE_INTERVAL = 3
