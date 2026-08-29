@@ -48,6 +48,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -622,6 +623,7 @@ private fun DashboardHeader(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.4.sp,
+                    lineHeight = 12.sp,
                 )
             }
             if (state.manualShiftModeEnabled) {
@@ -632,10 +634,10 @@ private fun DashboardHeader(
             }
         }
 
-        HeaderButton(
-            primary = "TUNE",
-            secondary = "ENGINE PROFILE",
-            accent = Amber,
+        HeaderIconButton(
+            icon = Icons.Filled.Settings,
+            contentDescription = "Open tuning",
+            accent = White,
             onClick = onOpenTuning,
         )
         PedalsInputHeaderControl(
@@ -948,6 +950,29 @@ private fun VolumeStepButton(
                     .fillMaxWidth(),
             )
         }
+    }
+}
+
+@Composable
+private fun HeaderIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    accent: Color = Cyan,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = accent),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(52.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = accent,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 
@@ -1375,24 +1400,18 @@ internal fun PedalControl(
             .border((2f * contentScale).dp, if (value > 0.01) accent else Color(0xFF60717D), RoundedCornerShape((16f * contentScale).dp))
             .pointerInput(onValue) {
                 awaitEachGesture {
-                    try {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        fun updateAt(y: Float) {
-                            onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
-                        }
-                        updateAt(down.position.y)
-                        var pointer = down
-                        do {
-                            val event = awaitPointerEvent()
-                            pointer = event.changes.firstOrNull { it.id == down.id } ?: break
-                            updateAt(pointer.position.y)
-                            pointer.consume()
-                        } while (pointer.pressed)
-                    } finally {
-                        // Pointer coroutines are cancelled when the window loses focus or
-                        // this node leaves composition. Never leave a simulated pedal held.
-                        onValue(0.0)
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    fun updateAt(y: Float) {
+                        onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
                     }
+                    updateAt(down.position.y)
+                    var pointer = down
+                    do {
+                        val event = awaitPointerEvent()
+                        pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                        updateAt(pointer.position.y)
+                        pointer.consume()
+                    } while (pointer.pressed)
                 }
             },
     ) {

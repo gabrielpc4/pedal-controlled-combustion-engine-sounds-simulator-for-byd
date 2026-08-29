@@ -35,6 +35,27 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun ignitionStartRevPlaysUpshiftCueOnEveryStartCycle() {
+        val simulation = EngineSimulation()
+        repeat(3) {
+            simulation.startIgnition()
+            val catchFrames = (ENGINE_START_CATCH_END_SECONDS / STEP).toInt() - 1
+            repeat(catchFrames) {
+                simulation.update(DriverInput(), STEP)
+            }
+            simulation.update(DriverInput(), STEP)
+            assertEquals(1L, simulation.state.shiftSerial)
+            assertEquals(ShiftDirection.UP, simulation.state.shiftDirection)
+
+            simulation.requestShutdown()
+            repeat(1_500) {
+                simulation.update(DriverInput(), STEP)
+            }
+            assertEquals(EngineIgnitionState.OFF, simulation.ignition)
+        }
+    }
+
+    @Test
     fun ignitionStartRevvesThenSettlesAtIdle() {
         val simulation = EngineSimulation()
         simulation.startIgnition()
@@ -484,6 +505,107 @@ class EngineSimulationTest {
             "downshift must never push coupled RPM above the car maximum",
             simulation.state.rpm <= limiter + 1.0,
         )
+    }
+
+    @Test
+    fun launchControlDisarmsWithGradualRpmFallWhenThrottleReleased() {
+        val simulation = EngineSimulation()
+        simulation.ensureIgnitionRunning()
+
+        repeat(240) {
+            simulation.update(
+                DriverInput(throttle = 1.0, brake = 0.35, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+        val rpmBeforeRelease = simulation.state.rpm
+        assertTrue(rpmBeforeRelease > LaunchControl.HOLD_RPM - 200.0)
+
+        simulation.update(
+            DriverInput(throttle = 0.0, brake = 0.35, simulateCoastRegen = true),
+            STEP,
+        )
+        val rpmAfterOneFrame = simulation.state.rpm
+        assertTrue(rpmAfterOneFrame > simulation.profile.idleRpm + 200.0)
+        assertTrue(rpmAfterOneFrame < rpmBeforeRelease)
+
+        repeat(5) {
+            simulation.update(
+                DriverInput(throttle = 0.0, brake = 0.35, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+        assertTrue(simulation.state.rpm > simulation.profile.idleRpm + 100.0)
+    }
+
+    @Test
+    fun launchControlHoldsFiveThousandWhileArmedThenLaunches() {
+        val simulation = EngineSimulation()
+        simulation.ensureIgnitionRunning()
+
+        repeat(120) {
+            simulation.update(
+                DriverInput(throttle = 1.0, brake = 0.35, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+        assertTrue(simulation.state.rpm > LaunchControl.HOLD_RPM - 120.0)
+        assertTrue(simulation.state.rpm < LaunchControl.HOLD_RPM + LaunchControl.ARMED_OVERSHOOT_RPM + 120.0)
+
+        repeat(200) {
+            simulation.update(
+                DriverInput(throttle = 1.0, brake = 0.35, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+        assertTrue(simulation.state.rpm > LaunchControl.HOLD_RPM - LaunchControl.JITTER_AMPLITUDE_RPM - 40.0)
+        assertTrue(simulation.state.rpm < LaunchControl.HOLD_RPM + LaunchControl.JITTER_AMPLITUDE_RPM + 40.0)
+
+        var peakLaunchRpm = 0.0
+        repeat(160) {
+            simulation.update(
+                DriverInput(throttle = 1.0, brake = 0.0, simulateCoastRegen = true),
+                STEP,
+            )
+            peakLaunchRpm = maxOf(peakLaunchRpm, simulation.state.rpm)
+        }
+        assertTrue(peakLaunchRpm > simulation.profile.redlineRpm - 150.0)
+
+        repeat(40) {
+            simulation.update(
+                DriverInput(throttle = 1.0, brake = 0.35, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+        repeat(600) {
+            simulation.update(
+                DriverInput(throttle = 0.0, brake = 1.0, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+        assertTrue(simulation.state.speedKmh < 5.0)
+        assertTrue(simulation.state.rpm < LaunchControl.HOLD_RPM - 200.0)
+    }
+
+    @Test
+    fun brakeAtStandstillBlocksThrottleFromAddingSpeed() {
+        assertTrue(LaunchControl.blocksDriveAtStandstill(speedMps = 0.0, brake = 0.2))
+        assertTrue(!LaunchControl.blocksDriveAtStandstill(speedMps = 1.0, brake = 0.2))
+    }
+
+    @Test
+    fun fullThrottleAndBrakeAtStopKeepsSimulatorSpeedAtZero() {
+        val simulation = EngineSimulation()
+        simulation.ensureIgnitionRunning()
+
+        repeat(240) {
+            simulation.update(
+                DriverInput(throttle = 1.0, brake = 0.35, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+
+        assertEquals(0.0, simulation.state.speedKmh, 0.001)
     }
 
     @Test

@@ -7,7 +7,20 @@ internal enum class SampleLayerRole { IDLE, LOAD, COAST, TEXTURE, LIMITER }
 /** Keeps the continuous idle program present in the cabin without raising driving-layer volume. */
 private const val IDLE_LAYER_GAIN_BOOST_DB = 8.0
 
-internal enum class SampleEffectTrigger { TRANSMISSION_LOOP, SHIFT_UP, SHIFT_DOWN, THROTTLE_LIFT }
+internal enum class SampleEffectTrigger {
+    TRANSMISSION_LOOP,
+    SHIFT_UP,
+    SHIFT_DOWN,
+    THROTTLE_LIFT,
+    TURBO_LOOP,
+    TURBO_FLUTTER,
+    TURBO_DUMP,
+    ;
+
+    fun isContinuousLoop(): Boolean {
+        return this == TRANSMISSION_LOOP || this == TURBO_LOOP || this == TURBO_FLUTTER
+    }
+}
 
 internal data class SampleEffectControlSpec(
     val id: String,
@@ -35,6 +48,12 @@ internal object SampleEffectControls {
         description = "Crackle or backfire after a strong throttle lift",
         bit = 1L shl 2,
     )
+    val turbo = SampleEffectControlSpec(
+        id = "turbo",
+        displayName = "Turbo",
+        description = "Spool whistle and compressor flutter from this car's sound bank",
+        bit = 1L shl 3,
+    )
 }
 
 internal data class SampleEffectSpec(
@@ -46,10 +65,32 @@ internal data class SampleEffectSpec(
     val minimumRpm: Double = 0.0,
     /** Extra one-shot assets selected at trigger time (FMOD SMART_RANDOM-style). */
     val variantAssetNames: List<String> = emptyList(),
+    /** When set, overrides the WAV smpl loop so a long take can skip dump bangs. */
+    val loopStartSeconds: Double? = null,
+    val loopEndSeconds: Double? = null,
 ) {
     val allAssetNames: List<String> = buildList {
         add(assetName)
         addAll(variantAssetNames)
+    }
+
+    fun resolvedLoopStartFrame(sampleRate: Int, fallback: Int): Int {
+        val seconds = loopStartSeconds
+        if (seconds == null) {
+            return fallback
+        }
+
+        return (seconds * sampleRate).toInt().coerceAtLeast(0)
+    }
+
+    fun resolvedLoopEndFrameExclusive(sampleRate: Int, fallback: Int, frameCount: Int): Int {
+        val seconds = loopEndSeconds
+        if (seconds == null) {
+            return fallback
+        }
+
+        val start = resolvedLoopStartFrame(sampleRate, 0)
+        return (seconds * sampleRate).toInt().coerceIn(start + 1, frameCount)
     }
 
     fun isNativeExhaustOverrun(): Boolean {
@@ -186,14 +227,23 @@ internal data class EngineSampleProfile(
     val layers: List<SampleLayerSpec>,
     val effects: List<SampleEffectSpec> = emptyList(),
     val throttleOutputGainDb: AutomationCurve? = null,
+    /**
+     * When false, this car always keeps LOAD layers in the mix even if the
+     * global coast-only program is on. The Skyline bank needs on+off together.
+     */
+    val usesCoastOnlyProgram: Boolean = true,
 ) {
     val requiredAssets: Set<String> = linkedSetOf<String>().apply {
         layers.mapTo(this) { it.assetName }
         effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
+    fun appliesCoastOnlyProgram(coastLayerMixEnabled: Boolean): Boolean {
+        return coastLayerMixEnabled && usesCoastOnlyProgram
+    }
+
     fun loopLayersForLoad(coastLayerMixEnabled: Boolean): List<SampleLayerSpec> {
-        if (coastLayerMixEnabled) {
+        if (appliesCoastOnlyProgram(coastLayerMixEnabled)) {
             return layers.filter { layer -> layer.role != SampleLayerRole.LOAD }
         }
         return layers
@@ -225,6 +275,7 @@ internal object EngineSampleProfiles {
     val all = listOf(
         default,
         lamborghiniAventadorSvProfile(),
+        nissanSkylineR34Profile(),
     )
     val maximumSupportedRpm = all.maxOf { it.maximumRpm }
 
@@ -259,6 +310,13 @@ internal object EngineSampleProfiles {
             zeroToHundred = "2.9 s",
             weight = "1,575",
             priceBrl = "R$ 5.200.000",
+        ),
+        "nissan_skyline_r34_cabin" to CarSpecifications(
+            horsepower = "325",
+            torqueKgfm = "40",
+            zeroToHundred = "4.9 s",
+            weight = "1,560",
+            priceBrl = "R$ 1.200.000",
         ),
     )
 }

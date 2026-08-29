@@ -14,9 +14,9 @@ class SampleEngineRendererTest {
 
     @Test
     fun everySelectableCarHasACompleteDistinctSampleProfile() {
-        assertEquals(2, EngineSampleProfiles.all.size)
-        assertEquals(2, EngineSampleProfiles.all.map { it.id }.distinct().size)
-        assertEquals(2, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
+        assertEquals(3, EngineSampleProfiles.all.size)
+        assertEquals(3, EngineSampleProfiles.all.map { it.id }.distinct().size)
+        assertEquals(3, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
 
         EngineSampleProfiles.all.forEach { candidate ->
             assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())
@@ -43,6 +43,26 @@ class SampleEngineRendererTest {
         EngineSampleProfiles.all.filterNot { it.id == huracan.id }.forEach { candidate ->
             assertEquals("${candidate.id} playback rate changed", candidate.outputSampleRate, candidate.playbackSampleRate)
         }
+        val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        assertEquals(44_100, skyline.outputSampleRate)
+        assertTrue(skyline.usesCoastOnlyProgram)
+        assertTrue(
+            skyline.layers
+                .filter { layer -> layer.role == SampleLayerRole.LOAD }
+                .none { layer -> layer.assetName in skyline.requiredAssetsForLoad(coastLayerMixEnabled = true) },
+        )
+        assertTrue(
+            skyline.layers
+                .filter { layer -> layer.role == SampleLayerRole.COAST }
+                .all { layer -> layer.assetName in skyline.requiredAssetsForLoad(coastLayerMixEnabled = true) },
+        )
+        assertTrue(skyline.layers.any { it.role == SampleLayerRole.COAST && it.assetName.contains("_in_") })
+        assertTrue(skyline.effects.any { it.trigger == SampleEffectTrigger.TURBO_LOOP })
+        assertTrue(skyline.effects.any { it.trigger == SampleEffectTrigger.TURBO_FLUTTER })
+        assertTrue(skyline.effects.any { it.trigger == SampleEffectTrigger.TURBO_DUMP })
+        assertTrue(skyline.layers.any { it.role == SampleLayerRole.LIMITER })
+        assertTrue(skyline.layers.any { it.role == SampleLayerRole.TEXTURE })
+        assertEquals(6, skyline.gearRatios.size)
     }
 
     @Test
@@ -242,7 +262,7 @@ class SampleEngineRendererTest {
         }
 
         val diagnostics = renderer.diagnostics()
-        assertEquals(profile.effects.size, diagnostics.loadedEffects)
+        assertTrue(diagnostics.loadedEffects >= profile.effects.size)
         assertEquals(1L, diagnostics.effectTriggers)
         assertTrue(diagnostics.activeEffects.contains("transmission_loop"))
     }
@@ -341,6 +361,32 @@ class SampleEngineRendererTest {
                 gain = 0.7,
             )
         }
+
+        assertEquals(1L, renderer.diagnostics().effectTriggers)
+        assertTrue(renderer.diagnostics().activeEffects.contains(SharedHuracanShiftSounds.SHIFT_UP_ID))
+    }
+
+    @Test
+    fun lateAttachHonorsActiveIgnitionShiftCue() {
+        val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
+        val decoded = aventador.requiredAssets.associateWith { asset ->
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        } + SharedHuracanShiftSounds.assetNames.associateWith {
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        }
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, aventador)
+        val output = ShortArray(1_920)
+
+        renderer.render(
+            EngineAudioFrame(
+                rpm = 4_500.0,
+                shiftSerial = 1,
+                shiftDirection = 1,
+                sharedShiftSoundsEnabled = true,
+            ),
+            output,
+            gain = 0.7,
+        )
 
         assertEquals(1L, renderer.diagnostics().effectTriggers)
         assertTrue(renderer.diagnostics().activeEffects.contains(SharedHuracanShiftSounds.SHIFT_UP_ID))

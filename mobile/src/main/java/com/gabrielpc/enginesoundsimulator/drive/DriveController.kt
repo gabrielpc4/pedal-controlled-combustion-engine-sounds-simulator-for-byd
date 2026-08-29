@@ -127,9 +127,6 @@ class DriveController(context: Context) {
     private val engineStartLoading = AtomicBoolean(false)
 
     @Volatile
-    private var postLoadEngineStartDelaySeconds = 0.0
-
-    @Volatile
     private var userVisibleMessage: UserVisibleMessage? = null
 
     @Volatile
@@ -229,6 +226,7 @@ class DriveController(context: Context) {
             try {
                 vehicleReader.start()
                 thread.start()
+                requestAutoSessionEngineStart()
             } catch (throwable: Throwable) {
                 running.set(false)
                 generation.incrementAndGet()
@@ -507,6 +505,23 @@ class DriveController(context: Context) {
         }
     }
 
+    private fun requestAutoSessionEngineStart() {
+        synchronized(lifecycleLock) {
+            if (simulation.isEngineEngagedForUi() || simulation.isShutdownPending()) {
+                ensureAudioEngineRunning(force = true)
+                return
+            }
+
+            if (sessionFirstStartPending.get()) {
+                engineStartLoading.set(true)
+                requestEngineStart(fromStartStopButton = false)
+                return
+            }
+
+            engageEngineAtIdle(forceAudio = true)
+        }
+    }
+
     private fun requestEngineStart(fromStartStopButton: Boolean = false) {
         if (simulation.isEngineEngagedForUi() || simulation.isShutdownPending()) {
             return
@@ -541,36 +556,23 @@ class DriveController(context: Context) {
 
     private fun beginPostLoadEngineStartDelay() {
         awaitingFirstAudioLoad.set(false)
-        postLoadEngineStartDelaySeconds = FIRST_START_POST_LOAD_DELAY_SECONDS
-    }
-
-    private fun advancePostLoadEngineStartDelay(dt: Double) {
-        if (postLoadEngineStartDelaySeconds <= 0.0) {
-            return
-        }
-
-        postLoadEngineStartDelaySeconds = (postLoadEngineStartDelaySeconds - dt).coerceAtLeast(0.0)
-        if (postLoadEngineStartDelaySeconds <= 0.0) {
-            completeDeferredEngineStart()
-        }
+        completeDeferredEngineStart()
     }
 
     private fun completeDeferredEngineStart() {
         awaitingFirstAudioLoad.set(false)
-        postLoadEngineStartDelaySeconds = 0.0
         engineStartLoading.set(false)
         sessionFirstStartPending.set(false)
-        startEngine(forceAudio = true)
+        engageEngineAtIdle(forceAudio = true)
     }
 
     private fun cancelPendingFirstAudioLoad() {
         awaitingFirstAudioLoad.set(false)
-        postLoadEngineStartDelaySeconds = 0.0
         engineStartLoading.set(false)
     }
 
     private fun isDeferringFirstSessionEngineStart(): Boolean {
-        return awaitingFirstAudioLoad.get() || postLoadEngineStartDelaySeconds > 0.0
+        return awaitingFirstAudioLoad.get()
     }
 
     private fun isSelectedCarAudioLoaded(): Boolean {
@@ -579,6 +581,13 @@ class DriveController(context: Context) {
 
     private fun startEngine(forceAudio: Boolean) {
         simulation.startIgnition()
+        if (forceAudio) {
+            ensureAudioEngineRunning(force = true)
+        }
+    }
+
+    private fun engageEngineAtIdle(forceAudio: Boolean) {
+        simulation.engageAtIdle()
         if (forceAudio) {
             ensureAudioEngineRunning(force = true)
         }
@@ -679,11 +688,6 @@ class DriveController(context: Context) {
             }
         }
         handleAudioLoadFailures()
-        if (postLoadEngineStartDelaySeconds > 0.0) {
-            synchronized(lifecycleLock) {
-                advancePostLoadEngineStartDelay(dt)
-            }
-        }
         if (simulation.isIgnitionActive()) {
             ensureAudioEngineRunning()
         } else if (audioEngine.isAudioActive() && !isDeferringFirstSessionEngineStart()) {
@@ -857,7 +861,6 @@ class DriveController(context: Context) {
         const val INTERRUPTION_RESUME_VOLUME = 0.25
         const val AUDIO_RESTART_COOLDOWN_MS = 2_000L
         const val AUTO_START_THROTTLE_THRESHOLD = 0.10
-        const val FIRST_START_POST_LOAD_DELAY_SECONDS = 2.0
     }
 }
 
@@ -883,7 +886,7 @@ private fun buildLayerMixTracks(
         val layer = profile.layers.firstOrNull { it.id == trackId }
         val effect = profile.effects.firstOrNull { it.id == trackId }
         when {
-            coastMixEnabled && layer?.role == SampleLayerRole.LOAD -> null
+            profile.appliesCoastOnlyProgram(coastMixEnabled) && layer?.role == SampleLayerRole.LOAD -> null
             layer != null -> LayerMixTrackState(
                 id = trackId,
                 displayName = layer.mixerDisplayName(),
@@ -893,7 +896,11 @@ private fun buildLayerMixTracks(
                 solo = control.solo,
                 outputLevel = outputLevels.firstOrNull { it.id == trackId }?.outputLevel ?: 0.0,
                 isEffect = false,
-                showVolumeSlider = layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD,
+                showVolumeSlider = if (profile.appliesCoastOnlyProgram(coastMixEnabled)) {
+                    layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD
+                } else {
+                    true
+                },
                 isLoadLayer = layer.role == SampleLayerRole.LOAD,
             )
             effect != null -> LayerMixTrackState(

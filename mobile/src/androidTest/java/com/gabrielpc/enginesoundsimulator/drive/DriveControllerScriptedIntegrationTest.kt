@@ -17,9 +17,14 @@ class DriveControllerScriptedIntegrationTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val controller = DriveController(context)
         try {
-            controller.toggleSound()
             controller.setInputMode(InputMode.SimulatedPedals)
             controller.start()
+            assertTrue(
+                "engine should auto-start when the controller loop begins",
+                waitUntil(timeoutMs = 8_000L) {
+                    controller.snapshot().engineSoundEnabled
+                },
+            )
             controller.setSimulatedPedalThrottle(1.0)
 
             assertTrue(

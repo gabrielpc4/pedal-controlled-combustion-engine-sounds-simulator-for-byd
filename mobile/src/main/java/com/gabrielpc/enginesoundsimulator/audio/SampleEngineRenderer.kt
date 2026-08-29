@@ -49,6 +49,7 @@ internal class SampleEngineRenderer private constructor(
     private var effectTriggers = 0L
     private var lastShiftSerial: Long? = null
     private var throttleLiftArmed = false
+    private val turboSpool = TurboSpoolModel()
     private var anyLayerSolo = false
     private var lastRequestedRpm = profile.idleRpm
     private var lastBlockPeak = 0.0
@@ -163,15 +164,18 @@ internal class SampleEngineRenderer private constructor(
         smoothedThrottle += (target.throttle.coerceIn(0.0, 1.0) - smoothedThrottle) * throttleAlpha
 
         anyLayerSolo = target.layerMix.values.any { control -> control.solo && !control.muted }
+        val coastProgram = profile.appliesCoastOnlyProgram(target.coastLayerMixEnabled)
+        turboSpool.update(blockSeconds, smoothedRpm, smoothedThrottle)
         updateVoiceTargets(
             smoothedRpm,
             smoothedThrottle,
             target.layerMix,
+            coastProgram,
             target.coastLayerMixEnabled,
         )
         updateEffectTargetsAndTriggers(target, target.layerMix)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
-        val targetProfileOutputGain = if (target.coastLayerMixEnabled) {
+        val targetProfileOutputGain = if (coastProgram) {
             profile.outputGainAt(1.0)
         } else {
             profile.outputGainAt(smoothedThrottle)
@@ -183,7 +187,7 @@ internal class SampleEngineRenderer private constructor(
         val profileGainAlpha = 1.0 - exp(-1.0 / (outputSampleRate * programFadeSeconds))
         val enabledAlpha = 1.0 - exp(-1.0 / (outputSampleRate * (target.tuning.enabledFadeMs / 1_000.0)))
         val layerFadeSeconds = target.tuning.layerFadeMs / 1_000.0
-        val idleLayerFadeSeconds = if (target.coastLayerMixEnabled) {
+        val idleLayerFadeSeconds = if (coastProgram) {
             COAST_IDLE_LAYER_FADE_MS / 1_000.0
         } else {
             layerFadeSeconds
@@ -199,7 +203,7 @@ internal class SampleEngineRenderer private constructor(
             var voiceIndex = 0
             while (voiceIndex < voices.size) {
                 val voice = voices[voiceIndex]
-                val voiceLayerAlpha = if (target.coastLayerMixEnabled && voice.spec.role == SampleLayerRole.IDLE) {
+                val voiceLayerAlpha = if (coastProgram && voice.spec.role == SampleLayerRole.IDLE) {
                     idleLayerAlpha
                 } else {
                     layerAlpha
@@ -348,6 +352,14 @@ internal class SampleEngineRenderer private constructor(
         val previousShift = lastShiftSerial
         if (previousShift == null) {
             lastShiftSerial = target.shiftSerial
+            if (target.shiftDirection != 0) {
+                val trigger = if (target.shiftDirection > 0) {
+                    SampleEffectTrigger.SHIFT_UP
+                } else {
+                    SampleEffectTrigger.SHIFT_DOWN
+                }
+                triggerShiftOneShots(trigger, smoothedRpm, layerMix, target)
+            }
         } else if (target.shiftSerial != previousShift) {
             lastShiftSerial = target.shiftSerial
             val trigger = if (target.shiftDirection > 0) {
@@ -364,6 +376,20 @@ internal class SampleEngineRenderer private constructor(
             triggerThrottleLiftOneShots(smoothedRpm, layerMix, target)
         }
 
+        if (turboSpool.consumeDumpPulse()) {
+            effectVoices.forEach { voice ->
+                if (voice.spec.trigger == SampleEffectTrigger.TURBO_FLUTTER) {
+                    voice.restartAtLoop()
+                }
+            }
+            triggerOneShots(
+                SampleEffectTrigger.TURBO_DUMP,
+                smoothedRpm,
+                layerMix,
+                target.coastLayerMixEnabled,
+            )
+        }
+
         var effectIndex = 0
         while (effectIndex < effectVoices.size) {
             val voice = effectVoices[effectIndex]
@@ -372,6 +398,12 @@ internal class SampleEngineRenderer private constructor(
                 voice.spec.isNativeGearChange() && target.sharedShiftSoundsEnabled -> 0.0
                 voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+                }
+                voice.spec.trigger == SampleEffectTrigger.TURBO_LOOP -> {
+                    voice.baseGain * turboSpool.whistleGain()
+                }
+                voice.spec.trigger == SampleEffectTrigger.TURBO_FLUTTER -> {
+                    voice.baseGain * turboSpool.flutterGain()
                 }
                 else -> {
                     if (voice.isOneShotActive) {
@@ -385,6 +417,14 @@ internal class SampleEngineRenderer private constructor(
             if (voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP) {
                 voice.phaseIncrement = voice.sampleRate.toDouble() / outputSampleRate *
                     (0.55 + normalizedRpm * 1.25)
+            }
+            if (voice.spec.trigger == SampleEffectTrigger.TURBO_LOOP) {
+                voice.phaseIncrement = voice.sampleRate.toDouble() / outputSampleRate *
+                    turboSpool.whistlePlaybackRatio()
+            }
+            if (voice.spec.trigger == SampleEffectTrigger.TURBO_FLUTTER) {
+                voice.phaseIncrement = voice.sampleRate.toDouble() / outputSampleRate *
+                    turboSpool.flutterPlaybackRatio()
             }
             effectIndex += 1
         }
@@ -533,12 +573,13 @@ internal class SampleEngineRenderer private constructor(
         rpm: Double,
         throttle: Double,
         layerMix: Map<String, LayerMixControl>,
+        coastProgram: Boolean,
         coastLayerMixEnabled: Boolean,
     ) {
         var voiceIndex = 0
         while (voiceIndex < voices.size) {
             val voice = voices[voiceIndex]
-            val authoredGain = voice.spec.gainAt(rpm, throttle, coastLayerMixEnabled)
+            val authoredGain = voice.spec.gainAt(rpm, throttle, coastProgram)
             voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix, coastLayerMixEnabled)
             voice.playbackRatio = voice.spec.playbackRatio(rpm)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate * voice.playbackRatio
@@ -658,17 +699,43 @@ internal class SampleEngineRenderer private constructor(
         var sampleRight = 0.0
             private set
         private var activeSample = sampleVariants.first()
-        private var active = spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP
+        private var active = spec.trigger.isContinuousLoop()
         private var hasLooped = false
         private var lastVariantIndex = -1
         val sampleRate = sampleVariants.first().sampleRate
         val baseGain = 10.0.pow(spec.baseGainDb / 20.0)
         val isOneShotActive: Boolean
-            get() = spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP && active
+            get() = !spec.trigger.isContinuousLoop() && active
         val isAudible: Boolean get() = active && gain > SILENCE_GAIN
 
+        init {
+            if (spec.trigger.isContinuousLoop()) {
+                phase = loopStartFrame().toDouble()
+            }
+        }
+
+        fun restartAtLoop() {
+            phase = loopStartFrame().toDouble()
+            hasLooped = false
+            if (spec.trigger.isContinuousLoop()) {
+                active = true
+            }
+        }
+
+        private fun loopStartFrame(): Int {
+            return spec.resolvedLoopStartFrame(activeSample.sampleRate, activeSample.loopStartFrame)
+        }
+
+        private fun loopEndFrameExclusive(): Int {
+            return spec.resolvedLoopEndFrameExclusive(
+                activeSample.sampleRate,
+                activeSample.loopEndFrameExclusive,
+                activeSample.frameCount,
+            )
+        }
+
         fun trigger(): Boolean {
-            if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP && active) {
+            if (!spec.trigger.isContinuousLoop() && active) {
                 return false
             }
             activeSample = pickVariantSample()
@@ -710,7 +777,7 @@ internal class SampleEngineRenderer private constructor(
         fun advance(): Boolean {
             if (!active) return false
             phase += phaseIncrement
-            if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
+            if (!spec.trigger.isContinuousLoop()) {
                 if (phase >= activeSample.frameCount - 1) {
                     active = false
                     gain = 0.0
@@ -718,19 +785,21 @@ internal class SampleEngineRenderer private constructor(
                 }
                 return false
             }
-            if (phase < activeSample.loopEndFrameExclusive) return false
-            val loopLength = activeSample.loopEndFrameExclusive - activeSample.loopStartFrame
-            phase = activeSample.loopStartFrame + (phase - activeSample.loopEndFrameExclusive) % loopLength
+            val loopEnd = loopEndFrameExclusive()
+            if (phase < loopEnd) return false
+            val loopStart = loopStartFrame()
+            val loopLength = loopEnd - loopStart
+            phase = loopStart + (phase - loopEnd) % loopLength
             hasLooped = true
             return true
         }
 
         private fun resolveFrame(index: Int): Int {
-            if (spec.trigger != SampleEffectTrigger.TRANSMISSION_LOOP) {
+            if (!spec.trigger.isContinuousLoop()) {
                 return index.coerceIn(0, activeSample.frameCount - 1)
             }
-            val start = activeSample.loopStartFrame
-            val end = activeSample.loopEndFrameExclusive
+            val start = loopStartFrame()
+            val end = loopEndFrameExclusive()
             val length = end - start
             return when {
                 index >= end -> start + (index - end) % length

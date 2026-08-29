@@ -21,4 +21,7 @@ internal fun SampleEffectSpec.playingRoleLabel(): String = when (trigger) {
     SampleEffectTrigger.SHIFT_UP -> "Shift up"
     SampleEffectTrigger.SHIFT_DOWN -> "Shift down"
     SampleEffectTrigger.THROTTLE_LIFT -> control.displayName
+    SampleEffectTrigger.TURBO_LOOP -> "Turbo"
+    SampleEffectTrigger.TURBO_FLUTTER -> "Turbo flutter"
+    SampleEffectTrigger.TURBO_DUMP -> "Turbo dump"
 }

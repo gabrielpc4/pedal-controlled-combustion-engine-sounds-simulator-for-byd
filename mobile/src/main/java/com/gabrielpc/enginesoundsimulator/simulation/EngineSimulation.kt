@@ -137,6 +137,14 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var secondsSinceShift = 10.0
     private var limiterLatched = false
     private var externalSpeedActive = false
+    private var launchControlPhase = LaunchControlPhase.INACTIVE
+    private var launchControlJitterPhase = 0.0
+    private var launchControlArmedElapsedSeconds = 0.0
+    private var launchControlArmedStartRpm = 0.0
+    private var launchControlDisarmElapsedSeconds = 0.0
+    private var launchControlDisarmStartRpm = 0.0
+    private var launchControlTachCycleElapsedSeconds = 0.0
+    private var launchControlTachCycleStartRpm = 0.0
     private var downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
     private var downshiftHysteresisKmhByGear = sortedDownshiftHysteresisKmhByGear(profile.gearRatios.size)
     private val externalSpeedEstimator = QuantizedSpeedEstimator()
@@ -174,8 +182,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         shutdownElapsedSeconds = 0.0
         engineRpm = 0.0
         limiterLatched = false
+        shiftSerial = 0L
         ignitionShiftCueDirection = ShiftDirection.NONE
         startupShiftCueFired = false
+        resetLaunchControl()
     }
 
     /** Engage the engine at idle with no starter rev sequence (app launch, car swap). */
@@ -185,6 +195,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         shutdownElapsedSeconds = 0.0
         engineRpm = profile.idleRpm
         limiterLatched = false
+        resetLaunchControl()
     }
 
     fun isVehicleThrottleActive(): Boolean = ignitionState == EngineIgnitionState.RUNNING
@@ -198,10 +209,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         shutdownElapsedSeconds = 0.0
         currentGearIndex = 0
         activeShift = null
-        shiftSerial += 1
         secondsSinceShift = 10.0
         downshiftBoundaryKmhByGear.fill(0.0)
         limiterLatched = false
+        resetLaunchControl()
     }
 
     /** @return true when shutdown finished and ignition returned to OFF. */
@@ -292,6 +303,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         externalSpeedActive = false
         downshiftBoundaryKmhByGear.fill(0.0)
         externalSpeedEstimator.reset()
+        resetLaunchControl()
     }
 
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
@@ -312,6 +324,12 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         )
 
         val externalKmh = input.externalSpeedKmh?.coerceAtLeast(0.0)
+        updateLaunchControl(
+            rawThrottle = rawThrottle,
+            transmissionPosition = input.transmissionPosition,
+            externalSpeedActive = externalKmh != null || externalSpeedActive,
+        )
+
         if (ignitionState == EngineIgnitionState.STOPPING && !externalSpeedActive && externalKmh == null) {
             applyShutdownBraking(dt)
             applyQuantizedSimulatorSpeed(dt)
@@ -406,9 +424,14 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     ) {
         val axleTorque = axleWheelTorqueAtSpeed(profile, simulatedPhysicalSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
+        val throttleDrive = if (LaunchControl.blocksDriveAtStandstill(simulatedPhysicalSpeedMps, filteredBrake)) {
+            0.0
+        } else {
+            filteredThrottle * brakeOverride
+        }
         val throttleConnected = transmissionPosition == TransmissionPosition.DRIVE && isVehicleThrottleActive()
         val requestedWheelTorque = if (throttleConnected) {
-            axleTorque.totalNm * filteredThrottle * brakeOverride
+            axleTorque.totalNm * throttleDrive
         } else {
             0.0
         }
@@ -422,7 +445,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         val uncappedDriveForce = deliveredWheelTorque / profile.wheelRadiusMeters
         val driveForce = min(
             uncappedDriveForce,
-            profile.vehicleMassKg * profile.tractionLimitMps2 * filteredThrottle,
+            profile.vehicleMassKg * profile.tractionLimitMps2 * throttleDrive,
         )
         val serviceBrakeForce = filteredBrake * profile.vehicleMassKg * MAX_SERVICE_BRAKE_MPS2
         val regenerativeCoastForce = if (
@@ -520,6 +543,11 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun updateSampleRpm(dt: Double, transmissionPosition: TransmissionPosition) {
+        if (launchControlPhase != LaunchControlPhase.INACTIVE && transmissionPosition == TransmissionPosition.DRIVE) {
+            updateLaunchControlRpm(dt)
+            return
+        }
+
         val target = when (transmissionPosition) {
             TransmissionPosition.DRIVE -> {
                 val shift = activeShift
@@ -577,10 +605,23 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
 
         val speedKmh = vehicleSpeedMps * 3.6
+        val coupledRpmForShift = when {
+            launchControlPhase == LaunchControlPhase.LAUNCHED &&
+                currentGearIndex == 0 &&
+                filteredThrottle >= FULL_THROTTLE_UPSHIFT_THRESHOLD -> {
+                rpmForSpeed(currentGearIndex)
+            }
+            launchControlPhase == LaunchControlPhase.LAUNCHED -> {
+                engineRpm
+            }
+            else -> {
+                rpmForSpeed(currentGearIndex)
+            }
+        }
         if (currentGearIndex < profile.gearRatios.lastIndex &&
             filteredThrottle > SHIFT_THROTTLE_THRESHOLD &&
             (
-                rpmForSpeed(currentGearIndex) >= upshiftTriggerRpm(currentGearIndex) ||
+                coupledRpmForShift >= upshiftTriggerRpm(currentGearIndex) ||
                     speedKmh >= upshiftTriggerSpeedKmh(currentGearIndex)
                 )
         ) {
@@ -707,6 +748,169 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             return profile.limiterRpm
         }
         return capped.coerceAtLeast(profile.idleRpm)
+    }
+
+    private fun resetLaunchControl() {
+        launchControlPhase = LaunchControlPhase.INACTIVE
+        launchControlJitterPhase = 0.0
+        launchControlArmedElapsedSeconds = 0.0
+        launchControlArmedStartRpm = profile.idleRpm
+        launchControlDisarmElapsedSeconds = 0.0
+        launchControlDisarmStartRpm = profile.idleRpm
+        launchControlTachCycleElapsedSeconds = 0.0
+        launchControlTachCycleStartRpm = profile.idleRpm
+    }
+
+    private fun updateLaunchControl(
+        rawThrottle: Double,
+        transmissionPosition: TransmissionPosition,
+        externalSpeedActive: Boolean,
+    ) {
+        val enabled = ignitionState == EngineIgnitionState.RUNNING &&
+            transmissionPosition == TransmissionPosition.DRIVE &&
+            !manualShiftEnabled &&
+            !externalSpeedActive
+
+        val previousPhase = launchControlPhase
+        launchControlPhase = LaunchControl.advancePhase(
+            phase = launchControlPhase,
+            rawThrottle = rawThrottle,
+            brake = filteredBrake,
+            speedMps = vehicleSpeedMps,
+            enabled = enabled,
+        )
+        if (launchControlPhase == LaunchControlPhase.ARMED && previousPhase != LaunchControlPhase.ARMED) {
+            launchControlJitterPhase = 0.0
+            launchControlArmedElapsedSeconds = 0.0
+            launchControlArmedStartRpm = engineRpm
+        }
+        if (launchControlPhase == LaunchControlPhase.DISARMING && previousPhase == LaunchControlPhase.ARMED) {
+            launchControlDisarmElapsedSeconds = 0.0
+            launchControlDisarmStartRpm = engineRpm
+        }
+        if (launchControlPhase == LaunchControlPhase.LAUNCHED && previousPhase != LaunchControlPhase.LAUNCHED) {
+            launchControlTachCycleElapsedSeconds = 0.0
+            launchControlTachCycleStartRpm = engineRpm
+        }
+    }
+
+    private fun updateLaunchControlRpm(dt: Double) {
+        when (launchControlPhase) {
+            LaunchControlPhase.INACTIVE -> Unit
+
+            LaunchControlPhase.DISARMING -> {
+                launchControlDisarmElapsedSeconds += dt
+                val target = LaunchControl.disarmTargetRpm(
+                    disarmElapsedSeconds = launchControlDisarmElapsedSeconds,
+                    startRpm = launchControlDisarmStartRpm,
+                    endRpm = launchControlArmedStartRpm,
+                )
+                engineRpm = approachExp(
+                    engineRpm,
+                    target,
+                    LaunchControl.ARMED_RAMP_FOLLOW_SECONDS,
+                    dt,
+                ).coerceIn(
+                    profile.idleRpm,
+                    profile.limiterRpm,
+                )
+                if (launchControlDisarmElapsedSeconds >= LaunchControl.ARMED_RAMP_SECONDS) {
+                    launchControlPhase = LaunchControlPhase.INACTIVE
+                    engineRpm = launchControlArmedStartRpm.coerceIn(profile.idleRpm, profile.limiterRpm)
+                }
+            }
+
+            LaunchControlPhase.ARMED -> {
+                launchControlArmedElapsedSeconds += dt
+                launchControlJitterPhase = launchControlJitterPhaseStep(dt, launchControlJitterPhase)
+                val target = LaunchControl.armedTargetRpm(
+                    armedElapsedSeconds = launchControlArmedElapsedSeconds,
+                    jitterPhaseRadians = launchControlJitterPhase,
+                    startRpm = launchControlArmedStartRpm,
+                )
+                val response = if (
+                    launchControlArmedElapsedSeconds <
+                        LaunchControl.ARMED_RAMP_SECONDS + LaunchControl.ARMED_SETTLE_SECONDS
+                ) {
+                    LaunchControl.ARMED_RAMP_FOLLOW_SECONDS
+                } else {
+                    LaunchControl.ARMED_JITTER_FOLLOW_SECONDS
+                }
+                engineRpm = approachExp(
+                    engineRpm,
+                    target,
+                    response,
+                    dt,
+                ).coerceIn(
+                    profile.idleRpm,
+                    profile.limiterRpm,
+                )
+            }
+
+            LaunchControlPhase.LAUNCHED -> {
+                val shift = activeShift
+                when {
+                    shift != null -> {
+                        val target = when {
+                            shift.gearChanged -> {
+                                rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
+                            }
+                            shift.direction == ShiftDirection.UP -> {
+                                min(
+                                    rpmForSpeed(currentGearIndex),
+                                    upshiftTriggerRpm(currentGearIndex),
+                                )
+                            }
+                            shift.direction == ShiftDirection.DOWN -> {
+                                rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
+                            }
+                            else -> rpmForSpeed(currentGearIndex)
+                        }
+                        engineRpm = approachExp(
+                            engineRpm,
+                            target,
+                            profile.syntheticRpmResponseSeconds,
+                            dt,
+                        ).coerceIn(profile.idleRpm, profile.limiterRpm)
+                    }
+
+                    LaunchControl.shouldPlayLaunchTachAnimation(currentGearIndex, filteredThrottle) -> {
+                        launchControlTachCycleElapsedSeconds += dt
+                        val target = LaunchControl.launchedTachTargetRpm(
+                            cycleElapsedSeconds = launchControlTachCycleElapsedSeconds,
+                            redlineRpm = profile.redlineRpm,
+                            launchStartRpm = launchControlTachCycleStartRpm,
+                        )
+                        val response = if (target >= engineRpm) {
+                            LaunchControl.LAUNCHED_TACH_REV_UP_FOLLOW_SECONDS
+                        } else {
+                            LaunchControl.LAUNCHED_TACH_BOUNCE_FOLLOW_SECONDS
+                        }
+                        engineRpm = approachExp(
+                            engineRpm,
+                            target,
+                            response,
+                            dt,
+                        ).coerceIn(profile.idleRpm, profile.limiterRpm)
+                    }
+
+                    else -> {
+                        val target = rpmForSpeed(currentGearIndex)
+                        val response = if (filteredThrottle >= LaunchControl.FULL_THROTTLE_THRESHOLD) {
+                            profile.syntheticRpmResponseSeconds
+                        } else {
+                            LaunchControl.LAUNCHED_ENGINE_BRAKE_RESPONSE_SECONDS
+                        }
+                        engineRpm = approachExp(
+                            engineRpm,
+                            target,
+                            response,
+                            dt,
+                        ).coerceIn(profile.idleRpm, profile.limiterRpm)
+                    }
+                }
+            }
+        }
     }
 
     private fun snapshot(): DrivetrainState {
