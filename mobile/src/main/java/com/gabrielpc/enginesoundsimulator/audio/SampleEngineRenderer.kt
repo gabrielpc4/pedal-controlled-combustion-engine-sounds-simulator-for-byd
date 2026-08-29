@@ -33,6 +33,8 @@ internal class SampleEngineRenderer private constructor(
     private val voices: List<LoopVoice>,
     private val effectVoices: List<EffectVoice>,
     private val popsAndBangsVoice: EffectVoice?,
+    private val sharedShiftUpVoice: EffectVoice?,
+    private val sharedShiftDownVoice: EffectVoice?,
     private val decodedBytes: Long,
 ) {
     private var smoothedRpm = profile.idleRpm
@@ -66,7 +68,8 @@ internal class SampleEngineRenderer private constructor(
         return SampleRendererDiagnostics(
             profileId = profile.id,
             loadedLoops = voices.size,
-            loadedEffects = effectVoices.size + if (popsAndBangsVoice != null) 1 else 0,
+            loadedEffects = effectVoices.size +
+                listOfNotNull(popsAndBangsVoice, sharedShiftUpVoice, sharedShiftDownVoice).size,
             decodedBytes = decodedBytes,
             targetRpm = lastRequestedRpm.toInt(),
             renderRpm = smoothedRpm.toInt(),
@@ -88,6 +91,16 @@ internal class SampleEngineRenderer private constructor(
                         add(voice.spec.id)
                     }
                 }
+                sharedShiftUpVoice?.let { voice ->
+                    if (voice.isAudible || voice.targetGain > SILENCE_GAIN) {
+                        add(voice.spec.id)
+                    }
+                }
+                sharedShiftDownVoice?.let { voice ->
+                    if (voice.isAudible || voice.targetGain > SILENCE_GAIN) {
+                        add(voice.spec.id)
+                    }
+                }
             }.joinToString(",").ifBlank { "none" },
         )
     }
@@ -97,6 +110,12 @@ internal class SampleEngineRenderer private constructor(
         addAll(effectVoices.map { it.spec.id })
         if (popsAndBangsVoice != null) {
             add(popsAndBangsVoice.spec.id)
+        }
+        sharedShiftUpVoice?.let { voice ->
+            add(voice.spec.id)
+        }
+        sharedShiftDownVoice?.let { voice ->
+            add(voice.spec.id)
         }
     }
 
@@ -121,6 +140,14 @@ internal class SampleEngineRenderer private constructor(
             effectIndex += 1
         }
         popsAndBangsVoice?.let { voice ->
+            destination[index] = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+            index += 1
+        }
+        sharedShiftUpVoice?.let { voice ->
+            destination[index] = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+            index += 1
+        }
+        sharedShiftDownVoice?.let { voice ->
             destination[index] = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
         }
     }
@@ -211,6 +238,24 @@ internal class SampleEngineRenderer private constructor(
             }
             if (voice.advance()) loopWraps += 1
         }
+        sharedShiftUpVoice?.let { voice ->
+            voice.gain += (voice.targetGain - voice.gain) * layerAlpha
+            if (voice.isAudible) {
+                voice.readStereoCubic()
+                effectLeft += voice.sampleLeft * voice.gain
+                effectRight += voice.sampleRight * voice.gain
+            }
+            if (voice.advance()) loopWraps += 1
+        }
+        sharedShiftDownVoice?.let { voice ->
+            voice.gain += (voice.targetGain - voice.gain) * layerAlpha
+            if (voice.isAudible) {
+                voice.readStereoCubic()
+                effectLeft += voice.sampleLeft * voice.gain
+                effectRight += voice.sampleRight * voice.gain
+            }
+            if (voice.advance()) loopWraps += 1
+        }
             masterGain += (targetMaster - masterGain) * masterAlpha
             profileOutputGain += (targetProfileOutputGain - profileOutputGain) * profileGainAlpha
             enabledGain += (targetEnabled - enabledGain) * enabledAlpha
@@ -272,6 +317,24 @@ internal class SampleEngineRenderer private constructor(
                     add(PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName))
                 }
             }
+            sharedShiftUpVoice?.let { voice ->
+                if (
+                    voice.isAudible &&
+                    voice.gain > SILENCE_GAIN &&
+                    (!anyLayerSolo || target.layerMix[voice.spec.id]?.solo == true)
+                ) {
+                    add(PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName))
+                }
+            }
+            sharedShiftDownVoice?.let { voice ->
+                if (
+                    voice.isAudible &&
+                    voice.gain > SILENCE_GAIN &&
+                    (!anyLayerSolo || target.layerMix[voice.spec.id]?.solo == true)
+                ) {
+                    add(PlayingSampleLabel(voice.spec.playingRoleLabel(), voice.spec.assetName))
+                }
+            }
         }
     }
 
@@ -287,12 +350,12 @@ internal class SampleEngineRenderer private constructor(
             lastShiftSerial = target.shiftSerial
         } else if (target.shiftSerial != previousShift) {
             lastShiftSerial = target.shiftSerial
-            triggerOneShots(
-                if (target.shiftDirection > 0) SampleEffectTrigger.SHIFT_UP else SampleEffectTrigger.SHIFT_DOWN,
-                smoothedRpm,
-                layerMix,
-                target.coastLayerMixEnabled,
-            )
+            val trigger = if (target.shiftDirection > 0) {
+                SampleEffectTrigger.SHIFT_UP
+            } else {
+                SampleEffectTrigger.SHIFT_DOWN
+            }
+            triggerShiftOneShots(trigger, smoothedRpm, layerMix, target)
         }
 
         if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
@@ -306,6 +369,7 @@ internal class SampleEngineRenderer private constructor(
             val voice = effectVoices[effectIndex]
             val authoredGain = when {
                 voice.spec.isNativeExhaustOverrun() && target.popsAndBangsEnabled -> 0.0
+                voice.spec.isNativeGearChange() && target.sharedShiftSoundsEnabled -> 0.0
                 voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
                 }
@@ -326,7 +390,42 @@ internal class SampleEngineRenderer private constructor(
         }
         popsAndBangsVoice?.let { voice ->
             val authoredGain = if (target.popsAndBangsEnabled && voice.isOneShotActive) {
-                voice.baseGain
+                voice.baseGain * target.popsAndBangsGain.coerceIn(
+                    EngineAudioFrame.MIN_EFFECT_GAIN,
+                    EngineAudioFrame.MAX_EFFECT_GAIN,
+                )
+            } else {
+                0.0
+            }
+            voice.targetGain = applyLayerMix(
+                voice.spec.id,
+                authoredGain,
+                layerMix,
+                target.coastLayerMixEnabled,
+            )
+        }
+        sharedShiftUpVoice?.let { voice ->
+            val authoredGain = if (target.sharedShiftSoundsEnabled && voice.isOneShotActive) {
+                voice.baseGain * target.sharedShiftSoundsGain.coerceIn(
+                    EngineAudioFrame.MIN_EFFECT_GAIN,
+                    EngineAudioFrame.MAX_EFFECT_GAIN,
+                )
+            } else {
+                0.0
+            }
+            voice.targetGain = applyLayerMix(
+                voice.spec.id,
+                authoredGain,
+                layerMix,
+                target.coastLayerMixEnabled,
+            )
+        }
+        sharedShiftDownVoice?.let { voice ->
+            val authoredGain = if (target.sharedShiftSoundsEnabled && voice.isOneShotActive) {
+                voice.baseGain * target.sharedShiftSoundsGain.coerceIn(
+                    EngineAudioFrame.MIN_EFFECT_GAIN,
+                    EngineAudioFrame.MAX_EFFECT_GAIN,
+                )
             } else {
                 0.0
             }
@@ -353,7 +452,10 @@ internal class SampleEngineRenderer private constructor(
 
         if (target.popsAndBangsEnabled) {
             val voice = popsAndBangsVoice ?: return
-            val authoredGain = voice.baseGain
+            val authoredGain = voice.baseGain * target.popsAndBangsGain.coerceIn(
+                EngineAudioFrame.MIN_EFFECT_GAIN,
+                EngineAudioFrame.MAX_EFFECT_GAIN,
+            )
             if (applyLayerMix(voice.spec.id, authoredGain, layerMix, target.coastLayerMixEnabled) > SILENCE_GAIN) {
                 if (voice.trigger()) {
                     effectTriggers += 1
@@ -377,6 +479,36 @@ internal class SampleEngineRenderer private constructor(
         return effectVoices.any { voice ->
             voice.spec.trigger == SampleEffectTrigger.THROTTLE_LIFT && voice.isOneShotActive
         }
+    }
+
+    private fun triggerShiftOneShots(
+        trigger: SampleEffectTrigger,
+        rpm: Double,
+        layerMix: Map<String, LayerMixControl>,
+        target: EngineAudioFrame,
+    ) {
+        if (target.sharedShiftSoundsEnabled) {
+            val voice = when (trigger) {
+                SampleEffectTrigger.SHIFT_UP -> sharedShiftUpVoice
+                SampleEffectTrigger.SHIFT_DOWN -> sharedShiftDownVoice
+                else -> null
+            } ?: return
+            if (rpm < voice.spec.minimumRpm) {
+                return
+            }
+            val authoredGain = voice.baseGain * target.sharedShiftSoundsGain.coerceIn(
+                EngineAudioFrame.MIN_EFFECT_GAIN,
+                EngineAudioFrame.MAX_EFFECT_GAIN,
+            )
+            if (applyLayerMix(voice.spec.id, authoredGain, layerMix, target.coastLayerMixEnabled) > SILENCE_GAIN) {
+                if (voice.trigger()) {
+                    effectTriggers += 1
+                }
+            }
+            return
+        }
+
+        triggerOneShots(trigger, rpm, layerMix, target.coastLayerMixEnabled)
     }
 
     private fun triggerOneShots(
@@ -449,6 +581,14 @@ internal class SampleEngineRenderer private constructor(
                 add(LayerOutputMeter(voice.spec.id, level))
             }
             popsAndBangsVoice?.let { voice ->
+                val level = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+                add(LayerOutputMeter(voice.spec.id, level))
+            }
+            sharedShiftUpVoice?.let { voice ->
+                val level = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
+                add(LayerOutputMeter(voice.spec.id, level))
+            }
+            sharedShiftDownVoice?.let { voice ->
                 val level = if (voice.isAudible) voice.gain.coerceIn(0.0, 1.0) else 0.0
                 add(LayerOutputMeter(voice.spec.id, level))
             }
@@ -626,9 +766,38 @@ internal class SampleEngineRenderer private constructor(
                     .use(WavPcmDecoder::decode)
             }
             val popsVoice = EffectVoice(SharedPopsAndBangs.effectSpec, popsSamples, outputSampleRate)
+            val shiftUpSample = assetManager.open(
+                SharedHuracanShiftSounds.assetPath(SharedHuracanShiftSounds.shiftUpSpec.assetName),
+                AssetManager.ACCESS_STREAMING,
+            ).use(WavPcmDecoder::decode)
+            val shiftDownSample = assetManager.open(
+                SharedHuracanShiftSounds.assetPath(SharedHuracanShiftSounds.shiftDownSpec.assetName),
+                AssetManager.ACCESS_STREAMING,
+            ).use(WavPcmDecoder::decode)
+            val sharedShiftUpVoice = EffectVoice(
+                SharedHuracanShiftSounds.shiftUpSpec,
+                listOf(shiftUpSample),
+                outputSampleRate,
+            )
+            val sharedShiftDownVoice = EffectVoice(
+                SharedHuracanShiftSounds.shiftDownSpec,
+                listOf(shiftDownSample),
+                outputSampleRate,
+            )
             val decodedBytes = decoded.values.sumOf(PcmLoopData::decodedBytes) +
-                popsSamples.sumOf(PcmLoopData::decodedBytes)
-            return SampleEngineRenderer(outputSampleRate, profile, voices, effects, popsVoice, decodedBytes)
+                popsSamples.sumOf(PcmLoopData::decodedBytes) +
+                shiftUpSample.decodedBytes +
+                shiftDownSample.decodedBytes
+            return SampleEngineRenderer(
+                outputSampleRate,
+                profile,
+                voices,
+                effects,
+                popsVoice,
+                sharedShiftUpVoice,
+                sharedShiftDownVoice,
+                decodedBytes,
+            )
         }
 
         internal fun fromDecoded(
@@ -652,16 +821,26 @@ internal class SampleEngineRenderer private constructor(
                 ?.let { samples ->
                     EffectVoice(SharedPopsAndBangs.effectSpec, samples, outputSampleRate)
                 }
+            val sharedShiftUpVoice = decoded[SharedHuracanShiftSounds.shiftUpSpec.assetName]?.let { sample ->
+                EffectVoice(SharedHuracanShiftSounds.shiftUpSpec, listOf(sample), outputSampleRate)
+            }
+            val sharedShiftDownVoice = decoded[SharedHuracanShiftSounds.shiftDownSpec.assetName]?.let { sample ->
+                EffectVoice(SharedHuracanShiftSounds.shiftDownSpec, listOf(sample), outputSampleRate)
+            }
             return SampleEngineRenderer(
                 outputSampleRate,
                 profile,
                 voices,
                 effects,
                 popsVoice,
+                sharedShiftUpVoice,
+                sharedShiftDownVoice,
                 profile.requiredAssets.sumOf { asset ->
                     val data = requireNotNull(decoded[asset]) { "Missing $asset" }
                     data.decodedBytes
-                } + (popsVoice?.let { SharedPopsAndBangs.assetNames.sumOf { name -> decoded[name]!!.decodedBytes } } ?: 0L),
+                } + (popsVoice?.let { SharedPopsAndBangs.assetNames.sumOf { name -> decoded[name]!!.decodedBytes } } ?: 0L) +
+                (sharedShiftUpVoice?.let { decoded[SharedHuracanShiftSounds.shiftUpSpec.assetName]!!.decodedBytes } ?: 0L) +
+                (sharedShiftDownVoice?.let { decoded[SharedHuracanShiftSounds.shiftDownSpec.assetName]!!.decodedBytes } ?: 0L),
             )
         }
 

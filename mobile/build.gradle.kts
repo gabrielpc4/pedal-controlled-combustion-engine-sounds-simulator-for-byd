@@ -111,6 +111,10 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
         )
         into("sample_engine/shared/pops_and_bangs")
     }
+    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted")) {
+        include("fx_shift_up.wav", "fx_shift_down.wav")
+        into("sample_engine/shared/huracan_shift_sounds")
+    }
     into(generatedSampleEngineAssets)
 }
 

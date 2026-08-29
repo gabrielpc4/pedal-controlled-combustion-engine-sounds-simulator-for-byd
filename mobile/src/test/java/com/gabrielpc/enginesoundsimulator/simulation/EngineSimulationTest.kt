@@ -20,6 +20,21 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun ignitionStartRevPlaysUpshiftCueAtBlip() {
+        val simulation = EngineSimulation()
+        simulation.startIgnition()
+        val catchFrames = (ENGINE_START_CATCH_END_SECONDS / STEP).toInt() - 1
+        repeat(catchFrames) {
+            simulation.update(DriverInput(), STEP)
+        }
+        assertEquals(0L, simulation.state.shiftSerial)
+
+        simulation.update(DriverInput(), STEP)
+        assertEquals(1L, simulation.state.shiftSerial)
+        assertEquals(ShiftDirection.UP, simulation.state.shiftDirection)
+    }
+
+    @Test
     fun ignitionStartRevvesThenSettlesAtIdle() {
         val simulation = EngineSimulation()
         simulation.startIgnition()
@@ -276,6 +291,30 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun firstGearPartialThrottleUsesNormalUpshiftWhenEarlyShiftDisabled() {
+        val baseProfile = EngineSimulation().profile
+        val profile = baseProfile.copy(secondGearEarlyShiftEnabled = false)
+        val simulation = EngineSimulation(profile)
+        simulation.engageAtIdle()
+        val partialTriggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, profile.firstToSecondPartialThrottleUpshiftRpm)
+        val normalTriggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, upshiftTriggerRpmForProfile(profile))
+
+        simulation.followIntegerSpeedRamp(0.0, partialTriggerSpeedKmh + 2.0, 5.0, 0.5)
+        assertEquals(
+            "with early shift off, partial throttle must stay in 1st past the partial-shift RPM",
+            1,
+            simulation.state.gear,
+        )
+
+        simulation.followIntegerSpeedRamp(partialTriggerSpeedKmh + 2.0, normalTriggerSpeedKmh + 2.0, 5.0, 0.5)
+        assertEquals(
+            "with early shift off, partial throttle must upshift at the normal shift RPM",
+            2,
+            simulation.state.gear,
+        )
+    }
+
+    @Test
     fun integerNoiseNearThresholdDoesNotCauseShiftHunting() {
         val simulation = EngineSimulation()
         simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 0.45)
@@ -323,6 +362,128 @@ class EngineSimulationTest {
         val coastState = coast.runFor(0.40, sim = true)
         val brakeState = brake.runFor(0.40, brake = 1.0, sim = true)
         assertTrue(brakeState.speedKmh < coastState.speedKmh - 10.0)
+    }
+
+    @Test
+    fun manualModeDoesNotAutoUpshift() {
+        val simulation = EngineSimulation()
+        simulation.manualShiftEnabled = true
+        simulation.engageAtIdle()
+        val profile = simulation.profile
+        val partialTriggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, profile.firstToSecondPartialThrottleUpshiftRpm)
+        val normalTriggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, upshiftTriggerRpmForProfile(profile))
+
+        simulation.followIntegerSpeedRamp(0.0, partialTriggerSpeedKmh + 4.0, 6.0, 0.5)
+        assertEquals(1, simulation.state.gear)
+
+        simulation.followIntegerSpeedRamp(partialTriggerSpeedKmh + 4.0, normalTriggerSpeedKmh + 4.0, 8.0, 1.0)
+        assertEquals(
+            "manual mode must never auto-upshift",
+            1,
+            simulation.state.gear,
+        )
+    }
+
+    @Test
+    fun manualModeRequestUpshiftChangesGear() {
+        val simulation = EngineSimulation()
+        simulation.manualShiftEnabled = true
+        simulation.engageAtIdle()
+        val profile = simulation.profile
+        val triggerSpeedKmh = speedKmhForCoupledRpm(profile, 0, profile.firstToSecondPartialThrottleUpshiftRpm)
+        simulation.followIntegerSpeedRamp(0.0, triggerSpeedKmh + 2.0, 4.0, 0.8)
+        assertEquals(1, simulation.state.gear)
+
+        assertTrue(simulation.requestManualUpshift())
+        repeat(80) {
+            simulation.update(DriverInput(throttle = 0.8, externalSpeedKmh = triggerSpeedKmh + 2.0), STEP)
+        }
+        assertEquals(2, simulation.state.gear)
+    }
+
+    @Test
+    fun manualModeIdleProtectionAutoDownshifts() {
+        val simulation = EngineSimulation()
+        simulation.manualShiftEnabled = true
+        simulation.engageAtIdle()
+        val profile = simulation.profile
+        val highSpeedKmh = 120.0
+        simulation.followIntegerSpeedRamp(0.0, highSpeedKmh, 10.0, 1.0)
+        var upshifts = 0
+        while (upshifts < profile.gearRatios.lastIndex) {
+            if (simulation.requestManualUpshift()) {
+                upshifts += 1
+            }
+            repeat(60) {
+                simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = highSpeedKmh), STEP)
+            }
+        }
+        assertTrue(
+            "manual upshifts should reach a high gear before the coast-down check",
+            simulation.state.gear >= 5,
+        )
+
+        val lowSpeedKmh = 8.0
+        val shiftSerialBeforeCoast = simulation.state.shiftSerial
+        val highGearBeforeCoast = simulation.state.gear
+        simulation.followIntegerSpeedRamp(highSpeedKmh, lowSpeedKmh, 8.0, 0.0)
+        repeat(800) {
+            simulation.update(DriverInput(throttle = 0.0, externalSpeedKmh = lowSpeedKmh), STEP)
+        }
+        assertTrue(
+            "idle protection must move out of the highest gear at ${lowSpeedKmh}km/h: before=$highGearBeforeCoast after=${simulation.state.gear}",
+            simulation.state.gear < highGearBeforeCoast,
+        )
+        assertTrue(
+            "coupled RPM must stay above the idle-audio band after protection",
+            simulation.state.rpm >= EngineSimulation.MANUAL_IDLE_PROTECTION_RPM - 25.0,
+        )
+        assertTrue(
+            "idle protection should trigger at least one downshift",
+            simulation.state.shiftSerial > shiftSerialBeforeCoast,
+        )
+    }
+
+    @Test
+    fun manualModeNonLastGearLimiterEngagesAtCarMaximum() {
+        val simulation = EngineSimulation()
+        simulation.manualShiftEnabled = true
+        simulation.engageAtIdle()
+        val limiter = simulation.profile.limiterRpm
+        simulation.followIntegerSpeedRamp(0.0, 100.0, 12.0, 1.0)
+        repeat(600) {
+            simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 100.0), STEP)
+        }
+        assertEquals(1, simulation.state.gear)
+        assertEquals(limiter, simulation.state.rpm, 80.0)
+        assertTrue(simulation.state.limiterActive)
+        assertTrue(simulation.state.speedKmh > 30.0)
+    }
+
+    @Test
+    fun manualModeDownshiftCapsRpmAtCarMaximum() {
+        val simulation = EngineSimulation()
+        simulation.manualShiftEnabled = true
+        simulation.engageAtIdle()
+        val limiter = simulation.profile.limiterRpm
+        simulation.followIntegerSpeedRamp(0.0, 110.0, 10.0, 1.0)
+        var upshifts = 0
+        while (upshifts < simulation.profile.gearRatios.lastIndex) {
+            if (simulation.requestManualUpshift()) {
+                upshifts += 1
+            }
+            repeat(40) {
+                simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 110.0), STEP)
+            }
+        }
+        simulation.requestManualDownshift()
+        repeat(100) {
+            simulation.update(DriverInput(throttle = 0.8, externalSpeedKmh = 110.0), STEP)
+        }
+        assertTrue(
+            "downshift must never push coupled RPM above the car maximum",
+            simulation.state.rpm <= limiter + 1.0,
+        )
     }
 
     @Test

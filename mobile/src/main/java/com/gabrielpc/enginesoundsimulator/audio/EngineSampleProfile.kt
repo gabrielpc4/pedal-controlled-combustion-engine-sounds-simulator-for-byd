@@ -57,6 +57,13 @@ internal data class SampleEffectSpec(
             control.id == SampleEffectControls.exhaustOverrun.id &&
             id != SharedPopsAndBangs.EFFECT_ID
     }
+
+    fun isNativeGearChange(): Boolean {
+        return (trigger == SampleEffectTrigger.SHIFT_UP || trigger == SampleEffectTrigger.SHIFT_DOWN) &&
+            control.id == SampleEffectControls.gearChanges.id &&
+            id != SharedHuracanShiftSounds.SHIFT_UP_ID &&
+            id != SharedHuracanShiftSounds.SHIFT_DOWN_ID
+    }
 }
 
 internal data class CurvePoint(val input: Double, val output: Double)

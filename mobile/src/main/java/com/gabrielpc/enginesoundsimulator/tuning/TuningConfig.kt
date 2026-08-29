@@ -41,6 +41,8 @@ data class EngineTuning(
     val secondToFirstDownshiftRpm: Double = DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
     /** Fixed coupled-RPM threshold for the 1st → 2nd upshift when throttle is not floored. */
     val firstToSecondPartialThrottleUpshiftRpm: Double = DEFAULT_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM,
+    /** When enabled, partial-throttle 1st → 2nd upshifts use [firstToSecondPartialThrottleUpshiftRpm]. */
+    val secondGearEarlyShiftEnabled: Boolean = true,
     val gearRatios: List<Double> = DEFAULT_GEARS,
     /** X is normalized road speed, Y is normalized measured front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
@@ -229,6 +231,14 @@ class TuningRepository(context: Context) {
                 KEY_SECOND_TO_FIRST_DOWNSHIFT_RPM,
                 defaults.engine.secondToFirstDownshiftRpm,
             ),
+            firstToSecondPartialThrottleUpshiftRpm = number(
+                KEY_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM,
+                defaults.engine.firstToSecondPartialThrottleUpshiftRpm,
+            ),
+            secondGearEarlyShiftEnabled = preferences.getBoolean(
+                KEY_SECOND_GEAR_EARLY_SHIFT_ENABLED,
+                defaults.engine.secondGearEarlyShiftEnabled,
+            ),
             gearRatios = decodeNumbers(preferences.getString(KEY_GEARS, null), defaults.engine.gearRatios),
             frontWheelTorqueCurve = decodeCurve(
                 preferences.getString(KEY_FRONT_WHEEL_TORQUE_CURVE, null),
@@ -286,6 +296,11 @@ class TuningRepository(context: Context) {
             .putString(KEY_DOWNSHIFT_DURATION, clean.engine.downshiftDurationMs.toString())
             .putString(KEY_SHIFT_DWELL, clean.engine.shiftDwellMs.toString())
             .putString(KEY_SECOND_TO_FIRST_DOWNSHIFT_RPM, clean.engine.secondToFirstDownshiftRpm.toString())
+            .putString(
+                KEY_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM,
+                clean.engine.firstToSecondPartialThrottleUpshiftRpm.toString(),
+            )
+            .putBoolean(KEY_SECOND_GEAR_EARLY_SHIFT_ENABLED, clean.engine.secondGearEarlyShiftEnabled)
             .putString(KEY_GEARS, encodeNumbers(clean.engine.gearRatios))
             .putString(KEY_FRONT_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.frontWheelTorqueCurve))
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
@@ -338,6 +353,8 @@ class TuningRepository(context: Context) {
         const val KEY_DOWNSHIFT_DURATION = "downshift_duration"
         const val KEY_SHIFT_DWELL = "shift_dwell"
         const val KEY_SECOND_TO_FIRST_DOWNSHIFT_RPM = "second_to_first_downshift_rpm"
+        const val KEY_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM = "first_to_second_partial_upshift_rpm"
+        const val KEY_SECOND_GEAR_EARLY_SHIFT_ENABLED = "second_gear_early_shift_enabled"
         const val KEY_GEARS = "gear_ratios"
         const val KEY_FRONT_WHEEL_TORQUE_CURVE = "front_wheel_torque_curve"
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"

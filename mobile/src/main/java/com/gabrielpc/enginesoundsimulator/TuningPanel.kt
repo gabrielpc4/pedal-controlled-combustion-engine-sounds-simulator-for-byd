@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator
 
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -36,6 +37,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -253,13 +255,21 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             ) {
                 onChange(config.copy(engine = engine.copy(secondToFirstDownshiftRpm = it)))
             }
-            ParameterSlider(
-                "1→2 PARTIAL RPM",
-                engine.firstToSecondPartialThrottleUpshiftRpm,
-                (engine.idleRpm + 200.0)..engine.upshiftRpm,
-                "%.0f RPM",
-            ) {
-                onChange(config.copy(engine = engine.copy(firstToSecondPartialThrottleUpshiftRpm = it)))
+            ParameterToggle(
+                label = "2ND GEAR EARLY SHIFT",
+                enabled = engine.secondGearEarlyShiftEnabled,
+            ) { enabled ->
+                onChange(config.copy(engine = engine.copy(secondGearEarlyShiftEnabled = enabled)))
+            }
+            if (engine.secondGearEarlyShiftEnabled) {
+                ParameterSlider(
+                    "1→2 PARTIAL RPM",
+                    engine.firstToSecondPartialThrottleUpshiftRpm,
+                    (engine.idleRpm + 200.0)..engine.upshiftRpm,
+                    "%.0f RPM",
+                ) {
+                    onChange(config.copy(engine = engine.copy(firstToSecondPartialThrottleUpshiftRpm = it)))
+                }
             }
         }
         PanelCard("AUDIO SMOOTHING", "Small fades that keep the sample-bank output seamless", Modifier.weight(1.15f)) {
@@ -317,6 +327,48 @@ private fun PanelCard(title: String, subtitle: String, modifier: Modifier = Modi
         Text(subtitle, color = TuneMuted, fontSize = 9.sp, letterSpacing = 0.5.sp)
         Spacer(Modifier.height(14.dp))
         content()
+    }
+}
+
+@Composable
+private fun ParameterToggle(
+    label: String,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    val accent = if (enabled) {
+        TuneGreen
+    } else {
+        TuneMuted
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onToggle(!enabled) }
+            .padding(horizontal = 2.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = TuneMuted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (enabled) {
+                "ON"
+            } else {
+                "OFF"
+            },
+            color = accent,
+            fontSize = 13.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 

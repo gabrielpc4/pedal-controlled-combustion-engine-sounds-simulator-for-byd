@@ -49,6 +49,8 @@ data class EngineProfile(
     val secondToFirstDownshiftRpm: Double = EngineTuning.DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
     /** 1st → 2nd upshift RPM when throttle is below [FULL_THROTTLE_UPSHIFT_THRESHOLD]. */
     val firstToSecondPartialThrottleUpshiftRpm: Double = EngineTuning.DEFAULT_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM,
+    /** When enabled, partial-throttle 1st → 2nd upshifts use [firstToSecondPartialThrottleUpshiftRpm]. */
+    val secondGearEarlyShiftEnabled: Boolean = true,
 ) {
     companion object {
         private val bank = EngineSampleProfiles.default
@@ -117,6 +119,7 @@ data class DrivetrainState(
 class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK_ENGINE) {
     var profile: EngineProfile = initialProfile
         private set
+    var manualShiftEnabled: Boolean = false
     private var ignitionState = EngineIgnitionState.OFF
     private var ignitionElapsedSeconds = 0.0
     private var shutdownElapsedSeconds = 0.0
@@ -129,6 +132,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var filteredBrake = 0.0
     private var activeShift: ActiveShift? = null
     private var shiftSerial = 0L
+    private var ignitionShiftCueDirection = ShiftDirection.NONE
+    private var startupShiftCueFired = false
     private var secondsSinceShift = 10.0
     private var limiterLatched = false
     private var externalSpeedActive = false
@@ -169,6 +174,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         shutdownElapsedSeconds = 0.0
         engineRpm = 0.0
         limiterLatched = false
+        ignitionShiftCueDirection = ShiftDirection.NONE
+        startupShiftCueFired = false
     }
 
     /** Engage the engine at idle with no starter rev sequence (app launch, car swap). */
@@ -206,11 +213,22 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             }
 
             EngineIgnitionState.STARTING -> {
+                val previousElapsed = ignitionElapsedSeconds
                 ignitionElapsedSeconds += dt
+                if (
+                    !startupShiftCueFired &&
+                    previousElapsed < ENGINE_START_CATCH_END_SECONDS &&
+                    ignitionElapsedSeconds >= ENGINE_START_CATCH_END_SECONDS
+                ) {
+                    shiftSerial += 1
+                    ignitionShiftCueDirection = ShiftDirection.UP
+                    startupShiftCueFired = true
+                }
                 engineRpm = engineStartRpmAt(ignitionElapsedSeconds, profile.idleRpm)
                 if (engineStartSettled(ignitionElapsedSeconds)) {
                     ignitionState = EngineIgnitionState.RUNNING
                     engineRpm = profile.idleRpm
+                    ignitionShiftCueDirection = ShiftDirection.NONE
                 }
             }
 
@@ -267,6 +285,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         filteredBrake = 0.0
         activeShift = null
         shiftSerial = 0L
+        ignitionShiftCueDirection = ShiftDirection.NONE
+        startupShiftCueFired = false
         secondsSinceShift = 10.0
         limiterLatched = false
         externalSpeedActive = false
@@ -328,9 +348,55 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (activeShift == null && input.transmissionPosition == TransmissionPosition.DRIVE &&
             ignitionState == EngineIgnitionState.RUNNING
         ) {
-            chooseAutomaticShift()
+            if (manualShiftEnabled) {
+                chooseManualIdleProtection()
+            } else {
+                chooseAutomaticShift()
+            }
         }
         return snapshot()
+    }
+
+    /** Manual mode: upshift one gear when the driver requests it (steering wheel or UI). */
+    fun requestManualUpshift(): Boolean {
+        if (!manualShiftEnabled) {
+            return false
+        }
+        if (ignitionState != EngineIgnitionState.RUNNING) {
+            return false
+        }
+        if (activeShift != null) {
+            return false
+        }
+        if (secondsSinceShift < profile.shiftDwellSeconds) {
+            return false
+        }
+        if (currentGearIndex >= profile.gearRatios.lastIndex) {
+            return false
+        }
+        beginShift(currentGearIndex + 1, ShiftDirection.UP)
+        return true
+    }
+
+    /** Manual mode: downshift one gear when the driver requests it. */
+    fun requestManualDownshift(): Boolean {
+        if (!manualShiftEnabled) {
+            return false
+        }
+        if (ignitionState != EngineIgnitionState.RUNNING) {
+            return false
+        }
+        if (activeShift != null) {
+            return false
+        }
+        if (secondsSinceShift < profile.shiftDwellSeconds) {
+            return false
+        }
+        if (currentGearIndex <= 0) {
+            return false
+        }
+        beginShift(currentGearIndex - 1, ShiftDirection.DOWN)
+        return true
     }
 
     private fun integrateElectricVehicle(
@@ -428,14 +494,24 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             return
         }
 
-        val safe = profile.gearRatios.indices.filter { rpmForSpeed(it) <= profile.redlineRpm * 0.92 }
-        currentGearIndex = safe.firstOrNull() ?: profile.gearRatios.lastIndex
-        while (currentGearIndex < profile.gearRatios.lastIndex &&
-            vehicleSpeedMps * 3.6 >= upshiftSpeedKmh(currentGearIndex)
-        ) {
-            val nextGear = currentGearIndex + 1
-            downshiftBoundaryKmhByGear[nextGear] = upshiftSpeedKmh(currentGearIndex)
-            currentGearIndex = nextGear
+        val safe = if (manualShiftEnabled) {
+            profile.gearRatios.indices.filter { rpmForSpeed(it) >= MANUAL_IDLE_PROTECTION_RPM }
+        } else {
+            profile.gearRatios.indices.filter { rpmForSpeed(it) <= profile.redlineRpm * 0.92 }
+        }
+        currentGearIndex = if (manualShiftEnabled) {
+            safe.lastOrNull() ?: 0
+        } else {
+            safe.firstOrNull() ?: profile.gearRatios.lastIndex
+        }
+        if (!manualShiftEnabled) {
+            while (currentGearIndex < profile.gearRatios.lastIndex &&
+                vehicleSpeedMps * 3.6 >= upshiftSpeedKmh(currentGearIndex)
+            ) {
+                val nextGear = currentGearIndex + 1
+                downshiftBoundaryKmhByGear[nextGear] = upshiftSpeedKmh(currentGearIndex)
+                currentGearIndex = nextGear
+            }
         }
         engineRpm = rpmForSpeed(currentGearIndex)
         activeShift = null
@@ -448,9 +524,19 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             TransmissionPosition.DRIVE -> {
                 val shift = activeShift
                 when {
-                    shift?.gearChanged == true -> shift.targetRpm
+                    shift?.gearChanged == true -> {
+                        rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
+                    }
                     shift?.direction == ShiftDirection.UP -> {
-                        min(rpmForSpeed(currentGearIndex), upshiftTriggerRpm(currentGearIndex))
+                        val cap = if (manualShiftEnabled) {
+                            profile.limiterRpm
+                        } else {
+                            upshiftTriggerRpm(currentGearIndex)
+                        }
+                        min(rpmForSpeed(currentGearIndex), cap)
+                    }
+                    shift?.direction == ShiftDirection.DOWN -> {
+                        rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
                     }
                     else -> rpmForSpeed(currentGearIndex)
                 }
@@ -470,6 +556,19 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private fun freeRevRpmTarget(): Double {
         val revSpan = profile.redlineRpm - profile.idleRpm
         return profile.idleRpm + filteredThrottle.coerceIn(0.0, 1.0) * revSpan
+    }
+
+    private fun chooseManualIdleProtection() {
+        if (secondsSinceShift < profile.shiftDwellSeconds) {
+            return
+        }
+        if (currentGearIndex <= 0) {
+            return
+        }
+        if (rpmForSpeed(currentGearIndex) >= MANUAL_IDLE_PROTECTION_RPM) {
+            return
+        }
+        beginShift(currentGearIndex - 1, ShiftDirection.DOWN)
     }
 
     private fun chooseAutomaticShift() {
@@ -514,11 +613,16 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     /**
      * Upshift as late as each car allows — just below its limiter latch, never above [EngineProfile.upshiftRpm].
-     * In 1st gear with partial throttle, uses [EngineProfile.firstToSecondPartialThrottleUpshiftRpm] instead.
+     * In 1st gear with partial throttle, uses [EngineProfile.firstToSecondPartialThrottleUpshiftRpm]
+     * when [EngineProfile.secondGearEarlyShiftEnabled] is true.
      */
     private fun upshiftTriggerRpm(gearIndex: Int): Double {
         val normalTrigger = upshiftTriggerRpmForProfile(profile)
-        if (gearIndex == 0 && filteredThrottle < FULL_THROTTLE_UPSHIFT_THRESHOLD) {
+        if (
+            profile.secondGearEarlyShiftEnabled &&
+            gearIndex == 0 &&
+            filteredThrottle < FULL_THROTTLE_UPSHIFT_THRESHOLD
+        ) {
             return profile.firstToSecondPartialThrottleUpshiftRpm
                 .coerceAtMost(normalTrigger)
                 .coerceAtLeast(profile.idleRpm + 500.0)
@@ -567,6 +671,15 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             return
         }
 
+        if (manualShiftEnabled && currentGearIndex < profile.gearRatios.lastIndex) {
+            val overspeeding = rawCoupledRpmForSpeed(currentGearIndex) >
+                profile.limiterRpm - LIMITER_TRIGGER_MARGIN_RPM
+            if (!overspeeding) {
+                limiterLatched = false
+                return
+            }
+        }
+
         limiterLatched = if (limiterLatched) {
             engineRpm > profile.limiterRpm - LIMITER_RELEASE_HYSTERESIS_RPM
         } else {
@@ -581,10 +694,19 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         return min(configuredLimit, motorSpeedLimit)
     }
 
-    private fun rpmForSpeed(gearIndex: Int): Double {
+    private fun rawCoupledRpmForSpeed(gearIndex: Int): Double {
         val wheelRpm = vehicleSpeedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
-        return (profile.idleRpm + wheelRpm * evenlySpacedGearRatio(profile, gearIndex))
-            .coerceIn(profile.idleRpm, profile.limiterRpm)
+        return profile.idleRpm + wheelRpm * evenlySpacedGearRatio(profile, gearIndex)
+    }
+
+    /** Coupled tach target for the current road speed and gear, with manual-mode limiter rules applied. */
+    private fun rpmForSpeed(gearIndex: Int): Double {
+        val raw = rawCoupledRpmForSpeed(gearIndex)
+        val capped = raw.coerceAtMost(profile.limiterRpm)
+        if (manualShiftEnabled && gearIndex < profile.gearRatios.lastIndex && raw > profile.limiterRpm) {
+            return profile.limiterRpm
+        }
+        return capped.coerceAtLeast(profile.idleRpm)
     }
 
     private fun snapshot(): DrivetrainState {
@@ -600,7 +722,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             smoothedBrake = filteredBrake,
             engineLoad = (filteredThrottle * (0.35 + 0.65 * wheelTorqueFraction)).coerceIn(0.0, 1.0),
             isShifting = shift != null,
-            shiftDirection = shift?.direction ?: ShiftDirection.NONE,
+            shiftDirection = shift?.direction ?: ignitionShiftCueDirection,
             shiftProgress = shift?.let { (it.elapsedSeconds / it.durationSeconds).coerceIn(0.0, 1.0) } ?: 0.0,
             shiftSerial = shiftSerial,
             limiterActive = limiterLatched,
@@ -630,6 +752,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         private const val SHUTDOWN_RPM_DECAY_SECONDS = 0.58
         private const val SHUTDOWN_RPM_EPSILON = 12.0
         private const val SHUTDOWN_SPEED_EPSILON_MPS = 0.12
+        /** Minimum coupled RPM manual mode keeps before auto-downshifting to avoid idle-layer bleed. */
+        internal const val MANUAL_IDLE_PROTECTION_RPM = 2_400.0
     }
 
     private data class ActiveShift(

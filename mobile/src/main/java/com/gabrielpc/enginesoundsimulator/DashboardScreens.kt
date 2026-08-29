@@ -102,6 +102,8 @@ internal fun MixerDashboardScreen(
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
+    onManualUpshift: () -> Unit,
+    onManualDownshift: () -> Unit,
     coastLayerMixEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -168,6 +170,8 @@ internal fun MixerDashboardScreen(
                     onThrottle = onThrottle,
                     onBrake = onBrake,
                     onTransmissionChange = onTransmissionChange,
+                    onManualUpshift = onManualUpshift,
+                    onManualDownshift = onManualDownshift,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 2.dp),

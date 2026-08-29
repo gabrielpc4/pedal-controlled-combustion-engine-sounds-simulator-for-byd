@@ -41,12 +41,36 @@ class AudioMixModeRepository(context: Context) {
             .apply()
     }
 
+    fun isSharedShiftSoundsEnabled(): Boolean {
+        return preferences.getBoolean(KEY_SHARED_SHIFT_SOUNDS_ENABLED, DEFAULT_SHARED_SHIFT_SOUNDS_ENABLED)
+    }
+
+    fun setSharedShiftSoundsEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_SHARED_SHIFT_SOUNDS_ENABLED, enabled)
+            .apply()
+    }
+
+    fun isManualShiftModeEnabled(): Boolean {
+        return preferences.getBoolean(KEY_MANUAL_SHIFT_MODE_ENABLED, DEFAULT_MANUAL_SHIFT_MODE_ENABLED)
+    }
+
+    fun setManualShiftModeEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_MANUAL_SHIFT_MODE_ENABLED, enabled)
+            .apply()
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "audio_experiments"
         const val KEY_COAST_LAYER_MIX_ENABLED = "coast_layer_mix_enabled"
         const val KEY_COAST_ONLY_FULL_GAIN_LEGACY = "coast_only_full_gain"
         const val KEY_POPS_AND_BANGS_ENABLED = "pops_and_bangs_enabled"
+        const val KEY_SHARED_SHIFT_SOUNDS_ENABLED = "shared_shift_sounds_enabled"
+        const val KEY_MANUAL_SHIFT_MODE_ENABLED = "manual_shift_mode_enabled"
         const val DEFAULT_COAST_LAYER_MIX_ENABLED = true
         const val DEFAULT_POPS_AND_BANGS_ENABLED = false
+        const val DEFAULT_SHARED_SHIFT_SOUNDS_ENABLED = false
+        const val DEFAULT_MANUAL_SHIFT_MODE_ENABLED = false
     }
 }

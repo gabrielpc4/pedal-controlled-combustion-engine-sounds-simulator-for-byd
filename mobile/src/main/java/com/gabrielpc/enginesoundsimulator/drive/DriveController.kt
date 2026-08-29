@@ -8,6 +8,7 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioFocusEvent
+import com.gabrielpc.enginesoundsimulator.audio.CarEffectGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
@@ -73,6 +74,10 @@ data class DriveSnapshot(
     val carAudioReady: Boolean = false,
     val engineStartLoading: Boolean = false,
     val popsAndBangsEnabled: Boolean = false,
+    val popsAndBangsGain: Double = EngineAudioFrame.DEFAULT_POPS_AND_BANGS_GAIN,
+    val sharedShiftSoundsEnabled: Boolean = false,
+    val sharedShiftSoundsGain: Double = EngineAudioFrame.DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
+    val manualShiftModeEnabled: Boolean = false,
     val userMessage: UserVisibleMessage? = null,
 )
 
@@ -83,11 +88,20 @@ class DriveController(context: Context) {
     private val layerMixRepository = LayerMixRepository(context.applicationContext)
     private val appMasterVolumeRepository = AppMasterVolumeRepository(context.applicationContext)
     private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
+    private val carEffectGainRepository = CarEffectGainRepository(context.applicationContext)
     private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
     private val coastLayerMixEnabled = AtomicBoolean(audioMixModeRepository.isCoastLayerMixEnabled())
     private val popsAndBangsEnabled = AtomicBoolean(audioMixModeRepository.isPopsAndBangsEnabled())
+    private val popsAndBangsGain = AtomicReference(
+        carEffectGainRepository.popsAndBangsGain(selectedCarRepository.load().id),
+    )
+    private val sharedShiftSoundsEnabled = AtomicBoolean(audioMixModeRepository.isSharedShiftSoundsEnabled())
+    private val sharedShiftSoundsGain = AtomicReference(
+        carEffectGainRepository.sharedShiftSoundsGain(selectedCarRepository.load().id),
+    )
+    private val manualShiftModeEnabled = AtomicBoolean(audioMixModeRepository.isManualShiftModeEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private val appMasterVolume = AtomicReference(appMasterVolumeRepository.load())
     private val appMasterVolumeBeforeMute = AtomicReference<Double?>(null)
@@ -141,6 +155,10 @@ class DriveController(context: Context) {
         coastLayerMixEnabled = coastLayerMixEnabled.get(),
         legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
         popsAndBangsEnabled = popsAndBangsEnabled.get(),
+        popsAndBangsGain = popsAndBangsGain.get(),
+        sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
+        sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+        manualShiftModeEnabled = manualShiftModeEnabled.get(),
         appMasterVolume = appMasterVolume.get(),
         carMasterVolume = carMasterVolume.get(),
     )
@@ -149,6 +167,7 @@ class DriveController(context: Context) {
         audioEngine.setCoastLayerMixEnabled(coastLayerMixEnabled.get())
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
         audioEngine.setSampleProfile(selectedSampleProfile.get())
+        simulation.manualShiftEnabled = manualShiftModeEnabled.get()
     }
 
     fun isRunning(): Boolean = running.get()
@@ -164,6 +183,10 @@ class DriveController(context: Context) {
             return base.copy(
                 engineSoundEnabled = ignitionActive,
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
+                popsAndBangsGain = popsAndBangsGain.get(),
+                sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
+                sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+                manualShiftModeEnabled = manualShiftModeEnabled.get(),
             )
         }
 
@@ -171,6 +194,10 @@ class DriveController(context: Context) {
         return base.copy(
             engineSoundEnabled = ignitionActive,
             popsAndBangsEnabled = popsAndBangsEnabled.get(),
+            popsAndBangsGain = popsAndBangsGain.get(),
+            sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
+            sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+            manualShiftModeEnabled = manualShiftModeEnabled.get(),
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
                 layerMixControls.get(),
@@ -285,8 +312,86 @@ class DriveController(context: Context) {
         popsAndBangsEnabled.set(enabled)
     }
 
+    fun setPopsAndBangsGain(gain: Double) {
+        val clamped = gain.coerceIn(EngineAudioFrame.MIN_EFFECT_GAIN, EngineAudioFrame.MAX_EFFECT_GAIN)
+        popsAndBangsGain.set(
+            carEffectGainRepository.savePopsAndBangsGain(selectedSampleProfile.get().id, clamped),
+        )
+    }
+
     fun togglePopsAndBangs() {
         setPopsAndBangsEnabled(!popsAndBangsEnabled.get())
+    }
+
+    fun setSharedShiftSoundsEnabled(enabled: Boolean) {
+        audioMixModeRepository.setSharedShiftSoundsEnabled(enabled)
+        sharedShiftSoundsEnabled.set(enabled)
+    }
+
+    fun setSharedShiftSoundsGain(gain: Double) {
+        val clamped = gain.coerceIn(EngineAudioFrame.MIN_EFFECT_GAIN, EngineAudioFrame.MAX_EFFECT_GAIN)
+        sharedShiftSoundsGain.set(
+            carEffectGainRepository.saveSharedShiftSoundsGain(selectedSampleProfile.get().id, clamped),
+        )
+    }
+
+    fun toggleSharedShiftSounds() {
+        setSharedShiftSoundsEnabled(!sharedShiftSoundsEnabled.get())
+    }
+
+    fun setManualShiftModeEnabled(enabled: Boolean) {
+        audioMixModeRepository.setManualShiftModeEnabled(enabled)
+        manualShiftModeEnabled.set(enabled)
+        simulation.manualShiftEnabled = enabled
+    }
+
+    fun toggleManualShiftMode() {
+        setManualShiftModeEnabled(!manualShiftModeEnabled.get())
+    }
+
+    fun requestManualUpshift(): Boolean {
+        synchronized(lifecycleLock) {
+            if (transmissionPosition.get() != TransmissionPosition.DRIVE) {
+                return false
+            }
+            if (!simulation.isEngineEngagedForUi()) {
+                return false
+            }
+            return simulation.requestManualUpshift()
+        }
+    }
+
+    fun requestManualDownshift(): Boolean {
+        synchronized(lifecycleLock) {
+            if (transmissionPosition.get() != TransmissionPosition.DRIVE) {
+                return false
+            }
+            if (!simulation.isEngineEngagedForUi()) {
+                return false
+            }
+            return simulation.requestManualDownshift()
+        }
+    }
+
+    fun handleShiftKey(keyCode: Int): Boolean {
+        if (!manualShiftModeEnabled.get()) {
+            return false
+        }
+        when (keyCode) {
+            android.view.KeyEvent.KEYCODE_MEDIA_NEXT,
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            -> {
+                requestManualUpshift()
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            -> {
+                requestManualDownshift()
+                return true
+            }
+            else -> return false
+        }
     }
 
     fun setAppMasterVolume(volume: Double) {
@@ -338,6 +443,8 @@ class DriveController(context: Context) {
             selectedSampleProfile.set(selected)
             layerMixControls.set(layerMixRepository.load(selected))
             carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
+            popsAndBangsGain.set(carEffectGainRepository.popsAndBangsGain(selected.id))
+            sharedShiftSoundsGain.set(carEffectGainRepository.sharedShiftSoundsGain(selected.id))
             selectedCarRepository.save(selected)
             val tuning = tuningConfig.get().withSampleProfile(selected)
             tuningConfig.set(tuning)
@@ -590,6 +697,7 @@ class DriveController(context: Context) {
         if (transmissionControl.lockedToVehicle) {
             transmissionPosition.set(transmissionControl.position)
         }
+        simulation.manualShiftEnabled = manualShiftModeEnabled.get()
 
         val drivetrain = simulation.update(
             DriverInput(
@@ -625,6 +733,9 @@ class DriveController(context: Context) {
                 layerMix = layerMixControls.get(),
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
+                popsAndBangsGain = popsAndBangsGain.get(),
+                sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
+                sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
             ),
         )
         val selectedCar = selectedSampleProfile.get()
@@ -653,6 +764,10 @@ class DriveController(context: Context) {
                 coastLayerMixEnabled = coastLayerMixEnabled.get(),
                 legacyThrottleMixEnabled = !coastLayerMixEnabled.get(),
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
+                popsAndBangsGain = popsAndBangsGain.get(),
+                sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
+                sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+                manualShiftModeEnabled = manualShiftModeEnabled.get(),
                 appMasterVolume = appMasterVolume.get(),
                 appMuted = appMasterVolumeBeforeMute.get() != null,
                 carMasterVolume = carMasterVolume.get(),
@@ -832,6 +947,7 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         shiftDwellSeconds = engine.shiftDwellMs / 1_000.0,
         secondToFirstDownshiftRpm = engine.secondToFirstDownshiftRpm,
         firstToSecondPartialThrottleUpshiftRpm = engine.firstToSecondPartialThrottleUpshiftRpm,
+        secondGearEarlyShiftEnabled = engine.secondGearEarlyShiftEnabled,
     )
 }
 

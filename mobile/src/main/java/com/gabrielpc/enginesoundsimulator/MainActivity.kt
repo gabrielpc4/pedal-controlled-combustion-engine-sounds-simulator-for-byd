@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.os.Bundle
 import android.view.Choreographer
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -45,11 +46,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -99,6 +104,7 @@ import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
+import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -150,6 +156,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && controller.handleShiftKey(event.keyCode)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         driveState = controller.snapshot()
@@ -171,6 +184,12 @@ class MainActivity : ComponentActivity() {
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
                         onTogglePopsAndBangs = controller::togglePopsAndBangs,
+                        onPopsAndBangsGainChange = controller::setPopsAndBangsGain,
+                        onToggleSharedShiftSounds = controller::toggleSharedShiftSounds,
+                        onSharedShiftSoundsGainChange = controller::setSharedShiftSoundsGain,
+                        onToggleManualShiftMode = controller::toggleManualShiftMode,
+                        onManualUpshift = controller::requestManualUpshift,
+                        onManualDownshift = controller::requestManualDownshift,
                         onToggleAppMute = controller::toggleAppMute,
                         onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
                         onIncreaseMasterVolume = controller::increaseAppMasterVolume,
@@ -245,6 +264,12 @@ private fun MotorSoundDashboard(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
     onTogglePopsAndBangs: () -> Unit,
+    onPopsAndBangsGainChange: (Double) -> Unit,
+    onToggleSharedShiftSounds: () -> Unit,
+    onSharedShiftSoundsGainChange: (Double) -> Unit,
+    onToggleManualShiftMode: () -> Unit,
+    onManualUpshift: () -> Unit,
+    onManualDownshift: () -> Unit,
     onToggleAppMute: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
@@ -283,6 +308,22 @@ private fun MotorSoundDashboard(
                         onBrake(if (pressed) 1.0 else 0.0)
                         true
                     }
+                    android.view.KeyEvent.KEYCODE_MEDIA_NEXT,
+                    android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+                    -> {
+                        if (pressed && state.manualShiftModeEnabled) {
+                            onManualUpshift()
+                        }
+                        state.manualShiftModeEnabled
+                    }
+                    android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                    android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+                    -> {
+                        if (pressed && state.manualShiftModeEnabled) {
+                            onManualDownshift()
+                        }
+                        state.manualShiftModeEnabled
+                    }
                     else -> false
                 }
             },
@@ -317,6 +358,7 @@ private fun MotorSoundDashboard(
                         onSelectSimulatedPedals = onSelectSimulatedPedals,
                         onSelectRealPedals = onSelectRealPedals,
                         onToggleInputSource = onToggleInputSource,
+                        onToggleManualShiftMode = onToggleManualShiftMode,
                         onToggleAppMute = onToggleAppMute,
                         onDecreaseMasterVolume = onDecreaseMasterVolume,
                         onIncreaseMasterVolume = onIncreaseMasterVolume,
@@ -368,7 +410,7 @@ private fun MotorSoundDashboard(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
                                     .fillMaxWidth()
-                                    .padding(start = 4.dp, end = 4.dp, bottom = 12.dp),
+                                    .padding(start = 4.dp, end = 4.dp),
                                 verticalAlignment = Alignment.Bottom,
                             ) {
                                 EngineStartStopButton(
@@ -376,10 +418,21 @@ private fun MotorSoundDashboard(
                                     loading = state.engineStartLoading,
                                     onClick = onToggleSound,
                                 )
-                                PopsAndBangsToggle(
+                                DashboardEffectToggle(
+                                    label = "Pops & Bangs",
                                     enabled = state.popsAndBangsEnabled,
+                                    gain = state.popsAndBangsGain,
                                     onToggle = onTogglePopsAndBangs,
-                                    modifier = Modifier.padding(start = 10.dp, bottom = 8.dp),
+                                    onGainChange = onPopsAndBangsGainChange,
+                                    modifier = Modifier.padding(start = 10.dp),
+                                )
+                                DashboardEffectToggle(
+                                    label = "Shift Sounds",
+                                    enabled = state.sharedShiftSoundsEnabled,
+                                    gain = state.sharedShiftSoundsGain,
+                                    onToggle = onToggleSharedShiftSounds,
+                                    onGainChange = onSharedShiftSoundsGainChange,
+                                    modifier = Modifier.padding(start = 8.dp),
                                 )
                                 Box(
                                     modifier = Modifier
@@ -392,6 +445,9 @@ private fun MotorSoundDashboard(
                                         onThrottle = onThrottle,
                                         onBrake = onBrake,
                                         onTransmissionChange = onTransmissionChange,
+                                        onManualUpshift = onManualUpshift,
+                                        onManualDownshift = onManualDownshift,
+                                        modifier = Modifier.offset(x = (-64).dp),
                                     )
                                 }
                             }
@@ -412,6 +468,8 @@ private fun MotorSoundDashboard(
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
+                            onManualUpshift = onManualUpshift,
+                            onManualDownshift = onManualDownshift,
                             coastLayerMixEnabled = state.coastLayerMixEnabled,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -443,6 +501,7 @@ private fun DashboardHeader(
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
+    onToggleManualShiftMode: () -> Unit,
     onToggleAppMute: () -> Unit,
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
@@ -565,6 +624,9 @@ private fun DashboardHeader(
                     letterSpacing = 0.4.sp,
                 )
             }
+            if (state.manualShiftModeEnabled) {
+                StatusTag("MANUAL", CyanSoft)
+            }
             if (state.legacyThrottleMixEnabled) {
                 StatusTag("LEGACY MIX", Amber)
             }
@@ -581,6 +643,10 @@ private fun DashboardHeader(
             onSelectSimulated = onSelectSimulatedPedals,
             onSelectReal = onSelectRealPedals,
             onToggle = onToggleInputSource,
+        )
+        ManualShiftHeaderControl(
+            manualEnabled = state.manualShiftModeEnabled,
+            onToggle = onToggleManualShiftMode,
         )
         MasterVolumeControls(
             volume = state.appMasterVolume,
@@ -662,6 +728,52 @@ private const val HEADER_MEMORY_STARTUP_BURST_MS = 10_000L
 private const val HEADER_MEMORY_STARTUP_REFRESH_MS = 250L
 private const val HEADER_MEMORY_REFRESH_MS = 15_000L
 private const val HEADER_CPU_REFRESH_MS = 1_000L
+
+@Composable
+private fun ManualShiftHeaderControl(
+    manualEnabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Panel)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "SHIFT:",
+            color = Muted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+        )
+        PedalsInputToggle(
+            realSelected = manualEnabled,
+            realPedalsActive = manualEnabled,
+            enabled = true,
+            onToggle = onToggle,
+        )
+        Text(
+            text = "MANUAL",
+            color = if (manualEnabled) {
+                CyanSoft
+            } else {
+                Muted
+            },
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.clickable {
+                if (!manualEnabled) {
+                    onToggle()
+                }
+            },
+        )
+    }
+}
 
 @Composable
 private fun PedalsInputHeaderControl(
@@ -892,6 +1004,8 @@ private fun ClassicDriveControls(
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
+    onManualUpshift: () -> Unit,
+    onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -899,6 +1013,13 @@ private fun ClassicDriveControls(
         horizontalArrangement = Arrangement.spacedBy(CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(18)),
         verticalAlignment = Alignment.Bottom,
     ) {
+        if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
+            ManualShiftButtons(
+                onUpshift = onManualUpshift,
+                onDownshift = onManualDownshift,
+                scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            )
+        }
         PedalControl(
             label = "BRAKE",
             value = state.brake,
@@ -927,11 +1048,105 @@ private fun ClassicDriveControls(
 }
 
 @Composable
+private fun ManualShiftButtons(
+    onUpshift: () -> Unit,
+    onDownshift: () -> Unit,
+    scale: Float,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(scale.scaledDp(8)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(bottom = scale.scaledDp(6)),
+    ) {
+        ManualShiftButton(
+            icon = Icons.Filled.KeyboardArrowUp,
+            contentDescription = "Upshift",
+            accent = Green,
+            size = scale.scaledDp(56),
+            contentScale = scale,
+            onClick = onUpshift,
+        )
+        ManualShiftButton(
+            icon = Icons.Filled.KeyboardArrowDown,
+            contentDescription = "Downshift",
+            accent = Red,
+            size = scale.scaledDp(56),
+            contentScale = scale,
+            onClick = onDownshift,
+        )
+    }
+}
+
+@Composable
+private fun ManualShiftButton(
+    icon: ImageVector,
+    contentDescription: String,
+    accent: Color,
+    size: Dp,
+    contentScale: Float,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val active = pressed
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape((16f * contentScale).dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF5B6670), Color(0xFF232D35), Color(0xFF11181E)),
+                ),
+            )
+            .border(
+                (2f * contentScale).dp,
+                if (active) {
+                    accent
+                } else {
+                    Color(0xFF60717D)
+                },
+                RoundedCornerShape((16f * contentScale).dp),
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (active) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(accent.copy(alpha = 0.10f), accent.copy(alpha = 0.45f)),
+                        ),
+                    ),
+            )
+        }
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (active) {
+                accent
+            } else {
+                Muted
+            },
+            modifier = Modifier.size((28f * contentScale).dp),
+        )
+    }
+}
+
+@Composable
 internal fun MixerDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
+    onManualUpshift: () -> Unit,
+    onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -939,6 +1154,13 @@ internal fun MixerDriveControls(
         horizontalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(12)),
         verticalAlignment = Alignment.Bottom,
     ) {
+        if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
+            ManualShiftButtons(
+                onUpshift = onManualUpshift,
+                onDownshift = onManualDownshift,
+                scale = MIXER_DRIVE_CONTROL_SCALE,
+            )
+        }
         PedalControl(
             label = "BRAKE",
             value = state.brake,
@@ -1250,13 +1472,16 @@ private fun DismissableUserMessageBanner(
 }
 
 @Composable
-private fun PopsAndBangsToggle(
+private fun DashboardEffectToggle(
+    label: String,
     enabled: Boolean,
+    gain: Double,
     onToggle: () -> Unit,
+    onGainChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val trackColor = if (enabled) {
-        Amber.copy(alpha = 0.92f)
+        Cyan.copy(alpha = 0.92f)
     } else {
         Line
     }
@@ -1267,25 +1492,26 @@ private fun PopsAndBangsToggle(
             0f
         },
         animationSpec = tween(durationMillis = 180),
-        label = "popsAndBangsToggle",
+        label = "${label}Toggle",
     )
     val trackWidth = 46.dp
     val trackHeight = 24.dp
     val thumbSize = 18.dp
     val trackInset = 3.dp
+    val accentColor = if (enabled) {
+        Cyan
+    } else {
+        Muted
+    }
 
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "Pops & Bangs",
-            color = if (enabled) {
-                Amber
-            } else {
-                Muted
-            },
+            text = label,
+            color = accentColor,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.4.sp,
@@ -1312,6 +1538,27 @@ private fun PopsAndBangsToggle(
                     .background(White),
             )
         }
+        Slider(
+            value = gain.toFloat(),
+            onValueChange = { onGainChange(it.toDouble()) },
+            valueRange = EngineAudioFrame.MIN_EFFECT_GAIN.toFloat()..EngineAudioFrame.MAX_EFFECT_GAIN.toFloat(),
+            modifier = Modifier
+                .width(72.dp)
+                .height(20.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = accentColor,
+                activeTrackColor = accentColor,
+                inactiveTrackColor = Line,
+            ),
+        )
+        Text(
+            text = String.format("%.1f×", gain),
+            color = accentColor,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(72.dp),
+        )
     }
 }
 

@@ -299,6 +299,54 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun sharedShiftSoundsOverridesNativeGearChangesWhenEnabled() {
+        val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
+        val decoded = aventador.requiredAssets.associateWith { asset ->
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        } + SharedHuracanShiftSounds.assetNames.associateWith {
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        }
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, aventador)
+        val output = ShortArray(1_920)
+
+        renderer.render(
+            EngineAudioFrame(
+                rpm = 4_500.0,
+                shiftSerial = 0,
+                sharedShiftSoundsEnabled = true,
+            ),
+            output,
+            gain = 0.7,
+        )
+        renderer.render(
+            EngineAudioFrame(
+                rpm = 4_500.0,
+                shiftSerial = 1,
+                shiftDirection = 1,
+                sharedShiftSoundsEnabled = true,
+                sharedShiftSoundsGain = 3.0,
+            ),
+            output,
+            gain = 0.7,
+        )
+        repeat(8) {
+            renderer.render(
+                EngineAudioFrame(
+                    rpm = 4_500.0,
+                    shiftSerial = 1,
+                    shiftDirection = 1,
+                    sharedShiftSoundsEnabled = true,
+                ),
+                output,
+                gain = 0.7,
+            )
+        }
+
+        assertEquals(1L, renderer.diagnostics().effectTriggers)
+        assertTrue(renderer.diagnostics().activeEffects.contains(SharedHuracanShiftSounds.SHIFT_UP_ID))
+    }
+
+    @Test
     fun throttleLiftOverrunDoesNotRetriggerWhileSampleIsStillPlaying() {
         val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
         val decoded = aventador.requiredAssets.associateWith { asset ->

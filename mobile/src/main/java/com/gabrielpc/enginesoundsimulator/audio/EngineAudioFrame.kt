@@ -16,4 +16,17 @@ data class EngineAudioFrame(
     val coastLayerMixEnabled: Boolean = true,
     /** When true, play the shared recorded pops on throttle lift and mute each car's native overrun. */
     val popsAndBangsEnabled: Boolean = false,
-)
+    /** Linear multiplier applied on top of the shared pops sample gain (default 2×). */
+    val popsAndBangsGain: Double = DEFAULT_POPS_AND_BANGS_GAIN,
+    /** When true, play Huracán shift one-shots on every car and mute native shift effects. */
+    val sharedShiftSoundsEnabled: Boolean = false,
+    /** Linear multiplier applied on top of the shared shift sample gain (default 3×). */
+    val sharedShiftSoundsGain: Double = DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
+) {
+    companion object {
+        const val DEFAULT_POPS_AND_BANGS_GAIN = 2.0
+        const val DEFAULT_SHARED_SHIFT_SOUNDS_GAIN = 3.0
+        const val MIN_EFFECT_GAIN = 0.5
+        const val MAX_EFFECT_GAIN = 6.0
+    }
+}
