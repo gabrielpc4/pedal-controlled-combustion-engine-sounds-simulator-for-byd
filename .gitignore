@@ -1,0 +1,29 @@
+# Android Studio and local machine state
+*.iml
+.idea/
+.gradle/
+.kotlin/
+local.properties
+mobile/build-number.properties
+.DS_Store
+
+# Build and native tooling output
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+hs_err_pid*.log
+
+# Signing material and distributable binaries
+*.jks
+*.keystore
+keystore.properties
+*.apk
+*.aab
+
+# User-supplied reverse-engineering references are not redistributable and may
+# contain vehicle identifiers. Their hashes/provenance remain in docs only.
+reference/
+audio_samples/
+audio_banks/
+docs/source-material/*.pdf

@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Engine Sounds Simulator</string>
+    <string name="engine_runtime_notification_channel">Engine runtime</string>
+    <string name="engine_runtime_notification_title">Engine Sounds Simulator</string>
+    <string name="engine_runtime_notification_text">Engine sound is running in the background.</string>
+</resources>
