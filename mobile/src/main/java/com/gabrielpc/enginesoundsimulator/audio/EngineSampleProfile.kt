@@ -1,5 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
+import kotlin.math.abs
+import kotlin.math.expm1
 import kotlin.math.pow
 
 internal enum class SampleLayerRole { IDLE, LOAD, COAST, TEXTURE, LIMITER }
@@ -107,12 +109,20 @@ internal data class SampleEffectSpec(
     }
 }
 
-internal data class CurvePoint(val input: Double, val output: Double)
+internal data class CurvePoint(
+    val input: Double,
+    val output: Double,
+    /** FMOD's outgoing handle for this segment; zero retains ordinary linear interpolation. */
+    val shape: Double = 0.0,
+    /** FMOD 1.08 curve type: exponential (0) or two-handle ease (1). */
+    val interpolationType: Int = 0,
+)
 
 internal data class AutomationCurve(val points: List<CurvePoint>) {
     init {
         require(points.isNotEmpty())
         require(points.zipWithNext().all { (left, right) -> left.input <= right.input })
+        require(points.all { point -> point.interpolationType in 0..1 })
     }
 
     fun valueAt(input: Double): Double {
@@ -124,8 +134,47 @@ internal data class AutomationCurve(val points: List<CurvePoint>) {
         }
         val left = points[rightIndex - 1]
         val right = points[rightIndex]
-        val fraction = (input - left.input) / (right.input - left.input)
+        val fraction = interpolationFraction(
+            (input - left.input) / (right.input - left.input),
+            left.shape,
+            left.interpolationType,
+        )
         return left.output + (right.output - left.output) * fraction
+    }
+
+    private fun interpolationFraction(fraction: Double, shape: Double, type: Int): Double {
+        return when (type) {
+            0 -> {
+                val exponent = shape * FMOD_EXPONENTIAL_SHAPE_SCALE
+                if (abs(exponent) < LINEAR_SHAPE_EPSILON) {
+                    fraction
+                } else {
+                    expm1(exponent * fraction) / expm1(exponent)
+                }
+            }
+
+            1 -> {
+                val exponent = 1.0 + 2.0 * abs(shape)
+                if (shape >= 0.0) {
+                    if (fraction <= 0.5) {
+                        0.5 * (2.0 * fraction).pow(exponent)
+                    } else {
+                        1.0 - 0.5 * (2.0 * (1.0 - fraction)).pow(exponent)
+                    }
+                } else if (fraction <= 0.5) {
+                    0.5 * (1.0 - (1.0 - 2.0 * fraction).pow(exponent))
+                } else {
+                    0.5 + 0.5 * (2.0 * fraction - 1.0).pow(exponent)
+                }
+            }
+
+            else -> error("Curve point type is validated at construction.")
+        }
+    }
+
+    private companion object {
+        const val FMOD_EXPONENTIAL_SHAPE_SCALE = 6.9522
+        const val LINEAR_SHAPE_EPSILON = 1.0e-7
     }
 }
 
@@ -138,6 +187,8 @@ internal data class SampleLayerSpec(
     val autopitchRootRpm: Double? = null,
     val basePitchSemitones: Double = 0.0,
     val baseGainDb: Double = 0.0,
+    /** The generic profiles retain their intentionally louder cabin idle; authored profiles can opt out. */
+    val applyIdleGainBoost: Boolean = true,
     val throttleGainDb: AutomationCurve? = null,
     val rpmAmplitudeCurves: List<AutomationCurve> = emptyList(),
     val rpmGainDbCurves: List<AutomationCurve> = emptyList(),
@@ -167,7 +218,8 @@ internal data class SampleLayerSpec(
         for (index in rpmGainDbCurves.indices) {
             rpmGainDb += rpmGainDbCurves[index].valueAt(rpm)
         }
-        val decibels = baseGainDb + (if (role == SampleLayerRole.IDLE) IDLE_LAYER_GAIN_BOOST_DB else 0.0) +
+        val decibels = baseGainDb +
+            (if (role == SampleLayerRole.IDLE && applyIdleGainBoost) IDLE_LAYER_GAIN_BOOST_DB else 0.0) +
             throttleGainContribution + rpmGainDb
         return amplitude * 10.0.pow(decibels / 20.0)
     }
@@ -195,6 +247,8 @@ internal data class EngineSampleProfile(
     val layers: List<SampleLayerSpec>,
     val effects: List<SampleEffectSpec> = emptyList(),
     val throttleOutputGainDb: AutomationCurve? = null,
+    /** Skyline's recovered FMOD event requires its authored load/coast crossfade. */
+    val supportsLoadOnlyProgram: Boolean = true,
 ) {
     val requiredAssets: Set<String> = linkedSetOf<String>().apply {
         layers.mapTo(this) { it.assetName }
@@ -202,7 +256,7 @@ internal data class EngineSampleProfile(
     }
 
     fun appliesLoadOnlyProgram(loadOnlyProgram: Boolean): Boolean {
-        return loadOnlyProgram
+        return supportsLoadOnlyProgram && loadOnlyProgram
     }
 
     fun loopLayersForLoad(loadOnlyProgram: Boolean): List<SampleLayerSpec> {

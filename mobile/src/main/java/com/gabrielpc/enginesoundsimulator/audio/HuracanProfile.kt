@@ -31,7 +31,19 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
         throttleCurve: AutomationCurve? = null,
         amplitude: List<AutomationCurve> = emptyList(),
         rpmGain: List<AutomationCurve> = emptyList(),
-    ) = SampleLayerSpec(id, asset, role, start, end, root, pitch, gain, throttleCurve, amplitude, rpmGain)
+    ) = SampleLayerSpec(
+        id = id,
+        assetName = asset,
+        role = role,
+        startRpm = start,
+        endRpm = end,
+        autopitchRootRpm = root,
+        basePitchSemitones = pitch,
+        baseGainDb = gain,
+        throttleGainDb = throttleCurve,
+        rpmAmplitudeCurves = amplitude,
+        rpmGainDbCurves = rpmGain,
+    )
 
     val layers = listOf(
         // The decoded exterior event explicitly identifies this as its idle stream. Prefer it
