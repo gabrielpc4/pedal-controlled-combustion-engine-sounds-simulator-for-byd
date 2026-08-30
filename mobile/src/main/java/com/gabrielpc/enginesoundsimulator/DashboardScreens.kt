@@ -136,7 +136,7 @@ internal fun MixerDashboardScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             MixerTrackColumn(
-                tracks = groupedTracks.coast,
+                tracks = groupedTracks.firstColumn,
                 loadOnlyProgram = loadOnlyProgram,
                 onLayerMuted = onLayerMuted,
                 onLayerSolo = onLayerSolo,
@@ -144,7 +144,7 @@ internal fun MixerDashboardScreen(
                 modifier = Modifier.weight(1f),
             )
             MixerTrackColumn(
-                tracks = groupedTracks.middle,
+                tracks = groupedTracks.load,
                 loadOnlyProgram = loadOnlyProgram,
                 onLayerMuted = onLayerMuted,
                 onLayerSolo = onLayerSolo,
@@ -157,7 +157,7 @@ internal fun MixerDashboardScreen(
                     .fillMaxHeight(),
             ) {
                 MixerTrackColumn(
-                    tracks = groupedTracks.texture,
+                    tracks = groupedTracks.auxiliary,
                     loadOnlyProgram = loadOnlyProgram,
                     onLayerMuted = onLayerMuted,
                     onLayerSolo = onLayerSolo,
@@ -184,22 +184,24 @@ internal fun MixerDashboardScreen(
 private val MIXER_PEDALS_OVERLAY_HEIGHT = 132.dp
 
 private data class GroupedMixerTracks(
-    val coast: List<LayerMixTrackState>,
-    val middle: List<LayerMixTrackState>,
-    val texture: List<LayerMixTrackState>,
+    val firstColumn: List<LayerMixTrackState>,
+    val load: List<LayerMixTrackState>,
+    val auxiliary: List<LayerMixTrackState>,
 )
 
 private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTracks {
     val idle = tracks.filter { it.sortGroup == 0 }
     val coast = tracks.filter { it.sortGroup == 1 }
     val texture = tracks.filter { it.sortGroup == 3 }
-    val middle = tracks.filter { track ->
-        track.sortGroup != 0 && track.sortGroup != 1 && track.sortGroup != 3
+    val load = tracks.filter { it.isLoadLayer }
+    val auxiliary = tracks.filter { track ->
+        !track.isLoadLayer && track.sortGroup != 0 && track.sortGroup != 1 && track.sortGroup != 3
     }
+
     return GroupedMixerTracks(
-        coast = idle + coast,
-        middle = middle,
-        texture = texture,
+        firstColumn = idle + coast,
+        load = load,
+        auxiliary = auxiliary + texture,
     )
 }
 

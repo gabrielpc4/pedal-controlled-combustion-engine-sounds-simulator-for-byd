@@ -107,8 +107,8 @@ internal fun nissanSkylineR34Profile() = EngineSampleProfile(
 
 /**
  * The Skyline preserves the recovered `engine_int` topology rather than using the generic
- * nearest-RPM-band approximation. Its lift blend keeps the interior engine character present,
- * while the exterior coast layers provide the descending feel.
+ * nearest-RPM-band approximation. Its lift blend keeps the interior engine character present
+ * through acceleration and deceleration without exterior coast layers.
  */
 private fun skylineFmodEngineLayers(): List<SampleLayerSpec> {
     val interiorLoadThrottle = fmodCurve(
@@ -118,10 +118,6 @@ private fun skylineFmodEngineLayers(): List<SampleLayerSpec> {
     val interiorAccentThrottle = fmodCurve(
         CurvePoint(0.20, -10.0, shape = -0.5943323),
         CurvePoint(0.70, -6.0),
-    )
-    val exteriorCoastThrottle = fmodCurve(
-        CurvePoint(0.10, -10.0, shape = 0.5893333),
-        CurvePoint(0.44, -37.47826, shape = 0.15823701),
     )
     val exteriorIdleThrottle = fmodCurve(
         CurvePoint(0.20, -8.0, shape = 0.7671622),
@@ -136,11 +132,6 @@ private fun skylineFmodEngineLayers(): List<SampleLayerSpec> {
         CurvePoint(2_000.0, -1.304348),
         CurvePoint(2_800.0, 4.8),
         CurvePoint(5_500.0, 4.8),
-    )
-    val exteriorRpmGain = fmodCurve(
-        CurvePoint(2_200.0, -37.5, shape = -0.817918),
-        CurvePoint(3_400.0, 2.0),
-        CurvePoint(7_500.0, 4.0),
     )
     val sineRpmGain = fmodCurve(
         CurvePoint(2_000.0, -35.217392, shape = -0.41455066),
@@ -163,96 +154,6 @@ private fun skylineFmodEngineLayers(): List<SampleLayerSpec> {
                 CurvePoint(1_400.0, 1.0, shape = 0.25471893),
                 CurvePoint(2_000.0, 0.0),
             )),
-        ),
-        skylineLayer(
-            id = "skyline_coast_very_low",
-            assetName = "rb26_4_ex_off_verylow.wav",
-            role = SampleLayerRole.COAST,
-            startRpm = 1_400.0,
-            endRpm = 3_400.0,
-            rootRpm = 2_330.0,
-            baseGainDb = -4.5,
-            throttleGainDb = exteriorIdleThrottle,
-            rpmAmplitudeCurves = listOf(fmodCurve(
-                CurvePoint(1_400.0, 0.0, shape = -0.2547189),
-                CurvePoint(2_000.0, 1.0),
-            )),
-            rpmGainDbCurves = listOf(fmodCurve(
-                CurvePoint(2_100.0, 0.0, shape = 0.95585155),
-                CurvePoint(3_400.0, -37.47826),
-            )),
-        ),
-        skylineLayer(
-            id = "skyline_coast_low_body",
-            assetName = "rb26_ex_5_offverylow.wav",
-            role = SampleLayerRole.COAST,
-            startRpm = 2_200.0,
-            endRpm = 4_300.0,
-            rootRpm = 3_630.0,
-            baseGainDb = 3.0,
-            throttleGainDb = exteriorCoastThrottle,
-            rpmAmplitudeCurves = listOf(fmodCurve(
-                CurvePoint(4_000.0, 1.0, shape = 0.25471893),
-                CurvePoint(4_300.0, 0.0),
-            )),
-            rpmGainDbCurves = listOf(exteriorRpmGain),
-        ),
-        skylineLayer(
-            id = "skyline_coast_low",
-            assetName = "rb26_ex_5_offlow.wav",
-            role = SampleLayerRole.COAST,
-            startRpm = 4_000.0,
-            endRpm = 5_000.0,
-            rootRpm = 4_060.0,
-            baseGainDb = 3.0,
-            throttleGainDb = exteriorCoastThrottle,
-            rpmAmplitudeCurves = listOf(
-                fmodCurve(
-                    CurvePoint(4_000.0, 0.0, shape = -0.2547189),
-                    CurvePoint(4_300.0, 1.0),
-                ),
-                fmodCurve(
-                    CurvePoint(4_700.0, 1.0, shape = 0.25471893),
-                    CurvePoint(5_000.0, 0.0),
-                ),
-            ),
-            rpmGainDbCurves = listOf(exteriorRpmGain),
-        ),
-        skylineLayer(
-            id = "skyline_coast_mid",
-            assetName = "rb26_ex_5_offmid.wav",
-            role = SampleLayerRole.COAST,
-            startRpm = 4_700.0,
-            endRpm = 6_400.0,
-            rootRpm = 5_330.0,
-            baseGainDb = 3.0,
-            throttleGainDb = exteriorCoastThrottle,
-            rpmAmplitudeCurves = listOf(
-                fmodCurve(
-                    CurvePoint(4_700.0, 0.0, shape = -0.2547189),
-                    CurvePoint(5_000.0, 1.0),
-                ),
-                fmodCurve(
-                    CurvePoint(5_600.0, 1.0, shape = 0.25471893),
-                    CurvePoint(6_400.0, 0.0),
-                ),
-            ),
-            rpmGainDbCurves = listOf(exteriorRpmGain),
-        ),
-        skylineLayer(
-            id = "skyline_coast_high",
-            assetName = "rb26_ex_5_offmid.wav",
-            role = SampleLayerRole.COAST,
-            startRpm = 5_600.0,
-            endRpm = 20_000.0,
-            rootRpm = 5_330.0,
-            baseGainDb = 3.0,
-            throttleGainDb = exteriorCoastThrottle,
-            rpmAmplitudeCurves = listOf(fmodCurve(
-                CurvePoint(5_600.0, 0.0, shape = -0.2547189),
-                CurvePoint(6_400.0, 1.0),
-            )),
-            rpmGainDbCurves = listOf(exteriorRpmGain),
         ),
         skylineLayer(
             id = "skyline_load_very_low_accent",

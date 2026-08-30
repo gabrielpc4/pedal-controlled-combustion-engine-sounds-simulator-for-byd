@@ -49,34 +49,22 @@ class SampleEngineRendererTest {
         assertFalse(skyline.appliesLoadOnlyProgram(loadOnlyProgram = true))
         assertEquals(skyline.layers.size, skyline.loopLayersForLoad(loadOnlyProgram = true).size)
         assertEquals(skyline.requiredAssets, skyline.requiredAssetsForLoad(loadOnlyProgram = true))
-        assertEquals(22, skyline.layers.size)
+        assertEquals(17, skyline.layers.size)
         assertTrue(
             skyline.layers
                 .filter { layer -> layer.role == SampleLayerRole.LOAD }
                 .all { layer -> layer.assetName.contains("_in_") },
         )
-        assertTrue(
-            skyline.layers
-                .filter { layer -> layer.role == SampleLayerRole.COAST }
-                .all { layer -> layer.assetName.contains("_ex_") },
-        )
-        assertTrue(skyline.layers.any { it.role == SampleLayerRole.COAST && it.assetName.contains("_ex_") })
+        assertTrue(skyline.layers.none { it.role == SampleLayerRole.COAST })
         assertTrue(skyline.effects.any { it.trigger == SampleEffectTrigger.TURBO_LOOP })
         assertTrue(skyline.effects.any { it.trigger == SampleEffectTrigger.TURBO_FLUTTER })
         assertTrue(skyline.effects.any { it.trigger == SampleEffectTrigger.TURBO_DUMP })
         assertTrue(skyline.layers.any { it.role == SampleLayerRole.LIMITER })
         assertTrue(skyline.layers.any { it.role == SampleLayerRole.TEXTURE })
         assertEquals(3, skyline.layers.count { it.assetName == "sin5.wav" })
-        assertEquals(2, skyline.layers.count { it.assetName == "rb26_ex_5_offmid.wav" })
         val loadedMid = skyline.layers.first { it.id == "skyline_load_mid" }
-        val coastLow = skyline.layers.first { it.id == "skyline_coast_low" }
         assertEquals(4_780.0, loadedMid.autopitchRootRpm ?: 0.0, 0.0)
         assertTrue(loadedMid.gainAt(4_400.0, 1.0, loadOnlyProgram = false) > 0.1)
-        assertTrue(coastLow.gainAt(4_400.0, 0.0, loadOnlyProgram = false) > 0.1)
-        assertTrue(
-            coastLow.gainAt(4_400.0, 0.0, loadOnlyProgram = false) >
-                coastLow.gainAt(4_400.0, 1.0, loadOnlyProgram = false) * 20.0,
-        )
         assertEquals(6, skyline.gearRatios.size)
     }
 
@@ -105,13 +93,8 @@ class SampleEngineRendererTest {
         val liftingLoad = skyline.layers
             .filter { it.role == SampleLayerRole.LOAD }
             .sumOf { it.gainAt(rpm, throttle = 0.0, loadOnlyProgram = false) }
-        val liftingCoast = skyline.layers
-            .filter { it.role == SampleLayerRole.COAST }
-            .sumOf { it.gainAt(rpm, throttle = 0.0, loadOnlyProgram = false) }
 
         assertTrue(liftingLoad >= acceleratingLoad * 0.60)
-        assertTrue(liftingCoast > 0.1)
-        assertTrue(liftingCoast <= liftingLoad * 1.25)
     }
 
     @Test
