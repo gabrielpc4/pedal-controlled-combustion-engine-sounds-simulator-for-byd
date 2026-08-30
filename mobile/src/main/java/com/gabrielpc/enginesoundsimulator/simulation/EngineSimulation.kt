@@ -108,7 +108,7 @@ data class DrivetrainState(
     val gear: Int,
     val speedKmh: Double,
     val smoothedThrottle: Double,
-    /** Direct pedal value used by P/N audio, independent of EV torque smoothing. */
+    /** Direct pedal value used by audio, independent of EV torque smoothing. */
     val audioThrottle: Double,
     val smoothedBrake: Double,
     val engineLoad: Double,
@@ -121,9 +121,10 @@ data class DrivetrainState(
 )
 
 /**
- * EV longitudinal model with a speed-coupled fictional engine and automatic sound gearbox.
+ * EV longitudinal model with a load-responsive fictional engine and automatic sound gearbox.
  * Integer BYD speed samples pass through a predictive critically-damped estimator before they
- * can move the tach or audio, so acceleration and deceleration remain continuous.
+ * can move the road-coupled RPM. Combustion torque can move the audible crank ahead of that
+ * synchronization point while the real vehicle speed remains authoritative.
  */
 class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK_ENGINE) {
     var profile: EngineProfile = initialProfile
@@ -133,10 +134,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var ignitionElapsedSeconds = 0.0
     private var shutdownElapsedSeconds = 0.0
     private var engineRpm = 0.0
-    /** P/N-only crank inertia; road-coupled RPM never uses this state. */
     private var freeRevDynamics = FreeRevEngineDynamics(profile.freeRevCalibration)
+    private var loadedEngineDynamics = LoadedEngineDynamics(profile.freeRevCalibration)
     private var freeRevLimiterPulse = false
-    private var freeRevAudioThrottle = 0.0
+    private var audioThrottle = 0.0
     private var vehicleSpeedMps = 0.0
     private var simulatedPhysicalSpeedMps = 0.0
     private var rawExternalSpeedKmh = 0.0
@@ -196,7 +197,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         engineRpm = 0.0
         freeRevDynamics.reset()
         freeRevLimiterPulse = false
-        freeRevAudioThrottle = 0.0
+        audioThrottle = 0.0
         limiterLatched = false
         shiftSerial = 0L
         ignitionShiftCueDirection = ShiftDirection.NONE
@@ -212,7 +213,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         engineRpm = profile.idleRpm
         freeRevDynamics.reset()
         freeRevLimiterPulse = false
-        freeRevAudioThrottle = 0.0
+        audioThrottle = 0.0
         limiterLatched = false
         resetLaunchControl()
     }
@@ -289,8 +290,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     fun updateProfile(updated: EngineProfile) {
         profile = updated
         freeRevDynamics.updateCalibration(updated.freeRevCalibration)
+        loadedEngineDynamics.updateCalibration(updated.freeRevCalibration)
         freeRevLimiterPulse = false
-        freeRevAudioThrottle = 0.0
+        audioThrottle = 0.0
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size) {
             downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
@@ -312,7 +314,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         engineRpm = 0.0
         freeRevDynamics.reset()
         freeRevLimiterPulse = false
-        freeRevAudioThrottle = 0.0
+        audioThrottle = 0.0
         vehicleSpeedMps = 0.0
         simulatedPhysicalSpeedMps = 0.0
         rawExternalSpeedKmh = 0.0
@@ -572,24 +574,39 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         transmissionPosition: TransmissionPosition,
         rawThrottle: Double,
     ) {
+        audioThrottle = rawThrottle.coerceIn(0.0, 1.0)
         if (launchControlPhase != LaunchControlPhase.INACTIVE && transmissionPosition == TransmissionPosition.DRIVE) {
             updateLaunchControlRpm(dt)
             return
         }
 
         if (transmissionPosition != TransmissionPosition.DRIVE) {
-            updateFreeRevRpm(dt, rawThrottle)
+            updateFreeRevRpm(dt)
             return
         }
 
         freeRevLimiterPulse = false
-        freeRevAudioThrottle = filteredThrottle
         val shift = activeShift
+        if (shift == null) {
+            engineRpm = loadedEngineDynamics.step(
+                rpm = engineRpm,
+                coupledRpm = rpmForSpeed(currentGearIndex),
+                rawThrottle = audioThrottle,
+                idleRpm = profile.idleRpm,
+                limiterRpm = profile.limiterRpm,
+                upshiftRpm = profile.upshiftRpm,
+                gearIndex = currentGearIndex,
+                gearCount = profile.gearRatios.size,
+                dt = dt,
+            )
+            return
+        }
+
         val target = when {
-            shift?.gearChanged == true -> {
+            shift.gearChanged -> {
                 rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
             }
-            shift?.direction == ShiftDirection.UP -> {
+            shift.direction == ShiftDirection.UP -> {
                 val cap = if (manualShiftEnabled) {
                     profile.limiterRpm
                 } else {
@@ -597,28 +614,27 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
                 }
                 min(rpmForSpeed(currentGearIndex), cap)
             }
-            shift?.direction == ShiftDirection.DOWN -> {
+            shift.direction == ShiftDirection.DOWN -> {
                 rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
             }
             else -> rpmForSpeed(currentGearIndex)
         }
         val response = when {
-            activeShift?.gearChanged == true -> (activeShift!!.durationSeconds * 0.30).coerceAtLeast(0.018)
+            shift.gearChanged -> (shift.durationSeconds * 0.30).coerceAtLeast(0.018)
             else -> profile.syntheticRpmResponseSeconds
         }
         engineRpm = approachExp(engineRpm, target, response, dt).coerceIn(profile.idleRpm, profile.limiterRpm)
     }
 
     /** P/N runs its own 3 ms crankshaft integration so it matches the Audio Lab control cadence. */
-    private fun updateFreeRevRpm(dt: Double, rawThrottle: Double) {
+    private fun updateFreeRevRpm(dt: Double) {
         var remainingSeconds = dt
-        freeRevAudioThrottle = rawThrottle.coerceIn(0.0, 1.0)
         freeRevLimiterPulse = false
         while (remainingSeconds > 0.0) {
             val stepSeconds = min(FREE_REV_STEP_SECONDS, remainingSeconds)
             val frame = freeRevDynamics.step(
                 rpm = engineRpm,
-                rawThrottle = freeRevAudioThrottle,
+                rawThrottle = audioThrottle,
                 idleRpm = profile.idleRpm,
                 limiterRpm = profile.limiterRpm,
                 dt = stepSeconds,
@@ -985,7 +1001,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             gear = currentGearIndex + 1,
             speedKmh = vehicleSpeedMps * 3.6,
             smoothedThrottle = filteredThrottle,
-            audioThrottle = freeRevAudioThrottle,
+            audioThrottle = audioThrottle,
             smoothedBrake = filteredBrake,
             engineLoad = (filteredThrottle * (0.35 + 0.65 * wheelTorqueFraction)).coerceIn(0.0, 1.0),
             isShifting = shift != null,

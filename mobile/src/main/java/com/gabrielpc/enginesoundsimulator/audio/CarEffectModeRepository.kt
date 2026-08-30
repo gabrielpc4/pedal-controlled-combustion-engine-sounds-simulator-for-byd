@@ -34,6 +34,14 @@ internal class CarEffectModeRepository(context: Context) {
         return saveMode(profileId, "transmission_enabled", enabled)
     }
 
+    fun turboSoundsEnabled(profileId: String): Boolean {
+        return readMode(profileId, "turbo_enabled", legacyKey = null, default = true)
+    }
+
+    fun saveTurboSoundsEnabled(profileId: String, enabled: Boolean): Boolean {
+        return saveMode(profileId, "turbo_enabled", enabled)
+    }
+
     private fun readMode(profileId: String, keySuffix: String, legacyKey: String?, default: Boolean): Boolean {
         val key = modeKey(profileId, keySuffix)
         if (preferences.contains(key)) {

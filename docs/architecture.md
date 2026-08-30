@@ -36,8 +36,11 @@ model rather than create separate audio or physics paths.
 ### Simulation and presentation gearbox
 
 `EngineSimulation` owns virtual road speed, braking, pedal smoothing, transmission position, and
-the state shown on the dashboard. In Drive, the fictional tachometer follows a continuous estimate
-of road speed rather than raw integer samples. In Park/Neutral, it can use free-rev behavior.
+the state shown on the dashboard. In Drive, road speed establishes the fictional clutch-synchronized
+RPM, while `LoadedEngineDynamics` applies combustion torque and crank/gearbox inertia so the audible
+engine can react to pedal load before the next integer speed sample. Its bounded slip always returns
+to the real speed anchor and never changes vehicle motion. In Park/Neutral, `FreeRevEngineDynamics`
+integrates the disconnected crankshaft without road coupling.
 
 The selected sample profile supplies the sound-facing RPM domain and presentation gearing. Those
 gears are a storytelling and audio device: changing a presentation gear must not introduce a

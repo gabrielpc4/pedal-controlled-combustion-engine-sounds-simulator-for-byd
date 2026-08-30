@@ -83,6 +83,9 @@ data class DriveSnapshot(
     val sharedShiftSoundsGain: Double = EngineAudioFrame.DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
     val transmissionEnabled: Boolean = true,
     val transmissionGain: Double = EngineAudioFrame.DEFAULT_TRANSMISSION_GAIN,
+    val hasTurboSounds: Boolean = false,
+    val turboSoundsEnabled: Boolean = true,
+    val turboSoundsGain: Double = EngineAudioFrame.DEFAULT_TURBO_SOUNDS_GAIN,
     val manualShiftModeEnabled: Boolean = false,
     val userMessage: UserVisibleMessage? = null,
 )
@@ -118,6 +121,12 @@ class DriveController(context: Context) {
     )
     private val transmissionGain = AtomicReference(
         carEffectGainRepository.transmissionGain(selectedCarRepository.load().id),
+    )
+    private val turboSoundsEnabled = AtomicBoolean(
+        carEffectModeRepository.turboSoundsEnabled(selectedCarRepository.load().id),
+    )
+    private val turboSoundsGain = AtomicReference(
+        carEffectGainRepository.turboSoundsGain(selectedCarRepository.load().id),
     )
     private val manualShiftModeEnabled = AtomicBoolean(audioMixModeRepository.isManualShiftModeEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
@@ -176,6 +185,9 @@ class DriveController(context: Context) {
         sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
         transmissionEnabled = transmissionEnabled.get(),
         transmissionGain = transmissionGain.get(),
+        hasTurboSounds = selectedSampleProfile.get().hasTurboSounds,
+        turboSoundsEnabled = turboSoundsEnabled.get(),
+        turboSoundsGain = turboSoundsGain.get(),
         manualShiftModeEnabled = manualShiftModeEnabled.get(),
         appMasterVolume = appMasterVolume.get(),
         carMasterVolume = carMasterVolume.get(),
@@ -205,6 +217,8 @@ class DriveController(context: Context) {
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
                 transmissionEnabled = transmissionEnabled.get(),
                 transmissionGain = transmissionGain.get(),
+                turboSoundsEnabled = turboSoundsEnabled.get(),
+                turboSoundsGain = turboSoundsGain.get(),
                 manualShiftModeEnabled = manualShiftModeEnabled.get(),
             )
         }
@@ -218,6 +232,8 @@ class DriveController(context: Context) {
             sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
             transmissionEnabled = transmissionEnabled.get(),
             transmissionGain = transmissionGain.get(),
+            turboSoundsEnabled = turboSoundsEnabled.get(),
+            turboSoundsGain = turboSoundsGain.get(),
             manualShiftModeEnabled = manualShiftModeEnabled.get(),
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
@@ -383,6 +399,23 @@ class DriveController(context: Context) {
         setTransmissionEnabled(!transmissionEnabled.get())
     }
 
+    fun setTurboSoundsEnabled(enabled: Boolean) {
+        turboSoundsEnabled.set(
+            carEffectModeRepository.saveTurboSoundsEnabled(selectedSampleProfile.get().id, enabled),
+        )
+    }
+
+    fun setTurboSoundsGain(gain: Double) {
+        val clamped = gain.coerceIn(EngineAudioFrame.MIN_TURBO_SOUNDS_GAIN, EngineAudioFrame.MAX_EFFECT_GAIN)
+        turboSoundsGain.set(
+            carEffectGainRepository.saveTurboSoundsGain(selectedSampleProfile.get().id, clamped),
+        )
+    }
+
+    fun toggleTurboSounds() {
+        setTurboSoundsEnabled(!turboSoundsEnabled.get())
+    }
+
     fun setManualShiftModeEnabled(enabled: Boolean) {
         audioMixModeRepository.setManualShiftModeEnabled(enabled)
         manualShiftModeEnabled.set(enabled)
@@ -494,6 +527,8 @@ class DriveController(context: Context) {
             sharedShiftSoundsEnabled.set(carEffectModeRepository.sharedShiftSoundsEnabled(selected.id))
             transmissionEnabled.set(carEffectModeRepository.transmissionEnabled(selected.id))
             transmissionGain.set(carEffectGainRepository.transmissionGain(selected.id))
+            turboSoundsEnabled.set(carEffectModeRepository.turboSoundsEnabled(selected.id))
+            turboSoundsGain.set(carEffectGainRepository.turboSoundsGain(selected.id))
             selectedCarRepository.save(selected)
             val tuning = tuningConfig.get().withSampleProfile(selected)
             tuningConfig.set(tuning)
@@ -769,19 +804,15 @@ class DriveController(context: Context) {
         val audioEnabled = simulation.ignition == EngineIgnitionState.STOPPING ||
             simulation.isEngineAudioAudible()
         val freeRev = transmissionControl.position != TransmissionPosition.DRIVE
-        val startupThrottle = if (simulation.ignition == EngineIgnitionState.STARTING) {
+        val audioThrottle = if (simulation.ignition == EngineIgnitionState.STARTING) {
             (drivetrain.rpm / profile.redlineRpm.coerceAtLeast(1.0)).coerceIn(0.0, 1.0) * 0.9
         } else {
-            drivetrain.smoothedThrottle
+            drivetrain.audioThrottle
         }
         audioEngine.update(
             EngineAudioFrame(
                 rpm = drivetrain.rpm,
-                throttle = if (transmissionControl.position == TransmissionPosition.DRIVE) {
-                    startupThrottle
-                } else {
-                    drivetrain.audioThrottle
-                },
+                throttle = audioThrottle,
                 enabled = audioEnabled,
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
@@ -806,6 +837,8 @@ class DriveController(context: Context) {
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
                 transmissionEnabled = transmissionEnabled.get(),
                 transmissionGain = transmissionGain.get(),
+                turboSoundsEnabled = turboSoundsEnabled.get(),
+                turboSoundsGain = turboSoundsGain.get(),
             ),
         )
         val selectedCar = selectedSampleProfile.get()
@@ -840,6 +873,9 @@ class DriveController(context: Context) {
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
                 transmissionEnabled = transmissionEnabled.get(),
                 transmissionGain = transmissionGain.get(),
+                hasTurboSounds = selectedCar.hasTurboSounds,
+                turboSoundsEnabled = turboSoundsEnabled.get(),
+                turboSoundsGain = turboSoundsGain.get(),
                 manualShiftModeEnabled = manualShiftModeEnabled.get(),
                 appMasterVolume = appMasterVolume.get(),
                 appMuted = appMasterVolumeBeforeMute.get() != null,

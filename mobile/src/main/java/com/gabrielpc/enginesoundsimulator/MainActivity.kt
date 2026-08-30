@@ -103,6 +103,7 @@ import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
+import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -187,6 +188,8 @@ class MainActivity : ComponentActivity() {
                         onSharedShiftSoundsGainChange = controller::setSharedShiftSoundsGain,
                         onToggleTransmission = controller::toggleTransmission,
                         onTransmissionGainChange = controller::setTransmissionGain,
+                        onToggleTurboSounds = controller::toggleTurboSounds,
+                        onTurboSoundsGainChange = controller::setTurboSoundsGain,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -270,6 +273,8 @@ private fun MotorSoundDashboard(
     onSharedShiftSoundsGainChange: (Double) -> Unit,
     onToggleTransmission: () -> Unit,
     onTransmissionGainChange: (Double) -> Unit,
+    onToggleTurboSounds: () -> Unit,
+    onTurboSoundsGainChange: (Double) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -435,6 +440,11 @@ private fun MotorSoundDashboard(
                                     transmissionGain = state.transmissionGain,
                                     onToggleTransmission = onToggleTransmission,
                                     onTransmissionGainChange = onTransmissionGainChange,
+                                    hasTurboSounds = state.hasTurboSounds,
+                                    turboSoundsEnabled = state.turboSoundsEnabled,
+                                    turboSoundsGain = state.turboSoundsGain,
+                                    onToggleTurboSounds = onToggleTurboSounds,
+                                    onTurboSoundsGainChange = onTurboSoundsGainChange,
                                     modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
                                 )
                                 ClassicDriveControls(
@@ -1255,14 +1265,18 @@ private fun CarStage(
                     .fillMaxWidth(0.88f)
                     .fillMaxHeight(0.65f)
                     .align(Alignment.Center)
-                    .offset(y = 18.dp),
+                    .offset(y = (-46).dp),
             )
         } else {
             Image(
                 painter = painterResource(R.drawable.apex_v10_car),
                 contentDescription = state.selectedCarName,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth(0.84f).fillMaxHeight(0.62f).align(Alignment.Center),
+                modifier = Modifier
+                    .fillMaxWidth(0.84f)
+                    .fillMaxHeight(0.62f)
+                    .align(Alignment.Center)
+                    .offset(y = (-46).dp),
             )
         }
 
@@ -1503,6 +1517,11 @@ private fun DashboardEffectControls(
     transmissionGain: Double,
     onToggleTransmission: () -> Unit,
     onTransmissionGainChange: (Double) -> Unit,
+    hasTurboSounds: Boolean,
+    turboSoundsEnabled: Boolean,
+    turboSoundsGain: Double,
+    onToggleTurboSounds: () -> Unit,
+    onTurboSoundsGainChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1530,6 +1549,16 @@ private fun DashboardEffectControls(
             onToggle = onToggleTransmission,
             onGainChange = onTransmissionGainChange,
         )
+        if (hasTurboSounds) {
+            DashboardEffectRow(
+                label = "TURBO",
+                enabled = turboSoundsEnabled,
+                gain = turboSoundsGain,
+                gainPresets = TURBO_EFFECT_GAIN_PRESETS,
+                onToggle = onToggleTurboSounds,
+                onGainChange = onTurboSoundsGainChange,
+            )
+        }
     }
 }
 
@@ -1540,6 +1569,7 @@ private fun DashboardEffectRow(
     gain: Double,
     onToggle: () -> Unit,
     onGainChange: (Double) -> Unit,
+    gainPresets: List<EffectGainPreset> = EFFECT_GAIN_PRESETS,
 ) {
     val accentColor = if (enabled) Cyan else Muted
 
@@ -1562,7 +1592,7 @@ private fun DashboardEffectRow(
             enabled = enabled,
             onToggle = onToggle,
         )
-        EFFECT_GAIN_PRESETS.forEach { preset ->
+        gainPresets.forEach { preset ->
             val selected = gain == preset.gain
             Text(
                 text = preset.label,
@@ -1624,6 +1654,13 @@ private val EFFECT_GAIN_PRESETS = listOf(
     EffectGainPreset("LOWER", 0.5),
     EffectGainPreset("NORMAL", 1.0),
     EffectGainPreset("LOUD", 2.0),
+    EffectGainPreset("LOUDER", 3.0),
+)
+
+private val TURBO_EFFECT_GAIN_PRESETS = listOf(
+    EffectGainPreset("LOWER", 0.25),
+    EffectGainPreset("NORMAL", 0.5),
+    EffectGainPreset("LOUD", EngineAudioFrame.DEFAULT_TURBO_SOUNDS_GAIN),
     EffectGainPreset("LOUDER", 3.0),
 )
 

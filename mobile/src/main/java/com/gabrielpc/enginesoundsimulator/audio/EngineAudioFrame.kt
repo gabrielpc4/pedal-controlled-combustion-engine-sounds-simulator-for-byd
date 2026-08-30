@@ -24,6 +24,10 @@ data class EngineAudioFrame(
     val throttleLiftEffectsEnabled: Boolean = true,
     /** Multiplier for turbo response when the pedal is pressed; Drive uses the authored 1× rate. */
     val turboSpoolAttackMultiplier: Double = 1.0,
+    /** Enables every turbo loop, flutter, and dump sound provided by the selected car. */
+    val turboSoundsEnabled: Boolean = true,
+    /** Linear multiplier applied to every turbo loop, flutter, and dump sound. */
+    val turboSoundsGain: Double = DEFAULT_TURBO_SOUNDS_GAIN,
     /** When true, play Huracán shift one-shots on every car and mute native shift effects. */
     val sharedShiftSoundsEnabled: Boolean = false,
     /** Linear multiplier applied on top of the shared shift sample gain (default 3×). */
@@ -37,7 +41,9 @@ data class EngineAudioFrame(
         const val DEFAULT_POPS_AND_BANGS_GAIN = 2.0
         const val DEFAULT_SHARED_SHIFT_SOUNDS_GAIN = 3.0
         const val DEFAULT_TRANSMISSION_GAIN = 1.0
+        const val DEFAULT_TURBO_SOUNDS_GAIN = 1.0
         const val MIN_EFFECT_GAIN = 0.5
+        const val MIN_TURBO_SOUNDS_GAIN = 0.25
         const val MAX_EFFECT_GAIN = 6.0
     }
 }

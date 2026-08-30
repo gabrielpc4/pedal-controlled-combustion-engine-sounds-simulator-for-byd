@@ -13,26 +13,31 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
     @Test
-    fun scriptedLaunchAndLiftOffStaySpeedCoupled() {
+    fun scriptedLaunchAndLiftOffUseLoadedRpm() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val controller = DriveController(context)
         try {
             controller.setInputMode(InputMode.SimulatedPedals)
+            controller.setUiActive(true)
             controller.start()
             assertTrue(
-                "engine should auto-start when the controller loop begins",
-                waitUntil(timeoutMs = 8_000L) {
-                    controller.snapshot().engineSoundEnabled
+                "engine and decoded audio should become ready before driving",
+                waitUntil(timeoutMs = 20_000L) {
+                    val snapshot = controller.snapshot()
+                    snapshot.engineSoundEnabled &&
+                        snapshot.carAudioReady &&
+                        snapshot.drivetrain.rpm > 0.0
                 },
             )
             controller.setSimulatedPedalThrottle(1.0)
 
+            val launchBuiltSpeed = waitUntil(timeoutMs = 2_500L) {
+                val state = controller.snapshot().drivetrain
+                state.speedKmh >= 30.0 && state.rpm > controller.snapshot().tuning.engine.idleRpm + 500.0
+            }
             assertTrue(
-                "scripted full throttle did not build road speed and coupled RPM",
-                waitUntil(timeoutMs = 2_500L) {
-                    val state = controller.snapshot().drivetrain
-                    state.speedKmh >= 30.0 && state.rpm > controller.snapshot().tuning.engine.idleRpm + 500.0
-                },
+                "scripted full throttle did not build road speed and loaded RPM: ${controller.snapshot().drivetrain}",
+                launchBuiltSpeed,
             )
             assertTrue(
                 "scripted full throttle did not create a virtual upshift",
@@ -45,7 +50,7 @@ class DriveControllerScriptedIntegrationTest {
             val beforeLift = controller.snapshot().drivetrain
             controller.setSimulatedPedalThrottle(0.0)
             assertTrue(
-                "scripted lift-off did not reduce both road speed and coupled RPM",
+                "scripted lift-off did not reduce both road speed and loaded RPM",
                 waitUntil(timeoutMs = 1_500L) {
                     val state = controller.snapshot().drivetrain
                     state.rpm < beforeLift.rpm && state.speedKmh < beforeLift.speedKmh

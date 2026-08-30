@@ -49,26 +49,51 @@ internal class CarEffectGainRepository(context: Context) {
         return saveGain(profileId, "transmission_gain", gain)
     }
 
+    fun turboSoundsGain(profileId: String): Double {
+        return readGain(
+            profileId = profileId,
+            keySuffix = "turbo_gain",
+            legacyKey = null,
+            default = EngineAudioFrame.DEFAULT_TURBO_SOUNDS_GAIN,
+            minimum = EngineAudioFrame.MIN_TURBO_SOUNDS_GAIN,
+        )
+    }
+
+    fun saveTurboSoundsGain(profileId: String, gain: Double): Double {
+        return saveGain(
+            profileId = profileId,
+            keySuffix = "turbo_gain",
+            gain = gain,
+            minimum = EngineAudioFrame.MIN_TURBO_SOUNDS_GAIN,
+        )
+    }
+
     private fun readGain(
         profileId: String,
         keySuffix: String,
         legacyKey: String?,
         default: Double,
+        minimum: Double = MIN,
     ): Double {
         val key = gainKey(profileId, keySuffix)
         if (preferences.contains(key)) {
-            return preferences.getFloat(key, default.toFloat()).toDouble().coerceIn(MIN, MAX)
+            return preferences.getFloat(key, default.toFloat()).toDouble().coerceIn(minimum, MAX)
         }
 
         if (legacyKey != null && legacyPreferences.contains(legacyKey)) {
-            return legacyPreferences.getFloat(legacyKey, default.toFloat()).toDouble().coerceIn(MIN, MAX)
+            return legacyPreferences.getFloat(legacyKey, default.toFloat()).toDouble().coerceIn(minimum, MAX)
         }
 
-        return default.coerceIn(MIN, MAX)
+        return default.coerceIn(minimum, MAX)
     }
 
-    private fun saveGain(profileId: String, keySuffix: String, gain: Double): Double {
-        val clamped = gain.coerceIn(MIN, MAX)
+    private fun saveGain(
+        profileId: String,
+        keySuffix: String,
+        gain: Double,
+        minimum: Double = MIN,
+    ): Double {
+        val clamped = gain.coerceIn(minimum, MAX)
         preferences.edit()
             .putFloat(gainKey(profileId, keySuffix), clamped.toFloat())
             .apply()

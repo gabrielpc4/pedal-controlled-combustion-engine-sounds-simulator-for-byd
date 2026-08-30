@@ -350,6 +350,14 @@ internal class SampleEngineRenderer private constructor(
     ) {
         val normalizedRpm = ((smoothedRpm - profile.idleRpm) / (profile.limiterRpm - profile.idleRpm))
             .coerceIn(0.0, 1.0)
+        val turboGain = if (target.turboSoundsEnabled) {
+            target.turboSoundsGain.coerceIn(
+                EngineAudioFrame.MIN_TURBO_SOUNDS_GAIN,
+                EngineAudioFrame.MAX_EFFECT_GAIN,
+            )
+        } else {
+            0.0
+        }
 
         val previousShift = lastShiftSerial
         if (previousShift == null) {
@@ -373,7 +381,7 @@ internal class SampleEngineRenderer private constructor(
         }
 
         val turboDumped = turboSpool.consumeDumpPulse()
-        if (turboDumped) {
+        if (turboDumped && turboGain > 0.0) {
             effectVoices.forEach { voice ->
                 if (voice.spec.trigger == SampleEffectTrigger.TURBO_FLUTTER) {
                     voice.restartAtLoop()
@@ -384,6 +392,7 @@ internal class SampleEngineRenderer private constructor(
                 smoothedRpm,
                 layerMix,
                 target.loadOnlyProgram,
+                gainMultiplier = turboGain,
             )
         }
 
@@ -437,10 +446,17 @@ internal class SampleEngineRenderer private constructor(
                     }
                 }
                 voice.spec.trigger == SampleEffectTrigger.TURBO_LOOP -> {
-                    voice.baseGain * turboSpool.whistleGain()
+                    voice.baseGain * turboSpool.whistleGain() * turboGain
                 }
                 voice.spec.trigger == SampleEffectTrigger.TURBO_FLUTTER -> {
-                    voice.baseGain * turboSpool.flutterGain()
+                    voice.baseGain * turboSpool.flutterGain() * turboGain
+                }
+                voice.spec.trigger == SampleEffectTrigger.TURBO_DUMP -> {
+                    if (voice.isOneShotActive) {
+                        voice.baseGain * turboGain
+                    } else {
+                        0.0
+                    }
                 }
                 else -> {
                     if (voice.isOneShotActive) {
@@ -609,11 +625,12 @@ internal class SampleEngineRenderer private constructor(
         rpm: Double,
         layerMix: Map<String, LayerMixControl>,
         loadOnlyProgram: Boolean,
+        gainMultiplier: Double = 1.0,
     ) {
         effectVoices.filter {
             it.spec.trigger == trigger && rpm >= it.spec.minimumRpm
         }.forEach { voice ->
-            val authoredGain = voice.baseGain
+            val authoredGain = voice.baseGain * gainMultiplier
             if (applyLayerMix(voice.spec.id, authoredGain, layerMix, loadOnlyProgram) > SILENCE_GAIN) {
                 if (voice.trigger()) {
                     effectTriggers += 1

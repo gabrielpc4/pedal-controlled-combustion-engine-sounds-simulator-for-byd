@@ -22,6 +22,10 @@ internal enum class SampleEffectTrigger {
     fun isContinuousLoop(): Boolean {
         return this == TRANSMISSION_LOOP || this == TURBO_LOOP || this == TURBO_FLUTTER
     }
+
+    fun isTurboSound(): Boolean {
+        return this == TURBO_LOOP || this == TURBO_FLUTTER || this == TURBO_DUMP
+    }
 }
 
 internal data class SampleEffectControlSpec(
@@ -258,6 +262,7 @@ internal data class EngineSampleProfile(
     /** Skyline's recovered FMOD event requires its authored load/coast crossfade. */
     val supportsLoadOnlyProgram: Boolean = true,
 ) {
+    val hasTurboSounds: Boolean = effects.any { effect -> effect.trigger.isTurboSound() }
     val requiredAssets: Set<String> = linkedSetOf<String>().apply {
         layers.mapTo(this) { it.assetName }
         effects.forEach { effect -> addAll(effect.allAssetNames) }

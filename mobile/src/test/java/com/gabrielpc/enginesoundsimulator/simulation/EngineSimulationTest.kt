@@ -143,7 +143,7 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce() {
+    fun driveRpmRespondsToThrottleAtUnchangedRoadSpeed() {
         val profile = EngineProfile.SAMPLE_BANK_ENGINE
         val light = EngineSimulation(profile)
         val heavy = EngineSimulation(profile)
@@ -151,8 +151,53 @@ class EngineSimulationTest {
         val heavyState = heavy.runForExternal(2.0, 48.0, 0.85)
         assertEquals(lightState.gear, heavyState.gear)
         assertEquals(lightState.speedKmh, heavyState.speedKmh, 0.01)
-        assertEquals(lightState.rpm, heavyState.rpm, 1.0)
+        assertTrue(
+            "loaded crank RPM must rise ahead of unchanged wheel speed: light=${lightState.rpm}, heavy=${heavyState.rpm}",
+            heavyState.rpm > lightState.rpm + 300.0,
+        )
         assertTrue(lightState.rpm > profile.idleRpm + 2_000.0)
+    }
+
+    @Test
+    fun drivePedalMovesAudioAndCrankBeforeTheNextSpeedSample() {
+        val simulation = EngineSimulation()
+        val baseline = simulation.runForExternal(1.5, 8.0, 0.0)
+
+        val firstLoadedFrame = simulation.update(
+            DriverInput(throttle = 1.0, externalSpeedKmh = 8.0),
+            STEP,
+        )
+        assertEquals(baseline.speedKmh, firstLoadedFrame.speedKmh, 0.01)
+        assertEquals(1.0, firstLoadedFrame.audioThrottle, 0.0)
+        assertTrue("EV torque filtering must not delay audio load", firstLoadedFrame.smoothedThrottle < 0.20)
+        assertTrue(
+            "combustion RPM must react on the first 5 ms frame",
+            firstLoadedFrame.rpm > baseline.rpm + 5.0,
+        )
+
+        repeat(9) {
+            simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 8.0), STEP)
+        }
+        assertEquals(baseline.speedKmh, simulation.state.speedKmh, 0.01)
+        assertTrue(
+            "combustion RPM must visibly lead wheel speed within 50 ms",
+            simulation.state.rpm > baseline.rpm + 150.0,
+        )
+    }
+
+    @Test
+    fun driveRpmRecouplesPromptlyAfterPedalRelease() {
+        val simulation = EngineSimulation()
+        val baseline = simulation.runForExternal(1.5, 8.0, 0.0)
+        val loaded = simulation.runForExternal(0.45, 8.0, 0.85)
+        assertTrue(
+            "loaded RPM must lead the same-speed coast RPM: baseline=${baseline.rpm}, loaded=${loaded.rpm}",
+            loaded.rpm > baseline.rpm + 300.0,
+        )
+
+        val released = simulation.runForExternal(0.8, 8.0, 0.0)
+        assertEquals(0.0, released.audioThrottle, 0.0)
+        assertEquals(baseline.rpm, released.rpm, 80.0)
     }
 
     @Test

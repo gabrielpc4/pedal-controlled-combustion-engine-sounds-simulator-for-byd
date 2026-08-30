@@ -45,6 +45,9 @@ class SampleEngineRendererTest {
             assertEquals("${candidate.id} playback rate changed", candidate.outputSampleRate, candidate.playbackSampleRate)
         }
         val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        assertFalse(huracan.hasTurboSounds)
+        assertFalse(aventador.hasTurboSounds)
+        assertTrue(skyline.hasTurboSounds)
         assertEquals(44_100, skyline.outputSampleRate)
         assertFalse(skyline.appliesLoadOnlyProgram(loadOnlyProgram = true))
         assertEquals(skyline.layers.size, skyline.loopLayersForLoad(loadOnlyProgram = true).size)
@@ -715,6 +718,23 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun turboPresetsScaleAndDisableEveryTurboSound() {
+        assertEquals(1.0, EngineAudioFrame().turboSoundsGain, 0.0)
+
+        val loud = turboOutputPeaks(gain = 1.0, enabled = true)
+        val normal = turboOutputPeaks(gain = 0.5, enabled = true)
+        val lower = turboOutputPeaks(gain = 0.25, enabled = true)
+        val disabled = turboOutputPeaks(gain = 3.0, enabled = false)
+
+        loud.forEach { (effectId, loudPeak) ->
+            assertTrue("$effectId must become audible during spool or dump", loudPeak > 0.01)
+            assertEquals("$effectId must honor the NORMAL preset", loudPeak * 0.5, normal.getValue(effectId), 0.025)
+            assertEquals("$effectId must honor the LOWER preset", loudPeak * 0.25, lower.getValue(effectId), 0.025)
+            assertEquals("$effectId must be silent when turbo sounds are off", 0.0, disabled.getValue(effectId), 0.001)
+        }
+    }
+
+    @Test
     fun incompleteBankIsRejectedInsteadOfUsingAnotherSoundSource() {
         val decoded = mapOf(
             profile.requiredAssets.first() to PcmLoopData(ShortArray(32) { 3_277 }, 1, 48_000, 1),
@@ -739,22 +759,67 @@ class SampleEngineRendererTest {
         )
     }
 
-    private fun testBank(): Map<String, PcmLoopData> = profile.requiredAssets.associateWith { asset ->
-        val frequency = 70.0 + abs(asset.hashCode() % 220)
-        val samples = ShortArray(2_048 * 2) { sampleIndex ->
-            val frame = sampleIndex / 2
-            val left = sin(2.0 * PI * frequency * frame / 44_100.0) * 0.35
-            val value = if (sampleIndex % 2 == 0) left else -left * 0.75
-            (value * Short.MAX_VALUE).toInt().toShort()
-        }
-        PcmLoopData(
-            interleavedSamples = samples,
-            sourceChannels = 2,
-            sampleRate = 44_100,
-            loopStartFrame = 250,
-            loopEndFrameExclusive = 1_900,
+    private fun turboOutputPeaks(gain: Double, enabled: Boolean): Map<String, Double> {
+        val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        val renderer = SampleEngineRenderer.fromDecoded(
+            skyline.outputSampleRate,
+            testBank(skyline),
+            skyline,
         )
+        val output = ShortArray(1_920)
+        val turboEffectIds = skyline.effects
+            .filter { effect -> effect.trigger.isTurboSound() }
+            .map { effect -> effect.id }
+        val peaks = turboEffectIds.associateWith { 0.0 }.toMutableMap()
+        val loadedFrame = EngineAudioFrame(
+            rpm = 4_500.0,
+            throttle = 1.0,
+            turboSoundsEnabled = enabled,
+            turboSoundsGain = gain,
+        )
+
+        fun capture() {
+            renderer.diagnostics().layerOutputMeters
+                .filter { meter -> meter.id in peaks }
+                .forEach { meter -> peaks[meter.id] = maxOf(peaks.getValue(meter.id), meter.outputLevel) }
+        }
+
+        repeat(80) {
+            renderer.render(loadedFrame, output, gain = 0.7)
+            capture()
+        }
+        repeat(8) {
+            renderer.render(loadedFrame.copy(throttle = 0.0), output, gain = 0.7)
+            capture()
+        }
+
+        return peaks
     }
+
+    private fun testBank(candidate: EngineSampleProfile = profile): Map<String, PcmLoopData> =
+        candidate.requiredAssets.associateWith { asset ->
+            val frequency = 70.0 + abs(asset.hashCode() % 220)
+            val authoredLoopEndSeconds = candidate.effects
+                .firstOrNull { effect -> asset in effect.allAssetNames }
+                ?.loopEndSeconds
+            val frameCount = maxOf(
+                2_048,
+                ((authoredLoopEndSeconds ?: 0.0) * candidate.outputSampleRate).toInt() + 2,
+            )
+            val samples = ShortArray(frameCount * 2) { sampleIndex ->
+                val frame = sampleIndex / 2
+                val left = sin(2.0 * PI * frequency * frame / candidate.outputSampleRate) * 0.35
+                val value = if (sampleIndex % 2 == 0) left else -left * 0.75
+                (value * Short.MAX_VALUE).toInt().toShort()
+            }
+            PcmLoopData(
+                interleavedSamples = samples,
+                sourceChannels = 2,
+                sampleRate = candidate.outputSampleRate,
+                loopStartFrame = 250,
+                loopEndFrameExclusive = frameCount - 148,
+            )
+        }
 
     private fun ShortArray.repeatFrames(times: Int): ShortArray =
         ShortArray(size * times) { this[it % size] }

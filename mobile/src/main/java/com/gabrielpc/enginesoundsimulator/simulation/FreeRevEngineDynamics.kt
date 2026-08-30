@@ -1,7 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
 import kotlin.math.PI
-import kotlin.math.max
 import kotlin.math.pow
 
 data class RpmTorquePoint(
@@ -134,7 +133,7 @@ internal class FreeRevEngineDynamics(
     ): FreeRevFrame {
         val stepSeconds = dt.coerceIn(MINIMUM_STEP_SECONDS, MAXIMUM_STEP_SECONDS)
         val throttle = rawThrottle.coerceIn(0.0, 1.0)
-        val mappedThrottle = interpolate(calibration.throttleCurve, throttle)
+        val mappedThrottle = interpolateTorqueCurve(calibration.throttleCurve, throttle)
         if (rpm > limiterRpm) {
             limiterCutRemainingSeconds = limiterCutDurationSeconds(calibration.limiterHz)
         }
@@ -144,12 +143,13 @@ internal class FreeRevEngineDynamics(
         }
         val effectiveThrottle = if (limiterActive) 0.0 else mappedThrottle
         val boost = updateTurbo(effectiveThrottle, rpm, stepSeconds)
-        val powerTorque = interpolate(calibration.torqueCurve, rpm) * (1.0 + boost)
-        val coastTorque = coastTorque(rpm, idleRpm)
-        var netTorque = coastTorque + effectiveThrottle * (powerTorque - coastTorque)
-        if (rpm < idleRpm) {
-            netTorque = max(netTorque, IDLE_STABILIZING_TORQUE_NM)
-        }
+        val netTorque = combustionTorqueNm(
+            calibration = calibration,
+            rpm = rpm,
+            mappedThrottle = effectiveThrottle,
+            idleRpm = idleRpm,
+            boost = boost,
+        )
         val angularAcceleration = netTorque / calibration.engineInertia.coerceAtLeast(MINIMUM_INERTIA)
         val nextRpm = (rpm + angularAcceleration * RPM_PER_RADIAN_SECOND * stepSeconds).coerceAtLeast(idleRpm)
 
@@ -175,33 +175,9 @@ internal class FreeRevEngineDynamics(
         return turbo.maximumBoost * turboCharge
     }
 
-    private fun coastTorque(rpm: Double, idleRpm: Double): Double {
-        if (rpm <= idleRpm) return 0.0
-
-        val reference = calibration.coastReferenceRpm
-        val nonLinearity = calibration.coastNonLinearity
-        val denominator = (1.0 - nonLinearity) * reference - idleRpm
-        val linear = if (denominator == 0.0) 0.0 else -calibration.coastReferenceTorqueNm / denominator
-        val nonlinearRpm = nonLinearity * reference
-        val quadratic = if (nonlinearRpm == 0.0) 0.0 else calibration.coastReferenceTorqueNm / (nonlinearRpm * nonlinearRpm)
-        val delta = rpm - idleRpm
-        return linear * delta - quadratic * delta * delta
-    }
-
     private fun limiterCutDurationSeconds(limiterHz: Double): Double {
         val intervalMs = if (limiterHz > 0.0) (1_000.0 / limiterHz).toInt() else 50
         return (intervalMs / 3).coerceAtLeast(1) * FIXED_REFERENCE_STEP_SECONDS
-    }
-
-    private fun interpolate(points: List<RpmTorquePoint>, input: Double): Double {
-        if (input <= points.first().rpm) return points.first().torqueNm
-        points.zipWithNext().forEach { (left, right) ->
-            if (input <= right.rpm) {
-                val fraction = (input - left.rpm) / (right.rpm - left.rpm)
-                return left.torqueNm + (right.torqueNm - left.torqueNm) * fraction
-            }
-        }
-        return points.last().torqueNm
     }
 
     private companion object {
@@ -210,6 +186,5 @@ internal class FreeRevEngineDynamics(
         const val MINIMUM_STEP_SECONDS = 0.0001
         const val MAXIMUM_STEP_SECONDS = 0.020
         const val MINIMUM_INERTIA = 0.001
-        const val IDLE_STABILIZING_TORQUE_NM = 15.0
     }
 }
