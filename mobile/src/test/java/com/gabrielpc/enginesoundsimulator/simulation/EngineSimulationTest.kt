@@ -436,6 +436,25 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun reducedSimulatedDriveForceLetsRpmRiseBeforeRoadSpeed() {
+        val regular = EngineSimulation().runFor(1.5, throttle = 1.0, sim = true)
+        val slowed = EngineSimulation().runFor(
+            seconds = 1.5,
+            throttle = 1.0,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+        )
+
+        assertTrue("test-mode road speed must build very slowly: $slowed", slowed.speedKmh < 5.0)
+        assertTrue("test-mode speed must remain far below normal simulation", slowed.speedKmh < regular.speedKmh * 0.15)
+        assertTrue("full pedal must still reach audio immediately", slowed.audioThrottle > 0.99)
+        assertTrue(
+            "loaded RPM must flare despite the nearly stationary virtual car: $slowed",
+            slowed.rpm > EngineProfile.SAMPLE_BANK_ENGINE.idleRpm + 600.0,
+        )
+    }
+
+    @Test
     fun fullThrottleAccelerationTargetsClaimedZeroToHundredWindow() {
         val simulation = EngineSimulation()
         simulation.engageAtIdle()
@@ -794,11 +813,21 @@ class EngineSimulationTest {
         brake: Double = 0.0,
         sim: Boolean = false,
         position: TransmissionPosition = TransmissionPosition.DRIVE,
+        simulatedDriveForceScale: Double = 1.0,
     ): DrivetrainState {
         ensureIgnitionRunning()
         var result = state
         repeat((seconds / STEP).toInt()) {
-            result = update(DriverInput(throttle, brake, simulateCoastRegen = sim, transmissionPosition = position), STEP)
+            result = update(
+                DriverInput(
+                    throttle = throttle,
+                    brake = brake,
+                    simulateCoastRegen = sim,
+                    transmissionPosition = position,
+                    simulatedDriveForceScale = simulatedDriveForceScale,
+                ),
+                STEP,
+            )
         }
         return result
     }

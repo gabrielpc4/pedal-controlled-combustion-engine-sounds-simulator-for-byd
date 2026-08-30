@@ -798,6 +798,11 @@ class DriveController(context: Context) {
                 // Use the resolved source, not just the selected mode, for coast/regen behavior.
                 simulateCoastRegen = input.usesSimulatedPedals,
                 transmissionPosition = transmissionControl.position,
+                simulatedDriveForceScale = if (input.usesSimulatedPedals) {
+                    SIMULATED_PEDALS_DRIVE_FORCE_SCALE
+                } else {
+                    1.0
+                },
             ),
             dt,
         )
@@ -967,6 +972,7 @@ class DriveController(context: Context) {
         const val AUDIO_RESTART_COOLDOWN_MS = 2_000L
         const val AUTO_START_THROTTLE_THRESHOLD = 0.10
         const val FREE_REV_TURBO_ATTACK_MULTIPLIER = 10.0
+        const val SIMULATED_PEDALS_DRIVE_FORCE_SCALE = 0.05
     }
 }
 

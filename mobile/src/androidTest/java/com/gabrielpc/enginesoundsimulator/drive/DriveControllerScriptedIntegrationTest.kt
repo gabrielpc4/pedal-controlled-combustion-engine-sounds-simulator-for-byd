@@ -13,7 +13,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
     @Test
-    fun scriptedLaunchAndLiftOffUseLoadedRpm() {
+    fun scriptedFullThrottleFlaresLoadedRpmBeforeSlowRoadSpeed() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val controller = DriveController(context)
         try {
@@ -30,35 +30,28 @@ class DriveControllerScriptedIntegrationTest {
                 },
             )
             controller.setSimulatedPedalThrottle(1.0)
+            SystemClock.sleep(1_500L)
 
-            val launchBuiltSpeed = waitUntil(timeoutMs = 2_500L) {
-                val state = controller.snapshot().drivetrain
-                state.speedKmh >= 30.0 && state.rpm > controller.snapshot().tuning.engine.idleRpm + 500.0
-            }
+            val fullThrottle = controller.snapshot()
             assertTrue(
-                "scripted full throttle did not build road speed and loaded RPM: ${controller.snapshot().drivetrain}",
-                launchBuiltSpeed,
+                "simulated road speed should barely move at full throttle: ${fullThrottle.drivetrain}",
+                fullThrottle.drivetrain.speedKmh < 5.0,
             )
             assertTrue(
-                "scripted full throttle did not create a virtual upshift",
-                waitUntil(timeoutMs = 3_000L) {
-                    val state = controller.snapshot().drivetrain
-                    state.gear >= 2 && !state.isShifting
-                },
+                "loaded RPM should flare while simulated road speed stays low: ${fullThrottle.drivetrain}",
+                fullThrottle.drivetrain.rpm > fullThrottle.tuning.engine.idleRpm + 600.0,
             )
+            assertTrue("full simulated pedal must still reach audio", fullThrottle.drivetrain.audioThrottle > 0.99)
+            assertTrue("slow test launch should remain in first gear", fullThrottle.drivetrain.gear == 1)
 
-            val beforeLift = controller.snapshot().drivetrain
+            val beforeLift = fullThrottle.drivetrain
             controller.setSimulatedPedalThrottle(0.0)
             assertTrue(
-                "scripted lift-off did not reduce both road speed and loaded RPM",
+                "scripted lift-off did not reduce loaded RPM",
                 waitUntil(timeoutMs = 1_500L) {
                     val state = controller.snapshot().drivetrain
-                    state.rpm < beforeLift.rpm && state.speedKmh < beforeLift.speedKmh
+                    state.rpm < beforeLift.rpm - 300.0 && state.speedKmh <= beforeLift.speedKmh
                 },
-            )
-            assertTrue(
-                "scripted lift-off did not eventually create a virtual downshift",
-                waitUntil(timeoutMs = 5_000L) { controller.snapshot().drivetrain.gear < beforeLift.gear },
             )
         } finally {
             controller.stop()

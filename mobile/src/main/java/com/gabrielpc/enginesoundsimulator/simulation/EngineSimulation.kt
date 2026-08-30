@@ -99,6 +99,8 @@ data class DriverInput(
     /** Applies simulator-only coast regen when integrating virtual road speed. */
     val simulateCoastRegen: Boolean = false,
     val transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
+    /** Scales only virtual vehicle propulsion, leaving pedal-driven RPM and audio untouched. */
+    val simulatedDriveForceScale: Double = 1.0,
 )
 
 enum class ShiftDirection { NONE, UP, DOWN }
@@ -372,6 +374,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
                 dt,
                 input.transmissionPosition,
                 input.simulateCoastRegen && rawThrottle <= PEDAL_RELEASE_THRESHOLD,
+                input.simulatedDriveForceScale,
             )
             if (input.transmissionPosition == TransmissionPosition.PARK) {
                 simulatedPhysicalSpeedMps = 0.0
@@ -448,6 +451,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         dt: Double,
         transmissionPosition: TransmissionPosition,
         applySimulatorRegen: Boolean,
+        driveForceScale: Double,
     ) {
         val axleTorque = axleWheelTorqueAtSpeed(profile, simulatedPhysicalSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
@@ -470,10 +474,11 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
         val deliveredWheelTorque = min(requestedWheelTorque, powerLimitedWheelTorque)
         val uncappedDriveForce = deliveredWheelTorque / profile.wheelRadiusMeters
-        val driveForce = min(
+        val fullDriveForce = min(
             uncappedDriveForce,
             profile.vehicleMassKg * profile.tractionLimitMps2 * throttleDrive,
         )
+        val driveForce = fullDriveForce * driveForceScale.coerceIn(0.0, 1.0)
         val serviceBrakeForce = filteredBrake * profile.vehicleMassKg * MAX_SERVICE_BRAKE_MPS2
         val regenerativeCoastForce = if (
             applySimulatorRegen && transmissionPosition == TransmissionPosition.DRIVE && simulatedPhysicalSpeedMps > 0.05
