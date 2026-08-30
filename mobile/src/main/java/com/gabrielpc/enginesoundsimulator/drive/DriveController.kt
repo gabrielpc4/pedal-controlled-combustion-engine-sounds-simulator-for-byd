@@ -9,6 +9,7 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioFocusEvent
 import com.gabrielpc.enginesoundsimulator.audio.CarEffectGainRepository
+import com.gabrielpc.enginesoundsimulator.audio.CarEffectModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
@@ -80,6 +81,8 @@ data class DriveSnapshot(
     val popsAndBangsGain: Double = EngineAudioFrame.DEFAULT_POPS_AND_BANGS_GAIN,
     val sharedShiftSoundsEnabled: Boolean = false,
     val sharedShiftSoundsGain: Double = EngineAudioFrame.DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
+    val transmissionEnabled: Boolean = true,
+    val transmissionGain: Double = EngineAudioFrame.DEFAULT_TRANSMISSION_GAIN,
     val manualShiftModeEnabled: Boolean = false,
     val userMessage: UserVisibleMessage? = null,
 )
@@ -92,18 +95,29 @@ class DriveController(context: Context) {
     private val appMasterVolumeRepository = AppMasterVolumeRepository(context.applicationContext)
     private val carMasterVolumeRepository = CarMasterVolumeRepository(context.applicationContext)
     private val carEffectGainRepository = CarEffectGainRepository(context.applicationContext)
+    private val carEffectModeRepository = CarEffectModeRepository(context.applicationContext)
     private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val primaryLayerSourceRepository = PrimaryEngineLayerSourceRepository(context.applicationContext)
     private val primaryLayerSource = AtomicReference(primaryLayerSourceRepository.load(selectedCarRepository.load()))
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
-    private val popsAndBangsEnabled = AtomicBoolean(audioMixModeRepository.isPopsAndBangsEnabled())
+    private val popsAndBangsEnabled = AtomicBoolean(
+        carEffectModeRepository.popsAndBangsEnabled(selectedCarRepository.load().id),
+    )
     private val popsAndBangsGain = AtomicReference(
         carEffectGainRepository.popsAndBangsGain(selectedCarRepository.load().id),
     )
-    private val sharedShiftSoundsEnabled = AtomicBoolean(audioMixModeRepository.isSharedShiftSoundsEnabled())
+    private val sharedShiftSoundsEnabled = AtomicBoolean(
+        carEffectModeRepository.sharedShiftSoundsEnabled(selectedCarRepository.load().id),
+    )
     private val sharedShiftSoundsGain = AtomicReference(
         carEffectGainRepository.sharedShiftSoundsGain(selectedCarRepository.load().id),
+    )
+    private val transmissionEnabled = AtomicBoolean(
+        carEffectModeRepository.transmissionEnabled(selectedCarRepository.load().id),
+    )
+    private val transmissionGain = AtomicReference(
+        carEffectGainRepository.transmissionGain(selectedCarRepository.load().id),
     )
     private val manualShiftModeEnabled = AtomicBoolean(audioMixModeRepository.isManualShiftModeEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
@@ -160,6 +174,8 @@ class DriveController(context: Context) {
         popsAndBangsGain = popsAndBangsGain.get(),
         sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
         sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+        transmissionEnabled = transmissionEnabled.get(),
+        transmissionGain = transmissionGain.get(),
         manualShiftModeEnabled = manualShiftModeEnabled.get(),
         appMasterVolume = appMasterVolume.get(),
         carMasterVolume = carMasterVolume.get(),
@@ -187,6 +203,8 @@ class DriveController(context: Context) {
                 popsAndBangsGain = popsAndBangsGain.get(),
                 sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+                transmissionEnabled = transmissionEnabled.get(),
+                transmissionGain = transmissionGain.get(),
                 manualShiftModeEnabled = manualShiftModeEnabled.get(),
             )
         }
@@ -198,6 +216,8 @@ class DriveController(context: Context) {
             popsAndBangsGain = popsAndBangsGain.get(),
             sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
             sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+            transmissionEnabled = transmissionEnabled.get(),
+            transmissionGain = transmissionGain.get(),
             manualShiftModeEnabled = manualShiftModeEnabled.get(),
             layerMixTracks = buildLayerMixTracks(
                 selectedSampleProfile.get(),
@@ -313,8 +333,9 @@ class DriveController(context: Context) {
     }
 
     fun setPopsAndBangsEnabled(enabled: Boolean) {
-        audioMixModeRepository.setPopsAndBangsEnabled(enabled)
-        popsAndBangsEnabled.set(enabled)
+        popsAndBangsEnabled.set(
+            carEffectModeRepository.savePopsAndBangsEnabled(selectedSampleProfile.get().id, enabled),
+        )
     }
 
     fun setPopsAndBangsGain(gain: Double) {
@@ -329,8 +350,9 @@ class DriveController(context: Context) {
     }
 
     fun setSharedShiftSoundsEnabled(enabled: Boolean) {
-        audioMixModeRepository.setSharedShiftSoundsEnabled(enabled)
-        sharedShiftSoundsEnabled.set(enabled)
+        sharedShiftSoundsEnabled.set(
+            carEffectModeRepository.saveSharedShiftSoundsEnabled(selectedSampleProfile.get().id, enabled),
+        )
     }
 
     fun setSharedShiftSoundsGain(gain: Double) {
@@ -342,6 +364,23 @@ class DriveController(context: Context) {
 
     fun toggleSharedShiftSounds() {
         setSharedShiftSoundsEnabled(!sharedShiftSoundsEnabled.get())
+    }
+
+    fun setTransmissionEnabled(enabled: Boolean) {
+        transmissionEnabled.set(
+            carEffectModeRepository.saveTransmissionEnabled(selectedSampleProfile.get().id, enabled),
+        )
+    }
+
+    fun setTransmissionGain(gain: Double) {
+        val clamped = gain.coerceIn(EngineAudioFrame.MIN_EFFECT_GAIN, EngineAudioFrame.MAX_EFFECT_GAIN)
+        transmissionGain.set(
+            carEffectGainRepository.saveTransmissionGain(selectedSampleProfile.get().id, clamped),
+        )
+    }
+
+    fun toggleTransmission() {
+        setTransmissionEnabled(!transmissionEnabled.get())
     }
 
     fun setManualShiftModeEnabled(enabled: Boolean) {
@@ -451,6 +490,10 @@ class DriveController(context: Context) {
             carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
             popsAndBangsGain.set(carEffectGainRepository.popsAndBangsGain(selected.id))
             sharedShiftSoundsGain.set(carEffectGainRepository.sharedShiftSoundsGain(selected.id))
+            popsAndBangsEnabled.set(carEffectModeRepository.popsAndBangsEnabled(selected.id))
+            sharedShiftSoundsEnabled.set(carEffectModeRepository.sharedShiftSoundsEnabled(selected.id))
+            transmissionEnabled.set(carEffectModeRepository.transmissionEnabled(selected.id))
+            transmissionGain.set(carEffectGainRepository.transmissionGain(selected.id))
             selectedCarRepository.save(selected)
             val tuning = tuningConfig.get().withSampleProfile(selected)
             tuningConfig.set(tuning)
@@ -761,6 +804,8 @@ class DriveController(context: Context) {
                 },
                 sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+                transmissionEnabled = transmissionEnabled.get(),
+                transmissionGain = transmissionGain.get(),
             ),
         )
         val selectedCar = selectedSampleProfile.get()
@@ -793,6 +838,8 @@ class DriveController(context: Context) {
                 popsAndBangsGain = popsAndBangsGain.get(),
                 sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
+                transmissionEnabled = transmissionEnabled.get(),
+                transmissionGain = transmissionGain.get(),
                 manualShiftModeEnabled = manualShiftModeEnabled.get(),
                 appMasterVolume = appMasterVolume.get(),
                 appMuted = appMasterVolumeBeforeMute.get() != null,

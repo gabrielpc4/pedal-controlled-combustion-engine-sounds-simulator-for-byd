@@ -48,8 +48,8 @@ internal class SampleEngineRenderer private constructor(
     private var overRangeSamples = 0L
     private var effectTriggers = 0L
     private var lastShiftSerial: Long? = null
-    private var throttleLiftArmed = false
-    private var throttleLiftAwaitingTurboDump = false
+    private var throttleLiftSustainedSeconds = 0.0
+    private var throttleLiftQualified = false
     private var throttleLiftDelayRemainingSeconds = 0.0
     private val turboSpool = TurboSpoolModel()
     private var anyLayerSolo = false
@@ -388,19 +388,22 @@ internal class SampleEngineRenderer private constructor(
         }
 
         if (target.throttleLiftEffectsEnabled) {
-            if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) {
-                throttleLiftArmed = true
-                throttleLiftAwaitingTurboDump = false
-                throttleLiftDelayRemainingSeconds = 0.0
-            } else if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
-                throttleLiftArmed = false
-                // The exhaust event belongs to an actual charged-turbo vent, not merely a pedal release.
-                throttleLiftAwaitingTurboDump = true
-            }
-
-            if (throttleLiftAwaitingTurboDump && turboDumped) {
-                throttleLiftAwaitingTurboDump = false
-                throttleLiftDelayRemainingSeconds = THROTTLE_LIFT_EFFECT_DELAY_SECONDS
+            when {
+                target.throttle >= THROTTLE_LIFT_ARM_LEVEL -> {
+                    throttleLiftSustainedSeconds += blockSeconds
+                    throttleLiftQualified = throttleLiftSustainedSeconds >= THROTTLE_LIFT_MINIMUM_DURATION_SECONDS
+                    throttleLiftDelayRemainingSeconds = 0.0
+                }
+                target.throttle <= THROTTLE_LIFT_FIRE_LEVEL -> {
+                    if (throttleLiftQualified) {
+                        throttleLiftDelayRemainingSeconds = THROTTLE_LIFT_EFFECT_DELAY_SECONDS
+                    }
+                    throttleLiftSustainedSeconds = 0.0
+                    throttleLiftQualified = false
+                }
+                else -> {
+                    // Keep an intentional pull armed through normal pedal modulation; only a full lift resets it.
+                }
             }
 
             if (throttleLiftDelayRemainingSeconds > 0.0) {
@@ -411,8 +414,8 @@ internal class SampleEngineRenderer private constructor(
                 }
             }
         } else {
-            throttleLiftArmed = false
-            throttleLiftAwaitingTurboDump = false
+            throttleLiftSustainedSeconds = 0.0
+            throttleLiftQualified = false
             stopThrottleLiftOneShots()
         }
 
@@ -424,7 +427,14 @@ internal class SampleEngineRenderer private constructor(
                     (!target.throttleLiftEffectsEnabled || target.popsAndBangsEnabled) -> 0.0
                 voice.spec.isNativeGearChange() && target.sharedShiftSoundsEnabled -> 0.0
                 voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP -> {
-                    voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+                    if (target.transmissionEnabled) {
+                        voice.baseGain * target.transmissionGain.coerceIn(
+                            EngineAudioFrame.MIN_EFFECT_GAIN,
+                            EngineAudioFrame.MAX_EFFECT_GAIN,
+                        ) * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
+                    } else {
+                        0.0
+                    }
                 }
                 voice.spec.trigger == SampleEffectTrigger.TURBO_LOOP -> {
                     voice.baseGain * turboSpool.whistleGain()
@@ -553,7 +563,8 @@ internal class SampleEngineRenderer private constructor(
     }
 
     private fun stopThrottleLiftOneShots() {
-        throttleLiftAwaitingTurboDump = false
+        throttleLiftSustainedSeconds = 0.0
+        throttleLiftQualified = false
         throttleLiftDelayRemainingSeconds = 0.0
         effectVoices.forEach { voice ->
             if (voice.spec.trigger == SampleEffectTrigger.THROTTLE_LIFT) {
@@ -973,9 +984,11 @@ internal class SampleEngineRenderer private constructor(
         private const val SAMPLE_HEADROOM = 0.65
         private const val PROGRAM_CHANNELS = 2
         private const val SILENCE_GAIN = 0.00001
-        private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
+        /** A deliberate pull is at least 40% pedal; its time may accumulate across pedal modulation. */
+        private const val THROTTLE_LIFT_ARM_LEVEL = 0.40
         private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
-        /** Lets the turbo dump lead a lift-off exhaust event without feeling detached from the release. */
+        private const val THROTTLE_LIFT_MINIMUM_DURATION_SECONDS = 1.0
+        /** Gives the engine a short release before its exhaust event, independent of turbo hardware. */
         private const val THROTTLE_LIFT_EFFECT_DELAY_SECONDS = 0.18
     }
 }

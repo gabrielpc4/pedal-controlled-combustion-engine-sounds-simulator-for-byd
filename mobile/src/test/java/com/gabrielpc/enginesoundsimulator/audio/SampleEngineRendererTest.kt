@@ -365,7 +365,7 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun sharedPopsAndBangsOverridesNativeOverrunWhenEnabled() {
+    fun sharedPopsAndBangsRequiresOneSecondAboveFortyPercentAcrossPedalModulation() {
         val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
         val decoded = aventador.requiredAssets.associateWith { asset ->
             shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
@@ -387,11 +387,25 @@ class SampleEngineRendererTest {
         }
         assertEquals(0L, renderer.diagnostics().effectTriggers)
 
-        repeat(20) {
-            renderer.render(frame.copy(throttle = 1.0), output, gain = 0.7)
+        repeat(49) {
+            renderer.render(frame.copy(throttle = 0.4), output, gain = 0.7)
         }
         renderer.render(frame, output, gain = 0.7)
+        repeat(9) {
+            renderer.render(frame, output, gain = 0.7)
+        }
         assertEquals(0L, renderer.diagnostics().effectTriggers)
+
+        repeat(25) {
+            renderer.render(frame.copy(throttle = 0.4), output, gain = 0.7)
+        }
+        repeat(10) {
+            renderer.render(frame.copy(throttle = 0.25), output, gain = 0.7)
+        }
+        repeat(25) {
+            renderer.render(frame.copy(throttle = 0.4), output, gain = 0.7)
+        }
+        renderer.render(frame, output, gain = 0.7)
         repeat(9) {
             renderer.render(frame, output, gain = 0.7)
         }
@@ -497,7 +511,7 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun throttleLiftOverrunWaitsForTheTurboDumpThenDoesNotRetriggerWhilePlaying() {
+    fun throttleLiftOverrunRequiresSustainedAccelerationAndDoesNotRetriggerWhilePlaying() {
         val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
         val decoded = aventador.requiredAssets.associateWith { asset ->
             shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
@@ -508,7 +522,7 @@ class SampleEngineRendererTest {
         val output = ShortArray(1_920)
         val enabled = EngineAudioFrame(rpm = 4_000.0, popsAndBangsEnabled = true)
 
-        repeat(20) {
+        repeat(50) {
             renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 1.0, popsAndBangsEnabled = true), output, gain = 0.7)
         }
         renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.0, popsAndBangsEnabled = true), output, gain = 0.7)
@@ -686,6 +700,18 @@ class SampleEngineRendererTest {
         val maxed = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
         val expectedMax = (baseline * LayerMixControl.MAX_GAIN_MULTIPLIER).coerceAtMost(1.0)
         assertEquals(expectedMax, maxed, 0.06)
+
+        repeat(48) {
+            renderer.render(frame.copy(transmissionGain = 0.5), output, gain = 0.7)
+        }
+        val presetHalf = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
+        assertEquals(baseline * 0.5, presetHalf, 0.03)
+
+        repeat(24) {
+            renderer.render(frame.copy(transmissionEnabled = false), output, gain = 0.7)
+        }
+        val disabled = renderer.diagnostics().layerOutputMeters.first { it.id == "transmission_loop" }.outputLevel
+        assertTrue("disabled transmission must fade silent", disabled < 0.006)
     }
 
     @Test

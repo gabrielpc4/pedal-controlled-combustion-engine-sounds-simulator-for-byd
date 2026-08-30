@@ -54,8 +54,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -105,7 +103,6 @@ import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
-import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -188,6 +185,8 @@ class MainActivity : ComponentActivity() {
                         onPopsAndBangsGainChange = controller::setPopsAndBangsGain,
                         onToggleSharedShiftSounds = controller::toggleSharedShiftSounds,
                         onSharedShiftSoundsGainChange = controller::setSharedShiftSoundsGain,
+                        onToggleTransmission = controller::toggleTransmission,
+                        onTransmissionGainChange = controller::setTransmissionGain,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -269,6 +268,8 @@ private fun MotorSoundDashboard(
     onPopsAndBangsGainChange: (Double) -> Unit,
     onToggleSharedShiftSounds: () -> Unit,
     onSharedShiftSoundsGainChange: (Double) -> Unit,
+    onToggleTransmission: () -> Unit,
+    onTransmissionGainChange: (Double) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -421,38 +422,30 @@ private fun MotorSoundDashboard(
                                     loading = state.engineStartLoading,
                                     onClick = onToggleSound,
                                 )
-                                DashboardEffectToggle(
-                                    label = "Pops & Bangs",
-                                    enabled = state.popsAndBangsEnabled,
-                                    gain = state.popsAndBangsGain,
-                                    onToggle = onTogglePopsAndBangs,
-                                    onGainChange = onPopsAndBangsGainChange,
-                                    modifier = Modifier.padding(start = 10.dp),
+                                DashboardEffectControls(
+                                    popsAndBangsEnabled = state.popsAndBangsEnabled,
+                                    popsAndBangsGain = state.popsAndBangsGain,
+                                    onTogglePopsAndBangs = onTogglePopsAndBangs,
+                                    onPopsAndBangsGainChange = onPopsAndBangsGainChange,
+                                    sharedShiftSoundsEnabled = state.sharedShiftSoundsEnabled,
+                                    sharedShiftSoundsGain = state.sharedShiftSoundsGain,
+                                    onToggleSharedShiftSounds = onToggleSharedShiftSounds,
+                                    onSharedShiftSoundsGainChange = onSharedShiftSoundsGainChange,
+                                    transmissionEnabled = state.transmissionEnabled,
+                                    transmissionGain = state.transmissionGain,
+                                    onToggleTransmission = onToggleTransmission,
+                                    onTransmissionGainChange = onTransmissionGainChange,
+                                    modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
                                 )
-                                DashboardEffectToggle(
-                                    label = "Shift Sounds",
-                                    enabled = state.sharedShiftSoundsEnabled,
-                                    gain = state.sharedShiftSoundsGain,
-                                    onToggle = onToggleSharedShiftSounds,
-                                    onGainChange = onSharedShiftSoundsGainChange,
-                                    modifier = Modifier.padding(start = 8.dp),
+                                ClassicDriveControls(
+                                    state = state,
+                                    onThrottle = onThrottle,
+                                    onBrake = onBrake,
+                                    onTransmissionChange = onTransmissionChange,
+                                    onManualUpshift = onManualUpshift,
+                                    onManualDownshift = onManualDownshift,
+                                    modifier = Modifier.padding(start = 64.dp),
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    contentAlignment = Alignment.BottomCenter,
-                                ) {
-                                    ClassicDriveControls(
-                                        state = state,
-                                        onThrottle = onThrottle,
-                                        onBrake = onBrake,
-                                        onTransmissionChange = onTransmissionChange,
-                                        onManualUpshift = onManualUpshift,
-                                        onManualDownshift = onManualDownshift,
-                                        modifier = Modifier.offset(x = (-64).dp),
-                                    )
-                                }
                             }
                             DashboardMixerLauncherButton(
                                 onClick = { mainScreen = DashboardMainScreen.MIXER },
@@ -633,9 +626,6 @@ private fun DashboardHeader(
             }
             if (state.manualShiftModeEnabled) {
                 StatusTag("MANUAL", CyanSoft)
-            }
-            if (state.loadOnlyProgram) {
-                StatusTag("${state.primaryLayerSource.displayName} PROGRAM", CyanSoft)
             }
         }
 
@@ -1500,95 +1490,142 @@ private fun DismissableUserMessageBanner(
 }
 
 @Composable
-private fun DashboardEffectToggle(
+private fun DashboardEffectControls(
+    popsAndBangsEnabled: Boolean,
+    popsAndBangsGain: Double,
+    onTogglePopsAndBangs: () -> Unit,
+    onPopsAndBangsGainChange: (Double) -> Unit,
+    sharedShiftSoundsEnabled: Boolean,
+    sharedShiftSoundsGain: Double,
+    onToggleSharedShiftSounds: () -> Unit,
+    onSharedShiftSoundsGainChange: (Double) -> Unit,
+    transmissionEnabled: Boolean,
+    transmissionGain: Double,
+    onToggleTransmission: () -> Unit,
+    onTransmissionGainChange: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.width(750.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        DashboardEffectRow(
+            label = "POPS & BANGS",
+            enabled = popsAndBangsEnabled,
+            gain = popsAndBangsGain,
+            onToggle = onTogglePopsAndBangs,
+            onGainChange = onPopsAndBangsGainChange,
+        )
+        DashboardEffectRow(
+            label = "SHIFT SOUNDS",
+            enabled = sharedShiftSoundsEnabled,
+            gain = sharedShiftSoundsGain,
+            onToggle = onToggleSharedShiftSounds,
+            onGainChange = onSharedShiftSoundsGainChange,
+        )
+        DashboardEffectRow(
+            label = "TRANSMISSION",
+            enabled = transmissionEnabled,
+            gain = transmissionGain,
+            onToggle = onToggleTransmission,
+            onGainChange = onTransmissionGainChange,
+        )
+    }
+}
+
+@Composable
+private fun DashboardEffectRow(
     label: String,
     enabled: Boolean,
     gain: Double,
     onToggle: () -> Unit,
     onGainChange: (Double) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val trackColor = if (enabled) {
-        Cyan.copy(alpha = 0.92f)
-    } else {
-        Line
-    }
-    val thumbProgress by animateFloatAsState(
-        targetValue = if (enabled) {
-            1f
-        } else {
-            0f
-        },
-        animationSpec = tween(durationMillis = 180),
-        label = "${label}Toggle",
-    )
-    val trackWidth = 46.dp
-    val trackHeight = 24.dp
-    val thumbSize = 18.dp
-    val trackInset = 3.dp
-    val accentColor = if (enabled) {
-        Cyan
-    } else {
-        Muted
-    }
+    val accentColor = if (enabled) Cyan else Muted
 
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    Row(
+        modifier = Modifier.height(42.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = label,
             color = accentColor,
-            fontSize = 11.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.4.sp,
-            textAlign = TextAlign.Center,
-            lineHeight = 12.sp,
-            modifier = Modifier.width(72.dp),
+            letterSpacing = 0.45.sp,
+            lineHeight = 14.sp,
+            modifier = Modifier.width(150.dp),
         )
-        BoxWithConstraints(
-            modifier = Modifier
-                .width(trackWidth)
-                .height(trackHeight)
-                .clip(RoundedCornerShape(50))
-                .background(trackColor)
-                .clickable(onClick = onToggle),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            val travel = maxWidth - thumbSize - trackInset * 2
-            Box(
+        DashboardEffectSwitch(
+            label = label,
+            enabled = enabled,
+            onToggle = onToggle,
+        )
+        EFFECT_GAIN_PRESETS.forEach { preset ->
+            val selected = gain == preset.gain
+            Text(
+                text = preset.label,
+                color = if (selected) Night else accentColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .padding(start = trackInset)
-                    .offset(x = travel * thumbProgress)
-                    .size(thumbSize)
-                    .clip(CircleShape)
-                    .background(White),
+                    .width(123.dp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (selected) Cyan else PanelBright)
+                    .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
+                    .clickable { onGainChange(preset.gain) }
+                    .padding(top = 10.dp),
             )
         }
-        Slider(
-            value = gain.toFloat(),
-            onValueChange = { onGainChange(it.toDouble()) },
-            valueRange = EngineAudioFrame.MIN_EFFECT_GAIN.toFloat()..EngineAudioFrame.MAX_EFFECT_GAIN.toFloat(),
+    }
+}
+
+@Composable
+private fun DashboardEffectSwitch(
+    label: String,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val trackColor = if (enabled) Cyan.copy(alpha = 0.92f) else Line
+    val thumbProgress by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "${label}Toggle",
+    )
+    BoxWithConstraints(
+        modifier = Modifier
+            .width(64.dp)
+            .height(32.dp)
+            .clip(RoundedCornerShape(50))
+            .background(trackColor)
+            .clickable(onClick = onToggle),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val thumbSize = 24.dp
+        val trackInset = 4.dp
+        val travel = maxWidth - thumbSize - trackInset * 2
+        Box(
             modifier = Modifier
-                .width(72.dp)
-                .height(20.dp),
-            colors = SliderDefaults.colors(
-                thumbColor = accentColor,
-                activeTrackColor = accentColor,
-                inactiveTrackColor = Line,
-            ),
-        )
-        Text(
-            text = String.format("%.1f×", gain),
-            color = accentColor,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.width(72.dp),
+                .padding(start = trackInset)
+                .offset(x = travel * thumbProgress)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(White),
         )
     }
 }
+
+private data class EffectGainPreset(val label: String, val gain: Double)
+
+private val EFFECT_GAIN_PRESETS = listOf(
+    EffectGainPreset("LOWER", 0.5),
+    EffectGainPreset("NORMAL", 1.0),
+    EffectGainPreset("LOUD", 2.0),
+    EffectGainPreset("LOUDER", 3.0),
+)
 
 @Composable
 private fun EngineStartStopButton(

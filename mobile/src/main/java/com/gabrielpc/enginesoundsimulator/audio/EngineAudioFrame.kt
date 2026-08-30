@@ -28,10 +28,15 @@ data class EngineAudioFrame(
     val sharedShiftSoundsEnabled: Boolean = false,
     /** Linear multiplier applied on top of the shared shift sample gain (default 3×). */
     val sharedShiftSoundsGain: Double = DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
+    /** Enables each car's continuous transmission sample, when its bank provides one. */
+    val transmissionEnabled: Boolean = true,
+    /** Linear multiplier applied to each car's continuous transmission sample. */
+    val transmissionGain: Double = DEFAULT_TRANSMISSION_GAIN,
 ) {
     companion object {
         const val DEFAULT_POPS_AND_BANGS_GAIN = 2.0
         const val DEFAULT_SHARED_SHIFT_SOUNDS_GAIN = 3.0
+        const val DEFAULT_TRANSMISSION_GAIN = 1.0
         const val MIN_EFFECT_GAIN = 0.5
         const val MAX_EFFECT_GAIN = 6.0
     }

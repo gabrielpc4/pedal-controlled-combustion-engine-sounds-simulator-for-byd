@@ -2,7 +2,7 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
 
-/** Per-car gain for shared pops & bangs and Huracán shift overrides. */
+/** Per-car gain for optional effects. */
 internal class CarEffectGainRepository(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val legacyPreferences = context.applicationContext.getSharedPreferences(
@@ -36,10 +36,23 @@ internal class CarEffectGainRepository(context: Context) {
         return saveGain(profileId, "shift_gain", gain)
     }
 
+    fun transmissionGain(profileId: String): Double {
+        return readGain(
+            profileId = profileId,
+            keySuffix = "transmission_gain",
+            legacyKey = null,
+            default = EngineAudioFrame.DEFAULT_TRANSMISSION_GAIN,
+        )
+    }
+
+    fun saveTransmissionGain(profileId: String, gain: Double): Double {
+        return saveGain(profileId, "transmission_gain", gain)
+    }
+
     private fun readGain(
         profileId: String,
         keySuffix: String,
-        legacyKey: String,
+        legacyKey: String?,
         default: Double,
     ): Double {
         val key = gainKey(profileId, keySuffix)
@@ -47,7 +60,7 @@ internal class CarEffectGainRepository(context: Context) {
             return preferences.getFloat(key, default.toFloat()).toDouble().coerceIn(MIN, MAX)
         }
 
-        if (legacyPreferences.contains(legacyKey)) {
+        if (legacyKey != null && legacyPreferences.contains(legacyKey)) {
             return legacyPreferences.getFloat(legacyKey, default.toFloat()).toDouble().coerceIn(MIN, MAX)
         }
 
