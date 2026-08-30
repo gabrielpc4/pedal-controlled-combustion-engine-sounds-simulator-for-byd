@@ -120,6 +120,33 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun coastCanReplaceLoadAsThePrimaryContinuousSourceWhenTheProfileProvidesIt() {
+        val coastSource = profile.loopLayersForPrimarySource(PrimaryEngineLayerSource.COAST)
+
+        assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST))
+        assertTrue(coastSource.any { it.role == SampleLayerRole.COAST })
+        assertTrue(coastSource.none { it.role == SampleLayerRole.LOAD })
+        assertTrue(
+            coastSource
+                .filter { it.role == SampleLayerRole.COAST }
+                .any { layer ->
+                    layer.gainAt(
+                        rpm = layer.autopitchRootRpm ?: profile.idleRpm,
+                        throttle = 1.0,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.COAST,
+                    ) > 0.0001
+                },
+        )
+        val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        assertFalse(skyline.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST))
+        assertEquals(
+            PrimaryEngineLayerSource.LOAD,
+            skyline.resolvedPrimaryLayerSource(PrimaryEngineLayerSource.COAST),
+        )
+    }
+
+    @Test
     fun throttleCurvesKeepTonalBodyWhileStillFavoringTheCorrectLayerSet() {
         val load = profile.layers.first { it.id == "l1" }
         val coast = profile.layers.first { it.id == "c2" }

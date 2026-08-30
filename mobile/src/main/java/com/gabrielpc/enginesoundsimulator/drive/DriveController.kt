@@ -15,6 +15,8 @@ import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
 import com.gabrielpc.enginesoundsimulator.audio.LayerOutputMeter
+import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
+import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSourceRepository
 import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
 import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
 import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
@@ -66,6 +68,8 @@ data class DriveSnapshot(
     val availableCarCount: Int,
     val layerMixTracks: List<LayerMixTrackState> = emptyList(),
     val loadOnlyProgram: Boolean = true,
+    val primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
+    val canUseCoastAsPrimary: Boolean = false,
     val appMasterVolume: Double = AppMasterVolumeRepository.DEFAULT,
     val appMuted: Boolean = false,
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
@@ -90,6 +94,8 @@ class DriveController(context: Context) {
     private val carEffectGainRepository = CarEffectGainRepository(context.applicationContext)
     private val audioMixModeRepository = AudioMixModeRepository(context.applicationContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
+    private val primaryLayerSourceRepository = PrimaryEngineLayerSourceRepository(context.applicationContext)
+    private val primaryLayerSource = AtomicReference(primaryLayerSourceRepository.load(selectedCarRepository.load()))
     private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
     private val popsAndBangsEnabled = AtomicBoolean(audioMixModeRepository.isPopsAndBangsEnabled())
     private val popsAndBangsGain = AtomicReference(
@@ -148,6 +154,8 @@ class DriveController(context: Context) {
         selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedSampleProfile.get()),
         availableCarCount = EngineSampleProfiles.all.size,
         loadOnlyProgram = true,
+        primaryLayerSource = primaryLayerSource.get(),
+        canUseCoastAsPrimary = selectedSampleProfile.get().supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST),
         popsAndBangsEnabled = popsAndBangsEnabled.get(),
         popsAndBangsGain = popsAndBangsGain.get(),
         sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
@@ -196,6 +204,7 @@ class DriveController(context: Context) {
                 layerMixControls.get(),
                 audioEngine.layerOutputMeters(),
                 loadOnlyProgram = true,
+                primaryLayerSource = primaryLayerSource.get(),
             ),
             carAudioReady = audioEngine.loadedSampleProfileId() == selectedId,
             engineStartLoading = engineStartLoading.get(),
@@ -293,6 +302,14 @@ class DriveController(context: Context) {
     fun setLayerMixSolo(trackId: String, solo: Boolean) {
         val profile = selectedSampleProfile.get()
         layerMixControls.set(layerMixRepository.setSolo(profile, trackId, solo))
+    }
+
+    fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
+        val profile = selectedSampleProfile.get()
+        val resolved = primaryLayerSourceRepository.save(profile, source)
+        if (primaryLayerSource.getAndSet(resolved) != resolved) {
+            audioEngine.setPrimaryLayerSource(resolved)
+        }
     }
 
     fun setPopsAndBangsEnabled(enabled: Boolean) {
@@ -429,6 +446,7 @@ class DriveController(context: Context) {
             val keepEngineRunning = simulation.isEngineEngagedForUi()
 
             selectedSampleProfile.set(selected)
+            primaryLayerSource.set(primaryLayerSourceRepository.load(selected))
             layerMixControls.set(layerMixRepository.load(selected))
             carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
             popsAndBangsGain.set(carEffectGainRepository.popsAndBangsGain(selected.id))
@@ -443,6 +461,7 @@ class DriveController(context: Context) {
                 simulation.engageAtIdle()
             }
             audioEngine.setSampleProfile(selected)
+            audioEngine.setPrimaryLayerSource(primaryLayerSource.get())
         }
     }
 
@@ -726,6 +745,7 @@ class DriveController(context: Context) {
                 tuning = effectiveAudioTuning(tuning, simulation.ignitionAudioGain()),
                 layerMix = layerMixControls.get(),
                 loadOnlyProgram = true,
+                primaryLayerSource = primaryLayerSource.get(),
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
                 popsAndBangsGain = popsAndBangsGain.get(),
                 sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
@@ -756,6 +776,8 @@ class DriveController(context: Context) {
                 selectedCarIndex = EngineSampleProfiles.all.indexOf(selectedCar),
                 availableCarCount = EngineSampleProfiles.all.size,
                 loadOnlyProgram = true,
+                primaryLayerSource = primaryLayerSource.get(),
+                canUseCoastAsPrimary = selectedCar.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST),
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
                 popsAndBangsGain = popsAndBangsGain.get(),
                 sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
@@ -869,13 +891,19 @@ private fun buildLayerMixTracks(
     controls: Map<String, LayerMixControl>,
     outputLevels: List<LayerOutputMeter>,
     loadOnlyProgram: Boolean,
+    primaryLayerSource: PrimaryEngineLayerSource,
 ): List<LayerMixTrackState> {
     return profile.mixerTrackOrder().mapNotNull { (trackId, sortGroup) ->
         val control = controls[trackId] ?: LayerMixControl.DEFAULT
         val layer = profile.layers.firstOrNull { it.id == trackId }
         val effect = profile.effects.firstOrNull { it.id == trackId }
         when {
-            profile.appliesLoadOnlyProgram(loadOnlyProgram) && layer?.role == SampleLayerRole.COAST -> null
+            profile.appliesLoadOnlyProgram(loadOnlyProgram) &&
+                primaryLayerSource == PrimaryEngineLayerSource.LOAD &&
+                layer?.role == SampleLayerRole.COAST -> null
+            profile.appliesLoadOnlyProgram(loadOnlyProgram) &&
+                primaryLayerSource == PrimaryEngineLayerSource.COAST &&
+                layer?.role == SampleLayerRole.LOAD -> null
             layer != null -> LayerMixTrackState(
                 id = trackId,
                 displayName = layer.mixerDisplayName(),

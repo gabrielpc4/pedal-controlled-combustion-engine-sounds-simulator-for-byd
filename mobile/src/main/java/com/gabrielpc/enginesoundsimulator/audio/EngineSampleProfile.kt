@@ -202,9 +202,11 @@ internal data class SampleLayerSpec(
         rpm: Double,
         throttle: Double,
         loadOnlyProgram: Boolean = true,
+        primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
     ): Double {
         if (rpm !in startRpm..endRpm) return 0.0
-        if (loadOnlyProgram && role == SampleLayerRole.COAST) return 0.0
+        if (loadOnlyProgram && primaryLayerSource == PrimaryEngineLayerSource.LOAD && role == SampleLayerRole.COAST) return 0.0
+        if (loadOnlyProgram && primaryLayerSource == PrimaryEngineLayerSource.COAST && role == SampleLayerRole.LOAD) return 0.0
 
         var amplitude = 1.0
         for (index in rpmAmplitudeCurves.indices) {
@@ -212,7 +214,11 @@ internal data class SampleLayerSpec(
         }
         if (amplitude <= 0.0) return 0.0
 
-        val effectiveThrottle = if (loadOnlyProgram && role != SampleLayerRole.IDLE) 1.0 else throttle
+        val effectiveThrottle = when {
+            !loadOnlyProgram || role == SampleLayerRole.IDLE -> throttle
+            primaryLayerSource == PrimaryEngineLayerSource.LOAD -> 1.0
+            else -> 0.0
+        }
         val throttleGainContribution = throttleGainDb?.valueAt(effectiveThrottle) ?: 0.0
         var rpmGainDb = 0.0
         for (index in rpmGainDbCurves.indices) {
@@ -259,6 +265,17 @@ internal data class EngineSampleProfile(
         return supportsLoadOnlyProgram && loadOnlyProgram
     }
 
+    fun resolvedPrimaryLayerSource(source: PrimaryEngineLayerSource): PrimaryEngineLayerSource {
+        return if (source == PrimaryEngineLayerSource.COAST && supportsLoadOnlyProgram && layers.any { it.role == SampleLayerRole.COAST }) {
+            source
+        } else {
+            PrimaryEngineLayerSource.LOAD
+        }
+    }
+
+    fun supportsPrimaryLayerSource(source: PrimaryEngineLayerSource): Boolean =
+        resolvedPrimaryLayerSource(source) == source
+
     fun loopLayersForLoad(loadOnlyProgram: Boolean): List<SampleLayerSpec> {
         if (appliesLoadOnlyProgram(loadOnlyProgram)) {
             return layers.filter { layer -> layer.role != SampleLayerRole.COAST }
@@ -268,6 +285,18 @@ internal data class EngineSampleProfile(
 
     fun requiredAssetsForLoad(loadOnlyProgram: Boolean): Set<String> = linkedSetOf<String>().apply {
         loopLayersForLoad(loadOnlyProgram).mapTo(this) { it.assetName }
+        effects.forEach { effect -> addAll(effect.allAssetNames) }
+    }
+
+    fun loopLayersForPrimarySource(source: PrimaryEngineLayerSource): List<SampleLayerSpec> {
+        return when (resolvedPrimaryLayerSource(source)) {
+            PrimaryEngineLayerSource.LOAD -> loopLayersForLoad(loadOnlyProgram = true)
+            PrimaryEngineLayerSource.COAST -> layers.filter { it.role != SampleLayerRole.LOAD }
+        }
+    }
+
+    fun requiredAssetsForPrimarySource(source: PrimaryEngineLayerSource): Set<String> = linkedSetOf<String>().apply {
+        loopLayersForPrimarySource(source).mapTo(this) { it.assetName }
         effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 

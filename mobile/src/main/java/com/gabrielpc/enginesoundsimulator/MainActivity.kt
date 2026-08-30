@@ -202,6 +202,7 @@ class MainActivity : ComponentActivity() {
                         onLayerMixMuted = controller::setLayerMixMuted,
                         onLayerMixSolo = controller::setLayerMixSolo,
                         onLayerMixVolume = controller::setLayerMixVolume,
+                        onPrimaryLayerSourceChange = controller::setPrimaryLayerSource,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
                         onDismissUserMessage = controller::dismissUserMessage,
                     )
@@ -282,6 +283,7 @@ private fun MotorSoundDashboard(
     onLayerMixMuted: (String, Boolean) -> Unit,
     onLayerMixSolo: (String, Boolean) -> Unit,
     onLayerMixVolume: (String, Double) -> Unit,
+    onPrimaryLayerSourceChange: (com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
     onDismissUserMessage: () -> Unit,
 ) {
@@ -469,6 +471,9 @@ private fun MotorSoundDashboard(
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
+                            primaryLayerSource = state.primaryLayerSource,
+                            canUseCoastAsPrimary = state.canUseCoastAsPrimary,
+                            onPrimaryLayerSourceChange = onPrimaryLayerSourceChange,
                             onManualUpshift = onManualUpshift,
                             onManualDownshift = onManualDownshift,
                             loadOnlyProgram = state.loadOnlyProgram,
@@ -630,7 +635,7 @@ private fun DashboardHeader(
                 StatusTag("MANUAL", CyanSoft)
             }
             if (state.loadOnlyProgram) {
-                StatusTag("LOAD ONLY", CyanSoft)
+                StatusTag("${state.primaryLayerSource.displayName} SOURCE", CyanSoft)
             }
         }
 

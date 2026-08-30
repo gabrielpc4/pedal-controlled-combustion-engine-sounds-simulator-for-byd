@@ -165,12 +165,14 @@ internal class SampleEngineRenderer private constructor(
 
         anyLayerSolo = target.layerMix.values.any { control -> control.solo && !control.muted }
         val loadProgram = profile.appliesLoadOnlyProgram(target.loadOnlyProgram)
+        val primaryLayerSource = profile.resolvedPrimaryLayerSource(target.primaryLayerSource)
         turboSpool.update(blockSeconds, smoothedRpm, smoothedThrottle)
         updateVoiceTargets(
             smoothedRpm,
             smoothedThrottle,
             target.layerMix,
             loadProgram,
+            primaryLayerSource,
             target.loadOnlyProgram,
         )
         updateEffectTargetsAndTriggers(target, target.layerMix)
@@ -563,12 +565,13 @@ internal class SampleEngineRenderer private constructor(
         throttle: Double,
         layerMix: Map<String, LayerMixControl>,
         loadProgram: Boolean,
+        primaryLayerSource: PrimaryEngineLayerSource,
         loadOnlyProgram: Boolean,
     ) {
         var voiceIndex = 0
         while (voiceIndex < voices.size) {
             val voice = voices[voiceIndex]
-            val authoredGain = voice.spec.gainAt(rpm, throttle, loadProgram)
+            val authoredGain = voice.spec.gainAt(rpm, throttle, loadProgram, primaryLayerSource)
             voice.targetGain = applyLayerMix(voice.spec.id, authoredGain, layerMix, loadOnlyProgram)
             voice.playbackRatio = voice.spec.playbackRatio(rpm)
             voice.phaseIncrement = voice.data.sampleRate.toDouble() / outputSampleRate * voice.playbackRatio
@@ -804,13 +807,22 @@ internal class SampleEngineRenderer private constructor(
             outputSampleRate: Int,
             profile: EngineSampleProfile = EngineSampleProfiles.default,
             loadOnlyProgram: Boolean = true,
+            primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
         ): SampleEngineRenderer {
-            val assetsToLoad = profile.requiredAssetsForLoad(loadOnlyProgram)
+            val assetsToLoad = if (profile.appliesLoadOnlyProgram(loadOnlyProgram)) {
+                profile.requiredAssetsForPrimarySource(primaryLayerSource)
+            } else {
+                profile.requiredAssetsForLoad(loadOnlyProgram)
+            }
             val decoded = assetsToLoad.associateWith { assetName ->
                 val path = "sample_engine/${profile.assetDirectory}/$assetName"
                 assetManager.open(path, AssetManager.ACCESS_STREAMING).use(WavPcmDecoder::decode)
             }
-            val voices = profile.loopLayersForLoad(loadOnlyProgram).map { spec ->
+            val voices = if (profile.appliesLoadOnlyProgram(loadOnlyProgram)) {
+                profile.loopLayersForPrimarySource(primaryLayerSource)
+            } else {
+                profile.loopLayersForLoad(loadOnlyProgram)
+            }.map { spec ->
                 LoopVoice(spec, requireNotNull(decoded[spec.assetName]))
             }
             val effects = profile.effects.map { spec ->

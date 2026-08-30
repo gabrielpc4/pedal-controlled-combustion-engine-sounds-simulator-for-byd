@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
+import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -105,6 +106,9 @@ internal fun MixerDashboardScreen(
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     loadOnlyProgram: Boolean,
+    primaryLayerSource: PrimaryEngineLayerSource,
+    canUseCoastAsPrimary: Boolean,
+    onPrimaryLayerSourceChange: (PrimaryEngineLayerSource) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val groupedTracks = remember(state.layerMixTracks) {
@@ -128,6 +132,13 @@ internal fun MixerDashboardScreen(
             onSelectCar = onSelectCar,
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
+        if (canUseCoastAsPrimary) {
+            Spacer(Modifier.height(6.dp))
+            PrimaryLayerSourceSelector(
+                selected = primaryLayerSource,
+                onSelected = onPrimaryLayerSourceChange,
+            )
+        }
         Spacer(Modifier.height(10.dp))
         Row(
             modifier = Modifier
@@ -178,6 +189,52 @@ internal fun MixerDashboardScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PrimaryLayerSourceSelector(
+    selected: PrimaryEngineLayerSource,
+    onSelected: (PrimaryEngineLayerSource) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel)
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "ENGINE SOURCE",
+            color = Muted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+        Spacer(Modifier.width(12.dp))
+        PrimaryEngineLayerSource.entries.forEach { source ->
+            val active = source == selected
+            Text(
+                text = source.displayName,
+                color = if (active) Cyan else Muted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable { onSelected(source) }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+        Text(
+            text = "SWAPS THE CONTINUOUS ENGINE WAV FAMILY",
+            color = Muted,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 12.dp),
+        )
     }
 }
 

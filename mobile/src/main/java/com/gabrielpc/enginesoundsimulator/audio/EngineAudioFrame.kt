@@ -14,6 +14,8 @@ data class EngineAudioFrame(
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** When true, mute coast layers and hold the engine program at full load while RPM still changes. */
     val loadOnlyProgram: Boolean = true,
+    /** Recorded family used as the continuous driving engine sound for profiles that support it. */
+    val primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
     /** When true, play the shared recorded pops on throttle lift and mute each car's native overrun. */
     val popsAndBangsEnabled: Boolean = false,
     /** Linear multiplier applied on top of the shared pops sample gain (default 2×). */

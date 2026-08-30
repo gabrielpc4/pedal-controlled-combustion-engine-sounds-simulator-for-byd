@@ -30,6 +30,7 @@ class EngineAudioEngine(context: Context) {
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
     private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
+    private val primaryLayerSource = AtomicReference(PrimaryEngineLayerSource.LOAD)
     private val loadedSampleProfileId = AtomicReference<String?>(null)
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
     private val focusMultiplier = AtomicReference(0.0)
@@ -117,6 +118,15 @@ class EngineAudioEngine(context: Context) {
         }
     }
 
+    internal fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
+        synchronized(lifecycleLock) {
+            val resolved = selectedProfile.get().resolvedPrimaryLayerSource(source)
+            if (primaryLayerSource.getAndSet(resolved) == resolved) return
+            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
+            if (shouldRestart && stopLocked()) startLocked()
+        }
+    }
+
     private fun startLocked() {
         if (
             running.get() ||
@@ -128,6 +138,7 @@ class EngineAudioEngine(context: Context) {
         }
 
         val sampleProfile = selectedProfile.get()
+        val source = sampleProfile.resolvedPrimaryLayerSource(primaryLayerSource.get())
         layerMeterBus = null
         focusMultiplier.set(0.0)
         val focusResult = runCatching { requestFocus() }
@@ -146,7 +157,7 @@ class EngineAudioEngine(context: Context) {
         loadFailure.set(null)
         running.set(true)
         val runId = generation.incrementAndGet()
-        val thread = Thread({ renderLoop(runId, sampleProfile) }, "engine-audio-renderer").apply { isDaemon = true }
+        val thread = Thread({ renderLoop(runId, sampleProfile, source) }, "engine-audio-renderer").apply { isDaemon = true }
         renderThread.set(thread)
         try {
             thread.start()
@@ -194,7 +205,11 @@ class EngineAudioEngine(context: Context) {
         return stopped
     }
 
-    private fun renderLoop(runId: Long, sampleProfile: EngineSampleProfile) {
+    private fun renderLoop(
+        runId: Long,
+        sampleProfile: EngineSampleProfile,
+        source: PrimaryEngineLayerSource,
+    ) {
         var opened: OpenedTrack? = null
 
         try {
@@ -207,6 +222,7 @@ class EngineAudioEngine(context: Context) {
                     sampleRate,
                     sampleProfile,
                     loadOnlyProgram = true,
+                    primaryLayerSource = source,
                 )
             } catch (throwable: Throwable) {
                 Log.e(TAG, "Failed to decode ${sampleProfile.id} sample bank", throwable)
