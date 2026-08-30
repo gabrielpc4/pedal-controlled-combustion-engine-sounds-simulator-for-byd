@@ -1,27 +1,27 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
-
-/** Persists audio controls that are independent of an FMOD event's authored mix. */
+/** Persists optional sample-engine effects controls. The renderer always uses the load-only program. */
 class AudioMixModeRepository(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    fun isCoastOnlyEnabled(): Boolean = preferences.getBoolean(KEY_COAST_ONLY_ENABLED, false)
+    fun isPopsAndBangsEnabled(): Boolean {
+        return preferences.getBoolean(KEY_POPS_AND_BANGS_ENABLED, DEFAULT_POPS_AND_BANGS_ENABLED)
+    }
 
-    fun setCoastOnlyEnabled(enabled: Boolean) {
+    fun setPopsAndBangsEnabled(enabled: Boolean) {
         preferences.edit()
-            .putBoolean(KEY_COAST_ONLY_ENABLED, enabled)
-            .apply { if (enabled) putBoolean(KEY_LOAD_ONLY_ENABLED, false) }
+            .putBoolean(KEY_POPS_AND_BANGS_ENABLED, enabled)
             .apply()
     }
 
-    /** Matches the desktop audio lab by holding engine/transmission events at authored full load. */
-    fun isLoadOnlyEnabled(): Boolean = preferences.getBoolean(KEY_LOAD_ONLY_ENABLED, DEFAULT_LOAD_ONLY_ENABLED)
+    fun isSharedShiftSoundsEnabled(): Boolean {
+        return preferences.getBoolean(KEY_SHARED_SHIFT_SOUNDS_ENABLED, DEFAULT_SHARED_SHIFT_SOUNDS_ENABLED)
+    }
 
-    fun setLoadOnlyEnabled(enabled: Boolean) {
+    fun setSharedShiftSoundsEnabled(enabled: Boolean) {
         preferences.edit()
-            .putBoolean(KEY_LOAD_ONLY_ENABLED, enabled)
-            .apply { if (enabled) putBoolean(KEY_COAST_ONLY_ENABLED, false) }
+            .putBoolean(KEY_SHARED_SHIFT_SOUNDS_ENABLED, enabled)
             .apply()
     }
 
@@ -37,10 +37,11 @@ class AudioMixModeRepository(context: Context) {
 
     private companion object {
         const val PREFERENCES_NAME = "audio_experiments"
-        const val KEY_COAST_ONLY_ENABLED = "fmod_coast_only_enabled"
-        const val KEY_LOAD_ONLY_ENABLED = "fmod_load_only_enabled"
+        const val KEY_POPS_AND_BANGS_ENABLED = "pops_and_bangs_enabled"
+        const val KEY_SHARED_SHIFT_SOUNDS_ENABLED = "shared_shift_sounds_enabled"
         const val KEY_MANUAL_SHIFT_MODE_ENABLED = "manual_shift_mode_enabled"
-        const val DEFAULT_LOAD_ONLY_ENABLED = false
+        const val DEFAULT_POPS_AND_BANGS_ENABLED = false
+        const val DEFAULT_SHARED_SHIFT_SOUNDS_ENABLED = false
         const val DEFAULT_MANUAL_SHIFT_MODE_ENABLED = false
     }
 }

@@ -4,163 +4,9 @@ plugins {
 }
 
 import java.io.File
-import java.security.MessageDigest
 import java.time.Instant
 import java.util.Properties
-import org.gradle.api.DefaultTask
-import org.gradle.api.file.ConfigurableFileCollection
-import org.gradle.api.provider.Property
-import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputFiles
-import org.gradle.api.tasks.PathSensitive
-import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.Sync
-import org.gradle.api.tasks.TaskAction
-
-abstract class ValidateFmodInputsTask : DefaultTask() {
-    @get:Input
-    abstract val fmodSdkPath: Property<String>
-
-    @get:Input
-    abstract val skylinePreviewPath: Property<String>
-
-    @get:Input
-    abstract val skylineStringsBankPath: Property<String>
-
-    @get:Input
-    abstract val skylineCommonBankPath: Property<String>
-
-    @get:Input
-    abstract val skylineBankPath: Property<String>
-
-    @get:Input
-    abstract val huracanBankPath: Property<String>
-
-    @get:Input
-    abstract val huracanPreviewPath: Property<String>
-
-    @get:Input
-    abstract val aventadorBankPath: Property<String>
-
-    @get:Input
-    abstract val aventadorPreviewPath: Property<String>
-
-    @get:Input
-    abstract val alfaBankPath: Property<String>
-
-    @get:Input
-    abstract val alfaPreviewPath: Property<String>
-
-    @get:Input
-    abstract val supraBankPath: Property<String>
-
-    @get:Input
-    abstract val supraPreviewPath: Property<String>
-
-    @get:InputFiles
-    @get:PathSensitive(PathSensitivity.NONE)
-    abstract val sourceFiles: ConfigurableFileCollection
-
-    @TaskAction
-    fun validateInputs() {
-        val fmodPath = fmodSdkPath.get()
-        check(fmodPath.isNotBlank() && File(fmodPath).isDirectory) {
-            "FMOD Studio API 1.10.11 Android SDK is not configured. " +
-                "Set fmod.sdk.dir=<official extracted SDK directory> in local.properties."
-        }
-        val fmodDirectory = File(fmodPath)
-        fun requireFile(file: File, label: String) {
-            val sourceHint = when {
-                file.toPath().startsWith(fmodDirectory.toPath()) ->
-                    "Check fmod.sdk.dir in local.properties and reinstall the official " +
-                        "FMOD Studio API 1.10.11 Android SDK if that file is absent."
-                else ->
-                    "Restore this private source under the repository's ignored audio_banks " +
-                        "directory; banks and preview artwork are intentionally not tracked."
-            }
-            check(file.isFile) {
-                "$label was not found at ${file.absolutePath}. $sourceHint"
-            }
-        }
-
-        val header = fmodDirectory.resolve("api/lowlevel/inc/fmod_common.h")
-        requireFile(fmodDirectory.resolve("api/lowlevel/lib/fmod.jar"), "FMOD Android Java wrapper")
-        requireFile(header, "FMOD core header")
-        requireFile(fmodDirectory.resolve("api/studio/inc/fmod_studio.hpp"), "FMOD Studio header")
-        listOf("armeabi-v7a", "arm64-v8a", "x86_64").forEach { abi ->
-            requireFile(fmodDirectory.resolve("api/lowlevel/lib/$abi/libfmod.so"), "FMOD core library for $abi")
-            requireFile(fmodDirectory.resolve("api/studio/lib/$abi/libfmodstudio.so"), "FMOD Studio library for $abi")
-        }
-        check(Regex("#define\\s+FMOD_VERSION\\s+0x00011011\\b").containsMatchIn(header.readText())) {
-            "fmod.sdk.dir must point to the FMOD Studio API 1.10.11 Android SDK; " +
-                "${header.absolutePath} declares a different FMOD_VERSION."
-        }
-
-        val banks = listOf(
-            Triple(
-                File(skylineStringsBankPath.get()),
-                "common.strings.bank",
-                "f9b633795f1c1634f1f1f7e9fed8a5c53c9c6b46554cc52b7e7880d8b3481381",
-            ),
-            Triple(
-                File(skylineCommonBankPath.get()),
-                "common.bank",
-                "821df0944062f5bf134b184daf099ab68fcdb549d06be1c13e721bfbfc5a6b3e",
-            ),
-            Triple(
-                File(skylineBankPath.get()),
-                "ks_nissan_skyline_r34.bank",
-                "a50ba96017868f37c50804350ea7a159b1f13ef347af95aca28dd1b8743bbc93",
-            ),
-            Triple(
-                File(huracanBankPath.get()),
-                "fx_lamborghini_huracan_trofeo_evo2.bank",
-                "74f5053dfcae0529027b37da993ece36d2ff3d26102af8370bfe6589d8f2479c",
-            ),
-            Triple(
-                File(aventadorBankPath.get()),
-                "tr_lamborghini_aventador_sv.bank",
-                "b83116900c41666fedf7b7256793d3d8808930a40ab938f1b089efd13bf63e42",
-            ),
-            Triple(
-                File(alfaBankPath.get()),
-                "ks_alfa_romeo_4c.bank",
-                "3e2c5d4341afda3131aa6095cdbacc46aa76592fca3b365cae00ae4fe6e3bf76",
-            ),
-            Triple(
-                File(supraBankPath.get()),
-                "zesty_toyota_supra_mk4_shuto_street.bank",
-                "64cfba3e153903430d95ec339b81930085708a1f5a74145b01c46d93aa067c0d",
-            ),
-        )
-        banks.forEach { (file, label, expectedHash) ->
-            requireFile(file, "Assetto Corsa $label")
-            val actualHash = file.sha256()
-            check(actualHash == expectedHash) {
-                "$label has SHA-256 $actualHash, expected $expectedHash. " +
-                    "The build will not package an unknown or modified bank."
-            }
-        }
-        requireFile(File(skylinePreviewPath.get()), "Skyline preview")
-        requireFile(File(huracanPreviewPath.get()), "Huracan preview")
-        requireFile(File(aventadorPreviewPath.get()), "Aventador preview")
-        requireFile(File(alfaPreviewPath.get()), "Alfa Romeo preview")
-        requireFile(File(supraPreviewPath.get()), "Toyota Supra preview")
-    }
-
-    private fun File.sha256(): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        inputStream().buffered().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-    }
-}
 
 val buildNumberFile = file("build-number.properties")
 val buildNumberProperties = Properties()
@@ -198,120 +44,114 @@ fun gitShortShaFromFiles(rootDir: File): String {
 val gitSha = gitShortShaFromFiles(rootProject.projectDir)
 val buildTimeUtc: String = Instant.now().toString()
 
-val localProperties = Properties().apply {
-    rootProject.file("local.properties").takeIf(File::isFile)?.inputStream()?.use(::load)
-}
-val fmodSdkDirectory = localProperties.getProperty("fmod.sdk.dir")
-    ?.takeIf(String::isNotBlank)
-    ?.let(::File)
-    ?.absoluteFile
+data class LocalEngineProfileAssets(
+    val assetDirectory: String,
+    val sourceDirectory: File,
+    val assetNames: List<String>,
+    val previewSource: File,
+    val previewAssetName: String,
+)
 
-val requiredFmodAbis = listOf("armeabi-v7a", "arm64-v8a", "x86_64")
-val generatedFmodSdk = layout.buildDirectory.dir("generated/fmodSdk")
-val generatedFmodAssets = layout.buildDirectory.dir("generated/fmodAssets")
-
-fun fmodSdkFile(relativePath: String): File =
-    fmodSdkDirectory?.resolve(relativePath) ?: rootProject.file("missing-fmod-sdk/$relativePath")
-
-val fmodJarSource = fmodSdkFile("api/lowlevel/lib/fmod.jar")
-val fmodHeaderSource = fmodSdkFile("api/lowlevel/inc/fmod_common.h")
-val privateAudioBanks = rootProject.file("audio_banks")
-val privateFmodBanks = privateAudioBanks.resolve("fmod")
-val privateCarPreviews = privateAudioBanks.resolve("car_previews")
-val assettoStringsBank = privateFmodBanks.resolve("common.strings.bank")
-val assettoCommonBank = privateFmodBanks.resolve("common.bank")
-val assettoSkylineBank = privateFmodBanks.resolve("ks_nissan_skyline_r34.bank")
-val skylinePreview = privateCarPreviews.resolve("nissan_skyline_r34.jpg")
-val huracanBank = privateFmodBanks.resolve("fx_lamborghini_huracan_trofeo_evo2.bank")
-val huracanPreview = privateCarPreviews.resolve("huracan_trofeo_evo2.jpg")
-val aventadorBank = privateFmodBanks.resolve("tr_lamborghini_aventador_sv.bank")
-val aventadorPreview = privateCarPreviews.resolve("aventador_sv.jpg")
-val alfaBank = privateFmodBanks.resolve("ks_alfa_romeo_4c.bank")
-val alfaPreview = privateCarPreviews.resolve("alfa_romeo_4c.jpg")
-val supraBank = privateFmodBanks.resolve("zesty_toyota_supra_mk4_shuto_street.bank")
-val supraPreview = privateCarPreviews.resolve("toyota_supra_mk4.jpg")
-
-val validateFmodInputs = tasks.register<ValidateFmodInputsTask>("validateFmodInputs") {
-    fmodSdkPath.set(fmodSdkDirectory?.path ?: "")
-    skylineStringsBankPath.set(assettoStringsBank.path)
-    skylineCommonBankPath.set(assettoCommonBank.path)
-    skylineBankPath.set(assettoSkylineBank.path)
-    skylinePreviewPath.set(skylinePreview.path)
-    huracanBankPath.set(huracanBank.path)
-    huracanPreviewPath.set(huracanPreview.path)
-    aventadorBankPath.set(aventadorBank.path)
-    aventadorPreviewPath.set(aventadorPreview.path)
-    alfaBankPath.set(alfaBank.path)
-    alfaPreviewPath.set(alfaPreview.path)
-    supraBankPath.set(supraBank.path)
-    supraPreviewPath.set(supraPreview.path)
-    sourceFiles.from(
-        fmodJarSource,
-        fmodHeaderSource,
-        fmodSdkFile("api/studio/inc/fmod_studio.hpp"),
-        requiredFmodAbis.flatMap { abi ->
-            listOf(
-                fmodSdkFile("api/lowlevel/lib/$abi/libfmod.so"),
-                fmodSdkFile("api/studio/lib/$abi/libfmodstudio.so"),
-            )
-        },
-        assettoStringsBank,
-        assettoCommonBank,
-        assettoSkylineBank,
-        skylinePreview,
-        huracanBank,
-        huracanPreview,
-        aventadorBank,
-        aventadorPreview,
-        alfaBank,
-        alfaPreview,
-        supraBank,
-        supraPreview,
-    )
-}
-
-val prepareFmodSdk = tasks.register<Sync>("prepareFmodSdk") {
-    dependsOn(validateFmodInputs)
-    from(fmodSdkFile("api/lowlevel/inc")) { into("include/core") }
-    from(fmodSdkFile("api/studio/inc")) { into("include/studio") }
-    from(fmodJarSource) { into("java") }
-    requiredFmodAbis.forEach { abi ->
-        from(fmodSdkFile("api/lowlevel/lib/$abi/libfmod.so")) { into("jniLibs/$abi") }
-        from(fmodSdkFile("api/studio/lib/$abi/libfmodstudio.so")) { into("jniLibs/$abi") }
+val localEngineProfiles = listOf(
+    LocalEngineProfileAssets(
+        assetDirectory = "lamborghini_huracan_trofeo_evo2",
+        sourceDirectory = rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted"),
+        assetNames = listOf(
+            "s010_hur_n1_high.wav", "s031_hur_high_l1.wav", "s032_hur_l2a.wav",
+            "s037_hur_idle_noise.wav", "s038_hur_high_l3.wav", "s039_hur_c1.wav",
+            "s044_hur_l3.wav", "s049_eng_noise9_high.wav", "s059_hur_c2.wav",
+            "s061_hur_n_up.wav", "s065_hur_l5.wav", "s073_hur_lim.wav",
+            "s077_eng_noise7.wav", "s078_hur_idle_low.wav", "s081_hur_high_l2a.wav",
+            "s089_hur_n2.wav", "s093_hur_c4.wav", "s113_hur_l1.wav",
+            "s117_hur_l4h.wav", "s126_amrgt3_sine.wav", "s127_hur_l4.wav",
+            "s134_hur_c3.wav", "s139_hur_l6.wav", "s149_hur_l4l.wav",
+            "fx_transmission.wav", "fx_shift_up.wav", "fx_shift_down.wav",
+        ),
+        previewSource = rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/preview1.jpg"),
+        previewAssetName = "lamborghini_huracan_trofeo_evo2.jpg",
+    ),
+    LocalEngineProfileAssets(
+        assetDirectory = "lamborghini_aventador_sv",
+        sourceDirectory = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted"),
+        assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav", "fx_transmission.wav", "fx_shift.wav"),
+        previewSource = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/preview1.jpg"),
+        previewAssetName = "lamborghini_aventador_sv.jpg",
+    ),
+    LocalEngineProfileAssets(
+        assetDirectory = "nissan_skyline_r34",
+        sourceDirectory = rootProject.file("audio_samples/fx_nissan_skyline_r34/converted"),
+        assetNames = listOf(
+            "rb26_4_ex_idle.wav",
+            "rb26_2_in_on_verylow.wav",
+            "rb26_in_2_onverylow.wav",
+            "rb26_2_in_on_verylow2.wav",
+            "rb26_2_in_on_low3.wav",
+            "rb26_in_2_onlow.wav",
+            "rb26_in_2_onmid.wav",
+            "rb26_2_in_on_mid3.wav",
+            "rb26_in_2_onmid2.wav",
+            "rb26_in_2_onhigh.wav",
+            "rb26_in_on_high2.wav",
+            "rb26_in_2_onhigh2.wav",
+            "rb26_in_on_veryhigh.wav",
+            "rb26_4_ex_off_verylow.wav",
+            "rb26_ex_5_offverylow.wav",
+            "rb26_ex_5_offlow.wav",
+            "rb26_ex_5_offmid.wav",
+            "rb26_3_revlim_EQ.wav",
+            "s1_turbo.wav",
+            "flutter_4.wav",
+            "rb26_bf1.wav",
+            "rb26_bf2.wav",
+            "sin5.wav",
+            "gearup.wav",
+            "gearupEXT.wav",
+            "geardnEXT.wav",
+            "missgear.wav",
+            "RB26DET_pop_1.wav",
+            "RB26DET_pop_2.wav",
+            "RB26DET_pop_3.wav",
+            "rb26_pop1.wav",
+            "rb26_pop2.wav",
+            "s1_pop.wav",
+        ),
+        previewSource = rootProject.file("audio_samples/fx_nissan_skyline_r34/preview1.jpg"),
+        previewAssetName = "nissan_skyline_r34.jpg",
+    ),
+)
+val generatedSampleEngineAssets = file("build/generated/sampleEngineAssets")
+val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets") {
+    localEngineProfiles.forEach { profile ->
+        from(profile.sourceDirectory) {
+            include(profile.assetNames)
+            into("sample_engine/${profile.assetDirectory}")
+        }
+        from(profile.previewSource) {
+            rename { profile.previewAssetName }
+            into("car_previews")
+        }
     }
-    into(generatedFmodSdk)
-}
-
-val prepareFmodAssets = tasks.register<Sync>("prepareFmodAssets") {
-    dependsOn(validateFmodInputs)
-    from(assettoStringsBank) { into("fmod") }
-    from(assettoCommonBank) { into("fmod") }
-    from(assettoSkylineBank) { into("fmod") }
-    from(huracanBank) { into("fmod") }
-    from(aventadorBank) { into("fmod") }
-    from(alfaBank) { into("fmod") }
-    from(supraBank) { into("fmod") }
-    from(skylinePreview) {
-        rename { "nissan_skyline_r34.jpg" }
-        into("car_previews")
+    // The Huracán bank supplies this explicitly named exterior idle loop separately from the
+    // reconstructed interior event. It replaces only the idle layer; driving layers remain
+    // the recovered cabin program.
+    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted_exterior")) {
+        include("s013_ex_idle.wav")
+        into("sample_engine/lamborghini_huracan_trofeo_evo2")
     }
-    from(huracanPreview) {
-        rename { "huracan_trofeo_evo2.jpg" }
-        into("car_previews")
+    from(rootProject.file("reference/alfa_romeo_4c_exhaust_effects/01_backfire_internal")) {
+        include(
+            "backfire_1.wav",
+            "backfire_2.wav",
+            "backfire_3.wav",
+            "backfire_4.wav",
+        )
+        into("sample_engine/shared/pops_and_bangs")
     }
-    from(aventadorPreview) {
-        rename { "aventador_sv.jpg" }
-        into("car_previews")
+    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted")) {
+        include("fx_shift_up.wav", "fx_shift_down.wav")
+        into("sample_engine/shared/huracan_shift_sounds")
     }
-    from(alfaPreview) {
-        rename { "alfa_romeo_4c.jpg" }
-        into("car_previews")
-    }
-    from(supraPreview) {
-        rename { "toyota_supra_mk4.jpg" }
-        into("car_previews")
-    }
-    into(generatedFmodAssets)
+    into(generatedSampleEngineAssets)
 }
 
 if (isAssembling && stampCarBuild) {
@@ -332,13 +172,7 @@ if (isAssembling && stampCarBuild) {
 }
 
 tasks.named("preBuild").configure {
-    dependsOn(prepareFmodSdk, prepareFmodAssets)
-}
-
-tasks.configureEach {
-    if (name.contains("CMake", ignoreCase = true) || name.contains("ExternalNativeBuild", ignoreCase = true)) {
-        dependsOn(prepareFmodSdk)
-    }
+    dependsOn(prepareSampleEngineAssets)
 }
 
 android {
@@ -360,19 +194,7 @@ android {
         buildConfigField("int", "BUILD_NUMBER", stampedBuildNumber.toString())
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        ndk {
-            abiFilters += requiredFmodAbis
-        }
-
-        externalNativeBuild {
-            cmake {
-                arguments += "-DFMOD_STAGED_DIR=${generatedFmodSdk.get().asFile.absolutePath.replace('\\', '/')}"
-                cppFlags += listOf("-std=c++17", "-Wall", "-Wextra", "-Werror=return-type")
-            }
-        }
     }
 
     buildTypes {
@@ -390,17 +212,7 @@ android {
         compose = true
         buildConfig = true
     }
-    sourceSets.getByName("main").assets.directories.add(generatedFmodAssets.get().asFile.path)
-    sourceSets.getByName("main").jniLibs.directories.add(generatedFmodSdk.get().dir("jniLibs").asFile.path)
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
-    androidResources {
-        noCompress += "bank"
-    }
+    sourceSets.getByName("main").assets.srcDir(generatedSampleEngineAssets)
     lint {
         // This APK is intentionally sideloaded on a BYD DiLink head unit. Target 25 is a
         // compatibility requirement for its vendor framework, not a Google Play configuration.
@@ -419,10 +231,6 @@ androidComponents {
 }
 
 dependencies {
-    // FmodNativeBridge deliberately calls org.fmod.FMOD through reflection, so JVM unit tests
-    // remain compilable before the user supplies the proprietary SDK. Packaging tasks validate
-    // and stage this runtime-only JAR together with the native binaries.
-    runtimeOnly(files(generatedFmodSdk.map { it.file("java/fmod.jar") }))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

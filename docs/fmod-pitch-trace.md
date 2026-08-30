@@ -1,5 +1,8 @@
 # Android FMOD pitch trace
 
+> Historical FMOD trace. The active WAV migration does not include FMOD; its committed experiment
+> remains available on `gpc/fmod-pitch-attempt`.
+
 Captured on `BYD_Seal_1920x1080` with the Skyline R34 bank during the same deterministic
 simulated-pedal launch. The temporary probe sampled the requested simulation RPM, the interpolated
 float passed through JNI, and both values returned by

@@ -1,5 +1,9 @@
 # Handoff: unresolved audible pitch stepping
 
+> Historical FMOD investigation only. The active `gpc/wav-audio-engine` branch deliberately
+> restores the WAV/AudioTrack renderer at the user's request, so the implementation instructions
+> below do not apply to that branch. The FMOD attempt is preserved in `gpc/fmod-pitch-attempt`.
+
 ## Current state
 
 - Repository: this checkout (all paths below are repository-relative unless stated otherwise).

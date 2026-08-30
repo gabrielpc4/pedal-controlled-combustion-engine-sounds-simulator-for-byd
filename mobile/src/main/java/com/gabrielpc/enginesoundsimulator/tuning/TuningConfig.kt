@@ -1,19 +1,19 @@
 package com.gabrielpc.enginesoundsimulator.tuning
 
 import android.content.Context
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfile
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
 import kotlin.math.max
 import kotlin.math.min
 
 data class CurvePoint(val x: Double, val y: Double)
 
 data class EngineTuning(
-    val idleRpm: Double = FmodCarProfiles.default.idleRpm,
-    val maxRpm: Double = FmodCarProfiles.default.maximumRpm,
-    val redlineRpm: Double = FmodCarProfiles.default.redlineRpm,
-    val limiterRpm: Double = FmodCarProfiles.default.limiterRpm,
-    val upshiftRpm: Double = FmodCarProfiles.default.upshiftRpm,
+    val idleRpm: Double = EngineSampleProfiles.default.idleRpm,
+    val maxRpm: Double = EngineSampleProfiles.default.maximumRpm,
+    val redlineRpm: Double = EngineSampleProfiles.default.redlineRpm,
+    val limiterRpm: Double = EngineSampleProfiles.default.limiterRpm,
+    val upshiftRpm: Double = EngineSampleProfiles.default.upshiftRpm,
     val maxTorqueNm: Double = 670.0,
     val peakPowerKw: Double = 390.0,
     val motorMaxRpm: Double = 16_000.0,
@@ -34,8 +34,8 @@ data class EngineTuning(
     val externalSpeedSmoothingMs: Double = 120.0,
     val throttleAttackMs: Double = 15.0,
     val throttleReleaseMs: Double = 20.0,
-    val upshiftDurationMs: Double = FmodCarProfiles.default.upshiftDurationSeconds * 1_000.0,
-    val downshiftDurationMs: Double = FmodCarProfiles.default.downshiftDurationSeconds * 1_000.0,
+    val upshiftDurationMs: Double = EngineSampleProfiles.default.upshiftDurationSeconds * 1_000.0,
+    val downshiftDurationMs: Double = EngineSampleProfiles.default.downshiftDurationSeconds * 1_000.0,
     val shiftDwellMs: Double = 150.0,
     /** Fixed coupled-RPM threshold for the 2nd → 1st downshift only. */
     val secondToFirstDownshiftRpm: Double = DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM,
@@ -52,7 +52,7 @@ data class EngineTuning(
     val throttleCurve: List<CurvePoint> = DEFAULT_THROTTLE_CURVE,
 ) {
     fun sanitized(): EngineTuning {
-        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, FmodCarProfiles.maximumSupportedRpm)
+        val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.maximumSupportedRpm)
         val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 100.0)
         val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm)
         val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
@@ -107,7 +107,7 @@ data class EngineTuning(
     companion object {
         const val DEFAULT_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
         const val DEFAULT_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM = 6_400.0
-        val DEFAULT_GEARS = FmodCarProfiles.default.gearRatios
+        val DEFAULT_GEARS = EngineSampleProfiles.default.gearRatios
         val DEFAULT_FRONT_WHEEL_TORQUE_CURVE = listOf(
             CurvePoint(0.000, 1.000),
             CurvePoint(0.156, 0.989),
@@ -149,9 +149,24 @@ data class EngineTuning(
 
 data class AudioTuning(
     val masterGain: Double = 0.72,
+    /** Smooths dashboard RPM changes before they move the audio sample positions. */
+    val rpmSmoothingMs: Double = 16.0,
+    /** Smooths throttle changes before they alter the sample-bank load blend. */
+    val throttleSmoothingMs: Double = 10.0,
+    /** Smooths the main program level and load-dependent output level. */
+    val programFadeMs: Double = 8.0,
+    /** Smooths enable/disable so starting or stopping playback never clicks. */
+    val enabledFadeMs: Double = 10.0,
+    /** Smooths individual loop-layer gain changes and crossfades. */
+    val layerFadeMs: Double = 12.0,
 ) {
     fun sanitized(): AudioTuning = copy(
         masterGain = masterGain.coerceIn(0.0, 1.20),
+        rpmSmoothingMs = rpmSmoothingMs.coerceIn(1.0, 300.0),
+        throttleSmoothingMs = throttleSmoothingMs.coerceIn(1.0, 300.0),
+        programFadeMs = programFadeMs.coerceIn(1.0, 300.0),
+        enabledFadeMs = enabledFadeMs.coerceIn(1.0, 500.0),
+        layerFadeMs = layerFadeMs.coerceIn(1.0, 300.0),
     )
 }
 
@@ -166,7 +181,7 @@ data class TuningConfig(
     }
 }
 
-internal fun TuningConfig.withFmodProfile(profile: FmodCarProfile): TuningConfig = copy(
+internal fun TuningConfig.withSampleProfile(profile: EngineSampleProfile): TuningConfig = copy(
     engine = engine.copy(
         idleRpm = profile.idleRpm,
         maxRpm = profile.maximumRpm,
@@ -238,6 +253,11 @@ class TuningRepository(context: Context) {
         val engine = if (currentCalibration) storedEngine else defaults.engine
         val audio = defaults.audio.copy(
             masterGain = number(KEY_MASTER_GAIN, defaults.audio.masterGain),
+            rpmSmoothingMs = number(KEY_AUDIO_RPM_SMOOTHING, defaults.audio.rpmSmoothingMs),
+            throttleSmoothingMs = number(KEY_AUDIO_THROTTLE_SMOOTHING, defaults.audio.throttleSmoothingMs),
+            programFadeMs = number(KEY_AUDIO_PROGRAM_FADE, defaults.audio.programFadeMs),
+            enabledFadeMs = number(KEY_AUDIO_ENABLED_FADE, defaults.audio.enabledFadeMs),
+            layerFadeMs = number(KEY_AUDIO_LAYER_FADE, defaults.audio.layerFadeMs),
         )
         if (!currentCalibration) {
             preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).apply()
@@ -286,6 +306,11 @@ class TuningRepository(context: Context) {
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
             .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
             .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
+            .putString(KEY_AUDIO_RPM_SMOOTHING, clean.audio.rpmSmoothingMs.toString())
+            .putString(KEY_AUDIO_THROTTLE_SMOOTHING, clean.audio.throttleSmoothingMs.toString())
+            .putString(KEY_AUDIO_PROGRAM_FADE, clean.audio.programFadeMs.toString())
+            .putString(KEY_AUDIO_ENABLED_FADE, clean.audio.enabledFadeMs.toString())
+            .putString(KEY_AUDIO_LAYER_FADE, clean.audio.layerFadeMs.toString())
             .apply()
     }
 
@@ -335,6 +360,11 @@ class TuningRepository(context: Context) {
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
         const val KEY_THROTTLE_CURVE = "throttle_curve"
         const val KEY_MASTER_GAIN = "master_gain"
+        const val KEY_AUDIO_RPM_SMOOTHING = "audio_rpm_smoothing"
+        const val KEY_AUDIO_THROTTLE_SMOOTHING = "audio_throttle_smoothing"
+        const val KEY_AUDIO_PROGRAM_FADE = "audio_program_fade"
+        const val KEY_AUDIO_ENABLED_FADE = "audio_enabled_fade"
+        const val KEY_AUDIO_LAYER_FADE = "audio_layer_fade"
     }
 }
 

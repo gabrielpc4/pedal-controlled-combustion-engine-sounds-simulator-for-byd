@@ -3,17 +3,9 @@ package com.gabrielpc.enginesoundsimulator.drive
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfiles
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarSelectionRepository
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.abs
 
 /**
  * Exercises the real controller worker with direct inputs rather than slow UI gestures.
@@ -21,120 +13,10 @@ import kotlin.math.abs
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
     @Test
-    fun switchingToSupraAtDeferredCompletionWaitsForTheSupraBank() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val selectionRepository = FmodCarSelectionRepository(context)
-        val previousProfile = selectionRepository.load()
-        selectionRepository.save(FmodCarProfiles.skylineR34)
-        val initialBankObserved = CountDownLatch(1)
-        val allowDeferredCompletion = CountDownLatch(1)
-        val interceptInitialBankOnce = AtomicBoolean(true)
-        val controller = DriveController(context) { loadedProfileId ->
-            if (
-                loadedProfileId == FmodCarProfiles.skylineR34.id &&
-                interceptInitialBankOnce.compareAndSet(true, false)
-            ) {
-                initialBankObserved.countDown()
-                allowDeferredCompletion.await(10L, TimeUnit.SECONDS)
-            }
-        }
-        try {
-            controller.setUiActive(true)
-            controller.setInputMode(InputMode.SimulatedPedals)
-            controller.start()
-
-            assertTrue(
-                "Skyline bank never reached the deferred-completion boundary",
-                initialBankObserved.await(12L, TimeUnit.SECONDS),
-            )
-            assertTrue(controller.selectCar(FmodCarProfiles.toyotaSupraMk4.id))
-            assertEquals(FmodCarProfiles.toyotaSupraMk4.id, controller.snapshot().selectedCarId)
-            assertFalse("Supra must not inherit Skyline readiness", controller.snapshot().carAudioReady)
-            assertFalse("ignition started before the selected bank was ready", controller.snapshot().engineSoundEnabled)
-
-            allowDeferredCompletion.countDown()
-            var ignitionBeforeSupraReady = false
-            assertTrue(
-                "Supra did not preload and begin its deferred authored ignition",
-                waitUntil(timeoutMs = 12_000L) {
-                    val snapshot = controller.snapshot()
-                    if (!snapshot.carAudioReady && snapshot.engineSoundEnabled) {
-                        ignitionBeforeSupraReady = true
-                    }
-                    snapshot.carAudioReady && snapshot.engineSoundEnabled && !snapshot.engineStartLoading
-                },
-            )
-            assertFalse(
-                "the stale Skyline completion consumed first-start state before Supra was ready",
-                ignitionBeforeSupraReady,
-            )
-
-            var peakRpm = controller.snapshot().drivetrain.rpm
-            val ignitionDeadline = SystemClock.elapsedRealtime() + 2_300L
-            while (SystemClock.elapsedRealtime() < ignitionDeadline) {
-                peakRpm = maxOf(peakRpm, controller.snapshot().drivetrain.rpm)
-                SystemClock.sleep(10L)
-            }
-            assertTrue(
-                "Supra's authored ignition RPM trace did not fire after its own bank became ready; peak=$peakRpm",
-                peakRpm >= 4_500.0,
-            )
-        } finally {
-            allowDeferredCompletion.countDown()
-            controller.stop()
-            selectionRepository.save(previousProfile)
-        }
-    }
-
-    @Test
-    fun firstSupraSessionPlaysEmbeddedIgnitionOnlyAfterItsBankIsReady() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val selectionRepository = FmodCarSelectionRepository(context)
-        val previousProfile = selectionRepository.load()
-        selectionRepository.save(FmodCarProfiles.toyotaSupraMk4)
-        val controller = DriveController(context)
-        try {
-            controller.setUiActive(true)
-            controller.setInputMode(InputMode.SimulatedPedals)
-            controller.start()
-
-            assertTrue(
-                "Supra bank did not finish preloading before the deferred start",
-                waitUntil(timeoutMs = 12_000L) {
-                    val snapshot = controller.snapshot()
-                    snapshot.carAudioReady && snapshot.engineSoundEnabled && !snapshot.engineStartLoading
-                },
-            )
-
-            var peakRpm = controller.snapshot().drivetrain.rpm
-            val ignitionDeadline = SystemClock.elapsedRealtime() + 2_300L
-            while (SystemClock.elapsedRealtime() < ignitionDeadline) {
-                peakRpm = maxOf(peakRpm, controller.snapshot().drivetrain.rpm)
-                SystemClock.sleep(10L)
-            }
-
-            assertTrue(
-                "deferred Supra start skipped its embedded ignition RPM trace; peak=$peakRpm",
-                peakRpm >= 4_500.0,
-            )
-            assertTrue(
-                "Supra ignition did not settle at the selected profile idle",
-                waitUntil(timeoutMs = 1_000L) {
-                    abs(controller.snapshot().drivetrain.rpm - FmodCarProfiles.toyotaSupraMk4.idleRpm) <= 25.0
-                },
-            )
-        } finally {
-            controller.stop()
-            selectionRepository.save(previousProfile)
-        }
-    }
-
-    @Test
     fun scriptedLaunchAndLiftOffStaySpeedCoupled() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val controller = DriveController(context)
         try {
-            controller.setUiActive(true)
             controller.setInputMode(InputMode.SimulatedPedals)
             controller.start()
             assertTrue(
