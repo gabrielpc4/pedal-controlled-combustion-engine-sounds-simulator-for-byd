@@ -217,7 +217,9 @@ internal data class SampleLayerSpec(
         val effectiveThrottle = when {
             !loadOnlyProgram || role == SampleLayerRole.IDLE -> throttle
             primaryLayerSource == PrimaryEngineLayerSource.LOAD -> 1.0
-            else -> 0.0
+            primaryLayerSource == PrimaryEngineLayerSource.COAST -> 0.0
+            primaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX -> throttle
+            else -> throttle
         }
         val throttleGainContribution = throttleGainDb?.valueAt(effectiveThrottle) ?: 0.0
         var rpmGainDb = 0.0
@@ -266,7 +268,8 @@ internal data class EngineSampleProfile(
     }
 
     fun resolvedPrimaryLayerSource(source: PrimaryEngineLayerSource): PrimaryEngineLayerSource {
-        return if (source == PrimaryEngineLayerSource.COAST && supportsLoadOnlyProgram && layers.any { it.role == SampleLayerRole.COAST }) {
+        val hasCoastLayers = layers.any { it.role == SampleLayerRole.COAST }
+        return if (source != PrimaryEngineLayerSource.LOAD && supportsLoadOnlyProgram && hasCoastLayers) {
             source
         } else {
             PrimaryEngineLayerSource.LOAD
@@ -292,6 +295,7 @@ internal data class EngineSampleProfile(
         return when (resolvedPrimaryLayerSource(source)) {
             PrimaryEngineLayerSource.LOAD -> loopLayersForLoad(loadOnlyProgram = true)
             PrimaryEngineLayerSource.COAST -> layers.filter { it.role != SampleLayerRole.LOAD }
+            PrimaryEngineLayerSource.FMOD_MIX -> layers
         }
     }
 

@@ -2,10 +2,11 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
 
-/** Chooses which recorded continuous engine family supplies the driving character. */
+/** Chooses the continuous engine WAV program. */
 enum class PrimaryEngineLayerSource(val displayName: String) {
     LOAD("LOAD"),
     COAST("COAST"),
+    FMOD_MIX("FMOD MIX"),
 }
 
 internal class PrimaryEngineLayerSourceRepository(context: Context) {

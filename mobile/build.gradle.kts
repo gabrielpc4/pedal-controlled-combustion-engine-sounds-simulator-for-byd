@@ -73,7 +73,16 @@ val localEngineProfiles = listOf(
     LocalEngineProfileAssets(
         assetDirectory = "lamborghini_aventador_sv",
         sourceDirectory = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted"),
-        assetNames = listOf("s006.wav", "s013.wav", "s039.wav", "s046.wav", "s048.wav", "s062.wav", "s063.wav", "s082.wav", "s098.wav", "s117.wav", "s118.wav", "s119.wav", "s127.wav", "s133.wav", "s138.wav", "s147.wav", "fx_transmission.wav", "fx_shift.wav"),
+        assetNames = listOf(
+            "aventadorintidle.wav",
+            "aventadorintaccf2825.wav", "aventadorintaccf3685.wav",
+            "aventadorintacc5250.wav", "aventadorintacc5600.wav", "aventadorintacc6000.wav",
+            "aventadorintacc6501.wav", "aventadorintacc7103.wav", "aventadorintacc7592.wav",
+            "aventadorintacc8294.wav",
+            "aventadorintoff3165.wav", "aventadorintoff4309.wav", "aventadorintoff5853.wav",
+            "aventadorintoff6300.wav", "aventadorintoff7200.wav", "aventadorintoff8373.wav",
+            "transmission.wav", "GEAR_CHANGING_CABIN.wav",
+        ),
         previewSource = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/preview1.jpg"),
         previewAssetName = "lamborghini_aventador_sv.jpg",
     ),

@@ -207,7 +207,7 @@ private fun PrimaryLayerSourceSelector(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "ENGINE SOURCE",
+            text = "ENGINE PROGRAM",
             color = Muted,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
@@ -229,7 +229,7 @@ private fun PrimaryLayerSourceSelector(
             )
         }
         Text(
-            text = "SWAPS THE CONTINUOUS ENGINE WAV FAMILY",
+            text = "SELECTS LOAD, COAST, OR THEIR AUTHORED THROTTLE MIX",
             color = Muted,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,

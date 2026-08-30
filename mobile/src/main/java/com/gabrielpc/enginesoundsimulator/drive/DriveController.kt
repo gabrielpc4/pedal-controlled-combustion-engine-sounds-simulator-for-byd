@@ -914,7 +914,8 @@ private fun buildLayerMixTracks(
                 outputLevel = outputLevels.firstOrNull { it.id == trackId }?.outputLevel ?: 0.0,
                 isEffect = false,
                 showVolumeSlider = if (profile.appliesLoadOnlyProgram(loadOnlyProgram)) {
-                    layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD
+                    primaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX ||
+                        (layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD)
                 } else {
                     true
                 },

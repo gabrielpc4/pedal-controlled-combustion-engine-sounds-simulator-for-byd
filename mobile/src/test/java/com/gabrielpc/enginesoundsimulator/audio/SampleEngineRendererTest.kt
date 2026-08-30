@@ -122,10 +122,14 @@ class SampleEngineRendererTest {
     @Test
     fun coastCanReplaceLoadAsThePrimaryContinuousSourceWhenTheProfileProvidesIt() {
         val coastSource = profile.loopLayersForPrimarySource(PrimaryEngineLayerSource.COAST)
+        val fmodMix = profile.loopLayersForPrimarySource(PrimaryEngineLayerSource.FMOD_MIX)
 
         assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST))
         assertTrue(coastSource.any { it.role == SampleLayerRole.COAST })
         assertTrue(coastSource.none { it.role == SampleLayerRole.LOAD })
+        assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.FMOD_MIX))
+        assertTrue(fmodMix.any { it.role == SampleLayerRole.LOAD })
+        assertTrue(fmodMix.any { it.role == SampleLayerRole.COAST })
         assertTrue(
             coastSource
                 .filter { it.role == SampleLayerRole.COAST }
@@ -140,9 +144,14 @@ class SampleEngineRendererTest {
         )
         val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
         assertFalse(skyline.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST))
+        assertFalse(skyline.supportsPrimaryLayerSource(PrimaryEngineLayerSource.FMOD_MIX))
         assertEquals(
             PrimaryEngineLayerSource.LOAD,
             skyline.resolvedPrimaryLayerSource(PrimaryEngineLayerSource.COAST),
+        )
+        assertEquals(
+            PrimaryEngineLayerSource.LOAD,
+            skyline.resolvedPrimaryLayerSource(PrimaryEngineLayerSource.FMOD_MIX),
         )
     }
 

@@ -635,7 +635,7 @@ private fun DashboardHeader(
                 StatusTag("MANUAL", CyanSoft)
             }
             if (state.loadOnlyProgram) {
-                StatusTag("${state.primaryLayerSource.displayName} SOURCE", CyanSoft)
+                StatusTag("${state.primaryLayerSource.displayName} PROGRAM", CyanSoft)
             }
         }
 
