@@ -64,6 +64,8 @@ intentionally ignored.
   how to make safe changes.
 - [Vehicle integration and assets](vehicle-integration-and-assets.md) records the BYD API
   evidence, testing discipline, and local sample-asset contract.
+- [WAV engine calibration recipe](wav-engine-calibration-recipe.md) provides the reproducible
+  process for building and listening-tuning any car profile.
 
 If a future change would invalidate an invariant in these documents, update the relevant document
 in the same change. Do not recreate historical per-feature notes; point to the code and tests
