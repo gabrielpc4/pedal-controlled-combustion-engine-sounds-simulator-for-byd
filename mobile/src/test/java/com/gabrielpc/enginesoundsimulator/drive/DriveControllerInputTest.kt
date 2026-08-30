@@ -73,6 +73,26 @@ class DriveControllerInputTest {
     }
 
     @Test
+    fun vehicleThrottleAtNinetyNinePercentCountsAsFullThrottle() {
+        val telemetry = TelemetrySnapshot(
+            readerState = ReaderState.ACTIVE,
+            accelerator = SignalValue(raw = 99.0, value = 99.0),
+            brake = SignalValue(raw = 0.0, value = 0.0),
+        )
+
+        val result = resolveDriveInput(
+            mode = InputMode.RealPedals,
+            telemetry = telemetry,
+            simulatedPedalThrottle = 0.0,
+            simulatedPedalBrake = 0.0,
+        )
+
+        assertEquals(1.0, result.throttle, 0.0)
+        assertEquals(1.0, normalizeVehicleThrottlePercent(100.0), 0.0)
+        assertEquals(0.98, normalizeVehicleThrottlePercent(98.0), 0.0)
+    }
+
+    @Test
     fun simulatedPedalsModeIgnoresOtherwiseValidVehiclePedals() {
         val telemetry = TelemetrySnapshot(
             readerState = ReaderState.ACTIVE,

@@ -40,6 +40,13 @@ data class EngineProfile(
     val rearWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_REAR_WHEEL_TORQUE_CURVE,
     /** X is pedal position; Y is requested motor torque. */
     val throttleCurve: List<CurvePoint> = EngineTuning.DEFAULT_THROTTLE_CURVE,
+    /** Crankshaft-only calibration used while Park or Neutral disconnects the sound engine. */
+    val freeRevCalibration: FreeRevCalibration = FreeRevCalibration.forEngine(
+        name = name,
+        idleRpm = idleRpm,
+        limiterRpm = limiterRpm,
+        maxTorqueNm = maxTorqueNm,
+    ),
     val throttleAttackSeconds: Double = 0.120,
     val throttleReleaseSeconds: Double = 0.090,
     val brakeResponseSeconds: Double = 0.055,
@@ -101,6 +108,8 @@ data class DrivetrainState(
     val gear: Int,
     val speedKmh: Double,
     val smoothedThrottle: Double,
+    /** Direct pedal value used by P/N audio, independent of EV torque smoothing. */
+    val audioThrottle: Double,
     val smoothedBrake: Double,
     val engineLoad: Double,
     val isShifting: Boolean,
@@ -124,6 +133,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var ignitionElapsedSeconds = 0.0
     private var shutdownElapsedSeconds = 0.0
     private var engineRpm = 0.0
+    /** P/N-only crank inertia; road-coupled RPM never uses this state. */
+    private var freeRevDynamics = FreeRevEngineDynamics(profile.freeRevCalibration)
+    private var freeRevLimiterPulse = false
+    private var freeRevAudioThrottle = 0.0
     private var vehicleSpeedMps = 0.0
     private var simulatedPhysicalSpeedMps = 0.0
     private var rawExternalSpeedKmh = 0.0
@@ -181,6 +194,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionElapsedSeconds = 0.0
         shutdownElapsedSeconds = 0.0
         engineRpm = 0.0
+        freeRevDynamics.reset()
+        freeRevLimiterPulse = false
+        freeRevAudioThrottle = 0.0
         limiterLatched = false
         shiftSerial = 0L
         ignitionShiftCueDirection = ShiftDirection.NONE
@@ -194,6 +210,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionElapsedSeconds = 0.0
         shutdownElapsedSeconds = 0.0
         engineRpm = profile.idleRpm
+        freeRevDynamics.reset()
+        freeRevLimiterPulse = false
+        freeRevAudioThrottle = 0.0
         limiterLatched = false
         resetLaunchControl()
     }
@@ -269,6 +288,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     fun updateProfile(updated: EngineProfile) {
         profile = updated
+        freeRevDynamics.updateCalibration(updated.freeRevCalibration)
+        freeRevLimiterPulse = false
+        freeRevAudioThrottle = 0.0
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size) {
             downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
@@ -288,6 +310,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionElapsedSeconds = 0.0
         shutdownElapsedSeconds = 0.0
         engineRpm = 0.0
+        freeRevDynamics.reset()
+        freeRevLimiterPulse = false
+        freeRevAudioThrottle = 0.0
         vehicleSpeedMps = 0.0
         simulatedPhysicalSpeedMps = 0.0
         rawExternalSpeedKmh = 0.0
@@ -360,8 +385,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
         advanceIgnition(dt)
         if (ignitionState == EngineIgnitionState.RUNNING) {
-            updateSampleRpm(dt, input.transmissionPosition)
-            updateLimiterLatch()
+            updateSampleRpm(dt, input.transmissionPosition, rawThrottle)
+            updateLimiterLatch(input.transmissionPosition)
         }
         if (activeShift == null && input.transmissionPosition == TransmissionPosition.DRIVE &&
             ignitionState == EngineIgnitionState.RUNNING
@@ -542,48 +567,66 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         secondsSinceShift = 0.0
     }
 
-    private fun updateSampleRpm(dt: Double, transmissionPosition: TransmissionPosition) {
+    private fun updateSampleRpm(
+        dt: Double,
+        transmissionPosition: TransmissionPosition,
+        rawThrottle: Double,
+    ) {
         if (launchControlPhase != LaunchControlPhase.INACTIVE && transmissionPosition == TransmissionPosition.DRIVE) {
             updateLaunchControlRpm(dt)
             return
         }
 
-        val target = when (transmissionPosition) {
-            TransmissionPosition.DRIVE -> {
-                val shift = activeShift
-                when {
-                    shift?.gearChanged == true -> {
-                        rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
-                    }
-                    shift?.direction == ShiftDirection.UP -> {
-                        val cap = if (manualShiftEnabled) {
-                            profile.limiterRpm
-                        } else {
-                            upshiftTriggerRpm(currentGearIndex)
-                        }
-                        min(rpmForSpeed(currentGearIndex), cap)
-                    }
-                    shift?.direction == ShiftDirection.DOWN -> {
-                        rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
-                    }
-                    else -> rpmForSpeed(currentGearIndex)
-                }
+        if (transmissionPosition != TransmissionPosition.DRIVE) {
+            updateFreeRevRpm(dt, rawThrottle)
+            return
+        }
+
+        freeRevLimiterPulse = false
+        freeRevAudioThrottle = filteredThrottle
+        val shift = activeShift
+        val target = when {
+            shift?.gearChanged == true -> {
+                rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
             }
-            TransmissionPosition.NEUTRAL, TransmissionPosition.PARK -> freeRevRpmTarget()
+            shift?.direction == ShiftDirection.UP -> {
+                val cap = if (manualShiftEnabled) {
+                    profile.limiterRpm
+                } else {
+                    upshiftTriggerRpm(currentGearIndex)
+                }
+                min(rpmForSpeed(currentGearIndex), cap)
+            }
+            shift?.direction == ShiftDirection.DOWN -> {
+                rpmForSpeed(shift.targetGearIndex).coerceAtMost(profile.limiterRpm)
+            }
+            else -> rpmForSpeed(currentGearIndex)
         }
         val response = when {
-            transmissionPosition != TransmissionPosition.DRIVE && target >= engineRpm -> NEUTRAL_REV_UP_RESPONSE_SECONDS
-            transmissionPosition != TransmissionPosition.DRIVE -> NEUTRAL_REV_DOWN_RESPONSE_SECONDS
             activeShift?.gearChanged == true -> (activeShift!!.durationSeconds * 0.30).coerceAtLeast(0.018)
             else -> profile.syntheticRpmResponseSeconds
         }
         engineRpm = approachExp(engineRpm, target, response, dt).coerceIn(profile.idleRpm, profile.limiterRpm)
     }
 
-    /** Throttle-driven revs independent of road speed, like a combustion engine in neutral. */
-    private fun freeRevRpmTarget(): Double {
-        val revSpan = profile.redlineRpm - profile.idleRpm
-        return profile.idleRpm + filteredThrottle.coerceIn(0.0, 1.0) * revSpan
+    /** P/N runs its own 3 ms crankshaft integration so it matches the Audio Lab control cadence. */
+    private fun updateFreeRevRpm(dt: Double, rawThrottle: Double) {
+        var remainingSeconds = dt
+        freeRevAudioThrottle = rawThrottle.coerceIn(0.0, 1.0)
+        freeRevLimiterPulse = false
+        while (remainingSeconds > 0.0) {
+            val stepSeconds = min(FREE_REV_STEP_SECONDS, remainingSeconds)
+            val frame = freeRevDynamics.step(
+                rpm = engineRpm,
+                rawThrottle = freeRevAudioThrottle,
+                idleRpm = profile.idleRpm,
+                limiterRpm = profile.limiterRpm,
+                dt = stepSeconds,
+            )
+            engineRpm = frame.rpm
+            freeRevLimiterPulse = freeRevLimiterPulse || frame.limiterActive
+            remainingSeconds -= stepSeconds
+        }
     }
 
     private fun chooseManualIdleProtection() {
@@ -635,8 +678,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             val demandDownshift = filteredThrottle > 0.78 &&
                 speedKmh < previousUpshift - KICKDOWN_SPEED_MARGIN_KMH
             val shouldDownshift = if (currentGearIndex == 1) {
-                // 2nd → 1st only: ignore the equal-band speed boundary and downshift at a fixed RPM.
-                rpmForSpeed(currentGearIndex) <= profile.secondToFirstDownshiftRpm || demandDownshift
+                speedKmh <= firstToSecondDownshiftSpeedKmh(previousUpshift) || demandDownshift
             } else {
                 val hysteresisKmh = downshiftHysteresisKmhByGear[currentGearIndex]
                 val downshiftSpeed = (previousUpshift - hysteresisKmh.toDouble()).coerceAtLeast(2.0)
@@ -650,6 +692,22 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
     private fun upshiftSpeedKmh(gearIndex: Int): Double {
         return evenlySpacedUpshiftSpeedKmh(profile, gearIndex)
+    }
+
+    /**
+     * Keep 2nd engaged across the point where 1st selected it.
+     *
+     * The configured 4,000 RPM point still applies whenever it is lower, but it must never
+     * overlap the real 1st → 2nd upshift speed — especially when the speed signal is quantized.
+     */
+    private fun firstToSecondDownshiftSpeedKmh(previousUpshiftKmh: Double): Double {
+        val configuredRpmSpeed = speedKmhForCoupledRpm(
+            profile,
+            gearIndex = 1,
+            targetRpm = profile.secondToFirstDownshiftRpm,
+        )
+        val stableSpeed = previousUpshiftKmh - FIRST_TO_SECOND_DOWNSHIFT_HYSTERESIS_KMH
+        return min(configuredRpmSpeed, stableSpeed).coerceAtLeast(2.0)
     }
 
     /**
@@ -706,7 +764,11 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
     }
 
-    private fun updateLimiterLatch() {
+    private fun updateLimiterLatch(transmissionPosition: TransmissionPosition) {
+        if (transmissionPosition != TransmissionPosition.DRIVE) {
+            limiterLatched = freeRevLimiterPulse
+            return
+        }
         if (activeShift?.direction == ShiftDirection.UP) {
             limiterLatched = false
             return
@@ -923,6 +985,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             gear = currentGearIndex + 1,
             speedKmh = vehicleSpeedMps * 3.6,
             smoothedThrottle = filteredThrottle,
+            audioThrottle = freeRevAudioThrottle,
             smoothedBrake = filteredBrake,
             engineLoad = (filteredThrottle * (0.35 + 0.65 * wheelTorqueFraction)).coerceIn(0.0, 1.0),
             isShifting = shift != null,
@@ -948,11 +1011,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         /** Shift this many RPM before each car's configured upshift point so the run-up stays off the limiter layer. */
         internal const val UPSHIFT_EARLY_MARGIN_RPM = 80.0
         private const val KICKDOWN_SPEED_MARGIN_KMH = 10.0
+        /** Separate the 2nd → 1st boundary from the speed where 1st selected 2nd. */
+        private const val FIRST_TO_SECOND_DOWNSHIFT_HYSTERESIS_KMH = 4.0
         internal const val DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH = 4
-        /** Neutral/Park rev-up: engine inertia spooling with no wheel load. */
-        private const val NEUTRAL_REV_UP_RESPONSE_SECONDS = 0.55
-        /** Neutral/Park rev-down: coasting back toward idle after lift-off. */
-        private const val NEUTRAL_REV_DOWN_RESPONSE_SECONDS = 0.90
+        private const val FREE_REV_STEP_SECONDS = 0.003
         private const val SHUTDOWN_RPM_DECAY_SECONDS = 0.58
         private const val SHUTDOWN_RPM_EPSILON = 12.0
         private const val SHUTDOWN_SPEED_EPSILON_MPS = 0.12

@@ -49,6 +49,8 @@ internal class SampleEngineRenderer private constructor(
     private var effectTriggers = 0L
     private var lastShiftSerial: Long? = null
     private var throttleLiftArmed = false
+    private var throttleLiftAwaitingTurboDump = false
+    private var throttleLiftDelayRemainingSeconds = 0.0
     private val turboSpool = TurboSpoolModel()
     private var anyLayerSolo = false
     private var lastRequestedRpm = profile.idleRpm
@@ -166,7 +168,12 @@ internal class SampleEngineRenderer private constructor(
         anyLayerSolo = target.layerMix.values.any { control -> control.solo && !control.muted }
         val loadProgram = profile.appliesLoadOnlyProgram(target.loadOnlyProgram)
         val primaryLayerSource = profile.resolvedPrimaryLayerSource(target.primaryLayerSource)
-        turboSpool.update(blockSeconds, smoothedRpm, smoothedThrottle)
+        turboSpool.update(
+            blockSeconds,
+            smoothedRpm,
+            smoothedThrottle,
+            target.turboSpoolAttackMultiplier,
+        )
         updateVoiceTargets(
             smoothedRpm,
             smoothedThrottle,
@@ -175,7 +182,7 @@ internal class SampleEngineRenderer private constructor(
             primaryLayerSource,
             target.loadOnlyProgram,
         )
-        updateEffectTargetsAndTriggers(target, target.layerMix)
+        updateEffectTargetsAndTriggers(target, target.layerMix, blockSeconds)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
         val targetProfileOutputGain = if (loadProgram) {
             profile.outputGainAt(1.0)
@@ -336,7 +343,11 @@ internal class SampleEngineRenderer private constructor(
     private fun isProgramAudible(target: EngineAudioFrame): Boolean =
         target.enabled && enabledGain > SILENCE_GAIN && masterGain > SILENCE_GAIN
 
-    private fun updateEffectTargetsAndTriggers(target: EngineAudioFrame, layerMix: Map<String, LayerMixControl>) {
+    private fun updateEffectTargetsAndTriggers(
+        target: EngineAudioFrame,
+        layerMix: Map<String, LayerMixControl>,
+        blockSeconds: Double,
+    ) {
         val normalizedRpm = ((smoothedRpm - profile.idleRpm) / (profile.limiterRpm - profile.idleRpm))
             .coerceIn(0.0, 1.0)
 
@@ -361,13 +372,8 @@ internal class SampleEngineRenderer private constructor(
             triggerShiftOneShots(trigger, smoothedRpm, layerMix, target)
         }
 
-        if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) throttleLiftArmed = true
-        if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
-            throttleLiftArmed = false
-            triggerThrottleLiftOneShots(smoothedRpm, layerMix, target)
-        }
-
-        if (turboSpool.consumeDumpPulse()) {
+        val turboDumped = turboSpool.consumeDumpPulse()
+        if (turboDumped) {
             effectVoices.forEach { voice ->
                 if (voice.spec.trigger == SampleEffectTrigger.TURBO_FLUTTER) {
                     voice.restartAtLoop()
@@ -381,11 +387,41 @@ internal class SampleEngineRenderer private constructor(
             )
         }
 
+        if (target.throttleLiftEffectsEnabled) {
+            if (target.throttle >= THROTTLE_LIFT_ARM_LEVEL) {
+                throttleLiftArmed = true
+                throttleLiftAwaitingTurboDump = false
+                throttleLiftDelayRemainingSeconds = 0.0
+            } else if (throttleLiftArmed && target.throttle <= THROTTLE_LIFT_FIRE_LEVEL) {
+                throttleLiftArmed = false
+                // The exhaust event belongs to an actual charged-turbo vent, not merely a pedal release.
+                throttleLiftAwaitingTurboDump = true
+            }
+
+            if (throttleLiftAwaitingTurboDump && turboDumped) {
+                throttleLiftAwaitingTurboDump = false
+                throttleLiftDelayRemainingSeconds = THROTTLE_LIFT_EFFECT_DELAY_SECONDS
+            }
+
+            if (throttleLiftDelayRemainingSeconds > 0.0) {
+                throttleLiftDelayRemainingSeconds -= blockSeconds
+                if (throttleLiftDelayRemainingSeconds <= 0.0) {
+                    throttleLiftDelayRemainingSeconds = 0.0
+                    triggerThrottleLiftOneShots(smoothedRpm, layerMix, target)
+                }
+            }
+        } else {
+            throttleLiftArmed = false
+            throttleLiftAwaitingTurboDump = false
+            stopThrottleLiftOneShots()
+        }
+
         var effectIndex = 0
         while (effectIndex < effectVoices.size) {
             val voice = effectVoices[effectIndex]
             val authoredGain = when {
-                voice.spec.isNativeExhaustOverrun() && target.popsAndBangsEnabled -> 0.0
+                voice.spec.isNativeExhaustOverrun() &&
+                    (!target.throttleLiftEffectsEnabled || target.popsAndBangsEnabled) -> 0.0
                 voice.spec.isNativeGearChange() && target.sharedShiftSoundsEnabled -> 0.0
                 voice.spec.trigger == SampleEffectTrigger.TRANSMISSION_LOOP -> {
                     voice.baseGain * (0.12 + normalizedRpm * 0.88) * (0.55 + smoothedThrottle * 0.45)
@@ -420,7 +456,11 @@ internal class SampleEngineRenderer private constructor(
             effectIndex += 1
         }
         popsAndBangsVoice?.let { voice ->
-            val authoredGain = if (target.popsAndBangsEnabled && voice.isOneShotActive) {
+            val authoredGain = if (
+                target.throttleLiftEffectsEnabled &&
+                    target.popsAndBangsEnabled &&
+                    voice.isOneShotActive
+            ) {
                 voice.baseGain * target.popsAndBangsGain.coerceIn(
                     EngineAudioFrame.MIN_EFFECT_GAIN,
                     EngineAudioFrame.MAX_EFFECT_GAIN,
@@ -510,6 +550,17 @@ internal class SampleEngineRenderer private constructor(
         return effectVoices.any { voice ->
             voice.spec.trigger == SampleEffectTrigger.THROTTLE_LIFT && voice.isOneShotActive
         }
+    }
+
+    private fun stopThrottleLiftOneShots() {
+        throttleLiftAwaitingTurboDump = false
+        throttleLiftDelayRemainingSeconds = 0.0
+        effectVoices.forEach { voice ->
+            if (voice.spec.trigger == SampleEffectTrigger.THROTTLE_LIFT) {
+                voice.stop()
+            }
+        }
+        popsAndBangsVoice?.stop()
     }
 
     private fun triggerShiftOneShots(
@@ -738,6 +789,16 @@ internal class SampleEngineRenderer private constructor(
             return true
         }
 
+        fun stop() {
+            if (spec.trigger.isContinuousLoop()) {
+                return
+            }
+
+            active = false
+            gain = 0.0
+            targetGain = 0.0
+        }
+
         private fun pickVariantSample(): PcmLoopData {
             if (sampleVariants.size == 1) {
                 lastVariantIndex = 0
@@ -914,6 +975,8 @@ internal class SampleEngineRenderer private constructor(
         private const val SILENCE_GAIN = 0.00001
         private const val THROTTLE_LIFT_ARM_LEVEL = 0.35
         private const val THROTTLE_LIFT_FIRE_LEVEL = 0.08
+        /** Lets the turbo dump lead a lift-off exhaust event without feeling detached from the release. */
+        private const val THROTTLE_LIFT_EFFECT_DELAY_SECONDS = 0.18
     }
 }
 

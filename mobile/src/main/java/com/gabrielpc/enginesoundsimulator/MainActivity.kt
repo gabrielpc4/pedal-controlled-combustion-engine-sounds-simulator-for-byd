@@ -1405,18 +1405,22 @@ internal fun PedalControl(
             .border((2f * contentScale).dp, if (value > 0.01) accent else Color(0xFF60717D), RoundedCornerShape((16f * contentScale).dp))
             .pointerInput(onValue) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    fun updateAt(y: Float) {
-                        onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
+                    try {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        fun updateAt(y: Float) {
+                            onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
+                        }
+                        updateAt(down.position.y)
+                        var pointer = down
+                        do {
+                            val event = awaitPointerEvent()
+                            pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                            updateAt(pointer.position.y)
+                            pointer.consume()
+                        } while (pointer.pressed)
+                    } finally {
+                        onValue(0.0)
                     }
-                    updateAt(down.position.y)
-                    var pointer = down
-                    do {
-                        val event = awaitPointerEvent()
-                        pointer = event.changes.firstOrNull { it.id == down.id } ?: break
-                        updateAt(pointer.position.y)
-                        pointer.consume()
-                    } while (pointer.pressed)
                 }
             },
     ) {

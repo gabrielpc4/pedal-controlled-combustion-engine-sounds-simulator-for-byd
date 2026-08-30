@@ -382,8 +382,44 @@ class SampleEngineRendererTest {
 
         renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5, popsAndBangsEnabled = true), output, gain = 0.7)
         renderer.render(frame, output, gain = 0.7)
+        repeat(10) {
+            renderer.render(frame, output, gain = 0.7)
+        }
+        assertEquals(0L, renderer.diagnostics().effectTriggers)
+
+        repeat(20) {
+            renderer.render(frame.copy(throttle = 1.0), output, gain = 0.7)
+        }
+        renderer.render(frame, output, gain = 0.7)
+        assertEquals(0L, renderer.diagnostics().effectTriggers)
+        repeat(9) {
+            renderer.render(frame, output, gain = 0.7)
+        }
         assertEquals(1L, renderer.diagnostics().effectTriggers)
         assertTrue(renderer.diagnostics().activeEffects.contains(SharedPopsAndBangs.EFFECT_ID))
+    }
+
+    @Test
+    fun freeRevDoesNotTriggerSharedPopsOrNativeExhaustOverrun() {
+        val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
+        val decoded = aventador.requiredAssets.associateWith { asset ->
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        } + SharedPopsAndBangs.assetNames.associateWith {
+            shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
+        }
+        val renderer = SampleEngineRenderer.fromDecoded(48_000, decoded, aventador)
+        val output = ShortArray(1_920)
+        val freeRevFrame = EngineAudioFrame(
+            rpm = 4_000.0,
+            popsAndBangsEnabled = true,
+            throttleLiftEffectsEnabled = false,
+        )
+
+        renderer.render(freeRevFrame.copy(throttle = 0.5), output, gain = 0.7)
+        renderer.render(freeRevFrame.copy(throttle = 0.0), output, gain = 0.7)
+
+        assertEquals(0L, renderer.diagnostics().effectTriggers)
+        assertFalse(renderer.diagnostics().activeEffects.contains(SharedPopsAndBangs.EFFECT_ID))
     }
 
     @Test
@@ -461,7 +497,7 @@ class SampleEngineRendererTest {
     }
 
     @Test
-    fun throttleLiftOverrunDoesNotRetriggerWhileSampleIsStillPlaying() {
+    fun throttleLiftOverrunWaitsForTheTurboDumpThenDoesNotRetriggerWhilePlaying() {
         val aventador = EngineSampleProfiles.find("lamborghini_aventador_sv_cabin")
         val decoded = aventador.requiredAssets.associateWith { asset ->
             shortLoopSample(frameCount = 48_000, sampleRate = 48_000)
@@ -472,8 +508,14 @@ class SampleEngineRendererTest {
         val output = ShortArray(1_920)
         val enabled = EngineAudioFrame(rpm = 4_000.0, popsAndBangsEnabled = true)
 
-        renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5, popsAndBangsEnabled = true), output, gain = 0.7)
+        repeat(20) {
+            renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 1.0, popsAndBangsEnabled = true), output, gain = 0.7)
+        }
         renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.0, popsAndBangsEnabled = true), output, gain = 0.7)
+        assertEquals(0L, renderer.diagnostics().effectTriggers)
+        repeat(9) {
+            renderer.render(enabled.copy(throttle = 0.0), output, gain = 0.7)
+        }
         assertEquals(1L, renderer.diagnostics().effectTriggers)
 
         renderer.render(EngineAudioFrame(rpm = 4_000.0, throttle = 0.5, popsAndBangsEnabled = true), output, gain = 0.7)

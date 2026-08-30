@@ -725,6 +725,7 @@ class DriveController(context: Context) {
         )
         val audioEnabled = simulation.ignition == EngineIgnitionState.STOPPING ||
             simulation.isEngineAudioAudible()
+        val freeRev = transmissionControl.position != TransmissionPosition.DRIVE
         val startupThrottle = if (simulation.ignition == EngineIgnitionState.STARTING) {
             (drivetrain.rpm / profile.redlineRpm.coerceAtLeast(1.0)).coerceIn(0.0, 1.0) * 0.9
         } else {
@@ -733,7 +734,11 @@ class DriveController(context: Context) {
         audioEngine.update(
             EngineAudioFrame(
                 rpm = drivetrain.rpm,
-                throttle = startupThrottle,
+                throttle = if (transmissionControl.position == TransmissionPosition.DRIVE) {
+                    startupThrottle
+                } else {
+                    drivetrain.audioThrottle
+                },
                 enabled = audioEnabled,
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
@@ -748,6 +753,12 @@ class DriveController(context: Context) {
                 primaryLayerSource = primaryLayerSource.get(),
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
                 popsAndBangsGain = popsAndBangsGain.get(),
+                throttleLiftEffectsEnabled = !freeRev,
+                turboSpoolAttackMultiplier = if (freeRev) {
+                    FREE_REV_TURBO_ATTACK_MULTIPLIER
+                } else {
+                    1.0
+                },
                 sharedShiftSoundsEnabled = sharedShiftSoundsEnabled.get(),
                 sharedShiftSoundsGain = sharedShiftSoundsGain.get(),
             ),
@@ -872,6 +883,7 @@ class DriveController(context: Context) {
         const val INTERRUPTION_RESUME_VOLUME = 0.25
         const val AUDIO_RESTART_COOLDOWN_MS = 2_000L
         const val AUTO_START_THROTTLE_THRESHOLD = 0.10
+        const val FREE_REV_TURBO_ATTACK_MULTIPLIER = 10.0
     }
 }
 
@@ -995,7 +1007,7 @@ internal fun resolveDriveInput(
 
     if (vehicleAvailable && mode == InputMode.RealPedals) {
         return ResolvedDriveInput(
-            throttle = (telemetry.accelerator.value!! / 100.0).coerceIn(0.0, 1.0),
+            throttle = normalizeVehicleThrottlePercent(telemetry.accelerator.value!!),
             brake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0),
             externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid },
             label = InputMode.RealPedals.displayName,
@@ -1011,6 +1023,20 @@ internal fun resolveDriveInput(
         usesSimulatedPedals = true,
     )
 }
+
+/**
+ * The vehicle reports a calibrated pedal range ending at 99%, so preserve its full-pedal intent
+ * for launch control and every other full-throttle rule.
+ */
+internal fun normalizeVehicleThrottlePercent(percent: Double): Double {
+    return if (percent >= VEHICLE_FULL_THROTTLE_PERCENT) {
+        1.0
+    } else {
+        (percent / 100.0).coerceIn(0.0, 1.0)
+    }
+}
+
+private const val VEHICLE_FULL_THROTTLE_PERCENT = 99.0
 
 internal data class InputSourceUiState(
     val primaryLabel: String,

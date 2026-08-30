@@ -20,6 +20,10 @@ data class EngineAudioFrame(
     val popsAndBangsEnabled: Boolean = false,
     /** Linear multiplier applied on top of the shared pops sample gain (default 2×). */
     val popsAndBangsGain: Double = DEFAULT_POPS_AND_BANGS_GAIN,
+    /** False in Park/Neutral so exhaust overrun and shared pops cannot fire on a free rev. */
+    val throttleLiftEffectsEnabled: Boolean = true,
+    /** Multiplier for turbo response when the pedal is pressed; Drive uses the authored 1× rate. */
+    val turboSpoolAttackMultiplier: Double = 1.0,
     /** When true, play Huracán shift one-shots on every car and mute native shift effects. */
     val sharedShiftSoundsEnabled: Boolean = false,
     /** Linear multiplier applied on top of the shared shift sample gain (default 3×). */

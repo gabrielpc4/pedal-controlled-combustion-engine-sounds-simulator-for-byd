@@ -1,14 +1,13 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-import kotlin.math.exp
 import kotlin.math.max
 
 /**
  * Reconstructs the Assetto Corsa Skyline turbo parameters:
  * [boost] feeds the continuous whistle, [bovDecay] feeds compressor flutter.
  *
- * The bank exposes those two event parameters. Twin ceramic turbos on the RB26
- * spool early and dump quickly on lift, which is what this model does.
+ * The bank exposes those two event parameters. Its boost follows the same
+ * direct LAG_UP/LAG_DN integrator used by the Audio Lab's Skyline engine path.
  */
 internal class TurboSpoolModel {
     var boost = 0.0
@@ -33,24 +32,29 @@ internal class TurboSpoolModel {
         return fire
     }
 
-    fun update(dt: Double, rpm: Double, throttle: Double) {
+    fun update(
+        dt: Double,
+        rpm: Double,
+        throttle: Double,
+        attackMultiplier: Double = 1.0,
+    ) {
         val clampedDt = dt.coerceIn(1.0 / 1_000.0, 0.080)
         val pedal = throttle.coerceIn(0.0, 1.0)
-        val target = pedal * spoolByRpm(rpm)
+        val target = (pedal * rpm.coerceAtLeast(0.0) / REFERENCE_RPM).coerceIn(0.0, 1.0)
         val drop = previousThrottle - pedal
-        val dumping = drop >= LIFT_DROP && boost >= BOV_ARM_BOOST
+        val dumping = drop >= LIFT_DROP && boost * (1.0 - pedal) > DUMP_CHARGE_THRESHOLD
 
         if (dumping) {
             pendingDump = true
             bovDecay = max(bovDecay, (boost * 0.62).coerceIn(0.28, 0.55))
         }
 
-        val responseSeconds = when {
-            target >= boost -> SPOOL_ATTACK_SECONDS
-            pedal <= DUMP_THROTTLE -> BOOST_DUMP_SECONDS
-            else -> BOOST_RELEASE_SECONDS
+        val lag = if (target > boost) {
+            LAG_UP * attackMultiplier.coerceIn(MINIMUM_ATTACK_MULTIPLIER, MAXIMUM_ATTACK_MULTIPLIER)
+        } else {
+            LAG_DOWN
         }
-        boost = approach(boost, target, responseSeconds, clampedDt)
+        boost += (clampedDt * lag).coerceIn(0.0, 1.0) * (target - boost)
         bovDecay = (bovDecay - clampedDt / BOV_DECAY_SECONDS).coerceAtLeast(0.0)
         previousThrottle = pedal
     }
@@ -82,38 +86,20 @@ internal class TurboSpoolModel {
     }
 
     companion object {
-        const val SPOOL_START_RPM = 1_450.0
-        const val SPOOL_FULL_RPM = 2_850.0
-        const val SPOOL_ATTACK_SECONDS = 0.28
-        const val BOOST_RELEASE_SECONDS = 0.42
-        const val BOOST_DUMP_SECONDS = 0.10
+        const val REFERENCE_RPM = 5_000.0
+        const val LAG_UP = 0.98
+        const val LAG_DOWN = 0.98
         const val BOV_DECAY_SECONDS = 0.85
         const val LIFT_DROP = 0.20
-        const val BOV_ARM_BOOST = 0.18
-        const val DUMP_THROTTLE = 0.14
+        /**
+         * Minimum charged boost required to vent on a real throttle lift.
+         *
+         * This is deliberately much lower than the fully-spooled boost level: short, useful pulls
+         * should still vent, while a brush of the accelerator must not produce a dump or overrun.
+         */
+        const val DUMP_CHARGE_THRESHOLD = 0.18
         const val WHISTLE_FLOOR = 0.06
-
-        internal fun spoolByRpm(rpm: Double): Double {
-            if (rpm <= SPOOL_START_RPM) {
-                return 0.0
-            }
-
-            if (rpm >= SPOOL_FULL_RPM) {
-                val fade = if (rpm > 7_400.0) {
-                    ((8_200.0 - rpm) / 800.0).coerceIn(0.45, 1.0)
-                } else {
-                    1.0
-                }
-                return fade
-            }
-
-            val fraction = (rpm - SPOOL_START_RPM) / (SPOOL_FULL_RPM - SPOOL_START_RPM)
-            return fraction * fraction * (3.0 - 2.0 * fraction)
-        }
-
-        private fun approach(current: Double, target: Double, responseSeconds: Double, dt: Double): Double {
-            val alpha = 1.0 - exp(-dt / responseSeconds.coerceAtLeast(0.008))
-            return current + (target - current) * alpha
-        }
+        const val MINIMUM_ATTACK_MULTIPLIER = 0.25
+        const val MAXIMUM_ATTACK_MULTIPLIER = 16.0
     }
 }
