@@ -96,6 +96,25 @@ class SampleEngineRendererTest {
     }
 
     @Test
+    fun skylineLiftRetainsTheInteriorLoadCharacter() {
+        val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        val rpm = 7_200.0
+        val acceleratingLoad = skyline.layers
+            .filter { it.role == SampleLayerRole.LOAD }
+            .sumOf { it.gainAt(rpm, throttle = 1.0, loadOnlyProgram = false) }
+        val liftingLoad = skyline.layers
+            .filter { it.role == SampleLayerRole.LOAD }
+            .sumOf { it.gainAt(rpm, throttle = 0.0, loadOnlyProgram = false) }
+        val liftingCoast = skyline.layers
+            .filter { it.role == SampleLayerRole.COAST }
+            .sumOf { it.gainAt(rpm, throttle = 0.0, loadOnlyProgram = false) }
+
+        assertTrue(liftingLoad >= acceleratingLoad * 0.60)
+        assertTrue(liftingCoast > 0.1)
+        assertTrue(liftingCoast <= liftingLoad * 1.25)
+    }
+
+    @Test
     fun profileContainsRecoveredContinuousEngineEvent() {
         assertEquals(24, profile.layers.size)
         assertEquals(27, profile.requiredAssets.size)

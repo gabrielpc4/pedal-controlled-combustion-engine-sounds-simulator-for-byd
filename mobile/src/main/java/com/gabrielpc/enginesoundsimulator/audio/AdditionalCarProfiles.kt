@@ -106,20 +106,21 @@ internal fun nissanSkylineR34Profile() = EngineSampleProfile(
 )
 
 /**
- * The Skyline is reconstructed from its exact `engine_int` graph rather than the generic
- * nearest-RPM-band approximation. Multiple authored sources intentionally overlap.
+ * The Skyline preserves the recovered `engine_int` topology rather than using the generic
+ * nearest-RPM-band approximation. Its lift blend keeps the interior engine character present,
+ * while the exterior coast layers provide the descending feel.
  */
 private fun skylineFmodEngineLayers(): List<SampleLayerSpec> {
     val interiorLoadThrottle = fmodCurve(
-        CurvePoint(0.20, -10.0, shape = -0.5943323),
+        CurvePoint(0.20, -8.0, shape = -0.5943323),
         CurvePoint(0.70, -8.0),
     )
     val interiorAccentThrottle = fmodCurve(
-        CurvePoint(0.20, -31.826088, shape = -0.5943323),
+        CurvePoint(0.20, -10.0, shape = -0.5943323),
         CurvePoint(0.70, -6.0),
     )
     val exteriorCoastThrottle = fmodCurve(
-        CurvePoint(0.10, -6.0, shape = 0.5893333),
+        CurvePoint(0.10, -10.0, shape = 0.5893333),
         CurvePoint(0.44, -37.47826, shape = 0.15823701),
     )
     val exteriorIdleThrottle = fmodCurve(
