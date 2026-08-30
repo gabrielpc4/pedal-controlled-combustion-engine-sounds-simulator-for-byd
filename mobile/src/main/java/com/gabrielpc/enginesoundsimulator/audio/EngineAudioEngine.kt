@@ -11,6 +11,7 @@ import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.LockSupport
 import kotlin.math.max
 
 enum class AudioFocusEvent {
@@ -233,10 +234,6 @@ class EngineAudioEngine(context: Context) {
             }
             if (!isCurrent(runId)) return
 
-            // Queue one silent stereo burst before play() so first-use routing does not underrun.
-            val primingBuffer = ShortArray(active.framesPerWrite * STEREO_CHANNEL_COUNT)
-            if (!writeFully(active.track, primingBuffer, runId)) return
-            if (!isCurrent(runId)) return
             active.track.play()
             if (active.track.playState != AudioTrack.PLAYSTATE_PLAYING) {
                 throw IllegalStateException("AudioTrack did not enter PLAYING state")
@@ -354,14 +351,26 @@ class EngineAudioEngine(context: Context) {
 
     private fun writeFully(track: AudioTrack, samples: ShortArray, runId: Long): Boolean {
         var offset = 0
+        var consecutiveEmptyWrites = 0
         while (offset < samples.size && isCurrent(runId)) {
             val written = track.write(
                 samples,
                 offset,
                 samples.size - offset,
-                AudioTrack.WRITE_BLOCKING,
+                AudioTrack.WRITE_NON_BLOCKING,
             )
-            if (written <= 0) throw IllegalStateException("AudioTrack.write returned $written")
+            if (written < 0) throw IllegalStateException("AudioTrack.write returned $written")
+            if (written == 0) {
+                consecutiveEmptyWrites += 1
+                if (consecutiveEmptyWrites >= MAX_CONSECUTIVE_EMPTY_WRITES) {
+                    throw IllegalStateException("AudioTrack.write made no progress")
+                }
+                // Some vehicle routes reject a full write transiently even after play(). Avoid
+                // blocking the renderer forever; wait briefly for the output buffer to drain.
+                LockSupport.parkNanos(EMPTY_WRITE_RETRY_NANOS)
+                continue
+            }
+            consecutiveEmptyWrites = 0
             offset += written
         }
         return offset == samples.size
@@ -428,6 +437,8 @@ class EngineAudioEngine(context: Context) {
         const val METER_PUBLISH_WRITE_INTERVAL = 3
         const val UNDERRUN_CHECK_WRITE_INTERVAL = 12
         const val STEREO_CHANNEL_COUNT = 2
+        const val EMPTY_WRITE_RETRY_NANOS = 1_000_000L
+        const val MAX_CONSECUTIVE_EMPTY_WRITES = 2_000
     }
 }
 
