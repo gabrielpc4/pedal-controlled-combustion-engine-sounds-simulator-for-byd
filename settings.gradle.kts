@@ -24,5 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "BYD Motor Sound"
 include(":mobile")
+include(":audio-pack-contract")
+include(":audio-installer")
 include(":automotive")
 include(":shared")

@@ -7,7 +7,7 @@ internal class RealtimeLayerMeterBus(private val trackIds: List<String>) {
     @Volatile
     private var sequence = 0
 
-    fun publish(renderer: SampleEngineRenderer, target: EngineAudioFrame) {
+    fun publish(renderer: EngineProgramRenderer, target: EngineAudioFrame) {
         sequence += 1
         renderer.writeLayerOutputLevels(target, levels)
         sequence += 1

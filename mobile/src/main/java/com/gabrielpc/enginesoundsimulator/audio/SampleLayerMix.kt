@@ -62,13 +62,25 @@ internal fun SampleLayerSpec.mixerDisplayName(): String {
 internal fun SampleEffectSpec.mixerDisplayName(): String = playingRoleLabel()
 
 internal fun SampleEffectTrigger.mixerSortGroup(): Int = when (this) {
+    SampleEffectTrigger.PARAMETER_PLACEMENT_ENTRY,
+    SampleEffectTrigger.ENGINE_EVENT_START,
+    SampleEffectTrigger.ENGINE_START,
+    -> 5
     SampleEffectTrigger.TRANSMISSION_LOOP -> 5
-    SampleEffectTrigger.TURBO_LOOP -> 6
-    SampleEffectTrigger.TURBO_FLUTTER -> 7
-    SampleEffectTrigger.TURBO_DUMP -> 8
-    SampleEffectTrigger.SHIFT_UP -> 9
-    SampleEffectTrigger.SHIFT_DOWN -> 10
-    SampleEffectTrigger.THROTTLE_LIFT -> 11
+    SampleEffectTrigger.TRANSMISSION_PULSE -> 6
+    SampleEffectTrigger.TURBO_LOOP -> 7
+    SampleEffectTrigger.TURBO_FLUTTER -> 8
+    SampleEffectTrigger.TURBO_DUMP -> 9
+    SampleEffectTrigger.LIMITER_LOOP,
+    SampleEffectTrigger.LIMITER_PULSE,
+    -> 10
+    SampleEffectTrigger.TRACTION_LIMIT,
+    SampleEffectTrigger.TRACTION_PULSE,
+    -> 11
+    SampleEffectTrigger.SHIFT_UP -> 12
+    SampleEffectTrigger.SHIFT_DOWN -> 13
+    SampleEffectTrigger.SHIFT_REJECTED -> 14
+    SampleEffectTrigger.THROTTLE_LIFT -> 15
 }
 
 internal fun EngineSampleProfile.mixerTrackOrder(

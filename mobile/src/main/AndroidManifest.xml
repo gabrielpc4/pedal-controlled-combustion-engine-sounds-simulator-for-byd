@@ -9,6 +9,10 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
+    <permission
+        android:name="com.gabrielpc.enginesoundsimulator.permission.INSTALL_AUDIO_PACK"
+        android:protectionLevel="signature" />
+
     <application
         android:name=".EngineSoundsApplication"
         android:allowBackup="true"
@@ -39,6 +43,14 @@
         <service
             android:name=".EngineRuntimeService"
             android:exported="false" />
+        <service
+            android:name=".audio.AudioPackInstallService"
+            android:exported="true"
+            android:permission="com.gabrielpc.enginesoundsimulator.permission.INSTALL_AUDIO_PACK">
+            <intent-filter>
+                <action android:name="com.gabrielpc.enginesoundsimulator.action.INSTALL_AUDIO_PACK" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -7,6 +7,7 @@ import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
+import com.gabrielpc.enginesoundsimulator.audio.EngineAudioPackRequirement
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioFocusEvent
 import com.gabrielpc.enginesoundsimulator.audio.CarEffectGainRepository
@@ -22,10 +23,11 @@ import com.gabrielpc.enginesoundsimulator.audio.LayerOutputMeter
 import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
 import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSourceRepository
 import com.gabrielpc.enginesoundsimulator.audio.ProgramLayerGains
-import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
-import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
 import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
+import com.gabrielpc.enginesoundsimulator.audio.isIncludedIn
+import com.gabrielpc.enginesoundsimulator.audio.mixerDisplayName
+import com.gabrielpc.enginesoundsimulator.audio.mixerTrackOrder
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
@@ -721,6 +723,26 @@ class DriveController(context: Context) {
         }
     }
 
+    /** Retries the selected program after its exact external audio pack finishes installing. */
+    internal fun retrySelectedCarAudioAfterPackInstall(installedPack: EngineAudioPackRequirement? = null) {
+        synchronized(lifecycleLock) {
+            val selectedPack = selectedSampleProfile.get().audioPackRequirement
+            if (installedPack != null && selectedPack != installedPack) {
+                return
+            }
+            if (isSelectedCarAudioLoaded()) return
+
+            userVisibleMessage = null
+            when {
+                simulation.isEngineEngagedForUi() -> ensureAudioEngineRunning(force = true)
+                sessionFirstStartPending.get() -> {
+                    engineStartLoading.set(true)
+                    requestEngineStart(fromStartStopButton = false)
+                }
+            }
+        }
+    }
+
     fun toggleSound() {
         synchronized(lifecycleLock) {
             if (isDeferringFirstSessionEngineStart()) {
@@ -840,7 +862,7 @@ class DriveController(context: Context) {
             return
         }
 
-        if (audioEngine.isAudioActive()) {
+        if (audioEngine.isAudioActive() && (!force || isSelectedCarAudioLoaded())) {
             return
         }
 
@@ -850,8 +872,14 @@ class DriveController(context: Context) {
         }
 
         synchronized(lifecycleLock) {
-            if (!running.get() || audioEngine.isAudioActive()) {
+            if (!running.get()) {
                 return
+            }
+            if (audioEngine.isAudioActive()) {
+                if (!force || isSelectedCarAudioLoaded()) return
+                // A renderer that began before a missing pack finished installing must be
+                // replaced even though its thread has not published a loaded profile yet.
+                audioEngine.stop()
             }
 
             lastAudioStartAttemptMs.set(now)
@@ -977,12 +1005,17 @@ class DriveController(context: Context) {
                 throttle = audioThrottle,
                 enabled = audioEnabled,
                 shiftSerial = drivetrain.shiftSerial,
+                shiftRejectedSerial = drivetrain.shiftRejectedSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
                     ShiftDirection.UP -> 1
                     ShiftDirection.DOWN -> -1
                     ShiftDirection.NONE -> 0
                 },
                 isShifting = drivetrain.isShifting,
+                presentationSpeedMetersPerSecond = drivetrain.presentationSpeedKmh / 3.6,
+                limiterActive = drivetrain.limiterActive,
+                tractionLimitActive = drivetrain.tractionLimitActive,
+                engineStarting = simulation.ignition == EngineIgnitionState.STARTING,
                 tuning = effectiveAudioTuning(tuning, simulation.ignitionAudioGain()),
                 layerMix = layerMixControls.get(),
                 programLayerGains = programLayerGains.get(),
@@ -1163,17 +1196,15 @@ private fun buildLayerMixTracks(
     perspective: EngineSoundPerspective,
 ): List<LayerMixTrackState> {
     val program = profile.program(perspective)
+    val resolvedPrimaryLayerSource = profile.resolvedPrimaryLayerSource(primaryLayerSource, perspective)
     return profile.mixerTrackOrder(perspective).mapNotNull { (trackId, sortGroup) ->
         val control = controls[trackId] ?: LayerMixControl.DEFAULT
         val layer = program.layers.firstOrNull { it.id == trackId }
         val effect = program.effects.firstOrNull { it.id == trackId }
         when {
             profile.appliesLoadOnlyProgram(loadOnlyProgram, perspective) &&
-                primaryLayerSource == PrimaryEngineLayerSource.LOAD &&
-                layer?.role == SampleLayerRole.COAST -> null
-            profile.appliesLoadOnlyProgram(loadOnlyProgram, perspective) &&
-                primaryLayerSource == PrimaryEngineLayerSource.COAST &&
-                layer?.role == SampleLayerRole.LOAD -> null
+                layer != null &&
+                !layer.role.isIncludedIn(resolvedPrimaryLayerSource) -> null
             layer != null -> LayerMixTrackState(
                 id = trackId,
                 displayName = layer.mixerDisplayName(),
@@ -1184,7 +1215,7 @@ private fun buildLayerMixTracks(
                 outputLevel = outputLevels.firstOrNull { it.id == trackId }?.outputLevel ?: 0.0,
                 isEffect = false,
                 showVolumeSlider = if (profile.appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
-                    primaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX ||
+                    resolvedPrimaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX ||
                         (layer.role != SampleLayerRole.COAST && layer.role != SampleLayerRole.LOAD)
                 } else {
                     true
@@ -1232,6 +1263,9 @@ private fun TuningConfig.toEngineProfile(sampleProfile: com.gabrielpc.enginesoun
         syntheticRpmResponseSeconds = engine.syntheticRpmResponseMs / 1_000.0,
         externalSpeedSmoothingSeconds = engine.externalSpeedSmoothingMs / 1_000.0,
         gearRatios = engine.gearRatios.toDoubleArray(),
+        soundFinalDriveRatio = sampleProfile.soundFinalDriveRatio,
+        soundDrivenWheelRadiusMeters = sampleProfile.soundDrivenWheelRadiusMeters,
+        usesLegacyEvenSpeedBandGearing = sampleProfile.usesLegacyEvenSpeedBandGearing,
         frontWheelTorqueCurve = engine.frontWheelTorqueCurve,
         rearWheelTorqueCurve = engine.rearWheelTorqueCurve,
         throttleCurve = engine.throttleCurve,

@@ -25,6 +25,7 @@ enum class AudioFocusEvent {
 class EngineAudioEngine(context: Context) {
     private val appContext = context.applicationContext
     private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val audioAssetResolver = EngineAudioAssetResolver(appContext)
     private val lifecycleLock = Any()
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
@@ -33,6 +34,8 @@ class EngineAudioEngine(context: Context) {
     private val soundPerspective = AtomicReference(EngineSoundPerspective.CABIN)
     private val primaryLayerSource = AtomicReference(PrimaryEngineLayerSource.LOAD)
     private val loadedSampleProfileId = AtomicReference<String?>(null)
+    private val atlasSessionEffects = AtomicReference<AtlasAudioSessionEffects?>(null)
+    private val atlasProfileAudioSessionGeneration = AtomicLong(0L)
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
@@ -117,20 +120,32 @@ class EngineAudioEngine(context: Context) {
         synchronized(lifecycleLock) {
             val resolvedPerspective = profile.resolvedPerspective(perspective)
             val resolvedSource = profile.resolvedPrimaryLayerSource(source, resolvedPerspective)
-            val changed = selectedProfile.getAndSet(profile).id != profile.id ||
-                soundPerspective.getAndSet(resolvedPerspective) != resolvedPerspective ||
-                primaryLayerSource.getAndSet(resolvedSource) != resolvedSource
-            if (!changed) return
+            val previousProfile = selectedProfile.getAndSet(profile)
+            val profileChanged = previousProfile.id != profile.id
+            val perspectiveChanged = soundPerspective.getAndSet(resolvedPerspective) != resolvedPerspective
+            val sourceChanged = primaryLayerSource.getAndSet(resolvedSource) != resolvedSource
+            if (!profileChanged && !perspectiveChanged && !sourceChanged) return
+            if (profile.isAtlasProfile && !profileChanged) {
+                parameters.updateAndGet { frame -> frame.copy(primaryLayerSource = resolvedSource) }
+                if (!perspectiveChanged) return
+            }
             loadedSampleProfileId.set(null)
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
-            if (shouldRestart && stopLocked()) startLocked()
+            val preserveAtlasSession = profile.isAtlasProfile && !profileChanged && perspectiveChanged
+            if (shouldRestart && stopLocked(preserveAtlasSession)) startLocked()
         }
     }
 
     internal fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
         synchronized(lifecycleLock) {
-            val resolved = selectedProfile.get().resolvedPrimaryLayerSource(source, soundPerspective.get())
+            val profile = selectedProfile.get()
+            val resolved = profile.resolvedPrimaryLayerSource(source, soundPerspective.get())
             if (primaryLayerSource.getAndSet(resolved) == resolved) return
+            if (profile.isAtlasProfile) {
+                parameters.updateAndGet { frame -> frame.copy(primaryLayerSource = resolved) }
+
+                return
+            }
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
             if (shouldRestart && stopLocked()) startLocked()
         }
@@ -181,7 +196,7 @@ class EngineAudioEngine(context: Context) {
     }
 
     /** Must be called with [lifecycleLock] held. */
-    private fun stopLocked(): Boolean {
+    private fun stopLocked(preserveAtlasSession: Boolean = false): Boolean {
         running.set(false)
         generation.incrementAndGet()
 
@@ -211,6 +226,7 @@ class EngineAudioEngine(context: Context) {
         focusMultiplier.set(0.0)
         layerMeterBus = null
         loadedSampleProfileId.set(null)
+        if (stopped && !preserveAtlasSession) closeAtlasSessionEffects()
         abandonFocusIfHeld()
         return stopped
     }
@@ -222,29 +238,61 @@ class EngineAudioEngine(context: Context) {
         source: PrimaryEngineLayerSource,
     ) {
         var opened: OpenedTrack? = null
+        var programRenderer: EngineProgramRenderer? = null
 
         try {
+            val playbackProfile = try {
+                EngineSampleProfiles.resolveForPlayback(sampleProfile)
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "Failed to load ${sampleProfile.id} atlas runtime", throwable)
+                reportLoadFailure(sampleProfile.id, formatLoadFailureDetail(throwable))
+                return
+            }
             // Profiles normally match their authored rate. Huracan is rendered app-side to the
             // BYD route's native 48 kHz so its 44.1 kHz bank never enters the vendor resampler.
-            val sampleRate = sampleProfile.playbackSampleRate
-            val sampleRenderer = try {
-                SampleEngineRenderer.load(
-                    appContext.assets,
-                    sampleRate,
-                    sampleProfile,
-                    perspective = perspective,
-                    loadOnlyProgram = true,
-                    primaryLayerSource = source,
-                )
+            val sampleRate = playbackProfile.playbackSampleRate
+            val renderer = try {
+                if (playbackProfile.isAtlasProfile) {
+                    val atlas = requireNotNull(playbackProfile.atlasProgram)
+                    val existing = atlasSessionEffects.get()
+                    val sessionEffects = if (existing?.state?.atlasFamilyId == atlas.id) {
+                        existing
+                    } else {
+                        check(existing == null) { "A different atlas profile session is still active" }
+                        AtlasAudioSessionEffects.create(
+                            profile = playbackProfile,
+                            fileResolver = audioAssetResolver.atlasFilesFor(playbackProfile),
+                            sharedEffectsSource = audioAssetResolver.sharedEffectsSource(),
+                            profileAudioSessionGeneration = nextAtlasProfileAudioSessionGeneration(),
+                        ).also(atlasSessionEffects::set)
+                    }
+                    val effectsView = sessionEffects.selectPerspective(perspective)
+                    FullEventAtlasRenderer.load(
+                        profile = playbackProfile,
+                        perspective = perspective,
+                        fileResolver = audioAssetResolver.atlasFilesFor(playbackProfile),
+                        effectsView = effectsView,
+                        initialSource = source,
+                    )
+                } else {
+                    SampleEngineRenderer.load(
+                        audioAssetResolver.sourceFor(playbackProfile),
+                        sampleRate,
+                        playbackProfile,
+                        perspective = perspective,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = source,
+                    )
+                }
             } catch (throwable: Throwable) {
                 Log.e(TAG, "Failed to decode ${sampleProfile.id} sample bank", throwable)
                 reportLoadFailure(sampleProfile.id, formatLoadFailureDetail(throwable))
                 return
             }
-            // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
-            // loading and JIT work cannot starve the newly opened output buffer.
-            val warmup = ShortArray(512)
-            repeat(3) { sampleRenderer.render(parameters.get(), warmup, gain = 0.0) }
+            programRenderer = renderer
+            // Setup must not render: semantic placement membership and finite events begin on the
+            // first audible frame, not during a hidden zero-gain warmup.
+            renderer.prepare()
             if (!isCurrent(runId)) return
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             val active = openTrack(sampleRate)
@@ -277,15 +325,15 @@ class EngineAudioEngine(context: Context) {
             } else {
                 active.capacityFrames
             }
-            val meterBus = RealtimeLayerMeterBus(sampleRenderer.meterTrackIds)
+            val meterBus = RealtimeLayerMeterBus(renderer.meterTrackIds)
             layerMeterBus = meterBus
             while (isCurrent(runId)) {
                 val frame = parameters.get()
-                sampleRenderer.render(frame, stereoProgram, focusMultiplier.get())
+                renderer.render(frame, stereoProgram, focusMultiplier.get())
                 if (!writeFully(track, stereoProgram, runId)) break
                 writes += 1
                 if (writes % METER_PUBLISH_WRITE_INTERVAL == 0) {
-                    meterBus.publish(sampleRenderer, frame)
+                    meterBus.publish(renderer, frame)
                 }
                 if (writes % UNDERRUN_CHECK_WRITE_INTERVAL == 0) {
                     val currentUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0
@@ -309,6 +357,7 @@ class EngineAudioEngine(context: Context) {
             }
         } finally {
             loadedSampleProfileId.set(null)
+            runCatching { programRenderer?.close() }
             opened?.track?.let { track ->
                 activeTrack.compareAndSet(track, null)
                 releaseTrack(track)
@@ -318,9 +367,21 @@ class EngineAudioEngine(context: Context) {
                 running.set(false)
                 focusMultiplier.set(0.0)
                 layerMeterBus = null
+                closeAtlasSessionEffects()
                 abandonFocusIfHeld()
             }
         }
+    }
+
+    private fun nextAtlasProfileAudioSessionGeneration(): Long =
+        atlasProfileAudioSessionGeneration.updateAndGet { generation ->
+            check(generation < Long.MAX_VALUE) { "Atlas profile audio session generation overflow" }
+            generation + 1L
+        }
+
+    private fun closeAtlasSessionEffects() {
+        runCatching { atlasSessionEffects.getAndSet(null)?.close() }
+            .onFailure { error -> Log.e(TAG, "Failed to close atlas profile audio session", error) }
     }
 
     private fun isCurrent(runId: Long): Boolean = running.get() && generation.get() == runId

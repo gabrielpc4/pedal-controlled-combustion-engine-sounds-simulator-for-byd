@@ -56,7 +56,7 @@ data class EngineTuning(
         val cleanMaxRpm = maxRpm.coerceIn(6_000.0, EngineSampleProfiles.maximumSupportedRpm)
         val cleanRedline = redlineRpm.coerceIn(4_000.0, cleanMaxRpm - 100.0)
         val cleanLimiter = limiterRpm.coerceIn(cleanRedline, cleanMaxRpm)
-        val cleanIdle = idleRpm.coerceIn(600.0, min(2_000.0, cleanRedline - 2_000.0))
+        val cleanIdle = idleRpm.coerceIn(500.0, min(5_000.0, cleanRedline - 500.0))
         val cleanUpshift = upshiftRpm.coerceIn(cleanIdle + 1_000.0, cleanRedline)
         return copy(
             idleRpm = cleanIdle,
@@ -82,8 +82,8 @@ data class EngineTuning(
             externalSpeedSmoothingMs = externalSpeedSmoothingMs.coerceIn(60.0, 500.0),
             throttleAttackMs = throttleAttackMs.coerceIn(15.0, 500.0),
             throttleReleaseMs = throttleReleaseMs.coerceIn(20.0, 800.0),
-            upshiftDurationMs = upshiftDurationMs.coerceIn(40.0, 900.0),
-            downshiftDurationMs = downshiftDurationMs.coerceIn(60.0, 1_000.0),
+            upshiftDurationMs = upshiftDurationMs.coerceIn(20.0, 900.0),
+            downshiftDurationMs = downshiftDurationMs.coerceIn(20.0, 1_000.0),
             shiftDwellMs = shiftDwellMs.coerceIn(100.0, 1_500.0),
             secondToFirstDownshiftRpm = secondToFirstDownshiftRpm.coerceIn(cleanIdle + 200.0, cleanUpshift),
             firstToSecondPartialThrottleUpshiftRpm = firstToSecondPartialThrottleUpshiftRpm.coerceIn(
@@ -383,11 +383,11 @@ internal fun interpolateCurve(points: List<CurvePoint>, input: Double): Double {
 }
 
 private fun sanitizeGears(values: List<Double>): List<Double> {
-    val source = if (values.size in 3..10) values else EngineTuning.DEFAULT_GEARS
+    val source = if (values.size in 2..10) values else EngineTuning.DEFAULT_GEARS
     val output = mutableListOf<Double>()
     source.forEachIndexed { index, raw ->
-        val upper = if (index == 0) 5.0 else output.last() - 0.05
-        output += raw.coerceIn(0.45, upper.coerceAtLeast(0.50))
+        val upper = if (index == 0) 12.0 else output.last() - 0.001
+        output += raw.coerceIn(0.10, upper.coerceAtLeast(0.101))
     }
     return output
 }

@@ -1,0 +1,25 @@
+{
+  "schema": "byd-full-event-playlist-selection-v3-golden",
+  "atlasFamilyId": "atlas_fixture",
+  "eventPath": "event:/cars/test/turbo",
+  "profileAudioSessionGeneration": 1,
+  "groupId": "multi:fixture",
+  "expectedSeedUnsigned": "14859776930294766760",
+  "members": [
+    {"authoredOrder": 0, "weight": 1.0, "triggerChancePercent": 100.0},
+    {"authoredOrder": 1, "weight": 2.0, "triggerChancePercent": 100.0},
+    {"authoredOrder": 2, "weight": 3.0, "triggerChancePercent": 100.0}
+  ],
+  "smartRandom": [
+    {"selectedOrder": 2, "accepted": true, "drawsUnsignedDecimal": ["6350076856783810810", "16746602941404377047", "12174883222022973748"]},
+    {"selectedOrder": 1, "accepted": true, "drawsUnsignedDecimal": ["12350016907929127283", "7896185083772648107", "17995091674691417663"]},
+    {"selectedOrder": 2, "accepted": true, "drawsUnsignedDecimal": ["13370193162588422964", "8423165948757168756", "9694014742562427328"]},
+    {"selectedOrder": 0, "accepted": true, "drawsUnsignedDecimal": ["3967986976618732205", "3229155842969262392", "8661842631051302629"]}
+  ],
+  "playSequential": [
+    {"selectedOrder": 0, "accepted": true, "sequentialCursor": 1, "drawsUnsignedDecimal": ["6350076856783810810", "16746602941404377047"]},
+    {"selectedOrder": 1, "accepted": true, "sequentialCursor": 2, "drawsUnsignedDecimal": ["12174883222022973748", "12350016907929127283"]},
+    {"selectedOrder": 2, "accepted": true, "sequentialCursor": 0, "drawsUnsignedDecimal": ["7896185083772648107", "17995091674691417663"]},
+    {"selectedOrder": 0, "accepted": true, "sequentialCursor": 1, "drawsUnsignedDecimal": ["13370193162588422964", "8423165948757168756"]}
+  ]
+}

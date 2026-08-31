@@ -10,11 +10,17 @@ data class EngineAudioFrame(
     val shiftSerial: Long = 0L,
     val shiftDirection: Int = 0,
     val isShifting: Boolean = false,
+    /** Signed, quantization-smoothed road speed used by donor drivetrain sound parameters. */
+    val presentationSpeedMetersPerSecond: Double = 0.0,
+    val limiterActive: Boolean = false,
+    val tractionLimitActive: Boolean = false,
+    val shiftRejectedSerial: Long = 0L,
+    val engineStarting: Boolean = false,
     val tuning: AudioTuning = AudioTuning(),
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** Per-perspective master trims for all continuous Load and Coast layers. */
     val programLayerGains: ProgramLayerGains = ProgramLayerGains(),
-    /** When true, mute coast layers and hold the engine program at full load while RPM still changes. */
+    /** Enables LOAD/COAST isolation; BOTH still follows the live pedal while RPM changes independently. */
     val loadOnlyProgram: Boolean = true,
     /** Recorded family used as the continuous driving engine sound for profiles that support it. */
     val primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,

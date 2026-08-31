@@ -4,8 +4,11 @@ plugins {
 }
 
 import java.io.File
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.Properties
+import groovy.json.JsonSlurper
+import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
 
 val buildNumberFile = file("build-number.properties")
@@ -14,13 +17,242 @@ if (buildNumberFile.exists()) {
     buildNumberFile.inputStream().use { buildNumberProperties.load(it) }
 }
 
-val isAssembling = gradle.startParameter.taskNames.any { taskName ->
-    taskName.contains("assemble", ignoreCase = true)
-}
 val stampCarBuild = gradle.startParameter.projectProperties["carApk"] == "true"
+val isMainAppAssembling = gradle.startParameter.taskNames.any { taskName ->
+    taskName == "assemble" ||
+        taskName == ":assemble" ||
+        taskName.startsWith(":mobile:assemble") ||
+        taskName.startsWith("mobile:assemble") ||
+        (taskName.startsWith("assemble") && !taskName.contains(":"))
+}
+val isFinalMainAppBuild = isMainAppAssembling && stampCarBuild
 
 val storedBuildNumber = buildNumberProperties.getProperty("buildNumber", "1").toInt()
-val stampedBuildNumber = if (isAssembling && stampCarBuild) storedBuildNumber + 1 else storedBuildNumber
+val stampedBuildNumber = if (isFinalMainAppBuild) storedBuildNumber + 1 else storedBuildNumber
+
+fun validateFinalCarCatalog(catalogFile: File) {
+    if (!catalogFile.isFile) {
+        throw GradleException(
+            "Final car APK build requires ${catalogFile.path}; run the release catalog assembly first.",
+        )
+    }
+
+    val root = try {
+        JsonSlurper().parse(catalogFile)
+    } catch (error: Exception) {
+        throw GradleException("Final car APK build found an unreadable car catalog at ${catalogFile.path}.", error)
+    }
+    val catalog = root as? Map<*, *> ?: throw GradleException(
+        "Final car APK build requires the car catalog root to be a JSON object.",
+    )
+    val rootBytes = catalogFile.readBytes()
+    val maximumRootBytes = 512 * 1024
+    val operationalRuntimeBytes = 8 * 1024 * 1024
+    val maximumRuntimeBytes = 16 * 1024 * 1024
+    val maximumFamilyRuntimeBytes = 4 * 1024 * 1024
+    if (rootBytes.size > maximumRootBytes) {
+        throw GradleException(
+            "Final car APK build requires a root catalog <= $maximumRootBytes bytes; found ${rootBytes.size}.",
+        )
+    }
+    if (catalog.keys != setOf("schema", "catalogVersion", "cars", "families")) {
+        throw GradleException(
+            "Final car APK build requires the catalog fields schema, catalogVersion, cars, and families.",
+        )
+    }
+    if (catalog["schema"] != "byd-car-atlas-catalog-v2") {
+        throw GradleException(
+            "Final car APK build requires schema byd-car-atlas-catalog-v2, found ${catalog["schema"]}.",
+        )
+    }
+    if (catalog["catalogVersion"]?.toString()?.toIntOrNull() != 2) {
+        throw GradleException(
+            "Final car APK build requires catalogVersion 2, found ${catalog["catalogVersion"]}.",
+        )
+    }
+
+    val cars = catalog["cars"] as? List<*> ?: throw GradleException(
+        "Final car APK build requires a cars array.",
+    )
+    val families = catalog["families"] as? List<*> ?: throw GradleException(
+        "Final car APK build requires a families array.",
+    )
+    if (cars.size != 36 || families.size != 32) {
+        throw GradleException(
+            "Final car APK build requires exactly 36 cars and 32 families; found ${cars.size} cars and ${families.size} families.",
+        )
+    }
+
+    fun stringIds(items: List<*>, field: String, label: String): List<String> {
+        return items.mapIndexed { index, item ->
+            val objectValue = item as? Map<*, *> ?: throw GradleException(
+                "Final car APK build found a non-object at $label[$index].",
+            )
+            objectValue[field] as? String ?: throw GradleException(
+                "Final car APK build found a missing or non-string $label[$index].$field.",
+            )
+        }
+    }
+
+    fun uniqueStringIds(items: List<*>, field: String, label: String): Set<String> {
+        val ids = stringIds(items, field, label)
+        if (ids.any(String::isBlank) || ids.toSet().size != ids.size) {
+            throw GradleException(
+                "Final car APK build requires unique non-empty $field values in $label.",
+            )
+        }
+
+        return ids.toSet()
+    }
+
+    uniqueStringIds(cars, "id", "cars")
+    val familyIds = uniqueStringIds(families, "id", "families")
+    val carFamilyIds = stringIds(cars, "audioProgramFamilyId", "cars").toSet()
+    if (carFamilyIds.any(String::isBlank)) {
+        throw GradleException(
+            "Final car APK build requires non-empty audioProgramFamilyId values in cars.",
+        )
+    }
+    if (carFamilyIds != familyIds) {
+        throw GradleException(
+            "Final car APK build requires every runtime family to be referenced by at least one car.",
+        )
+    }
+
+    fun sha256(bytes: ByteArray): String = MessageDigest
+        .getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { byte -> "%02x".format(byte) }
+
+    val assetsRoot = catalogFile.parentFile.canonicalFile
+    val expectedRuntimeAssets = mutableSetOf<String>()
+    var familyRuntimeBytes = 0L
+    families.forEachIndexed { index, item ->
+        val family = item as? Map<*, *> ?: throw GradleException(
+            "Final car APK build found a non-object at families[$index].",
+        )
+        val expectedKeys = setOf(
+            "id",
+            "assetDirectory",
+            "packRequirement",
+            "runtimeAssetName",
+            "runtimeBytes",
+            "runtimeSha256",
+            "eagerCapabilities",
+        )
+        if (family.keys != expectedKeys) {
+            throw GradleException(
+                "Final car APK build found an invalid lazy runtime descriptor at families[$index].",
+            )
+        }
+        val familyId = family["id"] as? String ?: throw GradleException(
+            "Final car APK build found a missing family id at families[$index].",
+        )
+        val assetName = family["runtimeAssetName"] as? String ?: throw GradleException(
+            "Final car APK build found a missing runtime asset name at families[$index].",
+        )
+        val expectedAssetName = "families/$familyId.json"
+        if (assetName != expectedAssetName || !expectedRuntimeAssets.add(assetName)) {
+            throw GradleException(
+                "Final car APK build found an unsafe or duplicate runtime asset name at families[$index].",
+            )
+        }
+        val declaredBytes = (family["runtimeBytes"] as? Number)?.toLong()
+            ?: throw GradleException(
+                "Final car APK build found a missing runtime byte count at families[$index].",
+            )
+        val declaredSha = family["runtimeSha256"] as? String ?: throw GradleException(
+            "Final car APK build found a missing runtime SHA-256 at families[$index].",
+        )
+        if (declaredBytes < 1 || declaredBytes > maximumFamilyRuntimeBytes ||
+            !Regex("[0-9a-f]{64}").matches(declaredSha)
+        ) {
+            throw GradleException(
+                "Final car APK build found an invalid runtime size or SHA-256 at families[$index].",
+            )
+        }
+        val capabilities = family["eagerCapabilities"] as? Map<*, *> ?: throw GradleException(
+            "Final car APK build found no eager capabilities at families[$index].",
+        )
+        if (capabilities.keys != setOf("perspectives", "effectControls")) {
+            throw GradleException(
+                "Final car APK build found invalid eager capability fields at families[$index].",
+            )
+        }
+        val perspectives = capabilities["perspectives"] as? List<*> ?: throw GradleException(
+            "Final car APK build found no eager perspective list at families[$index].",
+        )
+        if (perspectives.any { it !is String } || perspectives.toSet().size != perspectives.size || perspectives.isEmpty()) {
+            throw GradleException(
+                "Final car APK build found invalid eager perspectives at families[$index].",
+            )
+        }
+        val effectControls = capabilities["effectControls"] as? Map<*, *> ?: throw GradleException(
+            "Final car APK build found no eager effect controls at families[$index].",
+        )
+        if (effectControls.keys != perspectives.toSet()) {
+            throw GradleException(
+                "Final car APK build found mismatched eager effect controls at families[$index].",
+            )
+        }
+        perspectives.forEach { rawPerspective ->
+            val perspective = rawPerspective as String
+            val controls = effectControls[perspective] as? Map<*, *> ?: throw GradleException(
+                "Final car APK build found invalid eager controls for $perspective.",
+            )
+            val triggers = controls["runtimeTriggers"] as? List<*> ?: throw GradleException(
+                "Final car APK build found no eager triggers for $perspective.",
+            )
+            if (controls.keys != setOf("hasTurboEvent", "runtimeTriggers") ||
+                controls["hasTurboEvent"] !is Boolean ||
+                triggers.any { it !is String || it.isBlank() } ||
+                triggers.toSet().size != triggers.size
+            ) {
+                throw GradleException(
+                    "Final car APK build found invalid eager effect controls for $perspective.",
+                )
+            }
+        }
+        val runtimeFile = File(assetsRoot, assetName).canonicalFile
+        if (runtimeFile.parentFile != File(assetsRoot, "families").canonicalFile || !runtimeFile.isFile) {
+            throw GradleException(
+                "Final car APK build is missing the descriptor runtime asset $assetName.",
+            )
+        }
+        val runtimeBytes = runtimeFile.readBytes()
+        if (runtimeBytes.size.toLong() != declaredBytes || sha256(runtimeBytes) != declaredSha) {
+            throw GradleException(
+                "Final car APK build found a runtime asset that differs from its root descriptor: $assetName.",
+            )
+        }
+        familyRuntimeBytes += runtimeBytes.size
+    }
+    val familyDirectory = File(assetsRoot, "families")
+    val actualRuntimeAssets = familyDirectory.listFiles()?.filter(File::isFile)?.map {
+        "families/${it.name}"
+    }?.toSet() ?: emptySet()
+    if (actualRuntimeAssets != expectedRuntimeAssets) {
+        throw GradleException(
+            "Final car APK build found missing or orphan family runtime assets.",
+        )
+    }
+    val totalRuntimeBytes = rootBytes.size.toLong() + familyRuntimeBytes
+    if (totalRuntimeBytes > maximumRuntimeBytes) {
+        throw GradleException(
+            "Final car APK build requires root plus family runtimes <= $maximumRuntimeBytes bytes; found $totalRuntimeBytes.",
+        )
+    }
+    if (totalRuntimeBytes > operationalRuntimeBytes) {
+        logger.warn(
+            "Final car APK runtime catalog exceeds the $operationalRuntimeBytes-byte operational target: $totalRuntimeBytes.",
+        )
+    }
+}
+
+if (isFinalMainAppBuild) {
+    validateFinalCarCatalog(file("src/main/assets/car_catalog/atlas-catalog-v2.json"))
+}
+
 fun gitShortShaFromFiles(rootDir: File): String {
     val gitHead = File(rootDir, ".git/HEAD")
     if (!gitHead.exists()) {
@@ -190,7 +422,7 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
     into(generatedSampleEngineAssets)
 }
 
-if (isAssembling && stampCarBuild) {
+if (isFinalMainAppBuild) {
     val nextBuildNumber = stampedBuildNumber
     val targetBuildNumberFile = buildNumberFile
     tasks.register("persistBuildNumber") {
@@ -231,6 +463,14 @@ android {
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17")
+            }
+        }
     }
 
     buildTypes {
@@ -248,7 +488,16 @@ android {
         compose = true
         buildConfig = true
     }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
     sourceSets.getByName("main").assets.srcDir(generatedSampleEngineAssets)
+    sourceSets.getByName("test").resources.srcDir(
+        rootProject.file("tools/profile_generation/fixtures"),
+    )
     lint {
         // This APK is intentionally sideloaded on a BYD DiLink head unit. Target 25 is a
         // compatibility requirement for its vendor framework, not a Google Play configuration.
@@ -267,6 +516,7 @@ androidComponents {
 }
 
 dependencies {
+    implementation(project(":audio-pack-contract"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

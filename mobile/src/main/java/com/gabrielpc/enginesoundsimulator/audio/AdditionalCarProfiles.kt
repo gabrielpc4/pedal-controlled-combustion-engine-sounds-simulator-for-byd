@@ -68,7 +68,7 @@ internal fun nissanSkylineR34Profile() = EngineSampleProfile(
     cabinProgram = EngineSampleProgram(
         layers = skylineFmodEngineLayers(),
         effects = skylineEffects(),
-        supportsLoadOnlyProgram = false,
+        supportsLoadOnlyProgram = true,
     ),
     exteriorProgram = skylineExteriorProgram(skylineEffects()),
 )

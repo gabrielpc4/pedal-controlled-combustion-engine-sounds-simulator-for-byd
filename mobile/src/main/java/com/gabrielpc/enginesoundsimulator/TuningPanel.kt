@@ -233,7 +233,7 @@ private fun EngineTab(
                 ParameterSlider("SOUND LIMITER", engine.limiterRpm, engine.redlineRpm..(engine.maxRpm - 100.0), "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(limiterRpm = it)))
                 }
-                ParameterSlider("IDLE RPM", engine.idleRpm, 600.0..2_000.0, "%.0f") {
+                ParameterSlider("IDLE RPM", engine.idleRpm, 500.0..min(5_000.0, engine.redlineRpm - 500.0), "%.0f") {
                     onChange(config.copy(engine = engine.copy(idleRpm = it)))
                 }
                 ParameterSlider("NORMAL SHIFT RPM", engine.upshiftRpm, (engine.idleRpm + 1_000.0)..engine.redlineRpm, "%.0f RPM") {
@@ -266,10 +266,10 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             ResponsePreview(engine, Modifier.fillMaxWidth().weight(1f))
         }
         PanelCard("VIRTUAL SHIFTS", "Time spent moving between virtual gears", Modifier.weight(1f)) {
-            ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 40.0..900.0, "%.0f ms") {
+            ParameterSlider("UPSHIFT TIME", engine.upshiftDurationMs, 20.0..900.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(upshiftDurationMs = it)))
             }
-            ParameterSlider("DOWNSHIFT TIME", engine.downshiftDurationMs, 60.0..1_000.0, "%.0f ms") {
+            ParameterSlider("DOWNSHIFT TIME", engine.downshiftDurationMs, 20.0..1_000.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(downshiftDurationMs = it)))
             }
             ParameterSlider("SHIFT COOLDOWN", engine.shiftDwellMs, 100.0..1_500.0, "%.0f ms") {
@@ -321,7 +321,11 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 }
 
 @Composable
-private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (TuningConfig) -> Unit) {
+private fun AudioTab(
+    config: TuningConfig,
+    selectedCarId: String,
+    onChange: (TuningConfig) -> Unit,
+) {
     val audio = config.audio
     val profile = EngineSampleProfiles.find(selectedCarId)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

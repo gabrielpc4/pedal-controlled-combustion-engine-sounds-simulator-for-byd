@@ -34,6 +34,9 @@ data class EngineProfile(
     val externalSpeedSmoothingSeconds: Double,
     val simulatorCoastRegenMps2: Double = 2.50,
     val gearRatios: DoubleArray,
+    val soundFinalDriveRatio: Double = 1.0,
+    val soundDrivenWheelRadiusMeters: Double = wheelRadiusMeters,
+    val usesLegacyEvenSpeedBandGearing: Boolean = true,
     /** X is normalized road speed; Y is normalized front-axle wheel torque. */
     val frontWheelTorqueCurve: List<CurvePoint> = EngineTuning.DEFAULT_FRONT_WHEEL_TORQUE_CURVE,
     /** X is normalized road speed; Y is normalized rear-axle wheel torque. */
@@ -122,7 +125,9 @@ data class DrivetrainState(
     val shiftDirection: ShiftDirection,
     val shiftProgress: Double,
     val shiftSerial: Long,
+    val shiftRejectedSerial: Long,
     val limiterActive: Boolean,
+    val tractionLimitActive: Boolean,
     /** Continuous road-speed reconstruction used by the tach and audio pitch. */
     val presentationSpeedKmh: Double,
     /** Signed presentation-speed acceleration/deceleration rate in km/h per second. */
@@ -163,6 +168,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var filteredBrake = 0.0
     private var activeShift: ActiveShift? = null
     private var shiftSerial = 0L
+    private var shiftRejectedSerial = 0L
     private var ignitionShiftCueDirection = ShiftDirection.NONE
     private var startupShiftCueFired = false
     private var secondsSinceShift = 10.0
@@ -219,6 +225,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         resetThrottleRpmBump()
         limiterLatched = false
         shiftSerial = 0L
+        shiftRejectedSerial = 0L
         ignitionShiftCueDirection = ShiftDirection.NONE
         startupShiftCueFired = false
         resetLaunchControl()
@@ -349,6 +356,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         filteredBrake = 0.0
         activeShift = null
         shiftSerial = 0L
+        shiftRejectedSerial = 0L
         ignitionShiftCueDirection = ShiftDirection.NONE
         startupShiftCueFired = false
         secondsSinceShift = 10.0
@@ -439,19 +447,19 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     /** Manual mode: upshift one gear when the driver requests it (steering wheel or UI). */
     fun requestManualUpshift(): Boolean {
         if (!manualShiftEnabled) {
-            return false
+            return rejectManualShift()
         }
         if (ignitionState != EngineIgnitionState.RUNNING) {
-            return false
+            return rejectManualShift()
         }
         if (activeShift != null) {
-            return false
+            return rejectManualShift()
         }
         if (secondsSinceShift < profile.shiftDwellSeconds) {
-            return false
+            return rejectManualShift()
         }
         if (currentGearIndex >= profile.gearRatios.lastIndex) {
-            return false
+            return rejectManualShift()
         }
         beginShift(currentGearIndex + 1, ShiftDirection.UP)
         return true
@@ -460,22 +468,27 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     /** Manual mode: downshift one gear when the driver requests it. */
     fun requestManualDownshift(): Boolean {
         if (!manualShiftEnabled) {
-            return false
+            return rejectManualShift()
         }
         if (ignitionState != EngineIgnitionState.RUNNING) {
-            return false
+            return rejectManualShift()
         }
         if (activeShift != null) {
-            return false
+            return rejectManualShift()
         }
         if (secondsSinceShift < profile.shiftDwellSeconds) {
-            return false
+            return rejectManualShift()
         }
         if (currentGearIndex <= 0) {
-            return false
+            return rejectManualShift()
         }
         beginShift(currentGearIndex - 1, ShiftDirection.DOWN)
         return true
+    }
+
+    private fun rejectManualShift(): Boolean {
+        shiftRejectedSerial += 1L
+        return false
     }
 
     private fun integrateElectricVehicle(
@@ -1140,11 +1153,34 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             shiftDirection = shift?.direction ?: ignitionShiftCueDirection,
             shiftProgress = shift?.let { (it.elapsedSeconds / it.durationSeconds).coerceIn(0.0, 1.0) } ?: 0.0,
             shiftSerial = shiftSerial,
+            shiftRejectedSerial = shiftRejectedSerial,
             limiterActive = limiterLatched,
+            tractionLimitActive = isTractionLimited(),
             presentationSpeedKmh = presentationSpeedMps * 3.6,
             presentationAccelerationKmhPerSecond = presentationSpeedEstimator.presentationVelocityKmhPerSecond,
             rawSpeedKmh = rawExternalSpeedKmh,
         )
+    }
+
+    private fun isTractionLimited(): Boolean {
+        if (ignitionState != EngineIgnitionState.RUNNING || filteredThrottle <= 0.0) return false
+        val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
+        val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
+        val throttleDrive = filteredThrottle * brakeOverride
+        if (throttleDrive <= 0.0) return false
+        val requestedWheelTorque = axleTorque.totalNm * throttleDrive
+        val wheelOmega = vehicleSpeedMps / profile.wheelRadiusMeters
+        val powerLimitedTorque = if (wheelOmega < 1.0) {
+            requestedWheelTorque
+        } else {
+            min(
+                requestedWheelTorque,
+                profile.peakPowerKw * 1_000.0 * profile.drivetrainEfficiency / wheelOmega,
+            )
+        }
+        val requestedForce = powerLimitedTorque / profile.wheelRadiusMeters
+        val tractionForce = profile.vehicleMassKg * profile.tractionLimitMps2 * throttleDrive
+        return requestedForce > tractionForce + 1.0
     }
 
     companion object {
@@ -1195,6 +1231,9 @@ internal const val TORQUE_CURVE_REFERENCE_TOP_SPEED_KMH = 180.0
 
 /** Divides the configured road-speed range into one equal-width band per sound gear. */
 internal fun evenlySpacedUpshiftSpeedKmh(profile: EngineProfile, gearIndex: Int): Double {
+    if (!profile.usesLegacyEvenSpeedBandGearing) {
+        return speedKmhForCoupledRpm(profile, gearIndex, profile.upshiftRpm)
+    }
     val gearCount = profile.gearRatios.size.coerceAtLeast(1)
     return profile.topSpeedKmh * (gearIndex + 1).coerceIn(1, gearCount) / gearCount
 }
@@ -1214,6 +1253,12 @@ internal fun upshiftTriggerRpmForProfile(profile: EngineProfile): Double {
 
 /** Speed (km/h) where [gearIndex] reaches [targetRpm] under the coupled synthetic tach model. */
 internal fun speedKmhForCoupledRpm(profile: EngineProfile, gearIndex: Int, targetRpm: Double): Double {
+    if (!profile.usesLegacyEvenSpeedBandGearing) {
+        val overallRatio = profile.gearRatios[gearIndex.coerceIn(profile.gearRatios.indices)] *
+            profile.soundFinalDriveRatio
+        val wheelRpm = targetRpm.coerceAtLeast(0.0) / overallRatio.coerceAtLeast(0.001)
+        return wheelRpm * (2.0 * PI * profile.soundDrivenWheelRadiusMeters) / 60.0 * 3.6
+    }
     val ratio = evenlySpacedGearRatio(profile, gearIndex)
     val wheelRpm = (targetRpm - profile.idleRpm).coerceAtLeast(0.0) / ratio.coerceAtLeast(0.001)
     return wheelRpm * (2.0 * PI * profile.wheelRadiusMeters) / 60.0 * 3.6
@@ -1222,6 +1267,11 @@ internal fun speedKmhForCoupledRpm(profile: EngineProfile, gearIndex: Int, targe
 /** Road-coupled engine RPM before redline and limiter handling. */
 internal fun coupledRpmAtSpeedKmh(profile: EngineProfile, gearIndex: Int, speedKmh: Double): Double {
     val speedMps = speedKmh.coerceAtLeast(0.0) / 3.6
+    if (!profile.usesLegacyEvenSpeedBandGearing) {
+        val wheelRpm = speedMps / (2.0 * PI * profile.soundDrivenWheelRadiusMeters) * 60.0
+        val gearRatio = profile.gearRatios[gearIndex.coerceIn(profile.gearRatios.indices)]
+        return wheelRpm * gearRatio * profile.soundFinalDriveRatio
+    }
     val wheelRpm = speedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
 
     return profile.idleRpm + wheelRpm * evenlySpacedGearRatio(profile, gearIndex)

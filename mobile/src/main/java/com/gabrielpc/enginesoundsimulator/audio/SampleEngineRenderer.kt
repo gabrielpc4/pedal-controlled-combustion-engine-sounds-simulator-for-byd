@@ -37,7 +37,7 @@ internal class SampleEngineRenderer private constructor(
     private val sharedShiftUpVoice: EffectVoice?,
     private val sharedShiftDownVoice: EffectVoice?,
     private val decodedBytes: Long,
-) {
+) : EngineProgramRenderer {
     private var smoothedRpm = profile.idleRpm
     private var smoothedThrottle = 0.0
     private var masterGain = 0.0
@@ -109,7 +109,7 @@ internal class SampleEngineRenderer private constructor(
         )
     }
 
-    val meterTrackIds: List<String> = buildList {
+    override val meterTrackIds: List<String> = buildList {
         addAll(voices.map { it.spec.id })
         addAll(effectVoices.map { it.spec.id })
         if (popsAndBangsVoice != null) {
@@ -124,7 +124,7 @@ internal class SampleEngineRenderer private constructor(
     }
 
     /** Copies current gains into caller-owned storage without allocating on the audio thread. */
-    fun writeLayerOutputLevels(target: EngineAudioFrame, destination: DoubleArray) {
+    override fun writeLayerOutputLevels(target: EngineAudioFrame, destination: DoubleArray) {
         require(destination.size == meterTrackIds.size)
         if (!isProgramAudible(target)) {
             destination.fill(0.0)
@@ -156,7 +156,7 @@ internal class SampleEngineRenderer private constructor(
         }
     }
 
-    fun render(target: EngineAudioFrame, output: ShortArray, gain: Double) {
+    override fun render(target: EngineAudioFrame, output: ShortArray, gain: Double) {
         require(output.size % PROGRAM_CHANNELS == 0) { "Stereo render buffer must contain whole frames" }
         val frameCount = output.size / PROGRAM_CHANNELS
         val blockSeconds = frameCount.toDouble() / outputSampleRate
@@ -186,11 +186,12 @@ internal class SampleEngineRenderer private constructor(
         )
         updateEffectTargetsAndTriggers(target, target.layerMix, blockSeconds)
         val targetMaster = (gain * target.tuning.masterGain.coerceIn(0.0, 1.2) / 0.72).coerceIn(0.0, 1.5)
-        val targetProfileOutputGain = if (loadProgram) {
-            profile.outputGainAt(1.0, perspective)
-        } else {
-            profile.outputGainAt(smoothedThrottle, perspective)
-        }
+        val targetProfileOutputGain = profile.outputGainForPrimarySource(
+            liveThrottle = smoothedThrottle,
+            loadOnlyProgram = target.loadOnlyProgram,
+            primaryLayerSource = primaryLayerSource,
+            perspective = perspective,
+        )
         val targetEnabled = if (target.enabled) 1.0 else 0.0
         val targetContinuousProgram = 1.0
         val programFadeSeconds = target.tuning.programFadeMs / 1_000.0
@@ -285,6 +286,8 @@ internal class SampleEngineRenderer private constructor(
         lastBlockPeak = blockPeak
         lastTarget = target
     }
+
+    override fun close() = Unit
 
     /** Loop and effect WAV assets audibly contributing to the mixed output right now. */
     private fun audiblePlayingSamples(target: EngineAudioFrame): List<PlayingSampleLabel> = buildList {
@@ -906,6 +909,22 @@ internal class SampleEngineRenderer private constructor(
             perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
             loadOnlyProgram: Boolean = true,
             primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
+        ): SampleEngineRenderer = load(
+            assetSource = BundledAudioAssetSource(assetManager),
+            outputSampleRate = outputSampleRate,
+            profile = profile,
+            perspective = perspective,
+            loadOnlyProgram = loadOnlyProgram,
+            primaryLayerSource = primaryLayerSource,
+        )
+
+        fun load(
+            assetSource: AudioAssetSource,
+            outputSampleRate: Int,
+            profile: EngineSampleProfile = EngineSampleProfiles.default,
+            perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+            loadOnlyProgram: Boolean = true,
+            primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
         ): SampleEngineRenderer {
             val program = profile.program(perspective)
             val assetsToLoad = if (profile.appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
@@ -915,7 +934,7 @@ internal class SampleEngineRenderer private constructor(
             }
             val decoded = assetsToLoad.associateWith { assetName ->
                 val path = "sample_engine/${profile.assetDirectory}/$assetName"
-                assetManager.open(path, AssetManager.ACCESS_STREAMING).use(WavPcmDecoder::decode)
+                assetSource.open(path).use(WavPcmDecoder::decode)
             }
             val voices = if (profile.appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
                 profile.loopLayersForPrimarySource(primaryLayerSource, perspective)
@@ -931,17 +950,15 @@ internal class SampleEngineRenderer private constructor(
                 EffectVoice(spec, samples, outputSampleRate)
             }
             val popsSamples = SharedPopsAndBangs.assetNames.map { assetName ->
-                assetManager.open(SharedPopsAndBangs.assetPath(assetName), AssetManager.ACCESS_STREAMING)
+                assetSource.open(SharedPopsAndBangs.assetPath(assetName))
                     .use(WavPcmDecoder::decode)
             }
             val popsVoice = EffectVoice(SharedPopsAndBangs.effectSpec, popsSamples, outputSampleRate)
-            val shiftUpSample = assetManager.open(
+            val shiftUpSample = assetSource.open(
                 SharedHuracanShiftSounds.assetPath(SharedHuracanShiftSounds.shiftUpSpec.assetName),
-                AssetManager.ACCESS_STREAMING,
             ).use(WavPcmDecoder::decode)
-            val shiftDownSample = assetManager.open(
+            val shiftDownSample = assetSource.open(
                 SharedHuracanShiftSounds.assetPath(SharedHuracanShiftSounds.shiftDownSpec.assetName),
-                AssetManager.ACCESS_STREAMING,
             ).use(WavPcmDecoder::decode)
             val sharedShiftUpVoice = EffectVoice(
                 SharedHuracanShiftSounds.shiftUpSpec,

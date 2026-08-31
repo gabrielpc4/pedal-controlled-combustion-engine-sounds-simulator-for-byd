@@ -11,6 +11,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SampleEngineRendererTest {
+    @Test
+    fun noSavedCarSelectionUsesTheBundledDefault() {
+        assertEquals(EngineSampleProfiles.default, EngineSampleProfiles.find(null))
+    }
+
     private val profile = EngineSampleProfiles.default
 
     @Test
@@ -57,7 +62,7 @@ class SampleEngineRendererTest {
         assertFalse(aventador.hasTurboSounds)
         assertTrue(skyline.hasTurboSounds)
         assertEquals(44_100, skyline.outputSampleRate)
-        assertFalse(skyline.appliesLoadOnlyProgram(loadOnlyProgram = true))
+        assertTrue(skyline.appliesLoadOnlyProgram(loadOnlyProgram = true))
         assertEquals(skyline.layers.size, skyline.loopLayersForLoad(loadOnlyProgram = true).size)
         assertEquals(skyline.requiredAssets, skyline.requiredAssetsForLoad(loadOnlyProgram = true))
         assertEquals(17, skyline.layers.size)
@@ -100,6 +105,7 @@ class SampleEngineRendererTest {
             assertTrue(load.none { layer -> layer.role == SampleLayerRole.COAST })
             assertTrue(coast.any { layer -> layer.role == SampleLayerRole.COAST })
             assertTrue(coast.none { layer -> layer.role == SampleLayerRole.LOAD })
+            assertTrue(coast.none { layer -> layer.role == SampleLayerRole.LIMITER })
             assertTrue(both.any { layer -> layer.role == SampleLayerRole.LOAD })
             assertTrue(both.any { layer -> layer.role == SampleLayerRole.COAST })
             assertTrue(
@@ -172,6 +178,7 @@ class SampleEngineRendererTest {
         assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST))
         assertTrue(coastSource.any { it.role == SampleLayerRole.COAST })
         assertTrue(coastSource.none { it.role == SampleLayerRole.LOAD })
+        assertTrue(coastSource.none { it.role == SampleLayerRole.LIMITER })
         assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.FMOD_MIX))
         assertTrue(fmodMix.any { it.role == SampleLayerRole.LOAD })
         assertTrue(fmodMix.any { it.role == SampleLayerRole.COAST })
@@ -197,6 +204,48 @@ class SampleEngineRendererTest {
         assertEquals(
             PrimaryEngineLayerSource.LOAD,
             skyline.resolvedPrimaryLayerSource(PrimaryEngineLayerSource.FMOD_MIX),
+        )
+    }
+
+    @Test
+    fun isolatedProgramsEvaluateTheAuthoredOutputGainAtTheirAuditionThrottle() {
+        val liveThrottle = 0.35
+
+        assertEquals(
+            profile.outputGainAt(1.0),
+            profile.outputGainForPrimarySource(
+                liveThrottle = liveThrottle,
+                loadOnlyProgram = true,
+                primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+            ),
+            0.000_001,
+        )
+        assertEquals(
+            profile.outputGainAt(0.0),
+            profile.outputGainForPrimarySource(
+                liveThrottle = liveThrottle,
+                loadOnlyProgram = true,
+                primaryLayerSource = PrimaryEngineLayerSource.COAST,
+            ),
+            0.000_001,
+        )
+        assertEquals(
+            profile.outputGainAt(liveThrottle),
+            profile.outputGainForPrimarySource(
+                liveThrottle = liveThrottle,
+                loadOnlyProgram = true,
+                primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+            ),
+            0.000_001,
+        )
+        assertEquals(
+            profile.outputGainAt(liveThrottle),
+            profile.outputGainForPrimarySource(
+                liveThrottle = liveThrottle,
+                loadOnlyProgram = false,
+                primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+            ),
+            0.000_001,
         )
     }
 
@@ -697,6 +746,203 @@ class SampleEngineRendererTest {
         val coastAtFullPedal = coast.gainAt(7_000.0, 1.0, loadOnlyProgram = true)
         assertEquals(0.0, coastAtFullPedal, 0.0)
         assertTrue(loadAtLiftOff > load.gainAt(7_500.0, 0.0, loadOnlyProgram = false))
+    }
+
+    @Test
+    fun primaryProgramsKeepTheirAuthoredThrottleEndpointsWhileBothUsesThePedal() {
+        val load = profile.layers.first { it.id == "l1" }
+        val coast = profile.layers.first { it.id == "c2" }
+
+        val loadAtLightPedal = load.gainAt(
+            rpm = 7_500.0,
+            throttle = 0.08,
+            loadOnlyProgram = true,
+            primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+        )
+        val loadAtFullPedal = load.gainAt(
+            rpm = 7_500.0,
+            throttle = 1.0,
+            loadOnlyProgram = true,
+            primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+        )
+        assertEquals(loadAtFullPedal, loadAtLightPedal, 0.0001)
+
+        val coastWhileAccelerating = coast.gainAt(
+            rpm = 7_000.0,
+            throttle = 1.0,
+            loadOnlyProgram = true,
+            primaryLayerSource = PrimaryEngineLayerSource.COAST,
+        )
+        val coastAtLiftOff = coast.gainAt(
+            rpm = 7_000.0,
+            throttle = 0.0,
+            loadOnlyProgram = true,
+            primaryLayerSource = PrimaryEngineLayerSource.COAST,
+        )
+        assertEquals(coastAtLiftOff, coastWhileAccelerating, 0.0001)
+
+        val bothAtLightPedal = load.gainAt(
+            rpm = 7_500.0,
+            throttle = 0.08,
+            loadOnlyProgram = true,
+            primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+        )
+        val bothAtFullPedal = load.gainAt(
+            rpm = 7_500.0,
+            throttle = 1.0,
+            loadOnlyProgram = true,
+            primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+        )
+        assertTrue(bothAtFullPedal > bothAtLightPedal)
+    }
+
+    @Test
+    fun isolatedProgramsKeepOnlyTheirEngineFamilyAndSharedFoundation() {
+        val sharedRoles = setOf(SampleLayerRole.IDLE, SampleLayerRole.TEXTURE)
+
+        EngineSampleProfiles.all.forEach { candidate ->
+            EngineSoundPerspective.entries.forEach perspectiveLoop@{ perspective ->
+                if (!candidate.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST, perspective)) {
+                    return@perspectiveLoop
+                }
+
+                val program = candidate.program(perspective)
+                val load = candidate.loopLayersForPrimarySource(PrimaryEngineLayerSource.LOAD, perspective)
+                val coast = candidate.loopLayersForPrimarySource(PrimaryEngineLayerSource.COAST, perspective)
+                val both = candidate.loopLayersForPrimarySource(PrimaryEngineLayerSource.FMOD_MIX, perspective)
+
+                assertTrue(
+                    load.all { layer ->
+                        layer.role == SampleLayerRole.LOAD ||
+                            layer.role == SampleLayerRole.LIMITER ||
+                            layer.role in sharedRoles
+                    },
+                )
+                assertTrue(
+                    coast.all { layer ->
+                        layer.role == SampleLayerRole.COAST || layer.role in sharedRoles
+                    },
+                )
+                assertTrue(load.none { layer -> layer.role == SampleLayerRole.COAST })
+                assertTrue(coast.none { layer -> layer.role == SampleLayerRole.LOAD || layer.role == SampleLayerRole.LIMITER })
+                assertEquals(program.layers, both)
+
+                val effectAssets = program.effects.flatMapTo(linkedSetOf()) { effect -> effect.allAssetNames }
+                PrimaryEngineLayerSource.entries.forEach { source ->
+                    assertTrue(candidate.requiredAssetsForPrimarySource(source, perspective).containsAll(effectAssets))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun everyIncludedContinuousRoleUsesTheSelectedProgramThrottleEndpoint() {
+        val throttleCurve = AutomationCurve(
+            listOf(
+                CurvePoint(0.0, -20.0),
+                CurvePoint(1.0, 0.0),
+            ),
+        )
+        val layers = SampleLayerRole.entries.associateWith { role ->
+            SampleLayerSpec(
+                id = role.name.lowercase(),
+                assetName = "${role.name.lowercase()}.wav",
+                role = role,
+                startRpm = 0.0,
+                endRpm = 8_000.0,
+                throttleGainDb = throttleCurve,
+            )
+        }
+
+        layers.values
+            .filter { layer -> layer.role.isIncludedIn(PrimaryEngineLayerSource.LOAD) }
+            .forEach { layer ->
+                assertEquals(
+                    "${layer.role} did not use full-load automation",
+                    layer.gainAt(
+                        4_000.0,
+                        1.0,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+                    ),
+                    layer.gainAt(
+                        4_000.0,
+                        0.03,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+                    ),
+                    0.000_001,
+                )
+            }
+        layers.values
+            .filter { layer -> layer.role.isIncludedIn(PrimaryEngineLayerSource.COAST) }
+            .forEach { layer ->
+                assertEquals(
+                    "${layer.role} did not use lift-off automation",
+                    layer.gainAt(
+                        4_000.0,
+                        0.0,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.COAST,
+                    ),
+                    layer.gainAt(
+                        4_000.0,
+                        1.0,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.COAST,
+                    ),
+                    0.000_001,
+                )
+            }
+
+        assertEquals(
+            0.0,
+            layers.getValue(SampleLayerRole.COAST)
+                .gainAt(
+                    4_000.0,
+                    1.0,
+                    loadOnlyProgram = true,
+                    primaryLayerSource = PrimaryEngineLayerSource.LOAD,
+                ),
+            0.0,
+        )
+        assertEquals(
+            0.0,
+            layers.getValue(SampleLayerRole.LOAD)
+                .gainAt(
+                    4_000.0,
+                    0.0,
+                    loadOnlyProgram = true,
+                    primaryLayerSource = PrimaryEngineLayerSource.COAST,
+                ),
+            0.0,
+        )
+        assertEquals(
+            0.0,
+            layers.getValue(SampleLayerRole.LIMITER)
+                .gainAt(
+                    4_000.0,
+                    0.0,
+                    loadOnlyProgram = true,
+                    primaryLayerSource = PrimaryEngineLayerSource.COAST,
+                ),
+            0.0,
+        )
+
+        val bothLoad = layers.getValue(SampleLayerRole.LOAD)
+        assertTrue(
+            bothLoad.gainAt(
+                4_000.0,
+                1.0,
+                loadOnlyProgram = true,
+                primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+            ) > bothLoad.gainAt(
+                4_000.0,
+                0.03,
+                loadOnlyProgram = true,
+                primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+            ),
+        )
     }
 
     @Test

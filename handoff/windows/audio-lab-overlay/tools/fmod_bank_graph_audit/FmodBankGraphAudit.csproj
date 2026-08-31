@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <FmodBankParserRoot Condition="'$(FmodBankParserRoot)' == ''">$(MSBuildThisFileDirectory)..\..\.aclib-tools\FModBankParser</FmodBankParserRoot>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(FmodBankParserRoot)\\FModBankParser\\FModBankParser.csproj')">
+    <ProjectReference Include="$(FmodBankParserRoot)\FModBankParser\FModBankParser.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(FmodBankParserRoot)\\FModBankParser\\FModBankParser.csproj')">
+    <!-- The checked-in audit bundle is a buildable parser artifact fallback
+         for hosts that do not retain the source checkout. -->
+    <Reference Include="FModBankParser">
+      <HintPath>bin\Release\net8.0\FModBankParser.dll</HintPath>
+    </Reference>
+    <Reference Include="Fmod5Sharp">
+      <HintPath>bin\Release\net8.0\Fmod5Sharp.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

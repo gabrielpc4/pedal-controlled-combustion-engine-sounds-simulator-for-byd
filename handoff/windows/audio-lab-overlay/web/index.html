@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b0e">
+  <title>Assetto Corsa Audio Lab</title>
+  <link rel="stylesheet" href="/styles.css?v=9">
+</head>
+<body>
+  <a class="skip-link" href="#controls">Skip to controls</a>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">AC</span>
+        <div>
+          <p class="eyebrow">Native sound-bank drive simulation</p>
+          <h1>Audio Lab <span class="edition">/ 2014</span></h1>
+        </div>
+      </div>
+
+      <div class="topbar-status" aria-live="polite">
+        <div class="car-identity">
+          <span class="status-label">Selected car</span>
+          <strong id="carName">Tatuus FA01</strong>
+          <div class="car-picker-row">
+            <select id="carSelect" aria-label="Select installed car"></select>
+            <button class="favorite-button" id="favoriteButton" type="button" aria-pressed="false" aria-label="Add selected car to favorites" title="Add selected car to favorites"><span id="favoriteIcon" aria-hidden="true">☆</span></button>
+          </div>
+        </div>
+        <span class="connection-pill is-connecting" id="connectionPill">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connectionText">Connecting</span>
+        </span>
+      </div>
+    </header>
+
+    <div class="error-banner" id="errorBanner" role="alert" hidden>
+      <div>
+        <strong id="errorTitle">Simulator connection interrupted</strong>
+        <p id="errorMessage">The instrument will keep trying to reconnect.</p>
+      </div>
+      <button class="text-button" id="retryButton" type="button">Retry now</button>
+    </div>
+
+    <main class="dashboard">
+      <section class="instrument-card panel" aria-labelledby="instrumentTitle">
+        <div class="panel-heading instrument-heading">
+          <div>
+            <p class="eyebrow">Automatic rolling simulation</p>
+            <h2 id="instrumentTitle">Powertrain</h2>
+          </div>
+          <div class="powertrain-state">
+            <span class="transmission-chip" id="transmissionMode">AUTO</span>
+            <div class="engine-state" id="engineState">
+              <span class="engine-state-dot" aria-hidden="true"></span>
+              <span id="engineStateText">Ready</span>
+            </div>
+          </div>
+        </div>
+
+        <figure class="car-preview" id="carPreview">
+          <img id="carPreviewImage" src="/api/car-image?car=tatuusfa1" alt="Tatuus FA01 showroom preview">
+          <figcaption><span id="carPreviewName">Tatuus FA01</span><small>Installed showroom preview</small></figcaption>
+        </figure>
+
+        <div class="shift-array" id="shiftArray" aria-label="Shift lights"></div>
+
+        <div class="tach-wrap" id="tachMeter" role="meter" aria-label="Engine speed" aria-valuemin="0" aria-valuemax="7000" aria-valuenow="1250" aria-valuetext="1250 revolutions per minute">
+          <svg class="tach" id="tachSvg" viewBox="0 0 600 520" role="img" aria-labelledby="tachTitle tachDesc">
+            <title id="tachTitle">Engine tachometer</title>
+            <desc id="tachDesc">Analog tachometer ranging from zero to seven thousand revolutions per minute.</desc>
+            <circle class="dial-bezel" cx="300" cy="278" r="238"></circle>
+            <circle class="dial-face" cx="300" cy="278" r="222"></circle>
+            <path class="redline-arc" id="redlineArc" d=""></path>
+            <g id="tachTicks" aria-hidden="true"></g>
+            <g id="tachLabels" aria-hidden="true"></g>
+            <text class="dial-unit" x="300" y="345" text-anchor="middle">RPM × 1000</text>
+            <text class="dial-car" id="dialCarName" x="300" y="383" text-anchor="middle">TATUUS FA01</text>
+            <g class="needle" id="tachNeedle" aria-hidden="true">
+              <path class="needle-shadow" d="M 288 288 L 301 76 L 312 288 Z"></path>
+              <path class="needle-body" d="M 291 288 L 301 82 L 309 288 Z"></path>
+              <circle class="needle-hub-outer" cx="300" cy="278" r="28"></circle>
+              <circle class="needle-hub-inner" cx="300" cy="278" r="13"></circle>
+            </g>
+          </svg>
+
+          <div class="drive-digital">
+            <div class="gear-display" role="status" aria-live="polite" aria-label="Current gear">
+              <span class="drive-label">Gear</span>
+              <strong class="gear-value tabular" id="gearValue">N</strong>
+            </div>
+            <div class="speed-display">
+              <span class="drive-label">Vehicle speed</span>
+              <span><strong class="speed-value tabular" id="speedValue">0</strong><small>km/h</small></span>
+              <strong class="shift-phase" id="shiftPhase">READY</strong>
+            </div>
+            <div class="rpm-display">
+              <span class="drive-label">Engine</span>
+              <span class="digital-value tabular" id="rpmValue">1,250</span>
+              <span class="digital-unit">RPM</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="telemetry-strip" aria-label="Engine telemetry">
+          <div class="telemetry-cell">
+            <span class="telemetry-label">Throttle</span>
+            <span><strong class="tabular" id="throttleValue">0</strong><small>%</small></span>
+            <div class="mini-bar" aria-hidden="true"><span id="throttleBar"></span></div>
+          </div>
+          <div class="telemetry-cell boost-cell">
+            <span class="telemetry-label">Turbo boost</span>
+            <span><strong class="tabular" id="boostValue">0.00</strong><small>bar</small></span>
+            <div class="mini-bar boost-bar" aria-hidden="true"><span id="boostBar"></span></div>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">Clutch engagement</span>
+            <span><strong class="tabular" id="clutchValue">100</strong><small>%</small></span>
+            <div class="mini-bar clutch-bar" aria-hidden="true"><span id="clutchBar"></span></div>
+            <span class="telemetry-detail tabular" id="drivetrainValue">SHAFT 0 RPM</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">Brake</span>
+            <span><strong class="tabular" id="brakeValue">0</strong><small>%</small></span>
+            <div class="mini-bar brake-bar" aria-hidden="true"><span id="brakeBar"></span></div>
+            <span class="telemetry-detail" id="limiterValue">LIMITER ARMED 6,500</span>
+            <span class="pulse-meter" id="limiterPulse" aria-hidden="true"></span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="control-column" id="controls" aria-label="Simulator controls">
+        <section class="panel mic-panel" aria-labelledby="micTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Listener placement</p>
+              <h2 id="micTitle">Virtual microphone</h2>
+            </div>
+            <span class="mode-index tabular" id="modeIndex">01 / 03</span>
+          </div>
+
+          <div class="mic-visual" aria-hidden="true">
+            <svg viewBox="0 0 420 210">
+              <path class="car-centerline" d="M 210 16 L 210 194"></path>
+              <path class="car-outline" d="M 172 28 Q 210 10 248 28 L 266 72 L 266 151 Q 255 184 230 194 L 190 194 Q 165 184 154 151 L 154 72 Z"></path>
+              <path class="car-window" d="M 181 70 L 190 46 L 230 46 L 239 70 Z"></path>
+              <path class="car-cockpit" d="M 180 83 L 240 83 L 242 137 L 178 137 Z"></path>
+              <rect class="car-engine" x="183" y="146" width="54" height="28" rx="4"></rect>
+              <path class="exhaust-line" d="M 210 174 L 210 201"></path>
+              <circle class="emitter-dot" cx="210" cy="160" r="5"></circle>
+              <circle class="listener-ring" id="listenerRing" cx="210" cy="108" r="12"></circle>
+              <circle class="listener-dot" id="listenerDot" cx="210" cy="108" r="4"></circle>
+              <text class="listener-label" id="listenerLabel" x="228" y="112">COCKPIT</text>
+            </svg>
+          </div>
+
+          <div class="mode-selector" id="modeSelector" role="radiogroup" aria-label="Virtual microphone position">
+            <button class="mode-button is-selected" type="button" role="radio" aria-checked="true" data-camera="cockpit">
+              <span class="mode-number">01</span>
+              <span><strong>Cockpit</strong><small>Interior event</small></span>
+            </button>
+            <button class="mode-button" type="button" role="radio" aria-checked="false" data-camera="bonnet">
+              <span class="mode-number">02</span>
+              <span><strong>Bonnet</strong><small>External / hood</small></span>
+            </button>
+            <button class="mode-button" type="button" role="radio" aria-checked="false" data-camera="exhaust">
+              <span class="mode-number">03</span>
+              <span><strong>Exhaust</strong><small>External / tail</small></span>
+            </button>
+          </div>
+
+          <p class="mode-explainer" id="modeExplainer">
+            Plays the native interior engine event, with the cabin character authored into the bank.
+          </p>
+        </section>
+
+        <section class="panel throttle-panel" aria-labelledby="throttleTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Driver input</p>
+              <h2 id="throttleTitle">Throttle &amp; brake</h2>
+            </div>
+            <span class="pedal-readout tabular" id="pedalReadout">T 0 · B 0</span>
+          </div>
+
+          <div class="pedal-pad-grid">
+            <button class="pedal-pad throttle-pad" id="throttlePad" type="button" aria-pressed="false" aria-describedby="throttleHint">
+              <span class="pedal-icon" aria-hidden="true"><span></span></span>
+              <span class="pedal-pad-copy">
+                <strong>Hold throttle</strong>
+                <small id="throttleHint">Space / W</small>
+              </span>
+              <span class="hold-indicator" aria-hidden="true"></span>
+            </button>
+            <button class="pedal-pad brake-pad" id="brakePad" type="button" aria-pressed="false" aria-describedby="brakeHint">
+              <span class="pedal-icon brake-icon" aria-hidden="true"><span></span></span>
+              <span class="pedal-pad-copy">
+                <strong>Hold brake</strong>
+                <small id="brakeHint">S / ↓</small>
+              </span>
+              <span class="hold-indicator" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <button class="neutral-button" id="neutralButton" type="button" aria-pressed="false">
+            <span><strong>Neutral</strong><small>Disengage the drivetrain for free revs</small></span>
+            <span class="neutral-state" id="neutralText">Drive</span>
+          </button>
+
+          <div class="pedal-ranges">
+            <label class="range-control" for="throttleSlider">
+              <span><strong>Analog throttle</strong><output id="throttleOutput" for="throttleSlider">0%</output></span>
+              <input id="throttleSlider" type="range" min="0" max="100" value="0" step="1" aria-label="Analog throttle percentage">
+              <span class="range-scale" aria-hidden="true"><span>0</span><span>50</span><span>100</span></span>
+            </label>
+            <label class="range-control brake-range" for="brakeSlider">
+              <span><strong>Analog brake</strong><output id="brakeOutput" for="brakeSlider">0%</output></span>
+              <input id="brakeSlider" type="range" min="0" max="100" value="0" step="1" aria-label="Analog brake percentage">
+              <span class="range-scale" aria-hidden="true"><span>0</span><span>50</span><span>100</span></span>
+            </label>
+          </div>
+          <p class="pedal-note">Lift-off pops use AC's positive low-gas gate. Sweep the analog throttle below 30%; a digital key release correctly jumps straight to zero.</p>
+        </section>
+
+        <section class="panel audio-panel" aria-labelledby="audioTitle">
+          <div class="panel-heading audio-heading">
+            <div>
+              <p class="eyebrow">Output bus</p>
+              <h2 id="audioTitle">Audio</h2>
+            </div>
+            <button class="mute-button" id="muteButton" type="button" aria-pressed="false">
+              <span class="speaker-icon" aria-hidden="true"></span>
+              <span id="muteText">Mute</span>
+            </button>
+          </div>
+
+          <label class="range-control volume-control" for="volumeSlider">
+            <span><strong>Master level</strong><output id="volumeOutput" for="volumeSlider">85%</output></span>
+            <input id="volumeSlider" type="range" min="0" max="100" value="85" step="1" aria-label="Master output volume">
+          </label>
+
+          <button class="isolation-button" id="engineMuteButton" type="button" aria-pressed="false">
+            <span><strong>Engine + transmission</strong><small>Keep turbo, shifts, limiter and pops audible</small></span>
+            <span class="isolation-state" id="engineMuteText">Playing</span>
+          </button>
+
+          <button class="backfire-audition" id="backfireAuditionButton" type="button" hidden>
+            <span class="backfire-mark" aria-hidden="true">✦</span>
+            <span><strong>Play pops &amp; bangs</strong><small>Original isolated backfire event</small></span>
+          </button>
+
+          <dl class="audio-diagnostics">
+            <div><dt>Backend</dt><dd id="audioBackend">Starting…</dd></div>
+            <div><dt>Bank</dt><dd id="audioBank">Tatuus FA01</dd></div>
+            <div><dt>Event</dt><dd id="audioEvent">engine_int</dd></div>
+          </dl>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer-bar">
+      <div class="footer-status" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="footerStatus">Waiting for telemetry</span>
+      </div>
+      <p><kbd>Space</kbd> / <kbd>W</kbd> throttle · <kbd>S</kbd> / <kbd>↓</kbd> brake · <kbd>N</kbd> neutral · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> microphones · <kbd>M</kbd> mute</p>
+    </footer>
+  </div>
+
+  <noscript>
+    <div class="noscript">This instrument needs JavaScript to receive live telemetry and control the audio engine.</div>
+  </noscript>
+  <script src="/app.js?v=9" defer></script>
+</body>
+</html>

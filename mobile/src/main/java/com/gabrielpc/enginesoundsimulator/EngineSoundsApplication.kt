@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator
 
 import android.app.Application
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 
 class EngineSoundsApplication : Application() {
@@ -12,6 +13,7 @@ class EngineSoundsApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        EngineSampleProfiles.initialize(this)
         driveController = DriveController(this)
     }
 

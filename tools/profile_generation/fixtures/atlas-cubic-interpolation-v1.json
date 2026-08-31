@@ -1,0 +1,30 @@
+{
+  "schema": "byd-atlas-cubic-fixture-v1",
+  "pcm16StereoFrames": [
+    [-32768, 32767],
+    [-12000, 8000],
+    [0, -4000],
+    [16000, -16000],
+    [32767, -32768]
+  ],
+  "loopStartFrame": 0,
+  "loopEndFrameExclusive": 5,
+  "vectors": [
+    {
+      "phaseOffsetFrames": 0.25,
+      "expectedStereo": [-1.139999370555742, 1.1094579721976379]
+    },
+    {
+      "phaseOffsetFrames": 2.5,
+      "expectedStereo": [0.22596285897396767, -0.28699606311227754]
+    },
+    {
+      "phaseOffsetFrames": -0.75,
+      "expectedStereo": [0.5422409550767541, -0.5365549752800074]
+    },
+    {
+      "phaseOffsetFrames": 4.875,
+      "expectedStereo": [-0.8036881976340526, 0.8153372080713828]
+    }
+  ]
+}

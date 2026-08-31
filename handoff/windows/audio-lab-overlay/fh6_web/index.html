@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FH6 Virtual Powertrain</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 fill=%22%2348e0f0%22/><text x=%2232%22 y=%2240%22 text-anchor=%22middle%22 font-size=%2222%22 font-family=%22Arial%22 font-weight=%22900%22>F6</text></svg>">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">FH6</span>
+      <div><strong>Virtual Powertrain</strong><small>LOCAL REFERENCE LAB</small></div>
+    </div>
+    <div class="car-select">
+      <button id="favorite" class="favorite" type="button" aria-label="Favorite this car">☆</button>
+      <div><small>REFERENCE CAR</small><strong id="carName">1998 Toyota Supra RZ MKIV</strong></div>
+      <span class="stock-pill">STOCK</span>
+    </div>
+    <div id="streamStatus" class="stream"><i></i><span>CONNECTING</span></div>
+  </header>
+
+  <main>
+    <section class="hero panel">
+      <div class="tach-wrap">
+        <svg class="tach" viewBox="0 0 520 310" role="img" aria-label="Engine tachometer">
+          <path class="tach-track" d="M70 250 A190 190 0 0 1 450 250" pathLength="100" />
+          <path id="tachValue" class="tach-value" d="M70 250 A190 190 0 0 1 450 250" pathLength="100" />
+          <g class="tach-marks">
+            <text x="63" y="276">0</text><text x="92" y="150">2</text><text x="185" y="77">4</text>
+            <text x="309" y="77">6</text><text x="408" y="150">8</text><text x="446" y="276">10</text>
+          </g>
+          <line id="needle" x1="260" y1="250" x2="91" y2="250" />
+          <circle cx="260" cy="250" r="15" class="hub" />
+        </svg>
+        <div class="rpm-readout"><strong id="rpm">0</strong><span>RPM</span></div>
+      </div>
+      <div class="drive-readout">
+        <div id="gear" class="gear">P</div>
+        <div class="speed"><strong id="speed">0.00</strong><span>KM/H</span></div>
+        <div class="phase"><i id="shiftDot"></i><span id="shiftPhase">IGNITION OFF</span></div>
+      </div>
+      <div class="hero-stats">
+        <div><span>THROTTLE</span><strong id="throttleRead">0.0%</strong></div>
+        <div><span>BOOST</span><strong id="boostRead">0%</strong></div>
+        <div><span>INPUT</span><strong id="inputRead">WAITING</strong></div>
+        <div><span>RATIO DATA</span><strong id="ratioRead">GATED</strong></div>
+      </div>
+    </section>
+
+    <section class="control-grid">
+      <article class="panel controls">
+        <div class="section-heading"><div><small>POWERTRAIN CONTROL</small><h2>Vehicle input</h2></div><span id="inputRateBadge">20 HZ</span></div>
+        <div class="ignition-row">
+          <button id="ignition" class="ignition" type="button"><span>IGNITION</span><strong>OFF</strong></button>
+          <div class="selector" role="group" aria-label="Transmission selector">
+            <button data-selector="P" class="active" type="button">P</button>
+            <button data-selector="R" type="button">R</button>
+            <button data-selector="N" type="button">N</button>
+            <button data-selector="D" type="button">D</button>
+          </div>
+        </div>
+
+        <div class="pedal-intro"><strong>BYD SEAL AWD MOCK DRIVE</strong><span>Drag a pedal upward and keep holding it. Releasing the accelerator applies regenerative braking.</span></div>
+        <div class="pedal-deck">
+          <label class="pedal-control throttle-pedal">
+            <span class="pedal-title">THROTTLE <output id="throttleOutput">0.0%</output></span>
+            <span class="pedal-well">
+              <span class="pedal-scale" aria-hidden="true"><i>100</i><i>50</i><i>0</i></span>
+              <span class="pedal-plate" aria-hidden="true"><b>ACCEL</b><i></i><i></i><i></i></span>
+              <input id="throttleControl" class="pedal-range" type="range" min="0" max="100" step="0.1" value="0" aria-label="Throttle percentage; drag upward and hold">
+            </span>
+          </label>
+          <label class="pedal-control brake-pedal">
+            <span class="pedal-title">BRAKE <output id="brakeOutput">0.0%</output></span>
+            <span class="pedal-well">
+              <span class="pedal-scale" aria-hidden="true"><i>100</i><i>50</i><i>0</i></span>
+              <span class="pedal-plate" aria-hidden="true"><b>BRAKE</b><i></i><i></i><i></i></span>
+              <input id="brakeControl" class="pedal-range" type="range" min="0" max="100" step="0.1" value="0" aria-label="Brake percentage; drag upward and hold">
+            </span>
+          </label>
+          <div class="dynamics-readout">
+            <div><span>ACCELERATION</span><strong id="accelerationRead">0.00 m/s²</strong></div>
+            <div><span>LIFT / BRAKE REGEN</span><strong id="regenRead">0.0 kW</strong></div>
+            <div><span>ENERGY RECOVERED</span><strong id="energyRead">0.000 Wh</strong></div>
+            <small>408 kW · 0–100 target 3.97 s · 190 km/h governor</small>
+          </div>
+        </div>
+
+        <div class="sample-row">
+          <label>Input rate<select id="inputRate"><option>5</option><option>10</option><option selected>20</option><option>60</option></select><span>Hz</span></label>
+          <label>Scenario<select id="scenario"><option value="manual">Pedal drive</option><option value="launch">Full acceleration</option><option value="coast">Lift-off regeneration</option><option value="brake">Braking</option><option value="cycle">Repeatable cycle</option><option value="dropout">Packet dropout</option></select></label>
+        </div>
+      </article>
+
+      <article class="panel sound">
+        <div class="section-heading"><div><small>ORIGINAL ASSET ROUTING</small><h2>Listening position</h2></div></div>
+        <div class="camera" role="group" aria-label="Listening position">
+          <button data-camera="cockpit" class="active" type="button"><b>01</b><span>Cockpit</span></button>
+          <button data-camera="bonnet" type="button"><b>02</b><span>Bonnet</span></button>
+          <button data-camera="exhaust" type="button"><b>03</b><span>Exhaust</span></button>
+        </div>
+        <div class="toggle-list">
+          <label><span><strong>Master mute</strong><small>Silence every layer</small></span><input id="muted" type="checkbox"><i></i></label>
+          <label><span><strong>Engine / transmission isolate</strong><small>Hear effects without continuous powertrain</small></span><input id="isolated" type="checkbox"><i></i></label>
+          <label><span><strong>Authentic FH6 levels</strong><small>Compare authored throttle-level curves</small></span><input id="authentic" type="checkbox"><i></i></label>
+        </div>
+        <button id="audition" class="audition" type="button"><span>▶</span><div><strong>Audition pops &amp; bangs</strong><small>Trigger the original natural-condition route</small></div></button>
+      </article>
+    </section>
+
+    <section class="panel fidelity">
+      <div class="section-heading"><div><small>FIDELITY GATE</small><h2>Installed Supra sound stack</h2></div><span id="gateBadge" class="gate locked">LOCKED</span></div>
+      <p id="audioDetail">Reading installed FH6 audio definitions…</p>
+      <div id="layers" class="layers"></div>
+      <div class="boundary"><strong>Core powertrain only</strong><span>Engine · exhaust · intake · turbo · BOV · transmission · shifts · gear crack · backfire · burbles · anti-lag · limiter · startup</span><small>Tyres, brakes, chassis and damage are intentionally excluded.</small></div>
+    </section>
+  </main>
+
+  <footer><span>Reads assets in place from <code id="rootPath">D:\Games\Forza Horizon 6</code></span><span id="rejected"></span></footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>

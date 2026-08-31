@@ -6,21 +6,44 @@ import kotlin.math.pow
 
 internal enum class SampleLayerRole { IDLE, LOAD, COAST, TEXTURE, LIMITER }
 
+/**
+ * Continuous layers that belong to each selectable engine program. IDLE and TEXTURE are shared
+ * foundations; LIMITER is a full-load layer. Turbo, transmission, shifts, and overrun are effects
+ * with independent live-input rules and do not participate in this source-family selection.
+ */
+internal fun SampleLayerRole.isIncludedIn(source: PrimaryEngineLayerSource): Boolean = when (source) {
+    PrimaryEngineLayerSource.LOAD -> this != SampleLayerRole.COAST
+    PrimaryEngineLayerSource.COAST -> this == SampleLayerRole.IDLE ||
+        this == SampleLayerRole.COAST ||
+        this == SampleLayerRole.TEXTURE
+    PrimaryEngineLayerSource.FMOD_MIX -> true
+}
+
 /** Keeps the continuous idle program present in the cabin without raising driving-layer volume. */
 private const val IDLE_LAYER_GAIN_BOOST_DB = 8.0
 
 internal enum class SampleEffectTrigger {
+    PARAMETER_PLACEMENT_ENTRY,
+    ENGINE_EVENT_START,
     TRANSMISSION_LOOP,
+    TRANSMISSION_PULSE,
     SHIFT_UP,
     SHIFT_DOWN,
+    SHIFT_REJECTED,
     THROTTLE_LIFT,
     TURBO_LOOP,
     TURBO_FLUTTER,
     TURBO_DUMP,
+    LIMITER_LOOP,
+    LIMITER_PULSE,
+    TRACTION_LIMIT,
+    TRACTION_PULSE,
+    ENGINE_START,
     ;
 
     fun isContinuousLoop(): Boolean {
-        return this == TRANSMISSION_LOOP || this == TURBO_LOOP || this == TURBO_FLUTTER
+        return this == TRANSMISSION_LOOP || this == TURBO_LOOP || this == TURBO_FLUTTER ||
+            this == LIMITER_LOOP || this == TRACTION_LIMIT
     }
 
     fun isTurboSound(): Boolean {
@@ -59,6 +82,24 @@ internal object SampleEffectControls {
         displayName = "Turbo",
         description = "Spool whistle and compressor flutter from this car's sound bank",
         bit = 1L shl 3,
+    )
+    val limiter = SampleEffectControlSpec(
+        id = "limiter",
+        displayName = "Limiter",
+        description = "Engine limiter pulse from this car's sound bank",
+        bit = 1L shl 4,
+    )
+    val tractionLimit = SampleEffectControlSpec(
+        id = "traction_limit",
+        displayName = "Traction control",
+        description = "Traction-limit sound from this car's sound bank",
+        bit = 1L shl 5,
+    )
+    val engineLifecycle = SampleEffectControlSpec(
+        id = "engine_lifecycle",
+        displayName = "Engine lifecycle",
+        description = "Engine start and event-start transients from this car's sound bank",
+        bit = 1L shl 6,
     )
 }
 
@@ -209,8 +250,7 @@ internal data class SampleLayerSpec(
         primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
     ): Double {
         if (rpm !in startRpm..endRpm) return 0.0
-        if (loadOnlyProgram && primaryLayerSource == PrimaryEngineLayerSource.LOAD && role == SampleLayerRole.COAST) return 0.0
-        if (loadOnlyProgram && primaryLayerSource == PrimaryEngineLayerSource.COAST && role == SampleLayerRole.LOAD) return 0.0
+        if (loadOnlyProgram && !role.isIncludedIn(primaryLayerSource)) return 0.0
 
         var amplitude = 1.0
         for (index in rpmAmplitudeCurves.indices) {
@@ -219,7 +259,7 @@ internal data class SampleLayerSpec(
         if (amplitude <= 0.0) return 0.0
 
         val effectiveThrottle = when {
-            !loadOnlyProgram || role == SampleLayerRole.IDLE -> throttle
+            !loadOnlyProgram -> throttle
             primaryLayerSource == PrimaryEngineLayerSource.LOAD -> 1.0
             primaryLayerSource == PrimaryEngineLayerSource.COAST -> 0.0
             primaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX -> throttle
@@ -245,6 +285,19 @@ internal data class EngineSampleProgram(
     val supportsLoadOnlyProgram: Boolean = true,
 )
 
+/** Identifies the one validated external WAV pack that may satisfy a profile. */
+internal data class EngineAudioPackRequirement(
+    val packId: String,
+    val packVersion: Int,
+    val manifestSha256: String,
+) {
+    init {
+        require(BydAudioPackManifest.isValidPackId(packId)) { "Invalid audio pack id" }
+        require(packVersion > 0) { "Audio pack version must be positive" }
+        require(BydAudioPackManifest.isSha256(manifestSha256)) { "Invalid audio pack manifest hash" }
+    }
+}
+
 internal data class EngineSampleProfile(
     val id: String,
     val displayName: String,
@@ -261,11 +314,26 @@ internal data class EngineSampleProfile(
     val limiterRpm: Double,
     val upshiftRpm: Double,
     val gearRatios: List<Double>,
+    /** Donor-car final drive used only to couple road speed to the synthetic combustion sound. */
+    val soundFinalDriveRatio: Double = 1.0,
+    /** Donor driven-wheel radius, separate from BYD EV propulsion physics. */
+    val soundDrivenWheelRadiusMeters: Double = 0.347,
+    /** Keeps the original three hand-calibrated equal-speed-band profiles bit-for-behavior compatible. */
+    val usesLegacyEvenSpeedBandGearing: Boolean = true,
     val upshiftDurationSeconds: Double,
     val downshiftDurationSeconds: Double,
     val cabinProgram: EngineSampleProgram,
     val exteriorProgram: EngineSampleProgram? = null,
+    /** Null keeps legacy profiles in APK assets; new profiles can require a separately installed pack. */
+    val audioPackRequirement: EngineAudioPackRequirement? = null,
+    /** Full-event FMOD NRT atlas used instead of the legacy per-source renderer. */
+    val atlasProgram: FullEventAtlasProgram? = null,
+    /** Root-catalog descriptor. Its family runtime is verified and parsed only for playback. */
+    val atlasRuntimeDescriptor: AtlasFamilyRuntimeDescriptor? = null,
+    /** Donor-car controls used only by full-event atlas effects. */
+    val atlasAudioPhysics: AtlasCarAudioPhysics? = null,
 ) {
+    val isAtlasProfile: Boolean get() = atlasProgram != null || atlasRuntimeDescriptor != null
     val layers: List<SampleLayerSpec> = cabinProgram.layers
     val effects: List<SampleEffectSpec> = cabinProgram.effects
     val throttleOutputGainDb: AutomationCurve? = cabinProgram.throttleOutputGainDb
@@ -293,8 +361,16 @@ internal data class EngineSampleProfile(
         }
     }
 
-    fun hasTurboSounds(perspective: EngineSoundPerspective): Boolean =
-        program(perspective).effects.any { effect -> effect.trigger.isTurboSound() }
+    fun hasTurboSounds(perspective: EngineSoundPerspective): Boolean {
+        val hasTurboEvent = program(perspective).effects.any { effect -> effect.trigger.isTurboSound() }
+        // Some banks retain a dormant turbo event even for naturally aspirated cars. Atlas cars
+        // expose the dashboard control only when the donor's physical TURBO_n data exists too.
+        return if (isAtlasProfile) {
+            hasTurboEvent && atlasAudioPhysics?.turbos?.isNotEmpty() == true
+        } else {
+            hasTurboEvent
+        }
+    }
 
     fun appliesLoadOnlyProgram(
         loadOnlyProgram: Boolean,
@@ -307,6 +383,7 @@ internal data class EngineSampleProfile(
         source: PrimaryEngineLayerSource,
         perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     ): PrimaryEngineLayerSource {
+        if (isAtlasProfile) return source
         val program = program(perspective)
         val hasCoastLayers = program.layers.any { it.role == SampleLayerRole.COAST }
         return if (source != PrimaryEngineLayerSource.LOAD && program.supportsLoadOnlyProgram && hasCoastLayers) {
@@ -327,7 +404,7 @@ internal data class EngineSampleProfile(
     ): List<SampleLayerSpec> {
         val program = program(perspective)
         if (appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
-            return program.layers.filter { layer -> layer.role != SampleLayerRole.COAST }
+            return program.layers.filter { layer -> layer.role.isIncludedIn(PrimaryEngineLayerSource.LOAD) }
         }
         return program.layers
     }
@@ -346,11 +423,8 @@ internal data class EngineSampleProfile(
         perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     ): List<SampleLayerSpec> {
         val program = program(perspective)
-        return when (resolvedPrimaryLayerSource(source, perspective)) {
-            PrimaryEngineLayerSource.LOAD -> loopLayersForLoad(loadOnlyProgram = true, perspective)
-            PrimaryEngineLayerSource.COAST -> program.layers.filter { it.role != SampleLayerRole.LOAD }
-            PrimaryEngineLayerSource.FMOD_MIX -> program.layers
-        }
+        val resolvedSource = resolvedPrimaryLayerSource(source, perspective)
+        return program.layers.filter { layer -> layer.role.isIncludedIn(resolvedSource) }
     }
 
     fun requiredAssetsForPrimarySource(
@@ -368,12 +442,43 @@ internal data class EngineSampleProfile(
         program.effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
+    fun requiredExternalAssetPaths(): Set<String> = linkedSetOf<String>().apply {
+        atlasProgram?.requiredShardNames?.forEach { shardName ->
+            add("sample_engine/$assetDirectory/$shardName")
+        }
+        if (isAtlasProfile) return@apply
+        EngineSoundPerspective.entries.forEach { perspective ->
+            requiredAssets(perspective).forEach { assetName ->
+                add("sample_engine/$assetDirectory/$assetName")
+            }
+        }
+    }
+
     fun outputGainAt(
         throttle: Double,
         perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     ): Double = 10.0.pow(
         (program(perspective).throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0,
     )
+
+    fun outputGainForPrimarySource(
+        liveThrottle: Double,
+        loadOnlyProgram: Boolean,
+        primaryLayerSource: PrimaryEngineLayerSource,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): Double {
+        val outputThrottle = if (appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
+            when (resolvedPrimaryLayerSource(primaryLayerSource, perspective)) {
+                PrimaryEngineLayerSource.LOAD -> 1.0
+                PrimaryEngineLayerSource.COAST -> 0.0
+                PrimaryEngineLayerSource.FMOD_MIX -> liveThrottle
+            }
+        } else {
+            liveThrottle
+        }
+
+        return outputGainAt(outputThrottle, perspective)
+    }
 }
 
 /** Common road-car figures and Brazilian market-price references for a sound profile's model family. */
@@ -390,14 +495,55 @@ internal data class CarSpecifications(
 
 internal object EngineSampleProfiles {
     val default = huracanTrofeoEvo2Profile()
-    val all = listOf(
+    private val bundled = listOf(
         default,
         lamborghiniAventadorSvProfile(),
         nissanSkylineR34Profile(),
     )
-    val maximumSupportedRpm = all.maxOf { it.maximumRpm }
 
-    fun find(id: String?): EngineSampleProfile = all.firstOrNull { it.id == id } ?: default
+    @Volatile
+    private var external: List<EngineSampleProfile> = emptyList()
+
+    @Volatile
+    private var initialized = false
+
+    @Volatile
+    private var atlasRuntimeLoader: AtlasFamilyRuntimeLoader? = null
+
+    private val resolvedAtlasProfiles = CurrentAtlasResolvedProfileCache()
+
+    val all: List<EngineSampleProfile> get() = bundled + external
+    val maximumSupportedRpm: Double get() = all.maxOf { it.maximumRpm }
+
+    fun initialize(context: android.content.Context) {
+        if (initialized) return
+        synchronized(this) {
+            if (initialized) return
+            val loadedCatalog = ExternalCarCatalogLoader.loadIfPresent(context)
+            val loaded = loadedCatalog?.profiles.orEmpty()
+            val bundledIds = bundled.mapTo(hashSetOf()) { it.id }
+            require(loaded.none { it.id in bundledIds }) { "External car catalog collides with a bundled profile" }
+            external = loaded
+            atlasRuntimeLoader = loadedCatalog?.let { AtlasFamilyRuntimeLoader(context.applicationContext, it.families) }
+            resolvedAtlasProfiles.clear()
+            initialized = true
+        }
+    }
+
+    fun find(id: String?): EngineSampleProfile {
+        if (id == null) return default
+        return resolvedAtlasProfiles.find(id) ?: all.firstOrNull { it.id == id } ?: default
+    }
+
+    fun resolveForPlayback(profile: EngineSampleProfile): EngineSampleProfile {
+        val descriptor = profile.atlasRuntimeDescriptor ?: return profile
+        val atlas = requireNotNull(atlasRuntimeLoader) { "Atlas runtime loader is unavailable" }.load(descriptor)
+        return profile.copy(
+            atlasProgram = atlas,
+            cabinProgram = ExternalCarCatalogParser.sampleProgramFor(atlas, EngineSoundPerspective.CABIN),
+            exteriorProgram = ExternalCarCatalogParser.sampleProgramFor(atlas, EngineSoundPerspective.EXTERIOR),
+        ).also(resolvedAtlasProfiles::replace)
+    }
 
     fun adjacent(currentId: String, offset: Int): EngineSampleProfile {
         val current = all.indexOfFirst { it.id == currentId }.coerceAtLeast(0)

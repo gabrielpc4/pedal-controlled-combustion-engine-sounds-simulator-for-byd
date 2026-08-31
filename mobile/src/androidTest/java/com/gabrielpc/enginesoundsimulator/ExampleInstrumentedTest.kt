@@ -26,10 +26,10 @@ class ExampleInstrumentedTest {
     }
 
     @Test
-    fun everyProfilePackagesItsRequiredEffectsAsDecodablePcm() {
+    fun everyBundledProfilePackagesItsRequiredEffectsAsDecodablePcm() {
         val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
 
-        EngineSampleProfiles.all.forEach { profile ->
+        EngineSampleProfiles.all.filter { profile -> profile.audioPackRequirement == null }.forEach { profile ->
             EngineSoundPerspective.entries.forEach { perspective ->
                 profile.requiredAssets(perspective).forEach { assetName ->
                     val path = "sample_engine/${profile.assetDirectory}/$assetName"

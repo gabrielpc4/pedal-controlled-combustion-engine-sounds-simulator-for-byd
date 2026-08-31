@@ -7,6 +7,8 @@
 *.xml text eol=lf
 *.md text eol=lf
 gradlew text eol=lf
+handoff/windows/audio-lab-overlay/** text eol=lf
+handoff/windows/audio-lab-overlay-SHA256SUMS.txt text eol=lf
 
 *.jar binary
 *.png binary
