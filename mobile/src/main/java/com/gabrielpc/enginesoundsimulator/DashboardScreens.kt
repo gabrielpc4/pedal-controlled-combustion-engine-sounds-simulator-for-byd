@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
 import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
@@ -103,12 +104,17 @@ internal fun MixerDashboardScreen(
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
+    onLoadProgramLayerGainChange: (Double) -> Unit,
+    onCoastProgramLayerGainChange: (Double) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     loadOnlyProgram: Boolean,
     primaryLayerSource: PrimaryEngineLayerSource,
     canUseCoastAsPrimary: Boolean,
     onPrimaryLayerSourceChange: (PrimaryEngineLayerSource) -> Unit,
+    soundPerspective: EngineSoundPerspective,
+    hasExteriorProgram: Boolean,
+    onSoundPerspectiveChange: (EngineSoundPerspective) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val groupedTracks = remember(state.layerMixTracks) {
@@ -132,11 +138,26 @@ internal fun MixerDashboardScreen(
             onSelectCar = onSelectCar,
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
-        if (canUseCoastAsPrimary) {
+        if (hasExteriorProgram) {
             Spacer(Modifier.height(6.dp))
-            PrimaryLayerSourceSelector(
+            EngineProgramSelector(
                 selected = primaryLayerSource,
+                canUseCoastAsPrimary = canUseCoastAsPrimary,
                 onSelected = onPrimaryLayerSourceChange,
+                perspective = soundPerspective,
+                onPerspectiveSelected = onSoundPerspectiveChange,
+            )
+        }
+        val hasLoadLayers = groupedTracks.load.isNotEmpty() || primaryLayerSource == PrimaryEngineLayerSource.COAST
+        if (hasLoadLayers || canUseCoastAsPrimary) {
+            Spacer(Modifier.height(6.dp))
+            MixerProgramLayerGainControls(
+                showLoad = hasLoadLayers,
+                loadGain = state.programLayerGains.load,
+                onLoadGainChange = onLoadProgramLayerGainChange,
+                showCoast = canUseCoastAsPrimary,
+                coastGain = state.programLayerGains.coast,
+                onCoastGainChange = onCoastProgramLayerGainChange,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -193,9 +214,89 @@ internal fun MixerDashboardScreen(
 }
 
 @Composable
-private fun PrimaryLayerSourceSelector(
+private fun MixerProgramLayerGainControls(
+    showLoad: Boolean,
+    loadGain: Double,
+    onLoadGainChange: (Double) -> Unit,
+    showCoast: Boolean,
+    coastGain: Double,
+    onCoastGainChange: (Double) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (showLoad) {
+            MixerProgramLayerGainControl(
+                label = "LOAD ALL",
+                gain = loadGain,
+                onGainChange = onLoadGainChange,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (showCoast) {
+            MixerProgramLayerGainControl(
+                label = "COAST ALL",
+                gain = coastGain,
+                onGainChange = onCoastGainChange,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MixerProgramLayerGainControl(
+    label: String,
+    gain: Double,
+    onGainChange: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel.copy(alpha = 0.88f))
+            .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = label,
+            color = CyanSoft,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.7.sp,
+        )
+        Slider(
+            value = gain.toFloat().coerceIn(0f, 3f),
+            onValueChange = { onGainChange(it.toDouble()) },
+            valueRange = 0f..3f,
+            modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = Cyan,
+                activeTrackColor = Cyan,
+                inactiveTrackColor = Line,
+            ),
+        )
+        Text(
+            text = String.format(Locale.US, "%.1fx", gain),
+            color = White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.width(34.dp),
+        )
+    }
+}
+
+@Composable
+private fun EngineProgramSelector(
     selected: PrimaryEngineLayerSource,
+    canUseCoastAsPrimary: Boolean,
     onSelected: (PrimaryEngineLayerSource) -> Unit,
+    perspective: EngineSoundPerspective,
+    onPerspectiveSelected: (EngineSoundPerspective) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -207,6 +308,29 @@ private fun PrimaryLayerSourceSelector(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
+            text = "LISTENING",
+            color = Muted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+        Spacer(Modifier.width(10.dp))
+        EngineSoundPerspective.entries.forEach { option ->
+            val active = option == perspective
+            Text(
+                text = option.displayName,
+                color = if (active) Cyan else Muted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable { onPerspectiveSelected(option) }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+        Spacer(Modifier.width(22.dp))
+        Text(
             text = "ENGINE PROGRAM",
             color = Muted,
             fontSize = 10.sp,
@@ -216,25 +340,23 @@ private fun PrimaryLayerSourceSelector(
         Spacer(Modifier.width(12.dp))
         PrimaryEngineLayerSource.entries.forEach { source ->
             val active = source == selected
+            val supported = source == PrimaryEngineLayerSource.LOAD || canUseCoastAsPrimary
             Text(
                 text = source.displayName,
-                color = if (active) Cyan else Muted,
+                color = when {
+                    active -> Cyan
+                    supported -> Muted
+                    else -> Muted.copy(alpha = 0.35f)
+                },
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier
                     .clip(RoundedCornerShape(5.dp))
                     .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
-                    .clickable { onSelected(source) }
+                    .clickable(enabled = supported) { onSelected(source) }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
-        Text(
-            text = "SELECTS LOAD, COAST, OR THEIR AUTHORED THROTTLE MIX",
-            color = Muted,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 12.dp),
-        )
     }
 }
 
@@ -348,7 +470,7 @@ private fun BarTachometerHud(
         limiterActive = drivetrain.limiterActive,
     )
     val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
-    val speedKmh = drivetrain.rawSpeedKmh.toInt().coerceAtLeast(0)
+    val rpm = drivetrain.rpm.toInt().coerceAtLeast(0)
     val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
         drivetrain.gear.toString()
     } else {
@@ -361,20 +483,40 @@ private fun BarTachometerHud(
             verticalAlignment = Alignment.Bottom,
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = speedKmh.toString(),
-                    color = White,
-                    fontSize = 42.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = rpm.toString(),
+                        color = White,
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        text = "RPM",
+                        color = Muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.4.sp,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 7.dp),
+                    )
+                }
+                Spacer(Modifier.width(22.dp))
+                MixerTelemetryReadout(
+                    label = "SPEED",
+                    value = drivetrain.rawSpeedKmh.toInt().toString(),
+                    unit = "km/h",
                 )
-                Text(
-                    text = "Km/h",
-                    color = Muted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.4.sp,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 7.dp),
+                Spacer(Modifier.width(16.dp))
+                MixerTelemetryReadout(
+                    label = "PRED SPEED",
+                    value = String.format(Locale.US, "%.2f", drivetrain.presentationSpeedKmh),
+                    unit = "km/h",
+                )
+                Spacer(Modifier.width(16.dp))
+                MixerTelemetryReadout(
+                    label = "PRED ACCEL",
+                    value = String.format(Locale.US, "%+.2f", drivetrain.presentationAccelerationKmhPerSecond),
+                    unit = "km/h/s",
                 )
             }
             Column(
@@ -431,6 +573,41 @@ private fun BarTachometerHud(
                     start = Offset(redlineX, 0f),
                     end = Offset(redlineX, height),
                     strokeWidth = 2f,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MixerTelemetryReadout(
+    label: String,
+    value: String,
+    unit: String? = null,
+) {
+    Column {
+        Text(
+            text = label,
+            color = Muted,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.7.sp,
+        )
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = value,
+                color = Cyan,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+            )
+            unit?.let {
+                Text(
+                    text = it,
+                    color = CyanSoft,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 3.dp, bottom = 2.dp),
                 )
             }
         }

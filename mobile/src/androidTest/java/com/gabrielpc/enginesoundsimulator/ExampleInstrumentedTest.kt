@@ -3,6 +3,7 @@ package com.gabrielpc.enginesoundsimulator
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.WavPcmDecoder
 
 import org.junit.Test
@@ -29,20 +30,22 @@ class ExampleInstrumentedTest {
         val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
 
         EngineSampleProfiles.all.forEach { profile ->
-            profile.requiredAssets.forEach { assetName ->
-                val path = "sample_engine/${profile.assetDirectory}/$assetName"
-                assets.open(path).use { stream ->
-                    val header = ByteArray(4)
-                    assertEquals(4, stream.read(header))
-                    assertEquals("RIFF", String(header, Charsets.US_ASCII))
+            EngineSoundPerspective.entries.forEach { perspective ->
+                profile.requiredAssets(perspective).forEach { assetName ->
+                    val path = "sample_engine/${profile.assetDirectory}/$assetName"
+                    assets.open(path).use { stream ->
+                        val header = ByteArray(4)
+                        assertEquals(4, stream.read(header))
+                        assertEquals("RIFF", String(header, Charsets.US_ASCII))
+                    }
                 }
-            }
-            profile.effects.map { it.assetName }.distinct().forEach { assetName ->
-                val path = "sample_engine/${profile.assetDirectory}/$assetName"
-                val decoded = assets.open(path).use(WavPcmDecoder::decode)
-                assertTrue("$path has no audio", decoded.frameCount > 32)
-                assertTrue("$path is not mono/stereo", decoded.sourceChannels in 1..2)
-                assertEquals(profile.outputSampleRate, decoded.sampleRate)
+                profile.program(perspective).layers.forEach { layer ->
+                    val path = "sample_engine/${profile.assetDirectory}/${layer.assetName}"
+                    val decoded = assets.open(path).use(WavPcmDecoder::decode)
+                    assertTrue("$path has no audio", decoded.frameCount > 32)
+                    assertTrue("$path is not mono/stereo", decoded.sourceChannels in 1..2)
+                    assertTrue("$path has unsupported rate", decoded.sampleRate == 44_100 || decoded.sampleRate == 48_000)
+                }
             }
         }
     }

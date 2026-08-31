@@ -238,6 +238,13 @@ internal data class SampleLayerSpec(
 
 }
 
+internal data class EngineSampleProgram(
+    val layers: List<SampleLayerSpec>,
+    val effects: List<SampleEffectSpec> = emptyList(),
+    val throttleOutputGainDb: AutomationCurve? = null,
+    val supportsLoadOnlyProgram: Boolean = true,
+)
+
 internal data class EngineSampleProfile(
     val id: String,
     val displayName: String,
@@ -256,61 +263,117 @@ internal data class EngineSampleProfile(
     val gearRatios: List<Double>,
     val upshiftDurationSeconds: Double,
     val downshiftDurationSeconds: Double,
-    val layers: List<SampleLayerSpec>,
-    val effects: List<SampleEffectSpec> = emptyList(),
-    val throttleOutputGainDb: AutomationCurve? = null,
-    /** Skyline's recovered FMOD event requires its authored load/coast crossfade. */
-    val supportsLoadOnlyProgram: Boolean = true,
+    val cabinProgram: EngineSampleProgram,
+    val exteriorProgram: EngineSampleProgram? = null,
 ) {
-    val hasTurboSounds: Boolean = effects.any { effect -> effect.trigger.isTurboSound() }
+    val layers: List<SampleLayerSpec> = cabinProgram.layers
+    val effects: List<SampleEffectSpec> = cabinProgram.effects
+    val throttleOutputGainDb: AutomationCurve? = cabinProgram.throttleOutputGainDb
+    val supportsLoadOnlyProgram: Boolean = cabinProgram.supportsLoadOnlyProgram
+    val hasExteriorProgram: Boolean = exteriorProgram != null
+    val hasTurboSounds: Boolean = hasTurboSounds(EngineSoundPerspective.CABIN)
     val requiredAssets: Set<String> = linkedSetOf<String>().apply {
         layers.mapTo(this) { it.assetName }
         effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
-    fun appliesLoadOnlyProgram(loadOnlyProgram: Boolean): Boolean {
-        return supportsLoadOnlyProgram && loadOnlyProgram
+    fun resolvedPerspective(perspective: EngineSoundPerspective): EngineSoundPerspective {
+        return if (perspective == EngineSoundPerspective.EXTERIOR && exteriorProgram == null) {
+            EngineSoundPerspective.CABIN
+        } else {
+            perspective
+        }
     }
 
-    fun resolvedPrimaryLayerSource(source: PrimaryEngineLayerSource): PrimaryEngineLayerSource {
-        val hasCoastLayers = layers.any { it.role == SampleLayerRole.COAST }
-        return if (source != PrimaryEngineLayerSource.LOAD && supportsLoadOnlyProgram && hasCoastLayers) {
+    fun program(perspective: EngineSoundPerspective): EngineSampleProgram {
+        return if (resolvedPerspective(perspective) == EngineSoundPerspective.EXTERIOR) {
+            requireNotNull(exteriorProgram)
+        } else {
+            cabinProgram
+        }
+    }
+
+    fun hasTurboSounds(perspective: EngineSoundPerspective): Boolean =
+        program(perspective).effects.any { effect -> effect.trigger.isTurboSound() }
+
+    fun appliesLoadOnlyProgram(
+        loadOnlyProgram: Boolean,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): Boolean {
+        return program(perspective).supportsLoadOnlyProgram && loadOnlyProgram
+    }
+
+    fun resolvedPrimaryLayerSource(
+        source: PrimaryEngineLayerSource,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): PrimaryEngineLayerSource {
+        val program = program(perspective)
+        val hasCoastLayers = program.layers.any { it.role == SampleLayerRole.COAST }
+        return if (source != PrimaryEngineLayerSource.LOAD && program.supportsLoadOnlyProgram && hasCoastLayers) {
             source
         } else {
             PrimaryEngineLayerSource.LOAD
         }
     }
 
-    fun supportsPrimaryLayerSource(source: PrimaryEngineLayerSource): Boolean =
-        resolvedPrimaryLayerSource(source) == source
+    fun supportsPrimaryLayerSource(
+        source: PrimaryEngineLayerSource,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): Boolean = resolvedPrimaryLayerSource(source, perspective) == source
 
-    fun loopLayersForLoad(loadOnlyProgram: Boolean): List<SampleLayerSpec> {
-        if (appliesLoadOnlyProgram(loadOnlyProgram)) {
-            return layers.filter { layer -> layer.role != SampleLayerRole.COAST }
+    fun loopLayersForLoad(
+        loadOnlyProgram: Boolean,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): List<SampleLayerSpec> {
+        val program = program(perspective)
+        if (appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
+            return program.layers.filter { layer -> layer.role != SampleLayerRole.COAST }
         }
-        return layers
+        return program.layers
     }
 
-    fun requiredAssetsForLoad(loadOnlyProgram: Boolean): Set<String> = linkedSetOf<String>().apply {
-        loopLayersForLoad(loadOnlyProgram).mapTo(this) { it.assetName }
-        effects.forEach { effect -> addAll(effect.allAssetNames) }
+    fun requiredAssetsForLoad(
+        loadOnlyProgram: Boolean,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): Set<String> = linkedSetOf<String>().apply {
+        val program = program(perspective)
+        loopLayersForLoad(loadOnlyProgram, perspective).mapTo(this) { it.assetName }
+        program.effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
-    fun loopLayersForPrimarySource(source: PrimaryEngineLayerSource): List<SampleLayerSpec> {
-        return when (resolvedPrimaryLayerSource(source)) {
-            PrimaryEngineLayerSource.LOAD -> loopLayersForLoad(loadOnlyProgram = true)
-            PrimaryEngineLayerSource.COAST -> layers.filter { it.role != SampleLayerRole.LOAD }
-            PrimaryEngineLayerSource.FMOD_MIX -> layers
+    fun loopLayersForPrimarySource(
+        source: PrimaryEngineLayerSource,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): List<SampleLayerSpec> {
+        val program = program(perspective)
+        return when (resolvedPrimaryLayerSource(source, perspective)) {
+            PrimaryEngineLayerSource.LOAD -> loopLayersForLoad(loadOnlyProgram = true, perspective)
+            PrimaryEngineLayerSource.COAST -> program.layers.filter { it.role != SampleLayerRole.LOAD }
+            PrimaryEngineLayerSource.FMOD_MIX -> program.layers
         }
     }
 
-    fun requiredAssetsForPrimarySource(source: PrimaryEngineLayerSource): Set<String> = linkedSetOf<String>().apply {
-        loopLayersForPrimarySource(source).mapTo(this) { it.assetName }
-        effects.forEach { effect -> addAll(effect.allAssetNames) }
+    fun requiredAssetsForPrimarySource(
+        source: PrimaryEngineLayerSource,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): Set<String> = linkedSetOf<String>().apply {
+        val program = program(perspective)
+        loopLayersForPrimarySource(source, perspective).mapTo(this) { it.assetName }
+        program.effects.forEach { effect -> addAll(effect.allAssetNames) }
     }
 
-    fun outputGainAt(throttle: Double): Double =
-        10.0.pow((throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0)
+    fun requiredAssets(perspective: EngineSoundPerspective): Set<String> = linkedSetOf<String>().apply {
+        val program = program(perspective)
+        program.layers.mapTo(this) { layer -> layer.assetName }
+        program.effects.forEach { effect -> addAll(effect.allAssetNames) }
+    }
+
+    fun outputGainAt(
+        throttle: Double,
+        perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+    ): Double = 10.0.pow(
+        (program(perspective).throttleOutputGainDb?.valueAt(throttle.coerceIn(0.0, 1.0)) ?: 0.0) / 20.0,
+    )
 }
 
 /** Common road-car figures and Brazilian market-price references for a sound profile's model family. */

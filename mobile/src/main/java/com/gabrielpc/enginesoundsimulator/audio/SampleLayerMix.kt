@@ -71,8 +71,16 @@ internal fun SampleEffectTrigger.mixerSortGroup(): Int = when (this) {
     SampleEffectTrigger.THROTTLE_LIFT -> 11
 }
 
-internal fun EngineSampleProfile.mixerTrackOrder(): List<Pair<String, Int>> {
-    val layers = layers.map { it.id to it.role.mixerSortGroup() }
-    val effects = effects.map { it.id to it.trigger.mixerSortGroup() }
+internal fun EngineSampleProfile.mixerTrackOrder(
+    perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
+): List<Pair<String, Int>> {
+    val program = program(perspective)
+    val layers = program.layers.map { it.id to it.role.mixerSortGroup() }
+    val effects = program.effects.map { it.id to it.trigger.mixerSortGroup() }
     return (layers + effects).sortedWith(compareBy({ it.second }, { it.first }))
 }
+
+internal fun EngineSampleProfile.allMixerTrackOrder(): List<Pair<String, Int>> =
+    EngineSoundPerspective.entries
+        .flatMap { perspective -> mixerTrackOrder(perspective) }
+        .distinctBy { track -> track.first }

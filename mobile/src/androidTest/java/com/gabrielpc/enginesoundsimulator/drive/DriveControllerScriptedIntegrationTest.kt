@@ -3,6 +3,7 @@ package com.gabrielpc.enginesoundsimulator.drive
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.gabrielpc.enginesoundsimulator.IsolatedPreferenceContext
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,10 +14,14 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DriveControllerScriptedIntegrationTest {
     @Test
-    fun scriptedFullThrottleFlaresLoadedRpmBeforeSlowRoadSpeed() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
+    fun scriptedFullThrottleDrivesNormalSimulatedRoadSpeed() {
+        val context = IsolatedPreferenceContext(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+            "drive_controller_scripted",
+        ).also { it.clear() }
         val controller = DriveController(context)
         try {
+            controller.setLoadResponsiveRpmEnabled(true)
             controller.setInputMode(InputMode.SimulatedPedals)
             controller.setUiActive(true)
             controller.start()
@@ -34,31 +39,34 @@ class DriveControllerScriptedIntegrationTest {
 
             val fullThrottle = controller.snapshot()
             assertTrue(
-                "simulated road speed should barely move at full throttle: ${fullThrottle.drivetrain}",
-                fullThrottle.drivetrain.speedKmh < 5.0,
+                "full simulated propulsion must accelerate at the normal rate: ${fullThrottle.drivetrain}",
+                fullThrottle.drivetrain.speedKmh > 20.0,
             )
             assertTrue(
-                "loaded RPM should flare while simulated road speed stays low: ${fullThrottle.drivetrain}",
+                "loaded RPM must rise with normal simulated propulsion: ${fullThrottle.drivetrain}",
                 fullThrottle.drivetrain.rpm > fullThrottle.tuning.engine.idleRpm + 600.0,
             )
             assertTrue("full simulated pedal must still reach audio", fullThrottle.drivetrain.audioThrottle > 0.99)
-            assertTrue("slow test launch should remain in first gear", fullThrottle.drivetrain.gear == 1)
+            assertTrue("normal simulated propulsion should engage higher gears", fullThrottle.drivetrain.gear > 1)
 
             val beforeLift = fullThrottle.drivetrain
             controller.setSimulatedPedalThrottle(0.0)
-            val liftReducedRpm = waitUntil(timeoutMs = 1_500L) {
+            val liftShedEngineLoad = waitUntil(timeoutMs = 1_500L) {
                 val state = controller.snapshot().drivetrain
-                state.rpm < beforeLift.rpm - 300.0 &&
+                state.audioThrottle < 0.01 &&
+                    state.engineLoad < 0.01 &&
+                    state.rpm <= beforeLift.rpm + MAXIMUM_LIFT_SETTLE_RPM_OVERRUN &&
                     state.rawSpeedKmh <= beforeLift.rawSpeedKmh &&
                     state.speedKmh <= beforeLift.speedKmh + SPEED_ESTIMATE_SETTLE_TOLERANCE_KMH
             }
             val afterLift = controller.snapshot().drivetrain
             assertTrue(
-                "scripted lift-off did not reduce loaded RPM: before=$beforeLift after=$afterLift",
-                liftReducedRpm,
+                "scripted lift-off did not shed engine load cleanly: before=$beforeLift after=$afterLift",
+                liftShedEngineLoad,
             )
         } finally {
             controller.stop()
+            context.clear()
         }
     }
 
@@ -73,5 +81,6 @@ class DriveControllerScriptedIntegrationTest {
 
     private companion object {
         const val SPEED_ESTIMATE_SETTLE_TOLERANCE_KMH = 0.05
+        const val MAXIMUM_LIFT_SETTLE_RPM_OVERRUN = 150.0
     }
 }

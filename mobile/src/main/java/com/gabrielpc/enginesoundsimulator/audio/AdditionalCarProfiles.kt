@@ -41,6 +41,13 @@ internal fun lamborghiniAventadorSvProfile() = bandProfile(
         SampleEffectSpec("shift_up", SampleEffectControls.gearChanges, "GEAR_CHANGING_CABIN.wav", SampleEffectTrigger.SHIFT_UP, -8.0),
         SampleEffectSpec("shift_down", SampleEffectControls.gearChanges, "GEAR_CHANGING_CABIN.wav", SampleEffectTrigger.SHIFT_DOWN, -10.0),
     ),
+    exteriorProgram = aventadorExteriorProgram(
+        effects = listOf(
+            SampleEffectSpec("transmission_loop", SampleEffectControls.transmission, "transmission.wav", SampleEffectTrigger.TRANSMISSION_LOOP, -17.0),
+            SampleEffectSpec("shift_up", SampleEffectControls.gearChanges, "GEAR_CHANGING_CABIN.wav", SampleEffectTrigger.SHIFT_UP, -8.0),
+            SampleEffectSpec("shift_down", SampleEffectControls.gearChanges, "GEAR_CHANGING_CABIN.wav", SampleEffectTrigger.SHIFT_DOWN, -10.0),
+        ),
+    ),
 )
 
 internal fun nissanSkylineR34Profile() = EngineSampleProfile(
@@ -58,8 +65,15 @@ internal fun nissanSkylineR34Profile() = EngineSampleProfile(
     gearRatios = listOf(3.827, 2.360, 1.685, 1.312, 1.000, 0.793),
     upshiftDurationSeconds = 0.095,
     downshiftDurationSeconds = 0.220,
-    layers = skylineFmodEngineLayers(),
-    effects = listOf(
+    cabinProgram = EngineSampleProgram(
+        layers = skylineFmodEngineLayers(),
+        effects = skylineEffects(),
+        supportsLoadOnlyProgram = false,
+    ),
+    exteriorProgram = skylineExteriorProgram(skylineEffects()),
+)
+
+private fun skylineEffects() = listOf(
         SampleEffectSpec(
             id = "turbo_loop",
             control = SampleEffectControls.turbo,
@@ -110,8 +124,6 @@ internal fun nissanSkylineR34Profile() = EngineSampleProfile(
             minimumRpm = 3_800.0,
             variantAssetNames = listOf("RB26DET_pop_2.wav", "RB26DET_pop_3.wav"),
         ),
-    ),
-    supportsLoadOnlyProgram = false,
 )
 
 /**
@@ -515,6 +527,7 @@ private fun bandProfile(
     bandGainDb: Double = -5.0,
     loadThrottleCurve: AutomationCurve = dbCurve(0.0 to -36.0, 0.15 to -15.0, 0.45 to -5.0, 1.0 to 0.0),
     coastThrottleCurve: AutomationCurve = dbCurve(0.0 to 0.0, 0.25 to -5.0, 0.60 to -20.0, 1.0 to -40.0),
+    exteriorProgram: EngineSampleProgram? = null,
 ): EngineSampleProfile {
     val textureCurve = dbCurve(0.0 to -7.0, 1.0 to -3.0)
     val layers = mutableListOf<SampleLayerSpec>()
@@ -550,7 +563,12 @@ private fun bandProfile(
         redlineRpm = redlineRpm, limiterRpm = limiterRpm, upshiftRpm = upshiftRpm,
         gearRatios = gears,
         upshiftDurationSeconds = upshiftSeconds, downshiftDurationSeconds = downshiftSeconds,
-        layers = layers, effects = effects, throttleOutputGainDb = dbCurve(0.0 to 0.0, 1.0 to 0.0),
+        cabinProgram = EngineSampleProgram(
+            layers = layers,
+            effects = effects,
+            throttleOutputGainDb = dbCurve(0.0 to 0.0, 1.0 to 0.0),
+        ),
+        exteriorProgram = exteriorProgram,
     )
 }
 

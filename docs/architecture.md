@@ -49,9 +49,12 @@ clutch, torque interruption, or feedback into the electric road-force calculatio
 ### Sample engine audio
 
 `EngineSampleProfile` is the data boundary between a car recording set and the renderer. A profile
-describes its own RPM domain, playback rate, continuous layers, optional effects, automation
-curves, preview, and presentation parameters. Do not normalize every profile to a guessed common
-redline or sample rate just to simplify a UI assumption.
+describes its own RPM domain, playback rate, cabin and exterior programs, optional effects,
+automation curves, preview, and presentation parameters. Each perspective may expose LOAD,
+COAST, and BOTH independently. The active perspective and engine program are persisted per car;
+only that program is decoded so switching listening position cannot double the steady-state PCM
+memory footprint. Do not normalize every profile to a guessed common redline or sample rate just
+to simplify a UI assumption.
 
 `SampleEngineRenderer` decodes and continuously mixes authored PCM loops. It preserves source
 stereo, honours embedded WAV loop metadata where present, keeps phase/cursors continuous, and uses
@@ -79,8 +82,8 @@ These constraints exist to keep car audio continuous on a constrained head unit:
 - Reuse buffers and avoid allocations in the audio hot path. Meter data crosses to the UI through
   preallocated primitive storage rather than per-write Compose state.
 - Stop/restart renderer resources atomically when a sample profile or renderer configuration
-  genuinely requires it. A car switch must release the old renderer and `AudioTrack` before the
-  new profile takes ownership.
+  genuinely requires it. A car, listening-perspective, or LOAD/COAST/BOTH switch must release the
+  old renderer and `AudioTrack` before the new program takes ownership.
 - Preserve source channels and use each profile's verified source/playback rate. Diagnose a
   car-specific rate or asset problem locally; do not globally degrade unaffected profiles.
 - A renderer or asset-loading failure must fail closed (silence), not silently fall back to a
@@ -107,11 +110,15 @@ or perceived cabin quality.
 Maintain the read-only boundary and keep observed data separate from estimated calibration. A
 speed-derived signal must be smoothed before it controls presentation RPM/audio, especially when
 the source reports whole km/h values. The current vehicle model deliberately assumes BYD truncates
-those readings, so a reported `N` represents `[N, N + 1)` km/h. Below 15 km/h, pedal input seeds a
-bounded presentation prediction while crossing history is unavailable. If the first new integer
-arrives after that history was reset, the estimator recovers any missed boundary over multiple
-frames instead of stepping the tach and audio immediately. Any claim of real-car fidelity needs a
-cited measurement or must be labelled as an approximation in code/tests, not hidden in a UI label.
+those readings, so a reported `N` represents `[N, N + 1)` km/h. Pedal input seeds a bounded
+presentation direction inside the current interval at any road speed, before another whole-km/h
+sample arrives. A pedal edge establishes a small, smoothly followed directional target; the target
+stays in the reported interval except for the existing 0.08 km/h poll allowance. A pedal release
+invalidates both an opposing velocity and an unfinished upward boundary correction immediately; the
+next integer crossing then restores telemetry-derived velocity. If the first new integer arrives
+after crossing history was reset, the estimator recovers any missed distance over multiple frames
+instead of stepping the tach and audio immediately. Any claim of real-car fidelity needs a cited
+measurement or must be labelled as an approximation in code/tests, not hidden in a UI label.
 
 ## Verification
 

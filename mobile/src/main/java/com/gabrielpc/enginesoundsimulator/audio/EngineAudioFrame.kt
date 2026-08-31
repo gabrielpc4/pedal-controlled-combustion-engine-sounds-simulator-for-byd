@@ -12,6 +12,8 @@ data class EngineAudioFrame(
     val isShifting: Boolean = false,
     val tuning: AudioTuning = AudioTuning(),
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
+    /** Per-perspective master trims for all continuous Load and Coast layers. */
+    val programLayerGains: ProgramLayerGains = ProgramLayerGains(),
     /** When true, mute coast layers and hold the engine program at full load while RPM still changes. */
     val loadOnlyProgram: Boolean = true,
     /** Recorded family used as the continuous driving engine sound for profiles that support it. */

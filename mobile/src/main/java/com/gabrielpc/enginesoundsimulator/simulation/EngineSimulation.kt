@@ -103,6 +103,8 @@ data class DriverInput(
     val simulatedDriveForceScale: Double = 1.0,
     /** Scales only virtual lift-off regen; passive drag and service braking remain physical. */
     val simulatedCoastRegenScale: Double = 1.0,
+    /** Virtual uphill grade applied continuously in simulated-pedal mode only. */
+    val simulatedUphillDragGrade: Double = 0.0,
 )
 
 enum class ShiftDirection { NONE, UP, DOWN }
@@ -121,6 +123,10 @@ data class DrivetrainState(
     val shiftProgress: Double,
     val shiftSerial: Long,
     val limiterActive: Boolean,
+    /** Continuous road-speed reconstruction used by the tach and audio pitch. */
+    val presentationSpeedKmh: Double,
+    /** Signed presentation-speed acceleration/deceleration rate in km/h per second. */
+    val presentationAccelerationKmhPerSecond: Double,
     val rawSpeedKmh: Double,
 )
 
@@ -134,6 +140,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     var profile: EngineProfile = initialProfile
         private set
     var manualShiftEnabled: Boolean = false
+    @Volatile
+    var loadResponsiveRpmEnabled: Boolean = true
+    @Volatile
+    var throttleRpmBumpEnabled: Boolean = false
     private var ignitionState = EngineIgnitionState.OFF
     private var ignitionElapsedSeconds = 0.0
     private var shutdownElapsedSeconds = 0.0
@@ -142,6 +152,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var loadedEngineDynamics = LoadedEngineDynamics(profile.freeRevCalibration)
     private var freeRevLimiterPulse = false
     private var audioThrottle = 0.0
+    private var previousThrottleForRpmBump = 0.0
+    private var throttleRpmBumpProgress = 0.0
     private var vehicleSpeedMps = 0.0
     private var presentationSpeedMps = 0.0
     private var simulatedPhysicalSpeedMps = 0.0
@@ -204,6 +216,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         freeRevDynamics.reset()
         freeRevLimiterPulse = false
         audioThrottle = 0.0
+        resetThrottleRpmBump()
         limiterLatched = false
         shiftSerial = 0L
         ignitionShiftCueDirection = ShiftDirection.NONE
@@ -220,6 +233,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         freeRevDynamics.reset()
         freeRevLimiterPulse = false
         audioThrottle = 0.0
+        resetThrottleRpmBump()
         limiterLatched = false
         resetLaunchControl()
     }
@@ -238,6 +252,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         secondsSinceShift = 10.0
         downshiftBoundaryKmhByGear.fill(0.0)
         limiterLatched = false
+        resetThrottleRpmBump()
         resetLaunchControl()
     }
 
@@ -300,6 +315,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         loadedEngineDynamics.updateCalibration(updated.freeRevCalibration)
         freeRevLimiterPulse = false
         audioThrottle = 0.0
+        resetThrottleRpmBump()
         currentGearIndex = currentGearIndex.coerceIn(0, profile.gearRatios.lastIndex)
         if (downshiftBoundaryKmhByGear.size != profile.gearRatios.size) {
             downshiftBoundaryKmhByGear = DoubleArray(profile.gearRatios.size)
@@ -323,6 +339,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         freeRevDynamics.reset()
         freeRevLimiterPulse = false
         audioThrottle = 0.0
+        resetThrottleRpmBump()
         vehicleSpeedMps = 0.0
         presentationSpeedMps = 0.0
         simulatedPhysicalSpeedMps = 0.0
@@ -371,9 +388,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
 
         if (ignitionState == EngineIgnitionState.STOPPING && !externalSpeedActive && externalKmh == null) {
             applyShutdownBraking(dt)
-            applyQuantizedSimulatorSpeed(dt, filteredThrottle, filteredBrake)
+            applyQuantizedSimulatorSpeed(dt, rawThrottle, input.brake)
         } else if (externalKmh != null) {
-            applyExternalSpeed(externalKmh, filteredThrottle, filteredBrake, dt)
+            applyExternalSpeed(externalKmh, rawThrottle, input.brake, dt)
         } else {
             if (externalSpeedActive) {
                 simulatedPhysicalSpeedMps = vehicleSpeedMps
@@ -387,13 +404,14 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
                 input.simulateCoastRegen && rawThrottle <= PEDAL_RELEASE_THRESHOLD,
                 input.simulatedDriveForceScale,
                 input.simulatedCoastRegenScale,
+                input.simulatedUphillDragGrade,
             )
             if (input.transmissionPosition == TransmissionPosition.PARK) {
                 simulatedPhysicalSpeedMps = 0.0
                 vehicleSpeedMps = 0.0
                 presentationSpeedMps = 0.0
             }
-            applyQuantizedSimulatorSpeed(dt, filteredThrottle, filteredBrake)
+            applyQuantizedSimulatorSpeed(dt, rawThrottle, input.brake)
         }
 
         activeShift?.let { updateShift(it, dt) }
@@ -466,6 +484,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         applySimulatorRegen: Boolean,
         driveForceScale: Double,
         coastRegenScale: Double,
+        uphillDragGrade: Double,
     ) {
         val axleTorque = axleWheelTorqueAtSpeed(profile, simulatedPhysicalSpeedMps * 3.6)
         val brakeOverride = (1.0 - filteredBrake).coerceIn(0.0, 1.0)
@@ -507,7 +526,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         } else {
             0.0
         }
-        val acceleration = (driveForce - serviceBrakeForce - regenerativeCoastForce - aerodynamicDrag - rollingResistance) /
+        val uphillForce = profile.vehicleMassKg * GRAVITY_MPS2 * uphillDragGrade.coerceIn(0.0, 0.30)
+        val acceleration = (driveForce - serviceBrakeForce - regenerativeCoastForce - aerodynamicDrag - rollingResistance - uphillForce) /
             (profile.vehicleMassKg * profile.rotationalMassFactor)
         simulatedPhysicalSpeedMps = (simulatedPhysicalSpeedMps + acceleration * dt)
             .coerceIn(0.0, maximumVehicleSpeedMps())
@@ -623,6 +643,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
 
         if (transmissionPosition != TransmissionPosition.DRIVE) {
+            resetThrottleRpmBump()
             updateFreeRevRpm(dt)
             return
         }
@@ -630,19 +651,36 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         freeRevLimiterPulse = false
         val shift = activeShift
         if (shift == null) {
-            engineRpm = loadedEngineDynamics.step(
-                rpm = engineRpm,
-                coupledRpm = presentationRpmForGear(currentGearIndex),
+            val roadCoupledRpm = presentationRpmForGear(currentGearIndex)
+            val coupledRpm = roadCoupledRpm + throttleRpmBumpRpm(
+                roadCoupledRpm = roadCoupledRpm,
                 rawThrottle = audioThrottle,
-                idleRpm = profile.idleRpm,
-                limiterRpm = profile.limiterRpm,
-                upshiftRpm = profile.upshiftRpm,
-                gearIndex = currentGearIndex,
-                gearCount = profile.gearRatios.size,
                 dt = dt,
             )
+            engineRpm = if (loadResponsiveRpmEnabled) {
+                loadedEngineDynamics.step(
+                    rpm = engineRpm,
+                    coupledRpm = coupledRpm,
+                    rawThrottle = audioThrottle,
+                    idleRpm = profile.idleRpm,
+                    limiterRpm = profile.limiterRpm,
+                    upshiftRpm = profile.upshiftRpm,
+                    gearIndex = currentGearIndex,
+                    gearCount = profile.gearRatios.size,
+                    dt = dt,
+                )
+            } else {
+                approachExp(
+                    current = engineRpm,
+                    target = coupledRpm,
+                    timeConstant = profile.syntheticRpmResponseSeconds,
+                    dt = dt,
+                ).coerceIn(profile.idleRpm, profile.limiterRpm)
+            }
             return
         }
+
+        resetThrottleRpmBump()
 
         val target = when {
             shift.gearChanged -> {
@@ -666,6 +704,48 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             else -> profile.syntheticRpmResponseSeconds
         }
         engineRpm = approachExp(engineRpm, target, response, dt).coerceIn(profile.idleRpm, profile.limiterRpm)
+    }
+
+    /**
+     * Optional one-shot presentation cue: a pedal press over 20% temporarily uses the RPM that
+     * the next km/h would produce. It decays smoothly and never changes road speed or shifting.
+     */
+    private fun throttleRpmBumpRpm(
+        roadCoupledRpm: Double,
+        rawThrottle: Double,
+        dt: Double,
+    ): Double {
+        val crossedThreshold = previousThrottleForRpmBump <= THROTTLE_RPM_BUMP_THRESHOLD &&
+            rawThrottle > THROTTLE_RPM_BUMP_THRESHOLD
+        previousThrottleForRpmBump = rawThrottle
+        if (!throttleRpmBumpEnabled) {
+            throttleRpmBumpProgress = 0.0
+            return 0.0
+        }
+        if (crossedThreshold) {
+            throttleRpmBumpProgress = 1.0
+        }
+        throttleRpmBumpProgress = approachExp(
+            current = throttleRpmBumpProgress,
+            target = 0.0,
+            timeConstant = THROTTLE_RPM_BUMP_DECAY_SECONDS,
+            dt = dt,
+        )
+        if (throttleRpmBumpProgress <= THROTTLE_RPM_BUMP_SETTLE_PROGRESS) {
+            throttleRpmBumpProgress = 0.0
+            return 0.0
+        }
+
+        val nextKmhRpm = rpmForSpeed(
+            gearIndex = currentGearIndex,
+            speedMps = presentationSpeedMps + THROTTLE_RPM_BUMP_SPEED_METERS_PER_SECOND,
+        ).coerceAtMost(profile.limiterRpm)
+        return (nextKmhRpm - roadCoupledRpm).coerceAtLeast(0.0) * throttleRpmBumpProgress
+    }
+
+    private fun resetThrottleRpmBump() {
+        previousThrottleForRpmBump = 0.0
+        throttleRpmBumpProgress = 0.0
     }
 
     /** P/N runs its own 3 ms crankshaft integration so it matches the Audio Lab control cadence. */
@@ -859,8 +939,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun rawCoupledRpmForSpeed(gearIndex: Int, speedMps: Double): Double {
-        val wheelRpm = speedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
-        return profile.idleRpm + wheelRpm * evenlySpacedGearRatio(profile, gearIndex)
+        return coupledRpmAtSpeedKmh(profile, gearIndex, speedMps * 3.6)
     }
 
     private fun decisionRpmForGear(gearIndex: Int): Double {
@@ -1062,6 +1141,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
             shiftProgress = shift?.let { (it.elapsedSeconds / it.durationSeconds).coerceIn(0.0, 1.0) } ?: 0.0,
             shiftSerial = shiftSerial,
             limiterActive = limiterLatched,
+            presentationSpeedKmh = presentationSpeedMps * 3.6,
+            presentationAccelerationKmhPerSecond = presentationSpeedEstimator.presentationVelocityKmhPerSecond,
             rawSpeedKmh = rawExternalSpeedKmh,
         )
     }
@@ -1073,6 +1154,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         internal const val LIMITER_TRIGGER_MARGIN_RPM = 20.0
         private const val LIMITER_RELEASE_HYSTERESIS_RPM = 180.0
         private const val PEDAL_RELEASE_THRESHOLD = 0.001
+        private const val THROTTLE_RPM_BUMP_THRESHOLD = 0.20
+        private const val THROTTLE_RPM_BUMP_SPEED_METERS_PER_SECOND = 1.0 / 3.6
+        private const val THROTTLE_RPM_BUMP_DECAY_SECONDS = 0.38
+        private const val THROTTLE_RPM_BUMP_SETTLE_PROGRESS = 0.01
         private const val SHIFT_THROTTLE_THRESHOLD = 0.10
         /** Pedal above this uses the car's normal upshift RPM even in 1st gear. */
         private const val FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
@@ -1132,6 +1217,14 @@ internal fun speedKmhForCoupledRpm(profile: EngineProfile, gearIndex: Int, targe
     val ratio = evenlySpacedGearRatio(profile, gearIndex)
     val wheelRpm = (targetRpm - profile.idleRpm).coerceAtLeast(0.0) / ratio.coerceAtLeast(0.001)
     return wheelRpm * (2.0 * PI * profile.wheelRadiusMeters) / 60.0 * 3.6
+}
+
+/** Road-coupled engine RPM before redline and limiter handling. */
+internal fun coupledRpmAtSpeedKmh(profile: EngineProfile, gearIndex: Int, speedKmh: Double): Double {
+    val speedMps = speedKmh.coerceAtLeast(0.0) / 3.6
+    val wheelRpm = speedMps / (2.0 * PI * profile.wheelRadiusMeters) * 60.0
+
+    return profile.idleRpm + wheelRpm * evenlySpacedGearRatio(profile, gearIndex)
 }
 
 /** BYD and simulated RAW speed use the lower whole km/h for every `[N, N + 1)` interval. */

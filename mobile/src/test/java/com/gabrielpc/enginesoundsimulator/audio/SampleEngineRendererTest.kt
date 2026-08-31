@@ -21,6 +21,7 @@ class SampleEngineRendererTest {
 
         EngineSampleProfiles.all.forEach { candidate ->
             assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())
+            assertTrue("${candidate.id} has no exterior program", candidate.hasExteriorProgram)
             assertTrue(candidate.requiredAssets.containsAll(candidate.layers.map { it.assetName }))
             assertTrue(
                 candidate.requiredAssets.containsAll(
@@ -28,11 +29,18 @@ class SampleEngineRendererTest {
                 ),
             )
             assertTrue(candidate.outputSampleRate == 44_100 || candidate.outputSampleRate == 48_000)
-            for (rpm in candidate.idleRpm.toInt()..candidate.limiterRpm.toInt() step 25) {
-                val onLoad = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0, loadOnlyProgram = false) }
-                val lifted = candidate.layers.maxOf { it.gainAt(rpm.toDouble(), 0.0, loadOnlyProgram = false) }
-                assertTrue("${candidate.id} has no full-load voice at $rpm", onLoad > 0.0001)
-                assertTrue("${candidate.id} has no lift-off voice at $rpm", lifted > 0.0001)
+            EngineSoundPerspective.entries.forEach { perspective ->
+                val program = candidate.program(perspective)
+                assertTrue("${candidate.id} $perspective has no layers", program.layers.isNotEmpty())
+                assertTrue(candidate.supportsPrimaryLayerSource(PrimaryEngineLayerSource.LOAD, perspective))
+                assertTrue(candidate.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST, perspective) || perspective == EngineSoundPerspective.CABIN)
+                assertTrue(candidate.supportsPrimaryLayerSource(PrimaryEngineLayerSource.FMOD_MIX, perspective) || perspective == EngineSoundPerspective.CABIN)
+                for (rpm in candidate.idleRpm.toInt()..candidate.limiterRpm.toInt() step 25) {
+                    val onLoad = program.layers.maxOf { it.gainAt(rpm.toDouble(), 1.0, loadOnlyProgram = false) }
+                    val lifted = program.layers.maxOf { it.gainAt(rpm.toDouble(), 0.0, loadOnlyProgram = false) }
+                    assertTrue("${candidate.id} $perspective has no full-load voice at $rpm", onLoad > 0.0001)
+                    assertTrue("${candidate.id} $perspective has no lift-off voice at $rpm", lifted > 0.0001)
+                }
             }
         }
         val huracan = EngineSampleProfiles.find("lamborghini_huracan_trofeo_evo2_cabin")
@@ -69,6 +77,40 @@ class SampleEngineRendererTest {
         assertEquals(4_780.0, loadedMid.autopitchRootRpm ?: 0.0, 0.0)
         assertTrue(loadedMid.gainAt(4_400.0, 1.0, loadOnlyProgram = false) > 0.1)
         assertEquals(6, skyline.gearRatios.size)
+    }
+
+    @Test
+    fun everyExteriorProgramSupportsLoadCoastAndBothWithoutDecodingTheCabinProgram() {
+        EngineSampleProfiles.all.forEach { candidate ->
+            val exterior = candidate.program(EngineSoundPerspective.EXTERIOR)
+            val load = candidate.loopLayersForPrimarySource(
+                PrimaryEngineLayerSource.LOAD,
+                EngineSoundPerspective.EXTERIOR,
+            )
+            val coast = candidate.loopLayersForPrimarySource(
+                PrimaryEngineLayerSource.COAST,
+                EngineSoundPerspective.EXTERIOR,
+            )
+            val both = candidate.loopLayersForPrimarySource(
+                PrimaryEngineLayerSource.FMOD_MIX,
+                EngineSoundPerspective.EXTERIOR,
+            )
+
+            assertTrue(load.any { layer -> layer.role == SampleLayerRole.LOAD })
+            assertTrue(load.none { layer -> layer.role == SampleLayerRole.COAST })
+            assertTrue(coast.any { layer -> layer.role == SampleLayerRole.COAST })
+            assertTrue(coast.none { layer -> layer.role == SampleLayerRole.LOAD })
+            assertTrue(both.any { layer -> layer.role == SampleLayerRole.LOAD })
+            assertTrue(both.any { layer -> layer.role == SampleLayerRole.COAST })
+            assertTrue(
+                candidate.requiredAssetsForPrimarySource(
+                    PrimaryEngineLayerSource.LOAD,
+                    EngineSoundPerspective.EXTERIOR,
+                ).size < candidate.requiredAssets(EngineSoundPerspective.CABIN).size +
+                    candidate.requiredAssets(EngineSoundPerspective.EXTERIOR).size,
+            )
+            assertEquals(exterior.layers.size, both.size)
+        }
     }
 
     @Test

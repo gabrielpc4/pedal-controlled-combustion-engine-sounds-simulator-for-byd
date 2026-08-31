@@ -225,6 +225,74 @@ class EngineSimulationTest {
     }
 
     @Test
+    fun disablingLoadResponsiveRpmKeepsDriveRpmCoupledToRoadSpeed() {
+        val responsive = EngineSimulation()
+        val roadCoupled = EngineSimulation().apply {
+            loadResponsiveRpmEnabled = false
+        }
+        val responsiveState = responsive.runForExternal(2.0, 48.0, 0.85)
+        val roadCoupledState = roadCoupled.runForExternal(2.0, 48.0, 0.85)
+
+        assertEquals(responsiveState.speedKmh, roadCoupledState.speedKmh, 0.01)
+        assertEquals(responsiveState.gear, roadCoupledState.gear)
+        assertTrue(
+            "disabled responsive RPM must remove throttle-created crank slip: responsive=$responsiveState coupled=$roadCoupledState",
+            responsiveState.rpm > roadCoupledState.rpm + 300.0,
+        )
+        val minimumPresentationRpm = coupledRpmAtSpeedKmh(
+            profile = roadCoupled.profile,
+            gearIndex = roadCoupledState.gear - 1,
+            speedKmh = roadCoupledState.rawSpeedKmh,
+        )
+        val maximumPresentationRpm = coupledRpmAtSpeedKmh(
+            profile = roadCoupled.profile,
+            gearIndex = roadCoupledState.gear - 1,
+            speedKmh = roadCoupledState.rawSpeedKmh + 1.08,
+        )
+        assertTrue(
+            "disabled responsive RPM must stay coupled to the bounded presentation-speed interval: $roadCoupledState",
+            roadCoupledState.rpm in (minimumPresentationRpm - 50.0)..(maximumPresentationRpm + 50.0),
+        )
+    }
+
+    @Test
+    fun optionalThrottleBumpUsesTheNextKmhRpmThenSettlesBack() {
+        val atThreshold = EngineSimulation().apply {
+            loadResponsiveRpmEnabled = false
+            throttleRpmBumpEnabled = true
+            engageAtIdle()
+        }
+        val aboveThreshold = EngineSimulation().apply {
+            loadResponsiveRpmEnabled = false
+            throttleRpmBumpEnabled = true
+            engageAtIdle()
+        }
+        repeat(400) {
+            atThreshold.update(DriverInput(throttle = 0.0, externalSpeedKmh = 42.0), STEP)
+            aboveThreshold.update(DriverInput(throttle = 0.0, externalSpeedKmh = 42.0), STEP)
+        }
+        repeat(30) {
+            atThreshold.update(DriverInput(throttle = 0.20, externalSpeedKmh = 42.0), STEP)
+            aboveThreshold.update(DriverInput(throttle = 0.21, externalSpeedKmh = 42.0), STEP)
+        }
+
+        assertTrue(
+            "pedal above 20% must briefly sound one km/h ahead: at20=${atThreshold.state.rpm}, above20=${aboveThreshold.state.rpm}",
+            aboveThreshold.state.rpm > atThreshold.state.rpm + 30.0,
+        )
+        repeat(800) {
+            atThreshold.update(DriverInput(throttle = 0.21, externalSpeedKmh = 42.0), STEP)
+            aboveThreshold.update(DriverInput(throttle = 0.21, externalSpeedKmh = 42.0), STEP)
+        }
+        assertEquals(
+            "the temporary bump must correct back to the road-coupled RPM",
+            atThreshold.state.rpm,
+            aboveThreshold.state.rpm,
+            2.0,
+        )
+    }
+
+    @Test
     fun drivePedalMovesAudioAndCrankBeforeTheNextSpeedSample() {
         val simulation = EngineSimulation()
         val baseline = simulation.runForExternal(1.5, 8.0, 0.0)
@@ -263,7 +331,13 @@ class EngineSimulationTest {
 
         val released = simulation.runForExternal(0.8, 8.0, 0.0)
         assertEquals(0.0, released.audioThrottle, 0.0)
-        assertEquals(baseline.rpm, released.rpm, 80.0)
+        assertTrue("release must promptly remove loaded crank slip", released.rpm < loaded.rpm - 300.0)
+        assertEquals(
+            "the temporary lift prediction may lead the unchanged RAW speed slightly downward",
+            baseline.rpm,
+            released.rpm,
+            200.0,
+        )
     }
 
     @Test
@@ -499,6 +573,79 @@ class EngineSimulationTest {
         val dragCoast = dragOnly.runFor(0.8)
         assertTrue(regenCoast.speedKmh < dragCoast.speedKmh - 6.0)
         assertTrue("lower coast speed must produce lower coupled RPM", regenCoast.rpm < dragCoast.rpm)
+    }
+
+    @Test
+    fun maxSimulatedUphillSmoothlyReversesPresentationUnderHeldLightThrottle() {
+        val simulation = EngineSimulation()
+        simulation.ensureIgnitionRunning()
+        repeat((1.0 / STEP).toInt()) {
+            simulation.update(
+                DriverInput(throttle = 1.0, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+
+        var state = simulation.state
+        var previousRaw = state.rawSpeedKmh
+        var previousPresentation = state.presentationSpeedKmh
+        var firstDownwardBoundaryFrameChange: Double? = null
+        var presentationAtFirstDownwardBoundary: Double? = null
+        var presentationAfterBoundaryDwell: Double? = null
+
+        repeat((3.0 / STEP).toInt()) { frame ->
+            state = simulation.update(
+                DriverInput(
+                    throttle = 0.22,
+                    simulateCoastRegen = true,
+                    simulatedUphillDragGrade = 0.30,
+                ),
+                STEP,
+            )
+            if (state.rawSpeedKmh < previousRaw && firstDownwardBoundaryFrameChange == null) {
+                firstDownwardBoundaryFrameChange = kotlin.math.abs(
+                    state.presentationSpeedKmh - previousPresentation,
+                )
+                presentationAtFirstDownwardBoundary = state.presentationSpeedKmh
+            }
+            if (presentationAtFirstDownwardBoundary != null && presentationAfterBoundaryDwell == null && frame > 100) {
+                presentationAfterBoundaryDwell = state.presentationSpeedKmh
+            }
+            previousRaw = state.rawSpeedKmh
+            previousPresentation = state.presentationSpeedKmh
+        }
+
+        assertTrue("30% simulated uphill must lower reported speed under light throttle", firstDownwardBoundaryFrameChange != null)
+        assertTrue(
+            "first raw drop must not become a pitch step: $firstDownwardBoundaryFrameChange",
+            firstDownwardBoundaryFrameChange!! < 0.03,
+        )
+        assertTrue(
+            "prediction must continue down after the first raw drop: first=$presentationAtFirstDownwardBoundary later=$presentationAfterBoundaryDwell",
+            presentationAfterBoundaryDwell != null &&
+                presentationAfterBoundaryDwell!! < presentationAtFirstDownwardBoundary!! - 0.05,
+        )
+    }
+
+    @Test
+    fun simulatedRegenStrengthCanDisableOrRestoreLiftOffBraking() {
+        val noRegen = EngineSimulation()
+        val fullRegen = EngineSimulation()
+        noRegen.runFor(2.0, throttle = 0.75, sim = true)
+        fullRegen.runFor(2.0, throttle = 0.75, sim = true)
+
+        val coastWithoutRegen = noRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedCoastRegenScale = 0.0,
+        )
+        val coastWithRegen = fullRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedCoastRegenScale = 1.0,
+        )
+
+        assertTrue("full simulated regen must slow the car more on lift-off", coastWithRegen.speedKmh < coastWithoutRegen.speedKmh - 4.0)
     }
 
     @Test

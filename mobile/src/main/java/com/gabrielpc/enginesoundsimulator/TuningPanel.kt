@@ -87,6 +87,8 @@ private enum class TuningTab(val title: String, val subtitle: String) {
 internal fun TuningPanel(
     state: DriveSnapshot,
     onConfigChange: (TuningConfig) -> Unit,
+    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
+    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
     onReset: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -117,7 +119,14 @@ internal fun TuningPanel(
 
         Box(modifier = Modifier.weight(1f)) {
             when (TuningTab.entries[tabIndex]) {
-                TuningTab.ENGINE -> EngineTab(config, onConfigChange)
+                TuningTab.ENGINE -> EngineTab(
+                    config = config,
+                    loadResponsiveRpmEnabled = state.loadResponsiveRpmEnabled,
+                    onLoadResponsiveRpmEnabledChange = onLoadResponsiveRpmEnabledChange,
+                    throttleRpmBumpEnabled = state.throttleRpmBumpEnabled,
+                    onThrottleRpmBumpEnabledChange = onThrottleRpmBumpEnabledChange,
+                    onChange = onConfigChange,
+                )
                 TuningTab.DELAYS -> DelaysTab(config, onConfigChange)
                 TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
             }
@@ -146,7 +155,7 @@ private fun TuningHeader(
                 )
             }
             Text(
-                "Changes apply immediately and are saved automatically • simulated sound and tach behavior only",
+                "Changes save immediately • RESET clears all saved app preferences",
                 color = TuneMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
@@ -180,7 +189,14 @@ private fun TabButton(tab: TuningTab, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
+private fun EngineTab(
+    config: TuningConfig,
+    loadResponsiveRpmEnabled: Boolean,
+    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
+    throttleRpmBumpEnabled: Boolean,
+    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
+    onChange: (TuningConfig) -> Unit,
+) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
@@ -189,6 +205,18 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             Modifier.weight(1f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                ParameterToggle(
+                    label = "THROTTLE-RESPONSIVE RPM",
+                    enabled = loadResponsiveRpmEnabled,
+                    onToggle = onLoadResponsiveRpmEnabledChange,
+                )
+                Spacer(Modifier.height(8.dp))
+                ParameterToggle(
+                    label = "THROTTLE RPM BUMP (>20%)",
+                    enabled = throttleRpmBumpEnabled,
+                    onToggle = onThrottleRpmBumpEnabledChange,
+                )
+                Spacer(Modifier.height(8.dp))
                 ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,

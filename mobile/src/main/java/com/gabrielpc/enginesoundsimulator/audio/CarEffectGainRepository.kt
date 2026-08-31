@@ -1,12 +1,16 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
+import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 
 /** Per-car gain for optional effects. */
 internal class CarEffectGainRepository(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val preferences = context.applicationContext.getSharedPreferences(
+        AppPreferenceStores.CAR_EFFECT_GAINS,
+        Context.MODE_PRIVATE,
+    )
     private val legacyPreferences = context.applicationContext.getSharedPreferences(
-        LEGACY_PREFERENCES_NAME,
+        AppPreferenceStores.AUDIO_EXPERIMENTS,
         Context.MODE_PRIVATE,
     )
 
@@ -96,15 +100,20 @@ internal class CarEffectGainRepository(context: Context) {
         val clamped = gain.coerceIn(minimum, MAX)
         preferences.edit()
             .putFloat(gainKey(profileId, keySuffix), clamped.toFloat())
-            .apply()
-        return clamped
+            .commit()
+
+        return readGain(
+            profileId = profileId,
+            keySuffix = keySuffix,
+            legacyKey = null,
+            default = clamped,
+            minimum = minimum,
+        )
     }
 
     private fun gainKey(profileId: String, keySuffix: String): String = "$profileId.$keySuffix"
 
     private companion object {
-        const val PREFERENCES_NAME = "car_effect_gains"
-        const val LEGACY_PREFERENCES_NAME = "audio_experiments"
         const val LEGACY_POPS_GAIN_KEY = "pops_and_bangs_gain"
         const val LEGACY_SHIFT_GAIN_KEY = "shared_shift_sounds_gain"
         const val MIN = EngineAudioFrame.MIN_EFFECT_GAIN

@@ -55,6 +55,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -190,6 +192,10 @@ class MainActivity : ComponentActivity() {
                         onTransmissionGainChange = controller::setTransmissionGain,
                         onToggleTurboSounds = controller::toggleTurboSounds,
                         onTurboSoundsGainChange = controller::setTurboSoundsGain,
+                        onLoadResponsiveRpmEnabledChange = controller::setLoadResponsiveRpmEnabled,
+                        onThrottleRpmBumpEnabledChange = controller::setThrottleRpmBumpEnabled,
+                        onSimulatedCoastRegenStrengthChange = controller::setSimulatedCoastRegenStrength,
+                        onSimulatedUphillDragGradeChange = controller::setSimulatedUphillDragGrade,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -197,14 +203,17 @@ class MainActivity : ComponentActivity() {
                         onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
                         onIncreaseMasterVolume = controller::increaseAppMasterVolume,
                         onConfigChange = controller::setTuning,
-                        onResetTuning = controller::resetTuning,
+                        onResetPreferences = controller::resetAllPreferences,
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSelectCar = controller::selectCar,
                         onLayerMixMuted = controller::setLayerMixMuted,
                         onLayerMixSolo = controller::setLayerMixSolo,
                         onLayerMixVolume = controller::setLayerMixVolume,
+                        onLoadProgramLayerGainChange = controller::setLoadProgramLayerGain,
+                        onCoastProgramLayerGainChange = controller::setCoastProgramLayerGain,
                         onPrimaryLayerSourceChange = controller::setPrimaryLayerSource,
+                        onSoundPerspectiveChange = controller::setSoundPerspective,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
                         onDismissUserMessage = controller::dismissUserMessage,
                     )
@@ -275,6 +284,10 @@ private fun MotorSoundDashboard(
     onTransmissionGainChange: (Double) -> Unit,
     onToggleTurboSounds: () -> Unit,
     onTurboSoundsGainChange: (Double) -> Unit,
+    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
+    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
+    onSimulatedCoastRegenStrengthChange: (Double) -> Unit,
+    onSimulatedUphillDragGradeChange: (Double) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -282,14 +295,17 @@ private fun MotorSoundDashboard(
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
-    onResetTuning: () -> Unit,
+    onResetPreferences: () -> Unit,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
     onLayerMixMuted: (String, Boolean) -> Unit,
     onLayerMixSolo: (String, Boolean) -> Unit,
     onLayerMixVolume: (String, Double) -> Unit,
+    onLoadProgramLayerGainChange: (Double) -> Unit,
+    onCoastProgramLayerGainChange: (Double) -> Unit,
     onPrimaryLayerSourceChange: (com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource) -> Unit,
+    onSoundPerspectiveChange: (com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
     onDismissUserMessage: () -> Unit,
 ) {
@@ -454,6 +470,8 @@ private fun MotorSoundDashboard(
                                     onTransmissionChange = onTransmissionChange,
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
+                                    onSimulatedCoastRegenStrengthChange = onSimulatedCoastRegenStrengthChange,
+                                    onSimulatedUphillDragGradeChange = onSimulatedUphillDragGradeChange,
                                     modifier = Modifier.padding(start = 64.dp),
                                 )
                             }
@@ -474,9 +492,14 @@ private fun MotorSoundDashboard(
                             onLayerMuted = onLayerMixMuted,
                             onLayerSolo = onLayerMixSolo,
                             onLayerVolume = onLayerMixVolume,
+                            onLoadProgramLayerGainChange = onLoadProgramLayerGainChange,
+                            onCoastProgramLayerGainChange = onCoastProgramLayerGainChange,
                             primaryLayerSource = state.primaryLayerSource,
                             canUseCoastAsPrimary = state.canUseCoastAsPrimary,
                             onPrimaryLayerSourceChange = onPrimaryLayerSourceChange,
+                            soundPerspective = state.soundPerspective,
+                            hasExteriorProgram = state.hasExteriorProgram,
+                            onSoundPerspectiveChange = onSoundPerspectiveChange,
                             onManualUpshift = onManualUpshift,
                             onManualDownshift = onManualDownshift,
                             loadOnlyProgram = state.loadOnlyProgram,
@@ -491,7 +514,9 @@ private fun MotorSoundDashboard(
                     TuningPanel(
                         state = state,
                         onConfigChange = onConfigChange,
-                        onReset = onResetTuning,
+                        onLoadResponsiveRpmEnabledChange = onLoadResponsiveRpmEnabledChange,
+                        onThrottleRpmBumpEnabledChange = onThrottleRpmBumpEnabledChange,
+                        onReset = onResetPreferences,
                         onClose = { tuningOpen = false },
                     )
                 }
@@ -613,6 +638,7 @@ private fun DashboardHeader(
                 fontWeight = FontWeight.Light,
                 letterSpacing = 2.0.sp,
             )
+            StatusTag("BUILD ${AppBuildInfo.buildNumber}", CyanSoft)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1036,6 +1062,8 @@ private fun ClassicDriveControls(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
+    onSimulatedCoastRegenStrengthChange: (Double) -> Unit,
+    onSimulatedUphillDragGradeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1073,6 +1101,113 @@ private fun ClassicDriveControls(
             onPositionChange = onTransmissionChange,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = CLASSIC_DRIVE_CONTROL_SCALE,
+        )
+        if (!state.inputSourceIsRealPedals) {
+            SimulatedUphillDragControl(
+                grade = state.simulatedUphillDragGrade,
+                onGradeChange = onSimulatedUphillDragGradeChange,
+                scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            )
+            SimulatedCoastRegenControl(
+                strength = state.simulatedCoastRegenStrength,
+                onStrengthChange = onSimulatedCoastRegenStrengthChange,
+                scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SimulatedUphillDragControl(
+    grade: Double,
+    onGradeChange: (Double) -> Unit,
+    scale: Float,
+) {
+    val percent = (grade * 100).roundToInt()
+    SimulatedPedalStrengthControl(
+        label = "DRAG",
+        valueLabel = "$percent%",
+        footer = "UPHILL",
+        value = grade,
+        onValueChange = onGradeChange,
+        valueRange = 0f..0.30f,
+        scale = scale,
+    )
+}
+
+@Composable
+private fun SimulatedCoastRegenControl(
+    strength: Double,
+    onStrengthChange: (Double) -> Unit,
+    scale: Float,
+) {
+    val percent = (strength * 100).roundToInt()
+    SimulatedPedalStrengthControl(
+        label = "REGEN",
+        valueLabel = "$percent%",
+        footer = "LIFT-OFF",
+        value = strength,
+        onValueChange = onStrengthChange,
+        valueRange = 0f..1f,
+        scale = scale,
+    )
+}
+
+@Composable
+private fun SimulatedPedalStrengthControl(
+    label: String,
+    valueLabel: String,
+    footer: String,
+    value: Double,
+    onValueChange: (Double) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    scale: Float,
+) {
+    Column(
+        modifier = Modifier
+            .width((58f * scale).dp)
+            .height((202f * scale).dp)
+            .clip(RoundedCornerShape((16f * scale).dp))
+            .background(PanelBright)
+            .border((1.5f * scale).dp, Line, RoundedCornerShape((16f * scale).dp))
+            .padding(vertical = (8f * scale).dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy((3f * scale).dp),
+    ) {
+        Text(
+            text = label,
+            color = CyanSoft,
+            fontSize = (9f * scale).sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.55.sp,
+        )
+        Text(
+            text = valueLabel,
+            color = if (value <= 0.001) Muted else Cyan,
+            fontSize = (15f * scale).sp,
+            fontWeight = FontWeight.Black,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .width((32f * scale).dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Slider(
+                value = value.toFloat(),
+                onValueChange = { onValueChange(it.toDouble()) },
+                valueRange = valueRange,
+                modifier = Modifier
+                    .width((138f * scale).dp)
+                    .graphicsLayer { rotationZ = -90f },
+            )
+        }
+        Text(
+            text = footer,
+            color = Muted,
+            fontSize = (7f * scale).sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.25.sp,
         )
     }
 }

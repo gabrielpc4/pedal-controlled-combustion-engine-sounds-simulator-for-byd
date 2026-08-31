@@ -1,12 +1,16 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
+import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 
 /** Per-car enable state for optional audio effects. */
 internal class CarEffectModeRepository(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val preferences = context.applicationContext.getSharedPreferences(
+        AppPreferenceStores.CAR_EFFECT_MODES,
+        Context.MODE_PRIVATE,
+    )
     private val legacyPreferences = context.applicationContext.getSharedPreferences(
-        LEGACY_PREFERENCES_NAME,
+        AppPreferenceStores.AUDIO_EXPERIMENTS,
         Context.MODE_PRIVATE,
     )
 
@@ -58,15 +62,14 @@ internal class CarEffectModeRepository(context: Context) {
     private fun saveMode(profileId: String, keySuffix: String, enabled: Boolean): Boolean {
         preferences.edit()
             .putBoolean(modeKey(profileId, keySuffix), enabled)
-            .apply()
-        return enabled
+            .commit()
+
+        return readMode(profileId, keySuffix, legacyKey = null, default = enabled)
     }
 
     private fun modeKey(profileId: String, keySuffix: String): String = "$profileId.$keySuffix"
 
     private companion object {
-        const val PREFERENCES_NAME = "car_effect_modes"
-        const val LEGACY_PREFERENCES_NAME = "audio_experiments"
         const val LEGACY_POPS_AND_BANGS_ENABLED = "pops_and_bangs_enabled"
         const val LEGACY_SHARED_SHIFT_SOUNDS_ENABLED = "shared_shift_sounds_enabled"
     }

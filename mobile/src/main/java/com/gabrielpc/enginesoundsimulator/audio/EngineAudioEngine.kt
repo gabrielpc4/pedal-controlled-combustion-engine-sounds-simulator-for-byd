@@ -30,6 +30,7 @@ class EngineAudioEngine(context: Context) {
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
     private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
+    private val soundPerspective = AtomicReference(EngineSoundPerspective.CABIN)
     private val primaryLayerSource = AtomicReference(PrimaryEngineLayerSource.LOAD)
     private val loadedSampleProfileId = AtomicReference<String?>(null)
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
@@ -108,9 +109,17 @@ class EngineAudioEngine(context: Context) {
         }
     }
 
-    internal fun setSampleProfile(profile: EngineSampleProfile) {
+    internal fun setSoundProgram(
+        profile: EngineSampleProfile,
+        perspective: EngineSoundPerspective,
+        source: PrimaryEngineLayerSource,
+    ) {
         synchronized(lifecycleLock) {
-            val changed = selectedProfile.getAndSet(profile).id != profile.id
+            val resolvedPerspective = profile.resolvedPerspective(perspective)
+            val resolvedSource = profile.resolvedPrimaryLayerSource(source, resolvedPerspective)
+            val changed = selectedProfile.getAndSet(profile).id != profile.id ||
+                soundPerspective.getAndSet(resolvedPerspective) != resolvedPerspective ||
+                primaryLayerSource.getAndSet(resolvedSource) != resolvedSource
             if (!changed) return
             loadedSampleProfileId.set(null)
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
@@ -120,7 +129,7 @@ class EngineAudioEngine(context: Context) {
 
     internal fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
         synchronized(lifecycleLock) {
-            val resolved = selectedProfile.get().resolvedPrimaryLayerSource(source)
+            val resolved = selectedProfile.get().resolvedPrimaryLayerSource(source, soundPerspective.get())
             if (primaryLayerSource.getAndSet(resolved) == resolved) return
             val shouldRestart = running.get() || renderThread.get()?.isAlive == true
             if (shouldRestart && stopLocked()) startLocked()
@@ -138,7 +147,8 @@ class EngineAudioEngine(context: Context) {
         }
 
         val sampleProfile = selectedProfile.get()
-        val source = sampleProfile.resolvedPrimaryLayerSource(primaryLayerSource.get())
+        val perspective = sampleProfile.resolvedPerspective(soundPerspective.get())
+        val source = sampleProfile.resolvedPrimaryLayerSource(primaryLayerSource.get(), perspective)
         layerMeterBus = null
         focusMultiplier.set(0.0)
         val focusResult = runCatching { requestFocus() }
@@ -157,7 +167,7 @@ class EngineAudioEngine(context: Context) {
         loadFailure.set(null)
         running.set(true)
         val runId = generation.incrementAndGet()
-        val thread = Thread({ renderLoop(runId, sampleProfile, source) }, "engine-audio-renderer").apply { isDaemon = true }
+        val thread = Thread({ renderLoop(runId, sampleProfile, perspective, source) }, "engine-audio-renderer").apply { isDaemon = true }
         renderThread.set(thread)
         try {
             thread.start()
@@ -208,6 +218,7 @@ class EngineAudioEngine(context: Context) {
     private fun renderLoop(
         runId: Long,
         sampleProfile: EngineSampleProfile,
+        perspective: EngineSoundPerspective,
         source: PrimaryEngineLayerSource,
     ) {
         var opened: OpenedTrack? = null
@@ -221,6 +232,7 @@ class EngineAudioEngine(context: Context) {
                     appContext.assets,
                     sampleRate,
                     sampleProfile,
+                    perspective = perspective,
                     loadOnlyProgram = true,
                     primaryLayerSource = source,
                 )

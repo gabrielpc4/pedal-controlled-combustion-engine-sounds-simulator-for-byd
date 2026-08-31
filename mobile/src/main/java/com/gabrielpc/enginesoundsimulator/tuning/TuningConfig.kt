@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.tuning
 
 import android.content.Context
+import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfile
 import kotlin.math.max
@@ -195,7 +196,10 @@ internal fun TuningConfig.withSampleProfile(profile: EngineSampleProfile): Tunin
 ).sanitized()
 
 class TuningRepository(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val preferences = context.applicationContext.getSharedPreferences(
+        AppPreferenceStores.TUNING,
+        Context.MODE_PRIVATE,
+    )
 
     fun load(): TuningConfig {
         val defaults = TuningConfig.DEFAULT
@@ -260,7 +264,7 @@ class TuningRepository(context: Context) {
             layerFadeMs = number(KEY_AUDIO_LAYER_FADE, defaults.audio.layerFadeMs),
         )
         if (!currentCalibration) {
-            preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).apply()
+            preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).commit()
         }
         return TuningConfig(engine, audio).sanitized()
     }
@@ -311,19 +315,13 @@ class TuningRepository(context: Context) {
             .putString(KEY_AUDIO_PROGRAM_FADE, clean.audio.programFadeMs.toString())
             .putString(KEY_AUDIO_ENABLED_FADE, clean.audio.enabledFadeMs.toString())
             .putString(KEY_AUDIO_LAYER_FADE, clean.audio.layerFadeMs.toString())
-            .apply()
-    }
-
-    fun reset(): TuningConfig {
-        preferences.edit().clear().apply()
-        return TuningConfig.DEFAULT
+            .commit()
     }
 
     private fun number(key: String, fallback: Double): Double =
         preferences.getString(key, null)?.toDoubleOrNull() ?: fallback
 
     private companion object {
-        const val PREFERENCES_NAME = "engine_tuning"
         const val KEY_CALIBRATION_REVISION = "calibration_revision"
         const val CALIBRATION_REVISION = 13
         const val KEY_IDLE = "idle_rpm"

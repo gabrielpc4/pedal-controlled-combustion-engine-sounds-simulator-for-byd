@@ -144,8 +144,35 @@ val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets"
     // reconstructed interior event. It replaces only the idle layer; driving layers remain
     // the recovered cabin program.
     from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted_exterior")) {
-        include("s013_ex_idle.wav")
+        include(
+            "s009_ex_l3.wav",
+            "s013_ex_idle.wav",
+            "s016_ex_c2.wav",
+            "s042_ex_l6.wav",
+            "s058_ex_c1e.wav",
+            "s083_ex_c6.wav",
+            "s088_ex_l1b.wav",
+            "s123_ex_l4.wav",
+            "s131_ex_l5.wav",
+            "s136_ex_l2a_far.wav",
+            "s138_ex_c4.wav",
+            "s145_ex_c3.wav",
+        )
         into("sample_engine/lamborghini_huracan_trofeo_evo2")
+    }
+    from(rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted_exterior")) {
+        include(
+            "ex_aventador_idle.wav",
+            "ex_aventador_onlow.wav",
+            "ex_aventador_onmid.wav",
+            "ex_aventador_onmidhigh.wav",
+            "ex_aventador_onhigh.wav",
+            "ex_aventador_onveryhigh.wav",
+            "ex_aventador_offverylow.wav",
+            "ex_aventador_offmid.wav",
+            "ex_aventador_offveryhigh.wav",
+        )
+        into("sample_engine/lamborghini_aventador_sv")
     }
     from(rootProject.file("reference/alfa_romeo_4c_exhaust_effects/01_backfire_internal")) {
         include(
