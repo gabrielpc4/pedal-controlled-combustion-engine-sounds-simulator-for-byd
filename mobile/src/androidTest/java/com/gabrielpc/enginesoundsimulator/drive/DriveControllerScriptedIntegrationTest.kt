@@ -46,12 +46,16 @@ class DriveControllerScriptedIntegrationTest {
 
             val beforeLift = fullThrottle.drivetrain
             controller.setSimulatedPedalThrottle(0.0)
+            val liftReducedRpm = waitUntil(timeoutMs = 1_500L) {
+                val state = controller.snapshot().drivetrain
+                state.rpm < beforeLift.rpm - 300.0 &&
+                    state.rawSpeedKmh <= beforeLift.rawSpeedKmh &&
+                    state.speedKmh <= beforeLift.speedKmh + SPEED_ESTIMATE_SETTLE_TOLERANCE_KMH
+            }
+            val afterLift = controller.snapshot().drivetrain
             assertTrue(
-                "scripted lift-off did not reduce loaded RPM",
-                waitUntil(timeoutMs = 1_500L) {
-                    val state = controller.snapshot().drivetrain
-                    state.rpm < beforeLift.rpm - 300.0 && state.speedKmh <= beforeLift.speedKmh
-                },
+                "scripted lift-off did not reduce loaded RPM: before=$beforeLift after=$afterLift",
+                liftReducedRpm,
             )
         } finally {
             controller.stop()
@@ -65,5 +69,9 @@ class DriveControllerScriptedIntegrationTest {
             SystemClock.sleep(20L)
         }
         return predicate()
+    }
+
+    private companion object {
+        const val SPEED_ESTIMATE_SETTLE_TOLERANCE_KMH = 0.05
     }
 }

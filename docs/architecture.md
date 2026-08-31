@@ -106,8 +106,12 @@ or perceived cabin quality.
 
 Maintain the read-only boundary and keep observed data separate from estimated calibration. A
 speed-derived signal must be smoothed before it controls presentation RPM/audio, especially when
-the source reports whole km/h values. Any claim of real-car fidelity needs a cited measurement or
-must be labelled as an approximation in code/tests, not hidden in a UI label.
+the source reports whole km/h values. The current vehicle model deliberately assumes BYD truncates
+those readings, so a reported `N` represents `[N, N + 1)` km/h. Below 15 km/h, pedal input seeds a
+bounded presentation prediction while crossing history is unavailable. If the first new integer
+arrives after that history was reset, the estimator recovers any missed boundary over multiple
+frames instead of stepping the tach and audio immediately. Any claim of real-car fidelity needs a
+cited measurement or must be labelled as an approximation in code/tests, not hidden in a UI label.
 
 ## Verification
 

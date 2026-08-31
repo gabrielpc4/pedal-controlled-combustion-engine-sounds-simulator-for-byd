@@ -803,6 +803,11 @@ class DriveController(context: Context) {
                 } else {
                     1.0
                 },
+                simulatedCoastRegenScale = if (input.usesSimulatedPedals) {
+                    SIMULATED_PEDALS_COAST_REGEN_SCALE
+                } else {
+                    1.0
+                },
             ),
             dt,
         )
@@ -973,6 +978,7 @@ class DriveController(context: Context) {
         const val AUTO_START_THROTTLE_THRESHOLD = 0.10
         const val FREE_REV_TURBO_ATTACK_MULTIPLIER = 10.0
         const val SIMULATED_PEDALS_DRIVE_FORCE_SCALE = 0.05
+        const val SIMULATED_PEDALS_COAST_REGEN_SCALE = 0.0
     }
 }
 

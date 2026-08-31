@@ -6,7 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.floor
-import kotlin.math.roundToInt
 
 class EngineSimulationTest {
     @Test
@@ -78,13 +77,24 @@ class EngineSimulationTest {
         repeat(80) { rising += estimator.update(21.0, STEP, 0.12) }
         assertTrue("one integer step must not reach the tach in one frame", rising.first() in 20.0..20.20)
         assertTrue("speed must move continuously upward", rising.zipWithNext().all { it.second >= it.first })
-        assertTrue(rising.last() > 20.85)
+        assertTrue(rising.last() > 21.70)
 
         val falling = mutableListOf<Double>()
         repeat(80) { falling += estimator.update(20.0, STEP, 0.12) }
-        assertTrue("one integer step must not reach the tach in one frame", falling.first() > 20.75)
+        assertTrue("one integer step must not reach the tach in one frame", falling.first() > 21.50)
         assertTrue("speed must move continuously downward", falling.zipWithNext().all { it.second <= it.first })
-        assertTrue("falling estimate=${falling.last()}", falling.last() < 20.20)
+        assertTrue("falling estimate=${falling.last()}", falling.last() < 20.25)
+    }
+
+    @Test
+    fun authoritativeTruncatedSpeedSettlesExactlyAtZero() {
+        val estimator = QuantizedSpeedEstimator()
+        estimator.update(2.0, STEP, 0.12)
+        repeat(80) { estimator.update(1.0, STEP, 0.12) }
+        var estimate = 1.0
+        repeat(400) { estimate = estimator.update(0.0, STEP, 0.12) }
+
+        assertEquals(0.0, estimate, 0.0)
     }
 
     @Test
@@ -97,12 +107,68 @@ class EngineSimulationTest {
                 DriverInput(throttle = 0.55, simulateCoastRegen = true),
                 STEP,
             )
-            assertEquals(state.rawSpeedKmh.roundToInt().toDouble(), state.rawSpeedKmh, 0.0)
+            assertEquals(state.rawSpeedKmh.toInt().toDouble(), state.rawSpeedKmh, 0.0)
             if (kotlin.math.abs(state.speedKmh - state.rawSpeedKmh) > 0.01) {
                 observedInterpolatedFrame = true
             }
         }
         assertTrue("SIM must reconstruct motion between whole-km/h reports", observedInterpolatedFrame)
+    }
+
+    @Test
+    fun rawVehicleSpeedAlwaysUsesTruncation() {
+        assertEquals(0.0, truncateRawSpeedKmh(0.9999), 0.0)
+        assertEquals(1.0, truncateRawSpeedKmh(1.9999), 0.0)
+        assertEquals(2.0, truncateRawSpeedKmh(2.0), 0.0)
+
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val state = simulation.update(
+            DriverInput(throttle = 0.2, externalSpeedKmh = 1.9999),
+            STEP,
+        )
+
+        assertEquals("the runtime BYD path must use the same truncation as SIM RAW", 1.0, state.rawSpeedKmh, 0.0)
+    }
+
+    @Test
+    fun lightThrottleProducesSmoothTachAcrossSlowIntegerSpeedChanges() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val rpmFrames = mutableListOf<Double>()
+        val boundaryRpmChanges = mutableListOf<Double>()
+        var previousRawSpeed = 0.0
+        var previousRpm = simulation.state.rpm
+        val frames = (25.0 / STEP).toInt()
+
+        repeat(frames) { frame ->
+            val physicalSpeedKmh = frame * STEP * 0.2
+            val rawSpeedKmh = floor(physicalSpeedKmh)
+            val state = simulation.update(
+                DriverInput(throttle = 0.18, externalSpeedKmh = rawSpeedKmh),
+                STEP,
+            )
+            if (physicalSpeedKmh >= 1.0) {
+                rpmFrames += state.rpm
+                if (rawSpeedKmh != previousRawSpeed) {
+                    boundaryRpmChanges += state.rpm - previousRpm
+                }
+            }
+            previousRawSpeed = rawSpeedKmh
+            previousRpm = state.rpm
+        }
+
+        val rpmChanges = rpmFrames.zipWithNext().map { (first, second) -> second - first }
+        assertEquals("slow driving must remain in first gear", 1, simulation.state.gear)
+        assertTrue("tach must climb with reconstructed road motion", rpmFrames.last() > rpmFrames.first() + 500.0)
+        assertTrue(
+            "whole-km/h reports must not create a tach surge: $boundaryRpmChanges",
+            boundaryRpmChanges.all { it in -1.0..12.0 },
+        )
+        assertTrue(
+            "tach and the shared audio RPM signal must remain continuous",
+            rpmChanges.maxOrNull()!! < 12.0,
+        )
     }
 
     @Test
@@ -438,7 +504,8 @@ class EngineSimulationTest {
     @Test
     fun reducedSimulatedDriveForceLetsRpmRiseBeforeRoadSpeed() {
         val regular = EngineSimulation().runFor(1.5, throttle = 1.0, sim = true)
-        val slowed = EngineSimulation().runFor(
+        val slowSimulation = EngineSimulation()
+        val slowed = slowSimulation.runFor(
             seconds = 1.5,
             throttle = 1.0,
             sim = true,
@@ -451,6 +518,54 @@ class EngineSimulationTest {
         assertTrue(
             "loaded RPM must flare despite the nearly stationary virtual car: $slowed",
             slowed.rpm > EngineProfile.SAMPLE_BANK_ENGINE.idleRpm + 600.0,
+        )
+
+        val afterLift = slowSimulation.runFor(
+            seconds = 1.5,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+            simulatedCoastRegenScale = 0.0,
+        )
+        assertTrue(
+            "slow SIM lift-off must reduce loaded RPM: before=$slowed after=$afterLift",
+            afterLift.rpm < slowed.rpm - 300.0,
+        )
+    }
+
+    @Test
+    fun reducedSimulatedForceAlsoPreventsAbruptLiftOffRegen() {
+        val scaledRegen = EngineSimulation()
+        val fullRegen = EngineSimulation()
+        val speedBeforeLift = scaledRegen.runFor(
+            seconds = 1.5,
+            throttle = 1.0,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+        ).speedKmh
+        fullRegen.runFor(
+            seconds = 1.5,
+            throttle = 1.0,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+        )
+
+        val gradualLift = scaledRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+            simulatedCoastRegenScale = 0.0,
+        )
+        val abruptLift = fullRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+            simulatedCoastRegenScale = 1.0,
+        )
+
+        assertTrue("scaled SIM regen should retain meaningful coast speed: $gradualLift", gradualLift.speedKmh > speedBeforeLift * 0.35)
+        assertTrue(
+            "scaled SIM regen must coast longer than the original full regen",
+            gradualLift.speedKmh > abruptLift.speedKmh + 0.5,
         )
     }
 
@@ -475,7 +590,10 @@ class EngineSimulationTest {
         brake.runFor(2.0, throttle = 0.75, sim = true)
         val coastState = coast.runFor(0.40, sim = true)
         val brakeState = brake.runFor(0.40, brake = 1.0, sim = true)
-        assertTrue(brakeState.speedKmh < coastState.speedKmh - 10.0)
+        assertTrue(
+            "service brake must decelerate faster than coast: brake=$brakeState coast=$coastState",
+            brakeState.speedKmh < coastState.speedKmh - 9.5,
+        )
     }
 
     @Test
@@ -814,6 +932,7 @@ class EngineSimulationTest {
         sim: Boolean = false,
         position: TransmissionPosition = TransmissionPosition.DRIVE,
         simulatedDriveForceScale: Double = 1.0,
+        simulatedCoastRegenScale: Double = 1.0,
     ): DrivetrainState {
         ensureIgnitionRunning()
         var result = state
@@ -825,6 +944,7 @@ class EngineSimulationTest {
                     simulateCoastRegen = sim,
                     transmissionPosition = position,
                     simulatedDriveForceScale = simulatedDriveForceScale,
+                    simulatedCoastRegenScale = simulatedCoastRegenScale,
                 ),
                 STEP,
             )

@@ -10,7 +10,6 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.roundToInt
 
 private const val BYD_SPEED_CLASS = "android.hardware.bydauto.speed.BYDAutoSpeedDevice"
 private const val BYD_GEARBOX_CLASS = "android.hardware.bydauto.gearbox.BYDAutoGearboxDevice"
@@ -355,4 +354,4 @@ internal fun describeThrowable(throwable: Throwable): String {
     return if (message == null) cause.javaClass.simpleName else "${cause.javaClass.simpleName}: $message"
 }
 
-private fun formatRaw(raw: Double): String = raw.roundToInt().toString()
+private fun formatRaw(raw: Double): String = raw.toInt().toString()

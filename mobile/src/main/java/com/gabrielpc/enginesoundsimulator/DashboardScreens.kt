@@ -348,7 +348,7 @@ private fun BarTachometerHud(
         limiterActive = drivetrain.limiterActive,
     )
     val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
-    val speedKmh = drivetrain.rawSpeedKmh.roundToInt().coerceAtLeast(0)
+    val speedKmh = drivetrain.rawSpeedKmh.toInt().coerceAtLeast(0)
     val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
         drivetrain.gear.toString()
     } else {

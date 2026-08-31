@@ -30,7 +30,7 @@ data class EngineTuning(
     val topSpeedKmh: Double = 190.0,
     /** Tach response after the continuous road-speed estimate changes. */
     val syntheticRpmResponseMs: Double = 20.0,
-    /** Reconstructs continuous speed from the integer BYD reading. */
+    /** Reconstructs continuous speed from the truncated integer BYD reading. */
     val externalSpeedSmoothingMs: Double = 120.0,
     val throttleAttackMs: Double = 15.0,
     val throttleReleaseMs: Double = 20.0,
