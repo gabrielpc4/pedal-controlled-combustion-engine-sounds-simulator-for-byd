@@ -1,99 +1,51 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-/** Reusable raw snapshot consumed by the 400 Hz FMOD control worker. */
-class EngineAudioFrame(
-    rpm: Double = FmodCarProfiles.default.idleRpm,
-    /** Physical BYD/simulated pedal position; deliberately not combustion-smoothed. */
-    throttle: Double = 0.0,
-    /** AC-native signed driven-axle angular speed in rad/s; raw telemetry when available. */
-    drivetrainSpeed: Double = 0.0,
-    enabled: Boolean = false,
-    /** App, car, tuning, and ignition/shutdown gain folded into one linear value. */
-    masterGain: Double = 1.0,
-    shiftSerial: Long = 0L,
-    /** -1 down, 0 none, +1 up. */
-    shiftDirection: Int = 0,
-    /** True while the source simulation owns a cosmetic gear transition. */
-    isShifting: Boolean = false,
-    /** Source RPM destination sampled when the current cosmetic shift began. */
-    shiftTargetRpm: Double = rpm,
-    limiterActive: Boolean = false,
-    /** Audition option: hold engine/transmission events at full authored load, as the desktop lab does. */
-    loadOnlyEnabled: Boolean = false,
-    /** Audition option: override only the engine event's throttle parameter. */
-    coastOnlyEnabled: Boolean = false,
-    eventMixSettings: FmodEventMixSettings = FmodEventMixSettings.DEFAULT,
+import com.gabrielpc.enginesoundsimulator.tuning.AudioTuning
+
+/** Realtime controls consumed by the sample-bank renderer. */
+data class EngineAudioFrame(
+    val rpm: Double = EngineSampleProfiles.default.idleRpm,
+    val throttle: Double = 0.0,
+    val enabled: Boolean = true,
+    val shiftSerial: Long = 0L,
+    val shiftDirection: Int = 0,
+    val isShifting: Boolean = false,
+    val tuning: AudioTuning = AudioTuning(),
+    val layerMix: Map<String, LayerMixControl> = emptyMap(),
+    /** Per-perspective master trims for all continuous Load and Coast layers. */
+    val programLayerGains: ProgramLayerGains = ProgramLayerGains(),
+    /** When true, mute coast layers and hold the engine program at full load while RPM still changes. */
+    val loadOnlyProgram: Boolean = true,
+    /** Recorded family used as the continuous driving engine sound for profiles that support it. */
+    val primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
+    /** When true, play the shared recorded pops on throttle lift and mute each car's native overrun. */
+    val popsAndBangsEnabled: Boolean = false,
+    /** Linear multiplier applied on top of the shared pops sample gain (default 2×). */
+    val popsAndBangsGain: Double = DEFAULT_POPS_AND_BANGS_GAIN,
+    /** False in Park/Neutral so exhaust overrun and shared pops cannot fire on a free rev. */
+    val throttleLiftEffectsEnabled: Boolean = true,
+    /** Multiplier for turbo response when the pedal is pressed; Drive uses the authored 1× rate. */
+    val turboSpoolAttackMultiplier: Double = 1.0,
+    /** Enables every turbo loop, flutter, and dump sound provided by the selected car. */
+    val turboSoundsEnabled: Boolean = true,
+    /** Linear multiplier applied to every turbo loop, flutter, and dump sound. */
+    val turboSoundsGain: Double = DEFAULT_TURBO_SOUNDS_GAIN,
+    /** When true, play Huracán shift one-shots on every car and mute native shift effects. */
+    val sharedShiftSoundsEnabled: Boolean = false,
+    /** Linear multiplier applied on top of the shared shift sample gain (default 3×). */
+    val sharedShiftSoundsGain: Double = DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
+    /** Enables each car's continuous transmission sample, when its bank provides one. */
+    val transmissionEnabled: Boolean = true,
+    /** Linear multiplier applied to each car's continuous transmission sample. */
+    val transmissionGain: Double = DEFAULT_TRANSMISSION_GAIN,
 ) {
-    var rpm: Double = rpm
-        private set
-    var throttle: Double = throttle
-        private set
-    var drivetrainSpeed: Double = drivetrainSpeed
-        private set
-    var enabled: Boolean = enabled
-        private set
-    var masterGain: Double = masterGain
-        private set
-    var shiftSerial: Long = shiftSerial
-        private set
-    var shiftDirection: Int = shiftDirection
-        private set
-    var isShifting: Boolean = isShifting
-        private set
-    var shiftTargetRpm: Double = shiftTargetRpm
-        private set
-    var limiterActive: Boolean = limiterActive
-        private set
-    var loadOnlyEnabled: Boolean = loadOnlyEnabled
-        private set
-    var coastOnlyEnabled: Boolean = coastOnlyEnabled
-        private set
-    var eventMixSettings: FmodEventMixSettings = eventMixSettings
-        private set
-
-    internal fun overwrite(other: EngineAudioFrame) = overwrite(
-        rpm = other.rpm,
-        throttle = other.throttle,
-        drivetrainSpeed = other.drivetrainSpeed,
-        enabled = other.enabled,
-        masterGain = other.masterGain,
-        shiftSerial = other.shiftSerial,
-        shiftDirection = other.shiftDirection,
-        isShifting = other.isShifting,
-        shiftTargetRpm = other.shiftTargetRpm,
-        limiterActive = other.limiterActive,
-        loadOnlyEnabled = other.loadOnlyEnabled,
-        coastOnlyEnabled = other.coastOnlyEnabled,
-        eventMixSettings = other.eventMixSettings,
-    )
-
-    internal fun overwrite(
-        rpm: Double,
-        throttle: Double,
-        drivetrainSpeed: Double,
-        enabled: Boolean,
-        masterGain: Double,
-        shiftSerial: Long,
-        shiftDirection: Int,
-        isShifting: Boolean,
-        shiftTargetRpm: Double,
-        limiterActive: Boolean,
-        loadOnlyEnabled: Boolean,
-        coastOnlyEnabled: Boolean,
-        eventMixSettings: FmodEventMixSettings,
-    ) {
-        this.rpm = rpm
-        this.throttle = throttle
-        this.drivetrainSpeed = drivetrainSpeed
-        this.enabled = enabled
-        this.masterGain = masterGain
-        this.shiftSerial = shiftSerial
-        this.shiftDirection = shiftDirection
-        this.isShifting = isShifting
-        this.shiftTargetRpm = shiftTargetRpm
-        this.limiterActive = limiterActive
-        this.loadOnlyEnabled = loadOnlyEnabled
-        this.coastOnlyEnabled = coastOnlyEnabled
-        this.eventMixSettings = eventMixSettings
+    companion object {
+        const val DEFAULT_POPS_AND_BANGS_GAIN = 2.0
+        const val DEFAULT_SHARED_SHIFT_SOUNDS_GAIN = 3.0
+        const val DEFAULT_TRANSMISSION_GAIN = 1.0
+        const val DEFAULT_TURBO_SOUNDS_GAIN = 1.0
+        const val MIN_EFFECT_GAIN = 0.5
+        const val MIN_TURBO_SOUNDS_GAIN = 0.25
+        const val MAX_EFFECT_GAIN = 6.0
     }
 }

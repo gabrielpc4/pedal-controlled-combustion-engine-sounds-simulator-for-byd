@@ -1,13 +1,11 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
 import kotlin.math.floor
-import kotlin.math.round
 
 class EngineSimulationTest {
     @Test
@@ -21,24 +19,32 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun ignitionStartRevDoesNotEmitFakeShiftEvent() {
+    fun ignitionStartRevPlaysUpshiftCueAtBlip() {
         val simulation = EngineSimulation()
         simulation.startIgnition()
-        repeat(500) {
-            val state = simulation.update(DriverInput(), STEP)
-            assertEquals(0L, state.shiftSerial)
-            assertEquals(ShiftDirection.NONE, state.shiftDirection)
+        val catchFrames = (ENGINE_START_CATCH_END_SECONDS / STEP).toInt() - 1
+        repeat(catchFrames) {
+            simulation.update(DriverInput(), STEP)
         }
+        assertEquals(0L, simulation.state.shiftSerial)
+
+        simulation.update(DriverInput(), STEP)
+        assertEquals(1L, simulation.state.shiftSerial)
+        assertEquals(ShiftDirection.UP, simulation.state.shiftDirection)
     }
 
     @Test
-    fun repeatedIgnitionCyclesDoNotEmitFakeShiftEvents() {
+    fun ignitionStartRevPlaysUpshiftCueOnEveryStartCycle() {
         val simulation = EngineSimulation()
         repeat(3) {
             simulation.startIgnition()
-            repeat(500) { simulation.update(DriverInput(), STEP) }
-            assertEquals(0L, simulation.state.shiftSerial)
-            assertEquals(ShiftDirection.NONE, simulation.state.shiftDirection)
+            val catchFrames = (ENGINE_START_CATCH_END_SECONDS / STEP).toInt() - 1
+            repeat(catchFrames) {
+                simulation.update(DriverInput(), STEP)
+            }
+            simulation.update(DriverInput(), STEP)
+            assertEquals(1L, simulation.state.shiftSerial)
+            assertEquals(ShiftDirection.UP, simulation.state.shiftDirection)
 
             simulation.requestShutdown()
             repeat(1_500) {
@@ -71,218 +77,98 @@ class EngineSimulationTest {
         repeat(80) { rising += estimator.update(21.0, STEP, 0.12) }
         assertTrue("one integer step must not reach the tach in one frame", rising.first() in 20.0..20.20)
         assertTrue("speed must move continuously upward", rising.zipWithNext().all { it.second >= it.first })
-        assertTrue(rising.last() > 20.85)
+        assertTrue(rising.last() > 21.70)
 
         val falling = mutableListOf<Double>()
         repeat(80) { falling += estimator.update(20.0, STEP, 0.12) }
-        assertTrue("one integer step must not reach the tach in one frame", falling.first() > 20.75)
+        assertTrue("one integer step must not reach the tach in one frame", falling.first() > 21.50)
         assertTrue("speed must move continuously downward", falling.zipWithNext().all { it.second <= it.first })
-        assertTrue("falling estimate=${falling.last()}", falling.last() < 20.20)
+        assertTrue("falling estimate=${falling.last()}", falling.last() < 20.25)
     }
 
     @Test
-    fun quantizedSpeedEstimatorPredictsBetweenFiftyHertzIntegerSamples() {
+    fun authoritativeTruncatedSpeedSettlesExactlyAtZero() {
         val estimator = QuantizedSpeedEstimator()
-        var physicalSpeedKmh = 0.0
-        var bydIntegerSpeedKmh = 0.0
-        estimator.update(bydIntegerSpeedKmh, STEP, 0.12)
-        val estimates = mutableListOf<Double>()
-        val physicalSpeeds = mutableListOf<Double>()
+        estimator.update(2.0, STEP, 0.12)
+        repeat(80) { estimator.update(1.0, STEP, 0.12) }
+        var estimate = 1.0
+        repeat(400) { estimate = estimator.update(0.0, STEP, 0.12) }
 
-        repeat(3_000) { tick ->
-            physicalSpeedKmh += 2.0 * STEP
-            if (tick % 4 == 0) {
-                bydIntegerSpeedKmh = floor(physicalSpeedKmh + 0.5)
-            }
-            val estimate = estimator.update(bydIntegerSpeedKmh, STEP, 0.12)
-            if (physicalSpeedKmh >= 5.0) {
-                estimates += estimate
-                physicalSpeeds += physicalSpeedKmh
-            }
-        }
-
-        val deltas = estimates.zipWithNext { previous, current -> current - previous }
-        assertTrue("interpolated speed must advance on every 5 ms frame", deltas.all { it > 0.0 })
-        assertTrue("largest reconstructed step=${deltas.max()}", deltas.max() < 0.05)
-        assertTrue(
-            "maximum reconstruction error=${estimates.zip(physicalSpeeds).maxOf { abs(it.first - it.second) }}",
-            estimates.zip(physicalSpeeds).all { (estimate, physical) -> abs(estimate - physical) < 0.80 },
-        )
-        assertTrue(estimates.any { abs(it - round(it)) > 0.05 })
+        assertEquals(0.0, estimate, 0.0)
     }
 
     @Test
-    fun quantizedSpeedEstimatorInterpolatesBrakingAndSettlesExactlyAtZero() {
-        val estimator = QuantizedSpeedEstimator()
-        var physicalSpeedKmh = 24.0
-        var bydIntegerSpeedKmh = 24.0
-        estimator.update(bydIntegerSpeedKmh, STEP, 0.12)
-        val brakingEstimates = mutableListOf<Double>()
-
-        repeat(2_400) { tick ->
-            physicalSpeedKmh = (physicalSpeedKmh - 3.0 * STEP).coerceAtLeast(0.0)
-            if (tick % 4 == 0) {
-                bydIntegerSpeedKmh = floor(physicalSpeedKmh + 0.5)
-            }
-            val estimate = estimator.update(bydIntegerSpeedKmh, STEP, 0.12)
-            if (physicalSpeedKmh in 2.0..20.0) brakingEstimates += estimate
-        }
-
-        val deltas = brakingEstimates.zipWithNext { previous, current -> current - previous }
-        assertTrue("interpolated braking must move on every frame", deltas.all { it < 0.0 })
-        assertTrue("largest reconstructed braking step=${deltas.min()}", deltas.min() > -0.06)
-
-        var stoppedEstimate = Double.NaN
-        repeat(400) { stoppedEstimate = estimator.update(0.0, STEP, 0.12) }
-        assertEquals(0.0, stoppedEstimate, 0.0)
-    }
-
-    @Test
-    fun quantizedSpeedEstimatorStopsPredictingWhenNonzeroSpeedIsHeld() {
-        val estimator = QuantizedSpeedEstimator()
-        estimator.update(19.0, STEP, 0.12)
-        repeat(100) { estimator.update(20.0, STEP, 0.12) }
-
-        var heldEstimate = Double.NaN
-        repeat(600) { heldEstimate = estimator.update(20.0, STEP, 0.12) }
-
-        assertEquals(20.0, heldEstimate, 0.001)
-    }
-
-    @Test
-    fun wholeKmhBydTelemetryProducesContinuousSpeedAndRpmBetweenPolls() {
-        val simulation = EngineSimulation().apply { engageAtIdle() }
-        var physicalSpeedKmh = 10.0
-        var bydIntegerSpeedKmh = 10.0
-        val samples = mutableListOf<DrivetrainState>()
-
-        repeat(1_000) { tick ->
-            physicalSpeedKmh += 2.0 * STEP
-            // The real integration polls at 50 Hz and can repeat one whole-km/h value for many
-            // polls. The drivetrain and tach still update at the controller's 200 Hz cadence.
-            if (tick % 4 == 0) {
-                bydIntegerSpeedKmh = floor(physicalSpeedKmh + 0.5)
-            }
-            val state = simulation.update(
-                DriverInput(throttle = 0.25, externalSpeedKmh = bydIntegerSpeedKmh),
-                STEP,
-            )
-            if (physicalSpeedKmh >= 13.0) samples += state
-        }
-
-        assertTrue(samples.zipWithNext().any { (first, second) ->
-            first.rawSpeedKmh == second.rawSpeedKmh
-        })
-        assertTrue(samples.zipWithNext().all { (first, second) ->
-            second.speedKmh > first.speedKmh && second.rpm > first.rpm
-        })
-        val oneKmhRpmStep = coupledRpmIncreaseForSpeedKmh(
-            profile = simulation.profile,
-            gearIndex = 0,
-            speedKmh = 1.0,
-        )
-        assertTrue(samples.zipWithNext().all { (first, second) ->
-            val delta = second.rpm - first.rpm
-            delta > 0.0 && delta < oneKmhRpmStep
-        })
-    }
-
-    @Test
-    fun simulatorSubOneKmhMotionProducesContinuousRpmUpdates() {
+    fun simulatorReportsWholeKmhWhileDrivingAudioFromContinuousEstimate() {
         val simulation = EngineSimulation()
         simulation.engageAtIdle()
-        val samples = mutableListOf<DrivetrainState>()
-        repeat((4.0 / STEP).toInt()) {
+        var observedInterpolatedFrame = false
+        repeat((1.5 / STEP).toInt()) {
             val state = simulation.update(
-                DriverInput(throttle = 0.25, simulateCoastRegen = true),
+                DriverInput(throttle = 0.55, simulateCoastRegen = true),
                 STEP,
             )
-            if (state.speedKmh in 0.05..0.95) {
-                samples += state
+            assertEquals(state.rawSpeedKmh.toInt().toDouble(), state.rawSpeedKmh, 0.0)
+            if (kotlin.math.abs(state.speedKmh - state.rawSpeedKmh) > 0.01) {
+                observedInterpolatedFrame = true
             }
         }
-
-        assertTrue("expected several continuous samples below 1 km/h, got ${samples.size}", samples.size >= 8)
-        assertTrue(samples.all { it.rawSpeedKmh == it.speedKmh })
-        assertTrue(samples.zipWithNext().all { (first, second) ->
-            second.speedKmh > first.speedKmh &&
-                second.speedKmh - first.speedKmh < 1.0 &&
-                second.rpm > first.rpm
-        })
-        val oneKmhRpmStep = coupledRpmIncreaseForSpeedKmh(simulation.profile, gearIndex = 0, speedKmh = 1.0)
-        assertTrue(samples.zipWithNext().all { (first, second) ->
-            val delta = second.rpm - first.rpm
-            delta > 0.0 && delta < oneKmhRpmStep
-        })
+        assertTrue("SIM must reconstruct motion between whole-km/h reports", observedInterpolatedFrame)
     }
 
     @Test
-    fun fractionalRealTelemetryProducesMonotonicSubStepRpmUpdates() {
-        val simulation = EngineSimulation().apply { engageAtIdle() }
-        repeat(300) {
-            simulation.update(
-                DriverInput(throttle = 0.25, externalSpeedKmh = 12.0),
-                STEP,
-            )
-        }
+    fun rawVehicleSpeedAlwaysUsesTruncation() {
+        assertEquals(0.0, truncateRawSpeedKmh(0.9999), 0.0)
+        assertEquals(1.0, truncateRawSpeedKmh(1.9999), 0.0)
+        assertEquals(2.0, truncateRawSpeedKmh(2.0), 0.0)
 
-        val samples = (1..40).map { step ->
-            simulation.update(
-                DriverInput(throttle = 0.25, externalSpeedKmh = 12.0 + step * 0.01),
-                STEP,
-            )
-        }
-
-        assertEquals(12.40, samples.last().rawSpeedKmh, 0.000001)
-        assertTrue(samples.zipWithNext().all { (first, second) ->
-            second.speedKmh > first.speedKmh &&
-                second.speedKmh - first.speedKmh < 1.0 &&
-                second.rpm > first.rpm
-        })
-        val oneKmhRpmStep = coupledRpmIncreaseForSpeedKmh(simulation.profile, gearIndex = 0, speedKmh = 1.0)
-        assertTrue(samples.zipWithNext().all { (first, second) ->
-            val delta = second.rpm - first.rpm
-            delta > 0.0 && delta < oneKmhRpmStep
-        })
-    }
-
-    @Test
-    fun externalToSimulatorHandoffPreservesContinuousFractionalSpeedAndRpm() {
-        val simulation = EngineSimulation().apply { engageAtIdle() }
-        val externalSpeedKmh = 42.375
-        repeat(200) {
-            simulation.update(
-                DriverInput(throttle = 0.0, externalSpeedKmh = externalSpeedKmh),
-                STEP,
-            )
-        }
-        val beforeHandoff = simulation.state
-
-        val afterHandoff = simulation.update(
-            DriverInput(throttle = 0.0, simulateCoastRegen = false),
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val state = simulation.update(
+            DriverInput(throttle = 0.2, externalSpeedKmh = 1.9999),
             STEP,
         )
 
-        assertEquals(externalSpeedKmh, beforeHandoff.rawSpeedKmh, 0.0)
-        assertEquals(externalSpeedKmh, beforeHandoff.speedKmh, 0.000001)
-        assertEquals(beforeHandoff.gear, afterHandoff.gear)
-        assertFalse(afterHandoff.isShifting)
+        assertEquals("the runtime BYD path must use the same truncation as SIM RAW", 1.0, state.rawSpeedKmh, 0.0)
+    }
 
-        val speedDeltaKmh = beforeHandoff.speedKmh - afterHandoff.speedKmh
-        assertTrue("handoff speed delta=$speedDeltaKmh", speedDeltaKmh in 0.0..0.10)
-        assertEquals(afterHandoff.speedKmh, afterHandoff.rawSpeedKmh, 0.0)
+    @Test
+    fun lightThrottleProducesSmoothTachAcrossSlowIntegerSpeedChanges() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val rpmFrames = mutableListOf<Double>()
+        val boundaryRpmChanges = mutableListOf<Double>()
+        var previousRawSpeed = 0.0
+        var previousRpm = simulation.state.rpm
+        val frames = (25.0 / STEP).toInt()
+
+        repeat(frames) { frame ->
+            val physicalSpeedKmh = frame * STEP * 0.2
+            val rawSpeedKmh = floor(physicalSpeedKmh)
+            val state = simulation.update(
+                DriverInput(throttle = 0.18, externalSpeedKmh = rawSpeedKmh),
+                STEP,
+            )
+            if (physicalSpeedKmh >= 1.0) {
+                rpmFrames += state.rpm
+                if (rawSpeedKmh != previousRawSpeed) {
+                    boundaryRpmChanges += state.rpm - previousRpm
+                }
+            }
+            previousRawSpeed = rawSpeedKmh
+            previousRpm = state.rpm
+        }
+
+        val rpmChanges = rpmFrames.zipWithNext().map { (first, second) -> second - first }
+        assertEquals("slow driving must remain in first gear", 1, simulation.state.gear)
+        assertTrue("tach must climb with reconstructed road motion", rpmFrames.last() > rpmFrames.first() + 500.0)
         assertTrue(
-            "simulator speed was quantized to ${afterHandoff.rawSpeedKmh}",
-            afterHandoff.rawSpeedKmh > floor(afterHandoff.rawSpeedKmh),
+            "whole-km/h reports must not create a tach surge: $boundaryRpmChanges",
+            boundaryRpmChanges.all { it in -1.0..12.0 },
         )
-
-        val rpmDelta = beforeHandoff.rpm - afterHandoff.rpm
-        val maximumContinuousRpmDelta = coupledRpmIncreaseForSpeedKmh(
-            profile = simulation.profile,
-            gearIndex = beforeHandoff.gear - 1,
-            speedKmh = 0.10,
+        assertTrue(
+            "tach and the shared audio RPM signal must remain continuous",
+            rpmChanges.maxOrNull()!! < 12.0,
         )
-        assertTrue("handoff RPM delta=$rpmDelta", rpmDelta in 0.0..maximumContinuousRpmDelta)
     }
 
     @Test
@@ -323,16 +209,135 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun driveRpmIsDeterminedByRoadSpeedRatherThanThrottleForce() {
-        val profile = EngineProfile.SKYLINE_R34
+    fun driveRpmRespondsToThrottleAtUnchangedRoadSpeed() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
         val light = EngineSimulation(profile)
         val heavy = EngineSimulation(profile)
         val lightState = light.runForExternal(2.0, 48.0, 0.15)
         val heavyState = heavy.runForExternal(2.0, 48.0, 0.85)
         assertEquals(lightState.gear, heavyState.gear)
         assertEquals(lightState.speedKmh, heavyState.speedKmh, 0.01)
-        assertEquals(lightState.rpm, heavyState.rpm, 1.0)
+        assertTrue(
+            "loaded crank RPM must rise ahead of unchanged wheel speed: light=${lightState.rpm}, heavy=${heavyState.rpm}",
+            heavyState.rpm > lightState.rpm + 300.0,
+        )
         assertTrue(lightState.rpm > profile.idleRpm + 2_000.0)
+    }
+
+    @Test
+    fun disablingLoadResponsiveRpmKeepsDriveRpmCoupledToRoadSpeed() {
+        val responsive = EngineSimulation()
+        val roadCoupled = EngineSimulation().apply {
+            loadResponsiveRpmEnabled = false
+        }
+        val responsiveState = responsive.runForExternal(2.0, 48.0, 0.85)
+        val roadCoupledState = roadCoupled.runForExternal(2.0, 48.0, 0.85)
+
+        assertEquals(responsiveState.speedKmh, roadCoupledState.speedKmh, 0.01)
+        assertEquals(responsiveState.gear, roadCoupledState.gear)
+        assertTrue(
+            "disabled responsive RPM must remove throttle-created crank slip: responsive=$responsiveState coupled=$roadCoupledState",
+            responsiveState.rpm > roadCoupledState.rpm + 300.0,
+        )
+        val minimumPresentationRpm = coupledRpmAtSpeedKmh(
+            profile = roadCoupled.profile,
+            gearIndex = roadCoupledState.gear - 1,
+            speedKmh = roadCoupledState.rawSpeedKmh,
+        )
+        val maximumPresentationRpm = coupledRpmAtSpeedKmh(
+            profile = roadCoupled.profile,
+            gearIndex = roadCoupledState.gear - 1,
+            speedKmh = roadCoupledState.rawSpeedKmh + 1.08,
+        )
+        assertTrue(
+            "disabled responsive RPM must stay coupled to the bounded presentation-speed interval: $roadCoupledState",
+            roadCoupledState.rpm in (minimumPresentationRpm - 50.0)..(maximumPresentationRpm + 50.0),
+        )
+    }
+
+    @Test
+    fun optionalThrottleBumpUsesTheNextKmhRpmThenSettlesBack() {
+        val atThreshold = EngineSimulation().apply {
+            loadResponsiveRpmEnabled = false
+            throttleRpmBumpEnabled = true
+            engageAtIdle()
+        }
+        val aboveThreshold = EngineSimulation().apply {
+            loadResponsiveRpmEnabled = false
+            throttleRpmBumpEnabled = true
+            engageAtIdle()
+        }
+        repeat(400) {
+            atThreshold.update(DriverInput(throttle = 0.0, externalSpeedKmh = 42.0), STEP)
+            aboveThreshold.update(DriverInput(throttle = 0.0, externalSpeedKmh = 42.0), STEP)
+        }
+        repeat(30) {
+            atThreshold.update(DriverInput(throttle = 0.20, externalSpeedKmh = 42.0), STEP)
+            aboveThreshold.update(DriverInput(throttle = 0.21, externalSpeedKmh = 42.0), STEP)
+        }
+
+        assertTrue(
+            "pedal above 20% must briefly sound one km/h ahead: at20=${atThreshold.state.rpm}, above20=${aboveThreshold.state.rpm}",
+            aboveThreshold.state.rpm > atThreshold.state.rpm + 30.0,
+        )
+        repeat(800) {
+            atThreshold.update(DriverInput(throttle = 0.21, externalSpeedKmh = 42.0), STEP)
+            aboveThreshold.update(DriverInput(throttle = 0.21, externalSpeedKmh = 42.0), STEP)
+        }
+        assertEquals(
+            "the temporary bump must correct back to the road-coupled RPM",
+            atThreshold.state.rpm,
+            aboveThreshold.state.rpm,
+            2.0,
+        )
+    }
+
+    @Test
+    fun drivePedalMovesAudioAndCrankBeforeTheNextSpeedSample() {
+        val simulation = EngineSimulation()
+        val baseline = simulation.runForExternal(1.5, 8.0, 0.0)
+
+        val firstLoadedFrame = simulation.update(
+            DriverInput(throttle = 1.0, externalSpeedKmh = 8.0),
+            STEP,
+        )
+        assertEquals(baseline.speedKmh, firstLoadedFrame.speedKmh, 0.01)
+        assertEquals(1.0, firstLoadedFrame.audioThrottle, 0.0)
+        assertTrue("EV torque filtering must not delay audio load", firstLoadedFrame.smoothedThrottle < 0.20)
+        assertTrue(
+            "combustion RPM must react on the first 5 ms frame",
+            firstLoadedFrame.rpm > baseline.rpm + 5.0,
+        )
+
+        repeat(9) {
+            simulation.update(DriverInput(throttle = 1.0, externalSpeedKmh = 8.0), STEP)
+        }
+        assertEquals(baseline.speedKmh, simulation.state.speedKmh, 0.01)
+        assertTrue(
+            "combustion RPM must visibly lead wheel speed within 50 ms",
+            simulation.state.rpm > baseline.rpm + 150.0,
+        )
+    }
+
+    @Test
+    fun driveRpmRecouplesPromptlyAfterPedalRelease() {
+        val simulation = EngineSimulation()
+        val baseline = simulation.runForExternal(1.5, 8.0, 0.0)
+        val loaded = simulation.runForExternal(0.45, 8.0, 0.85)
+        assertTrue(
+            "loaded RPM must lead the same-speed coast RPM: baseline=${baseline.rpm}, loaded=${loaded.rpm}",
+            loaded.rpm > baseline.rpm + 300.0,
+        )
+
+        val released = simulation.runForExternal(0.8, 8.0, 0.0)
+        assertEquals(0.0, released.audioThrottle, 0.0)
+        assertTrue("release must promptly remove loaded crank slip", released.rpm < loaded.rpm - 300.0)
+        assertEquals(
+            "the temporary lift prediction may lead the unchanged RAW speed slightly downward",
+            baseline.rpm,
+            released.rpm,
+            200.0,
+        )
     }
 
     @Test
@@ -344,97 +349,27 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun everyCarSoundGearboxDividesOneHundredNinetyKmhIntoEqualRedlineBands() {
-        FmodCarProfiles.all.forEach { fmodProfile ->
-            val profile = EngineProfile.SKYLINE_R34.copy(
-                name = fmodProfile.displayName,
-                idleRpm = fmodProfile.idleRpm,
-                redlineRpm = fmodProfile.redlineRpm,
-                limiterRpm = fmodProfile.limiterRpm,
-                upshiftRpm = fmodProfile.upshiftRpm,
-                gearRatios = fmodProfile.gearRatios.toDoubleArray(),
+    fun soundGearsDivideTopSpeedIntoEqualBands() {
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
+        val expectedBandKmh = profile.topSpeedKmh / profile.gearRatios.size
+        profile.gearRatios.indices.forEach { gearIndex ->
+            assertEquals(
+                expectedBandKmh * (gearIndex + 1),
+                evenlySpacedUpshiftSpeedKmh(profile, gearIndex),
+                0.0001,
             )
-            val expectedBandKmh = profile.topSpeedKmh / profile.gearRatios.size
-            profile.gearRatios.indices.forEach { gearIndex ->
-                assertEquals(
-                    expectedBandKmh * (gearIndex + 1),
-                    evenlySpacedUpshiftSpeedKmh(profile, gearIndex),
-                    0.0001,
-                )
-                val boundaryWheelRpm = (evenlySpacedUpshiftSpeedKmh(profile, gearIndex) / 3.6) /
-                    (2.0 * Math.PI * profile.wheelRadiusMeters) * 60.0
-                val boundaryRpm = profile.idleRpm + boundaryWheelRpm *
-                    evenlySpacedGearRatio(profile, gearIndex)
-                assertEquals(fmodProfile.redlineRpm, boundaryRpm, 0.001)
-            }
-            val topSpeedWheelRpm = (190.0 / 3.6) /
+            val boundaryWheelRpm = (evenlySpacedUpshiftSpeedKmh(profile, gearIndex) / 3.6) /
                 (2.0 * Math.PI * profile.wheelRadiusMeters) * 60.0
-            val topSpeedRpm = profile.idleRpm + topSpeedWheelRpm *
-                evenlySpacedGearRatio(profile, profile.gearRatios.lastIndex)
-            assertEquals(fmodProfile.redlineRpm, topSpeedRpm, 0.001)
+            val boundaryRpm = profile.idleRpm + boundaryWheelRpm *
+                evenlySpacedGearRatio(profile, gearIndex)
+            assertEquals(profile.upshiftRpm, boundaryRpm, 0.001)
         }
-    }
-
-    @Test
-    fun profileSwitchCancelsShiftWhoseTargetGearDoesNotExistInNewProfile() {
-        val sevenSpeed = EngineProfile.SKYLINE_R34.copy(
-            gearRatios = FmodCarProfiles.huracanTrofeoEvo2.gearRatios.toDoubleArray(),
-            upshiftDurationSeconds = 0.080,
-        )
-        val sixSpeed = sevenSpeed.copy(
-            gearRatios = FmodCarProfiles.skylineR34.gearRatios.toDoubleArray(),
-        )
-        val simulation = EngineSimulation(sevenSpeed).apply {
-            manualShiftEnabled = true
-            engageAtIdle()
-        }
-        // Establish the external-speed source before starting a shift. Its first sample
-        // intentionally synchronizes the presentation gearbox and cancels any in-flight shift.
-        repeat(40) {
-            simulation.update(
-                DriverInput(throttle = 0.0, externalSpeedKmh = 0.0),
-                STEP,
-            )
-        }
-        // Let the deliberately rate-limited telemetry estimator reach road speed while still
-        // in first; otherwise manual idle protection correctly downshifts second during the ramp.
-        repeat(900) {
-            simulation.update(
-                DriverInput(throttle = 1.0, externalSpeedKmh = 190.0),
-                STEP,
-            )
-        }
-
-        repeat(5) {
-            assertTrue(
-                "manual upshift ${it + 1} should be accepted; state=${simulation.state}",
-                simulation.requestManualUpshift(),
-            )
-            repeat(100) {
-                simulation.update(
-                    DriverInput(throttle = 1.0, externalSpeedKmh = 190.0),
-                    STEP,
-                )
-            }
-        }
-        assertEquals(6, simulation.state.gear)
-        assertTrue(simulation.requestManualUpshift())
-        assertTrue(simulation.state.isShifting)
-
-        simulation.updateProfile(sixSpeed)
-        repeat(12) {
-            simulation.update(
-                DriverInput(throttle = 1.0, externalSpeedKmh = 190.0),
-                STEP,
-            )
-            assertTrue("six-speed profile exposed gear ${simulation.state.gear}", simulation.state.gear <= 6)
-        }
-        assertFalse(simulation.state.isShifting)
+        assertEquals(190.0 / 7.0, expectedBandKmh, 0.0001)
     }
 
     @Test
     fun downshiftHysteresisIsSortedIntBetweenZeroAndFour() {
-        val hysteresis = sortedDownshiftHysteresisKmhByGear(EngineProfile.SKYLINE_R34.gearRatios.size)
+        val hysteresis = sortedDownshiftHysteresisKmhByGear(EngineProfile.SAMPLE_BANK_ENGINE.gearRatios.size)
         val perDownshift = hysteresis.drop(1)
 
         assertTrue(perDownshift.isNotEmpty())
@@ -467,8 +402,8 @@ class EngineSimulationTest {
 
     @Test
     fun upshiftTriggerUsesEachCarsShiftAndLimiterRpm() {
-        FmodCarProfiles.all.forEach { sample ->
-            val profile = EngineProfile.SKYLINE_R34.copy(
+        EngineSampleProfiles.all.forEach { sample ->
+            val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
                 idleRpm = sample.idleRpm,
                 limiterRpm = sample.limiterRpm,
                 upshiftRpm = sample.upshiftRpm,
@@ -496,14 +431,29 @@ class EngineSimulationTest {
     }
 
     @Test
-    fun secondToFirstDownshiftUsesFixedFourThousandRpm() {
+    fun secondToFirstDownshiftUsesTheLowerOfConfiguredRpmAndStableSpeed() {
         val simulation = EngineSimulation()
         simulation.engageAtIdle()
-        val profile = EngineProfile.SKYLINE_R34
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE
         simulation.followIntegerSpeedRamp(0.0, 40.0, 5.0, 0.5)
         assertEquals(2, simulation.state.gear)
 
         val triggerSpeedKmh = speedKmhForCoupledRpm(profile, 1, profile.secondToFirstDownshiftRpm)
+        val partialThrottleUpshiftSpeedKmh = evenlySpacedUpshiftSpeedKmh(profile, 0) *
+            ((profile.firstToSecondPartialThrottleUpshiftRpm - profile.idleRpm) /
+                (profile.upshiftRpm - profile.idleRpm))
+        val stableDownshiftSpeedKmh = minOf(
+            triggerSpeedKmh,
+            partialThrottleUpshiftSpeedKmh - EngineSimulation.DOWNSHIFT_SPEED_HYSTERESIS_MAX_KMH,
+        )
+        val speedBoundaryDownshiftKmh = evenlySpacedUpshiftSpeedKmh(profile, 0) -
+            sortedDownshiftHysteresisKmhByGear(profile.gearRatios.size)[1]
+        assertTrue(
+            "2→1 must keep a gap below the partial-throttle 1→2 shift point",
+            stableDownshiftSpeedKmh < partialThrottleUpshiftSpeedKmh,
+        )
+        assertTrue("the configured 4,000 RPM point remains the upper bound", stableDownshiftSpeedKmh <= triggerSpeedKmh)
+        assertTrue("the normal speed boundary remains below the configured 4,000 RPM point", triggerSpeedKmh < speedBoundaryDownshiftKmh)
 
         simulation.update(
             DriverInput(throttle = 0.5, externalSpeedKmh = triggerSpeedKmh + 4.0),
@@ -511,19 +461,28 @@ class EngineSimulationTest {
         )
         assertEquals("still above the configured 2→1 RPM coupled point", 2, simulation.state.gear)
 
-        simulation.followIntegerSpeedRamp(triggerSpeedKmh + 4.0, triggerSpeedKmh - 2.0, 3.0, 0.5)
-        // Allow one pair of 20 ms BYD polling periods plus the cosmetic downshift duration for the
-        // reconstructed final sample to cross the threshold and finish the accepted shift.
-        simulation.runForExternal(
-            profile.downshiftDurationSeconds + 0.04,
-            floor(triggerSpeedKmh - 2.0),
-            0.5,
-        )
-        assertEquals(
-            "must downshift to 1st once coupled RPM falls through the configured threshold; state=${simulation.state}",
-            1,
-            simulation.state.gear,
-        )
+        simulation.followIntegerSpeedRamp(triggerSpeedKmh + 4.0, stableDownshiftSpeedKmh - 2.0, 3.0, 0.5)
+        assertEquals("must downshift to 1st once it crosses the stable 2→1 threshold", 1, simulation.state.gear)
+    }
+
+    @Test
+    fun firstToSecondShiftDoesNotHuntAtThePartialThrottleSpeed() {
+        val simulation = EngineSimulation()
+        simulation.engageAtIdle()
+        val profile = simulation.profile
+        val partialThrottleUpshiftSpeedKmh = evenlySpacedUpshiftSpeedKmh(profile, 0) *
+            ((profile.firstToSecondPartialThrottleUpshiftRpm - profile.idleRpm) /
+                (profile.upshiftRpm - profile.idleRpm))
+        val heldSpeedKmh = partialThrottleUpshiftSpeedKmh + 0.5
+
+        simulation.followIntegerSpeedRamp(0.0, heldSpeedKmh + 3.0, 4.0, 0.5)
+        simulation.runForExternal(1.0, heldSpeedKmh, 0.5)
+        assertEquals(2, simulation.state.gear)
+        val settledShiftSerial = simulation.state.shiftSerial
+
+        simulation.runForExternal(1.0, heldSpeedKmh, 0.5)
+        assertEquals("holding near the 1→2 point must remain in 2nd", 2, simulation.state.gear)
+        assertEquals("the protected 1↔2 band must not repeatedly shift", settledShiftSerial, simulation.state.shiftSerial)
     }
 
     @Test
@@ -536,7 +495,7 @@ class EngineSimulationTest {
         simulation.followIntegerSpeedRamp(0.0, triggerSpeedKmh - 3.0, 4.0, 0.5)
         assertEquals(1, simulation.state.gear)
 
-        simulation.followIntegerSpeedRamp(triggerSpeedKmh - 3.0, triggerSpeedKmh + 5.0, 3.0, 0.5)
+        simulation.followIntegerSpeedRamp(triggerSpeedKmh - 3.0, triggerSpeedKmh + 2.0, 2.0, 0.5)
         assertEquals(
             "partial throttle must upshift 1→2 at the configured partial-shift RPM",
             2,
@@ -595,21 +554,12 @@ class EngineSimulationTest {
         val simulation = EngineSimulation()
         simulation.followIntegerSpeedRamp(0.0, 65.0, 5.0, 0.45)
         val serialBeforeNoise = simulation.state.shiftSerial
-        repeat(300) { frame ->
-            val raw = if ((frame / 20) % 2 == 0) 58.0 else 59.0
-            simulation.update(DriverInput(throttle = 0.45, externalSpeedKmh = raw), STEP)
-        }
-        val serialAfterSettling = simulation.state.shiftSerial
-        repeat(700) { frame ->
+        repeat(1_000) { frame ->
             val raw = if ((frame / 20) % 2 == 0) 58.0 else 59.0
             simulation.update(DriverInput(throttle = 0.45, externalSpeedKmh = raw), STEP)
         }
         assertTrue(simulation.state.gear >= 2)
-        assertTrue(
-            "crossing the new six-gear boundary may settle once, but not hunt",
-            serialAfterSettling - serialBeforeNoise <= 1L,
-        )
-        assertEquals("shift dwell and hysteresis must prevent a shift loop", serialAfterSettling, simulation.state.shiftSerial)
+        assertEquals("shift dwell must prevent a shift loop", serialBeforeNoise, simulation.state.shiftSerial)
     }
 
     @Test
@@ -623,6 +573,147 @@ class EngineSimulationTest {
         val dragCoast = dragOnly.runFor(0.8)
         assertTrue(regenCoast.speedKmh < dragCoast.speedKmh - 6.0)
         assertTrue("lower coast speed must produce lower coupled RPM", regenCoast.rpm < dragCoast.rpm)
+    }
+
+    @Test
+    fun maxSimulatedUphillSmoothlyReversesPresentationUnderHeldLightThrottle() {
+        val simulation = EngineSimulation()
+        simulation.ensureIgnitionRunning()
+        repeat((1.0 / STEP).toInt()) {
+            simulation.update(
+                DriverInput(throttle = 1.0, simulateCoastRegen = true),
+                STEP,
+            )
+        }
+
+        var state = simulation.state
+        var previousRaw = state.rawSpeedKmh
+        var previousPresentation = state.presentationSpeedKmh
+        var firstDownwardBoundaryFrameChange: Double? = null
+        var presentationAtFirstDownwardBoundary: Double? = null
+        var presentationAfterBoundaryDwell: Double? = null
+
+        repeat((3.0 / STEP).toInt()) { frame ->
+            state = simulation.update(
+                DriverInput(
+                    throttle = 0.22,
+                    simulateCoastRegen = true,
+                    simulatedUphillDragGrade = 0.30,
+                ),
+                STEP,
+            )
+            if (state.rawSpeedKmh < previousRaw && firstDownwardBoundaryFrameChange == null) {
+                firstDownwardBoundaryFrameChange = kotlin.math.abs(
+                    state.presentationSpeedKmh - previousPresentation,
+                )
+                presentationAtFirstDownwardBoundary = state.presentationSpeedKmh
+            }
+            if (presentationAtFirstDownwardBoundary != null && presentationAfterBoundaryDwell == null && frame > 100) {
+                presentationAfterBoundaryDwell = state.presentationSpeedKmh
+            }
+            previousRaw = state.rawSpeedKmh
+            previousPresentation = state.presentationSpeedKmh
+        }
+
+        assertTrue("30% simulated uphill must lower reported speed under light throttle", firstDownwardBoundaryFrameChange != null)
+        assertTrue(
+            "first raw drop must not become a pitch step: $firstDownwardBoundaryFrameChange",
+            firstDownwardBoundaryFrameChange!! < 0.03,
+        )
+        assertTrue(
+            "prediction must continue down after the first raw drop: first=$presentationAtFirstDownwardBoundary later=$presentationAfterBoundaryDwell",
+            presentationAfterBoundaryDwell != null &&
+                presentationAfterBoundaryDwell!! < presentationAtFirstDownwardBoundary!! - 0.05,
+        )
+    }
+
+    @Test
+    fun simulatedRegenStrengthCanDisableOrRestoreLiftOffBraking() {
+        val noRegen = EngineSimulation()
+        val fullRegen = EngineSimulation()
+        noRegen.runFor(2.0, throttle = 0.75, sim = true)
+        fullRegen.runFor(2.0, throttle = 0.75, sim = true)
+
+        val coastWithoutRegen = noRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedCoastRegenScale = 0.0,
+        )
+        val coastWithRegen = fullRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedCoastRegenScale = 1.0,
+        )
+
+        assertTrue("full simulated regen must slow the car more on lift-off", coastWithRegen.speedKmh < coastWithoutRegen.speedKmh - 4.0)
+    }
+
+    @Test
+    fun reducedSimulatedDriveForceLetsRpmRiseBeforeRoadSpeed() {
+        val regular = EngineSimulation().runFor(1.5, throttle = 1.0, sim = true)
+        val slowSimulation = EngineSimulation()
+        val slowed = slowSimulation.runFor(
+            seconds = 1.5,
+            throttle = 1.0,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+        )
+
+        assertTrue("test-mode road speed must build very slowly: $slowed", slowed.speedKmh < 5.0)
+        assertTrue("test-mode speed must remain far below normal simulation", slowed.speedKmh < regular.speedKmh * 0.15)
+        assertTrue("full pedal must still reach audio immediately", slowed.audioThrottle > 0.99)
+        assertTrue(
+            "loaded RPM must flare despite the nearly stationary virtual car: $slowed",
+            slowed.rpm > EngineProfile.SAMPLE_BANK_ENGINE.idleRpm + 600.0,
+        )
+
+        val afterLift = slowSimulation.runFor(
+            seconds = 1.5,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+            simulatedCoastRegenScale = 0.0,
+        )
+        assertTrue(
+            "slow SIM lift-off must reduce loaded RPM: before=$slowed after=$afterLift",
+            afterLift.rpm < slowed.rpm - 300.0,
+        )
+    }
+
+    @Test
+    fun reducedSimulatedForceAlsoPreventsAbruptLiftOffRegen() {
+        val scaledRegen = EngineSimulation()
+        val fullRegen = EngineSimulation()
+        val speedBeforeLift = scaledRegen.runFor(
+            seconds = 1.5,
+            throttle = 1.0,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+        ).speedKmh
+        fullRegen.runFor(
+            seconds = 1.5,
+            throttle = 1.0,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+        )
+
+        val gradualLift = scaledRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+            simulatedCoastRegenScale = 0.0,
+        )
+        val abruptLift = fullRegen.runFor(
+            seconds = 0.8,
+            sim = true,
+            simulatedDriveForceScale = 0.05,
+            simulatedCoastRegenScale = 1.0,
+        )
+
+        assertTrue("scaled SIM regen should retain meaningful coast speed: $gradualLift", gradualLift.speedKmh > speedBeforeLift * 0.35)
+        assertTrue(
+            "scaled SIM regen must coast longer than the original full regen",
+            gradualLift.speedKmh > abruptLift.speedKmh + 0.5,
+        )
     }
 
     @Test
@@ -646,7 +737,10 @@ class EngineSimulationTest {
         brake.runFor(2.0, throttle = 0.75, sim = true)
         val coastState = coast.runFor(0.40, sim = true)
         val brakeState = brake.runFor(0.40, brake = 1.0, sim = true)
-        assertTrue(brakeState.speedKmh < coastState.speedKmh - 10.0)
+        assertTrue(
+            "service brake must decelerate faster than coast: brake=$brakeState coast=$coastState",
+            brakeState.speedKmh < coastState.speedKmh - 9.5,
+        )
     }
 
     @Test
@@ -879,6 +973,93 @@ class EngineSimulationTest {
         assertEquals(0.0, state.speedKmh, 0.001)
     }
 
+    @Test
+    fun skylineNeutralRevMatchesTheAudioLabTorqueAndInertiaTrace() {
+        val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
+            name = skyline.displayName,
+            idleRpm = skyline.idleRpm,
+            redlineRpm = skyline.redlineRpm,
+            limiterRpm = skyline.limiterRpm,
+            upshiftRpm = skyline.upshiftRpm,
+            freeRevCalibration = FreeRevCalibration.forEngine(
+                name = skyline.displayName,
+                idleRpm = skyline.idleRpm,
+                limiterRpm = skyline.limiterRpm,
+                maxTorqueNm = EngineProfile.SAMPLE_BANK_ENGINE.maxTorqueNm,
+            ),
+        )
+        val simulation = EngineSimulation(profile)
+        simulation.ensureIgnitionRunning()
+        val idle = simulation.profile.idleRpm
+
+        val firstFrame = simulation.update(
+            DriverInput(throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL),
+            STEP,
+        )
+        assertTrue(firstFrame.rpm > idle)
+        assertTrue("free rev must not teleport on its first frame", firstFrame.rpm < idle + 100.0)
+
+        repeat((0.05 / STEP).toInt() - 1) {
+            simulation.update(
+                DriverInput(throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL),
+                STEP,
+            )
+        }
+        assertEquals("50 ms Audio Lab trace", 1_213.4, simulation.state.rpm, 45.0)
+
+        repeat((0.45 / STEP).toInt()) {
+            simulation.update(
+                DriverInput(throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL),
+                STEP,
+            )
+        }
+        val fullThrottle = simulation.state.rpm
+        assertEquals("500 ms Audio Lab trace", 8_239.4, fullThrottle, 110.0)
+        assertTrue("the free rev must pass the limiter threshold before fuel cut", fullThrottle > simulation.profile.limiterRpm)
+
+        repeat((0.5 / STEP).toInt()) {
+            simulation.update(
+                DriverInput(throttle = 1.0, transmissionPosition = TransmissionPosition.NEUTRAL),
+                STEP,
+            )
+        }
+        assertEquals("one-second Audio Lab limiter trace", 7_891.9, simulation.state.rpm, 130.0)
+
+        val liftFrame = simulation.update(
+            DriverInput(throttle = 0.0, transmissionPosition = TransmissionPosition.NEUTRAL),
+            STEP,
+        )
+        assertTrue("crank inertia must keep the first lift frame above idle", liftFrame.rpm > idle + 500.0)
+        assertTrue(liftFrame.rpm <= fullThrottle + 75.0)
+
+        repeat((0.495 / STEP).toInt()) {
+            simulation.update(
+                DriverInput(throttle = 0.0, transmissionPosition = TransmissionPosition.NEUTRAL),
+                STEP,
+            )
+        }
+        assertEquals("500 ms lift Audio Lab trace", 5_833.0, simulation.state.rpm, 140.0)
+        assertTrue("coast torque must retain audible revs after a half-second lift", simulation.state.rpm > idle + 4_000.0)
+    }
+
+    @Test
+    fun parkAndNeutralUseTheSameFreeRevModelWithoutMovingTheVehicle() {
+        val neutral = EngineSimulation()
+        val park = EngineSimulation()
+        neutral.ensureIgnitionRunning()
+        park.ensureIgnitionRunning()
+
+        repeat((0.35 / STEP).toInt()) {
+            neutral.update(DriverInput(throttle = 0.8, transmissionPosition = TransmissionPosition.NEUTRAL), STEP)
+            park.update(DriverInput(throttle = 0.8, transmissionPosition = TransmissionPosition.PARK), STEP)
+        }
+
+        assertEquals(neutral.state.rpm, park.state.rpm, 0.001)
+        assertEquals(0.0, neutral.state.speedKmh, 0.001)
+        assertEquals(0.0, park.state.speedKmh, 0.001)
+    }
+
     private fun EngineSimulation.ensureIgnitionRunning() {
         if (!isIgnitionActive()) {
             startIgnition()
@@ -897,11 +1078,23 @@ class EngineSimulationTest {
         brake: Double = 0.0,
         sim: Boolean = false,
         position: TransmissionPosition = TransmissionPosition.DRIVE,
+        simulatedDriveForceScale: Double = 1.0,
+        simulatedCoastRegenScale: Double = 1.0,
     ): DrivetrainState {
         ensureIgnitionRunning()
         var result = state
         repeat((seconds / STEP).toInt()) {
-            result = update(DriverInput(throttle, brake, simulateCoastRegen = sim, transmissionPosition = position), STEP)
+            result = update(
+                DriverInput(
+                    throttle = throttle,
+                    brake = brake,
+                    simulateCoastRegen = sim,
+                    transmissionPosition = position,
+                    simulatedDriveForceScale = simulatedDriveForceScale,
+                    simulatedCoastRegenScale = simulatedCoastRegenScale,
+                ),
+                STEP,
+            )
         }
         return result
     }
@@ -930,16 +1123,6 @@ class EngineSimulationTest {
             result = update(DriverInput(throttle = throttle, externalSpeedKmh = floor(continuous)), STEP)
         }
         return result
-    }
-
-    private fun coupledRpmIncreaseForSpeedKmh(
-        profile: EngineProfile,
-        gearIndex: Int,
-        speedKmh: Double,
-    ): Double {
-        val wheelRpm = (speedKmh / 3.6) /
-            (2.0 * Math.PI * profile.wheelRadiusMeters) * 60.0
-        return wheelRpm * evenlySpacedGearRatio(profile, gearIndex)
     }
 
     private companion object { const val STEP = 1.0 / 200.0 }

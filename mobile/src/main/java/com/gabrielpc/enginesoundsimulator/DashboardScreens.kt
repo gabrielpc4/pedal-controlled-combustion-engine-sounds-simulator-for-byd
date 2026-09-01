@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator
 
 import android.graphics.BitmapFactory
+import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -24,13 +25,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -47,6 +45,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -55,14 +55,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.audio.FmodAudioCapability
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfiles
-import com.gabrielpc.enginesoundsimulator.audio.FmodCapabilityDelivery
-import com.gabrielpc.enginesoundsimulator.audio.FmodEventKind
-import com.gabrielpc.enginesoundsimulator.audio.FmodEventMixSettings
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
+import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
+import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
+import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -71,43 +72,7 @@ import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
-    MIXER("MIXER", "FMOD EVENTS"),
-}
-
-/** Presentation contract for the future native, rendered-PCM verification action. */
-internal data class FmodAudioEventCheckResult(
-    val kind: FmodEventKind,
-    val eventPath: String,
-    val instanceStarts: Int,
-    val soundPlayedCallbacks: Int,
-    val renderedFrames: Long,
-    val peakDbfs: Double?,
-    val rmsDbfs: Double?,
-    val nonFiniteSamples: Long,
-    val passed: Boolean,
-    val detail: String = "",
-)
-
-internal sealed interface FmodAudioCheckUiState {
-    data class Running(val profileName: String) : FmodAudioCheckUiState
-
-    data class Complete(
-        val profileName: String,
-        val eventResults: List<FmodAudioEventCheckResult>,
-        val excludedInstantiationCount: Int,
-        val durationMilliseconds: Long,
-    ) : FmodAudioCheckUiState {
-        val passed: Boolean
-            get() = eventResults.isNotEmpty() &&
-                eventResults.all(FmodAudioEventCheckResult::passed) &&
-                excludedInstantiationCount == 0
-    }
-
-    data class Failed(
-        val stage: String,
-        val detail: String,
-        val partialResults: List<FmodAudioEventCheckResult> = emptyList(),
-    ) : FmodAudioCheckUiState
+    MIXER("MIXER", "HUD + LAYERS"),
 }
 
 @Composable
@@ -134,39 +99,26 @@ internal fun MixerDashboardScreen(
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
+    onSelectCar: (String) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
-    onEventEnabled: (FmodEventKind, Boolean) -> Unit,
-    onEventGainDb: (FmodEventKind, Double) -> Unit,
-    onLoadOnlyEnabled: (Boolean) -> Unit,
-    onCoastOnlyEnabled: (Boolean) -> Unit,
+    onLayerMuted: (String, Boolean) -> Unit,
+    onLayerSolo: (String, Boolean) -> Unit,
+    onLayerVolume: (String, Double) -> Unit,
+    onLoadProgramLayerGainChange: (Double) -> Unit,
+    onCoastProgramLayerGainChange: (Double) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
-    onSelectCar: (String) -> Unit,
-    onRunFmodAudioCheck: (() -> Unit)? = null,
-    fmodAudioCheckState: FmodAudioCheckUiState? = null,
+    loadOnlyProgram: Boolean,
+    primaryLayerSource: PrimaryEngineLayerSource,
+    canUseCoastAsPrimary: Boolean,
+    onPrimaryLayerSourceChange: (PrimaryEngineLayerSource) -> Unit,
+    soundPerspective: EngineSoundPerspective,
+    hasExteriorProgram: Boolean,
+    onSoundPerspectiveChange: (EngineSoundPerspective) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val selectedProfile = remember(state.selectedCarId) {
-        FmodCarProfiles.find(state.selectedCarId)
-    }
-    val supportedKinds = remember(selectedProfile.id, selectedProfile.events) {
-        FmodEventKind.entries.filter(selectedProfile.events::containsKey)
-    }
-    val eventPaths = remember(selectedProfile.id, selectedProfile.events) {
-        selectedProfile.events.mapValues { it.value.path }
-    }
-    val embeddedCapabilities = remember(selectedProfile.id, selectedProfile.capabilityRoutes) {
-        selectedProfile.capabilityRoutes.entries
-            .filter { it.value.delivery == FmodCapabilityDelivery.EMBEDDED_IN_ENGINE }
-            .groupBy(
-                keySelector = { it.value.eventKind },
-                valueTransform = { it.key },
-            )
-    }
-    val eventColumnSize = ((supportedKinds.size + MIXER_EVENT_COLUMN_COUNT - 1) /
-        MIXER_EVENT_COLUMN_COUNT).coerceAtLeast(1)
-    val eventColumns = List(MIXER_EVENT_COLUMN_COUNT) { column ->
-        supportedKinds.drop(column * eventColumnSize).take(eventColumnSize)
+    val groupedTracks = remember(state.layerMixTracks) {
+        groupMixerTracks(state.layerMixTracks)
     }
 
     Column(
@@ -179,16 +131,35 @@ internal fun MixerDashboardScreen(
             transmissionPosition = state.transmissionPosition,
             maxRpm = state.tuning.engine.maxRpm,
             redlineRpm = state.tuning.engine.redlineRpm,
+            selectedCarId = state.selectedCarId,
             selectedCarName = state.selectedCarName,
             selectedCarPreviewAsset = state.selectedCarPreviewAsset,
-            selectedCarId = state.selectedCarId,
-            selectedCarIndex = state.selectedCarIndex,
-            availableCarCount = state.availableCarCount,
-            carAudioReady = state.carAudioReady,
             carMasterVolume = state.carMasterVolume,
-            onCarMasterVolumeChange = onCarMasterVolumeChange,
             onSelectCar = onSelectCar,
+            onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
+        if (hasExteriorProgram) {
+            Spacer(Modifier.height(6.dp))
+            EngineProgramSelector(
+                selected = primaryLayerSource,
+                canUseCoastAsPrimary = canUseCoastAsPrimary,
+                onSelected = onPrimaryLayerSourceChange,
+                perspective = soundPerspective,
+                onPerspectiveSelected = onSoundPerspectiveChange,
+            )
+        }
+        val hasLoadLayers = groupedTracks.load.isNotEmpty() || primaryLayerSource == PrimaryEngineLayerSource.COAST
+        if (hasLoadLayers || canUseCoastAsPrimary) {
+            Spacer(Modifier.height(6.dp))
+            MixerProgramLayerGainControls(
+                showLoad = hasLoadLayers,
+                loadGain = state.programLayerGains.load,
+                onLoadGainChange = onLoadProgramLayerGainChange,
+                showCoast = canUseCoastAsPrimary,
+                coastGain = state.programLayerGains.coast,
+                onCoastGainChange = onCoastProgramLayerGainChange,
+            )
+        }
         Spacer(Modifier.height(10.dp))
         Row(
             modifier = Modifier
@@ -196,22 +167,20 @@ internal fun MixerDashboardScreen(
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            EventMixColumn(
-                kinds = eventColumns[0],
-                eventPaths = eventPaths,
-                embeddedCapabilities = embeddedCapabilities,
-                settings = state.eventMixSettings,
-                onEventEnabled = onEventEnabled,
-                onEventGainDb = onEventGainDb,
+            MixerTrackColumn(
+                tracks = groupedTracks.firstColumn,
+                loadOnlyProgram = loadOnlyProgram,
+                onLayerMuted = onLayerMuted,
+                onLayerSolo = onLayerSolo,
+                onLayerVolume = onLayerVolume,
                 modifier = Modifier.weight(1f),
             )
-            EventMixColumn(
-                kinds = eventColumns[1],
-                eventPaths = eventPaths,
-                embeddedCapabilities = embeddedCapabilities,
-                settings = state.eventMixSettings,
-                onEventEnabled = onEventEnabled,
-                onEventGainDb = onEventGainDb,
+            MixerTrackColumn(
+                tracks = groupedTracks.load,
+                loadOnlyProgram = loadOnlyProgram,
+                onLayerMuted = onLayerMuted,
+                onLayerSolo = onLayerSolo,
+                onLayerVolume = onLayerVolume,
                 modifier = Modifier.weight(1f),
             )
             Box(
@@ -219,39 +188,14 @@ internal fun MixerDashboardScreen(
                     .weight(1f)
                     .fillMaxHeight(),
             ) {
-                EventMixColumn(
-                    kinds = eventColumns[2],
-                    eventPaths = eventPaths,
-                    embeddedCapabilities = embeddedCapabilities,
-                    settings = state.eventMixSettings,
-                    onEventEnabled = onEventEnabled,
-                    onEventGainDb = onEventGainDb,
+                MixerTrackColumn(
+                    tracks = groupedTracks.auxiliary,
+                    loadOnlyProgram = loadOnlyProgram,
+                    onLayerMuted = onLayerMuted,
+                    onLayerSolo = onLayerSolo,
+                    onLayerVolume = onLayerVolume,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = MIXER_PEDALS_OVERLAY_HEIGHT),
-                    footer = {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            EngineThrottleOverrideControl(
-                                label = "LOAD ONLY",
-                                detail = "Matches the desktop lab: engine and transmission load lanes stay full; turbo, backfire detection, tach, and EV torque retain real inputs.",
-                                accent = Cyan,
-                                enabled = state.loadOnlyEnabled,
-                                onEnabledChange = onLoadOnlyEnabled,
-                            )
-                            EngineThrottleOverrideControl(
-                                label = "COAST ONLY",
-                                detail = "Only engine_int hears zero throttle; separate turbo, backfire, and transmission events retain real inputs.",
-                                accent = Amber,
-                                enabled = state.coastOnlyEnabled,
-                                onEnabledChange = onCoastOnlyEnabled,
-                            )
-                            if (onRunFmodAudioCheck != null || fmodAudioCheckState != null) {
-                                FmodAudioCheckControl(
-                                    state = fmodAudioCheckState,
-                                    onRun = onRunFmodAudioCheck,
-                                )
-                            }
-                        }
-                    },
                 )
                 MixerDriveControls(
                     state = state,
@@ -269,38 +213,201 @@ internal fun MixerDashboardScreen(
     }
 }
 
-private const val MIXER_EVENT_COLUMN_COUNT = 3
-private val MIXER_PEDALS_OVERLAY_HEIGHT = 132.dp
+@Composable
+private fun MixerProgramLayerGainControls(
+    showLoad: Boolean,
+    loadGain: Double,
+    onLoadGainChange: (Double) -> Unit,
+    showCoast: Boolean,
+    coastGain: Double,
+    onCoastGainChange: (Double) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (showLoad) {
+            MixerProgramLayerGainControl(
+                label = "LOAD ALL",
+                gain = loadGain,
+                onGainChange = onLoadGainChange,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (showCoast) {
+            MixerProgramLayerGainControl(
+                label = "COAST ALL",
+                gain = coastGain,
+                onGainChange = onCoastGainChange,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
 
 @Composable
-private fun EventMixColumn(
-    kinds: List<FmodEventKind>,
-    eventPaths: Map<FmodEventKind, String>,
-    embeddedCapabilities: Map<FmodEventKind, List<FmodAudioCapability>>,
-    settings: FmodEventMixSettings,
-    onEventEnabled: (FmodEventKind, Boolean) -> Unit,
-    onEventGainDb: (FmodEventKind, Double) -> Unit,
+private fun MixerProgramLayerGainControl(
+    label: String,
+    gain: Double,
+    onGainChange: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel.copy(alpha = 0.88f))
+            .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = label,
+            color = CyanSoft,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.7.sp,
+        )
+        Slider(
+            value = gain.toFloat().coerceIn(0f, 3f),
+            onValueChange = { onGainChange(it.toDouble()) },
+            valueRange = 0f..3f,
+            modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = Cyan,
+                activeTrackColor = Cyan,
+                inactiveTrackColor = Line,
+            ),
+        )
+        Text(
+            text = String.format(Locale.US, "%.1fx", gain),
+            color = White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.width(34.dp),
+        )
+    }
+}
+
+@Composable
+private fun EngineProgramSelector(
+    selected: PrimaryEngineLayerSource,
+    canUseCoastAsPrimary: Boolean,
+    onSelected: (PrimaryEngineLayerSource) -> Unit,
+    perspective: EngineSoundPerspective,
+    onPerspectiveSelected: (EngineSoundPerspective) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel)
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "LISTENING",
+            color = Muted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+        Spacer(Modifier.width(10.dp))
+        EngineSoundPerspective.entries.forEach { option ->
+            val active = option == perspective
+            Text(
+                text = option.displayName,
+                color = if (active) Cyan else Muted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable { onPerspectiveSelected(option) }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+        Spacer(Modifier.width(22.dp))
+        Text(
+            text = "ENGINE PROGRAM",
+            color = Muted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+        Spacer(Modifier.width(12.dp))
+        PrimaryEngineLayerSource.entries.forEach { source ->
+            val active = source == selected
+            val supported = source == PrimaryEngineLayerSource.LOAD || canUseCoastAsPrimary
+            Text(
+                text = source.displayName,
+                color = when {
+                    active -> Cyan
+                    supported -> Muted
+                    else -> Muted.copy(alpha = 0.35f)
+                },
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable(enabled = supported) { onSelected(source) }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+private val MIXER_PEDALS_OVERLAY_HEIGHT = 132.dp
+
+private data class GroupedMixerTracks(
+    val firstColumn: List<LayerMixTrackState>,
+    val load: List<LayerMixTrackState>,
+    val auxiliary: List<LayerMixTrackState>,
+)
+
+private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTracks {
+    val idle = tracks.filter { it.sortGroup == 0 }
+    val coast = tracks.filter { it.sortGroup == 1 }
+    val texture = tracks.filter { it.sortGroup == 3 }
+    val load = tracks.filter { it.isLoadLayer }
+    val auxiliary = tracks.filter { track ->
+        !track.isLoadLayer && track.sortGroup != 0 && track.sortGroup != 1 && track.sortGroup != 3
+    }
+
+    return GroupedMixerTracks(
+        firstColumn = idle + coast,
+        load = load,
+        auxiliary = auxiliary + texture,
+    )
+}
+
+@Composable
+private fun MixerTrackColumn(
+    tracks: List<LayerMixTrackState>,
+    loadOnlyProgram: Boolean,
+    onLayerMuted: (String, Boolean) -> Unit,
+    onLayerSolo: (String, Boolean) -> Unit,
+    onLayerVolume: (String, Double) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
-    footer: (@Composable () -> Unit)? = null,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxHeight(),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(kinds, key = { it.name }) { kind ->
-            FmodEventMixControl(
-                kind = kind,
-                authoredEventPath = eventPaths.getValue(kind),
-                embeddedCapabilities = embeddedCapabilities[kind].orEmpty(),
-                enabled = settings.control(kind).enabled,
-                gainDb = settings.control(kind).gainDb,
-                onEnabledChange = { onEventEnabled(kind, it) },
-                onGainDbChange = { onEventGainDb(kind, it) },
+        items(tracks, key = { it.id }) { track ->
+            LayerMixTrackControl(
+                track = track,
+                loadOnlyProgram = loadOnlyProgram,
+                onMuted = { onLayerMuted(track.id, it) },
+                onSolo = { onLayerSolo(track.id, it) },
+                onVolume = { onLayerVolume(track.id, it) },
             )
         }
-        footer?.let { footerContent -> item(key = "footer") { footerContent() } }
     }
 }
 
@@ -310,15 +417,12 @@ private fun MixerHeaderRow(
     transmissionPosition: TransmissionPosition,
     maxRpm: Double,
     redlineRpm: Double,
+    selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
-    selectedCarId: String,
-    selectedCarIndex: Int,
-    availableCarCount: Int,
-    carAudioReady: Boolean,
     carMasterVolume: Double,
-    onCarMasterVolumeChange: (Double) -> Unit,
     onSelectCar: (String) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -337,16 +441,13 @@ private fun MixerHeaderRow(
             redlineRpm = redlineRpm,
             modifier = Modifier.weight(0.58f).fillMaxHeight(),
         )
-        FixedCarSummary(
+        CarDropdownSelector(
+            selectedCarId = selectedCarId,
             selectedCarName = selectedCarName,
             selectedCarPreviewAsset = selectedCarPreviewAsset,
-            selectedCarId = selectedCarId,
-            selectedCarIndex = selectedCarIndex,
-            availableCarCount = availableCarCount,
-            carAudioReady = carAudioReady,
             carMasterVolume = carMasterVolume,
-            onCarMasterVolumeChange = onCarMasterVolumeChange,
             onSelectCar = onSelectCar,
+            onCarMasterVolumeChange = onCarMasterVolumeChange,
             modifier = Modifier.weight(0.42f).fillMaxHeight(),
         )
     }
@@ -369,7 +470,7 @@ private fun BarTachometerHud(
         limiterActive = drivetrain.limiterActive,
     )
     val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
-    val speedKmh = drivetrain.rawSpeedKmh.roundToInt().coerceAtLeast(0)
+    val rpm = drivetrain.rpm.toInt().coerceAtLeast(0)
     val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
         drivetrain.gear.toString()
     } else {
@@ -382,20 +483,40 @@ private fun BarTachometerHud(
             verticalAlignment = Alignment.Bottom,
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = speedKmh.toString(),
-                    color = White,
-                    fontSize = 42.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = rpm.toString(),
+                        color = White,
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        text = "RPM",
+                        color = Muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.4.sp,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 7.dp),
+                    )
+                }
+                Spacer(Modifier.width(22.dp))
+                MixerTelemetryReadout(
+                    label = "SPEED",
+                    value = drivetrain.rawSpeedKmh.toInt().toString(),
+                    unit = "km/h",
                 )
-                Text(
-                    text = "Km/h",
-                    color = Muted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.4.sp,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 7.dp),
+                Spacer(Modifier.width(16.dp))
+                MixerTelemetryReadout(
+                    label = "PRED SPEED",
+                    value = String.format(Locale.US, "%.2f", drivetrain.presentationSpeedKmh),
+                    unit = "km/h",
+                )
+                Spacer(Modifier.width(16.dp))
+                MixerTelemetryReadout(
+                    label = "PRED ACCEL",
+                    value = String.format(Locale.US, "%+.2f", drivetrain.presentationAccelerationKmhPerSecond),
+                    unit = "km/h/s",
                 )
             }
             Column(
@@ -459,20 +580,51 @@ private fun BarTachometerHud(
 }
 
 @Composable
-private fun FixedCarSummary(
+private fun MixerTelemetryReadout(
+    label: String,
+    value: String,
+    unit: String? = null,
+) {
+    Column {
+        Text(
+            text = label,
+            color = Muted,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.7.sp,
+        )
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = value,
+                color = Cyan,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+            )
+            unit?.let {
+                Text(
+                    text = it,
+                    color = CyanSoft,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 3.dp, bottom = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CarDropdownSelector(
+    selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
-    selectedCarId: String,
-    selectedCarIndex: Int,
-    availableCarCount: Int,
-    carAudioReady: Boolean,
     carMasterVolume: Double,
-    onCarMasterVolumeChange: (Double) -> Unit,
     onSelectCar: (String) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var carMenuExpanded by remember { mutableStateOf(false) }
-    val availableProfiles = FmodCarProfiles.all
+    var expanded by remember { mutableStateOf(false) }
     Box(
         modifier = modifier.padding(start = 12.dp),
         contentAlignment = Alignment.CenterStart,
@@ -489,7 +641,9 @@ private fun FixedCarSummary(
             CarPreviewThumbnail(
                 previewAsset = selectedCarPreviewAsset,
                 contentDescription = selectedCarName,
-                modifier = Modifier.fillMaxHeight(),
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .clickable { expanded = true },
             )
             Column(
                 modifier = Modifier
@@ -498,70 +652,21 @@ private fun FixedCarSummary(
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = true },
+                ) {
+                    Text("SIMULATED CAR", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text(
-                        text = "FMOD BANK  •  ${selectedCarIndex + 1}/${availableCarCount.coerceAtLeast(1)}  •  " +
-                            if (carAudioReady) "READY" else "LOADING",
-                        color = if (carAudioReady) Green else Amber,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
+                        text = selectedCarName,
+                        color = White,
+                        fontSize = 16.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(5.dp))
-                                .clickable(enabled = availableProfiles.size > 1) {
-                                    carMenuExpanded = true
-                                }
-                                .padding(vertical = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = selectedCarName,
-                                color = White,
-                                fontSize = 16.sp,
-                                lineHeight = 20.sp,
-                                fontWeight = FontWeight.Black,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (availableProfiles.size > 1) {
-                                Icon(
-                                    imageVector = Icons.Default.KeyboardArrowDown,
-                                    contentDescription = "Choose FMOD car",
-                                    tint = Cyan,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = carMenuExpanded,
-                            onDismissRequest = { carMenuExpanded = false },
-                        ) {
-                            availableProfiles.forEach { profile ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = profile.displayName,
-                                            color = if (profile.id == selectedCarId) Cyan else White,
-                                            fontWeight = if (profile.id == selectedCarId) {
-                                                FontWeight.Black
-                                            } else {
-                                                FontWeight.Medium
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        carMenuExpanded = false
-                                        if (profile.id != selectedCarId) onSelectCar(profile.id)
-                                    },
-                                )
-                            }
-                        }
-                    }
                 }
 
                 Row(
@@ -595,6 +700,34 @@ private fun FixedCarSummary(
                         fontFamily = FontFamily.Monospace,
                     )
                 }
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            EngineSampleProfiles.all.forEach { profile ->
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CarPreviewThumbnail(
+                                previewAsset = profile.previewAssetName,
+                                contentDescription = profile.displayName,
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                            )
+                            Text(
+                                profile.displayName,
+                                fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
+                            )
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelectCar(profile.id)
+                    },
+                )
             }
         }
     }
@@ -651,16 +784,23 @@ private data class LoadedCarPreview(
 )
 
 @Composable
-private fun FmodEventMixControl(
-    kind: FmodEventKind,
-    authoredEventPath: String,
-    embeddedCapabilities: List<FmodAudioCapability>,
-    enabled: Boolean,
-    gainDb: Double,
-    onEnabledChange: (Boolean) -> Unit,
-    onGainDbChange: (Double) -> Unit,
+private fun LayerMixTrackControl(
+    track: LayerMixTrackState,
+    loadOnlyProgram: Boolean,
+    onMuted: (Boolean) -> Unit,
+    onSolo: (Boolean) -> Unit,
+    onVolume: (Double) -> Unit,
 ) {
-    val accent = if (enabled) Cyan else Muted
+    val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
+    val fillColor = outputMeterFillColor(level)
+    val showTrimSlider = loadOnlyProgram && track.showVolumeSlider
+    val meterLabelPaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textAlign = Paint.Align.RIGHT
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -675,242 +815,123 @@ private fun FmodEventMixControl(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = kind.displayName(),
-                color = accent,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.weight(1f),
-            )
-            EventEnableChip(
-                checked = enabled,
-                onCheckedChange = onEnabledChange,
-            )
-        }
-        Text(
-            text = "${kind.description()}  •  ${authoredEventPath.substringAfterLast('/')}",
-            color = Muted,
-            fontSize = 9.sp,
-            lineHeight = 11.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-        if (embeddedCapabilities.isNotEmpty()) {
-            Text(
-                text = "EMBEDDED HERE: " + embeddedCapabilities.joinToString(" • ") {
-                    it.displayName()
-                },
-                color = Amber,
-                fontSize = 8.sp,
-                lineHeight = 10.sp,
+                text = track.displayName,
+                color = White,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
+                lineHeight = 13.sp,
+                modifier = Modifier.weight(1f),
             )
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                "GAIN",
-                color = Muted,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
-                modifier = Modifier.width(34.dp),
-            )
-            Slider(
-                value = gainDb.toFloat().coerceIn(
-                    FmodEventMixSettings.MIN_GAIN_DB.toFloat(),
-                    FmodEventMixSettings.MAX_GAIN_DB.toFloat(),
-                ),
-                onValueChange = { onGainDbChange(it.toDouble()) },
-                valueRange = FmodEventMixSettings.MIN_GAIN_DB.toFloat()..FmodEventMixSettings.MAX_GAIN_DB.toFloat(),
-                enabled = enabled,
-                colors = SliderDefaults.colors(
-                    thumbColor = accent,
-                    activeTrackColor = accent,
-                    inactiveTrackColor = Line,
-                    disabledThumbColor = Muted.copy(alpha = 0.45f),
-                    disabledActiveTrackColor = Line,
-                    disabledInactiveTrackColor = Line.copy(alpha = 0.55f),
-                ),
+            Canvas(
                 modifier = Modifier
                     .weight(1f)
-                    .height(28.dp),
-            )
-            Text(
-                formatGainDb(gainDb),
-                color = accent,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-                textAlign = TextAlign.End,
-                modifier = Modifier.width(62.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun EngineThrottleOverrideControl(
-    label: String,
-    detail: String,
-    accent: Color,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (enabled) accent.copy(alpha = 0.12f) else Panel.copy(alpha = 0.88f))
-            .border(1.dp, if (enabled) accent.copy(alpha = 0.8f) else Line.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-            .clickable { onEnabledChange(!enabled) }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                label,
-                color = if (enabled) accent else White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Text(
-                detail,
-                color = Muted,
-                fontSize = 9.sp,
-                lineHeight = 11.sp,
-            )
-        }
-        EventEnableChip(
-            checked = enabled,
-            accent = accent,
-            onCheckedChange = onEnabledChange,
-        )
-    }
-}
-
-@Composable
-private fun FmodAudioCheckControl(
-    state: FmodAudioCheckUiState?,
-    onRun: (() -> Unit)?,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Panel.copy(alpha = 0.88f))
-            .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        Button(
-            onClick = { onRun?.invoke() },
-            enabled = onRun != null && state !is FmodAudioCheckUiState.Running,
-            modifier = Modifier.fillMaxWidth().height(32.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Cyan.copy(alpha = 0.18f),
-                contentColor = Cyan,
-                disabledContainerColor = Line.copy(alpha = 0.35f),
-                disabledContentColor = Muted,
-            ),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Text(
-                text = if (state is FmodAudioCheckUiState.Running) {
-                    "CHECKING RENDERED AUDIO…"
-                } else {
-                    "RUN FMOD AUDIO CHECK"
-                },
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 0.5.sp,
-            )
-        }
-        when (state) {
-            null -> Unit
-            is FmodAudioCheckUiState.Running -> Text(
-                text = "${state.profileName}: rendering each allowlisted event off-screen.",
-                color = Amber,
-                fontSize = 9.sp,
-                lineHeight = 11.sp,
-            )
-            is FmodAudioCheckUiState.Complete -> {
-                Text(
-                    text = if (state.passed) {
-                        "PASS • ${state.eventResults.size} events • ${state.durationMilliseconds} ms"
-                    } else {
-                        "FAILED • ${state.eventResults.count { !it.passed }} event failures • " +
-                            "${state.excludedInstantiationCount} excluded instances"
-                    },
-                    color = if (state.passed) Green else Red,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Black,
-                    lineHeight = 11.sp,
-                )
-                FmodAudioEventCheckRows(state.eventResults)
+                    .height(22.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF061018))
+                    .border(1.dp, Line.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
+            ) {
+                if (level > 0.002f) {
+                    drawRect(
+                        color = fillColor,
+                        size = androidx.compose.ui.geometry.Size(
+                            width = size.width * level,
+                            height = size.height,
+                        ),
+                        alpha = 0.88f,
+                    )
+                }
+                meterLabelPaint.textSize = size.height * 0.55f
+                meterLabelPaint.color = fillColor.toArgb()
+                drawIntoCanvas { canvas ->
+                    canvas.nativeCanvas.drawText(
+                        "${(level * 100f).roundToInt()}%",
+                        size.width - 8f,
+                        size.height * 0.70f,
+                        meterLabelPaint,
+                    )
+                }
             }
-            is FmodAudioCheckUiState.Failed -> {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                MixToggleChip(
+                    label = "M",
+                    checked = track.muted,
+                    accent = Red,
+                    onCheckedChange = onMuted,
+                )
+                MixToggleChip(
+                    label = "S",
+                    checked = track.solo,
+                    accent = Amber,
+                    onCheckedChange = onSolo,
+                )
+            }
+        }
+        if (showTrimSlider) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = "${state.stage}: ${state.detail}",
-                    color = Red,
+                    "GAIN",
+                    color = Muted,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    lineHeight = 11.sp,
+                    letterSpacing = 0.8.sp,
+                    modifier = Modifier.width(34.dp),
                 )
-                FmodAudioEventCheckRows(state.partialResults)
+                Slider(
+                    value = track.userVolume.toFloat().coerceIn(
+                        LayerMixControl.MIN_GAIN_MULTIPLIER.toFloat(),
+                        LayerMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
+                    ),
+                    onValueChange = { onVolume(it.toDouble()) },
+                    valueRange = LayerMixControl.MIN_GAIN_MULTIPLIER.toFloat()..LayerMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Cyan,
+                        activeTrackColor = Cyan,
+                        inactiveTrackColor = Line,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp),
+                )
+                Text(
+                    String.format(Locale.US, "%.1fx", track.userVolume),
+                    color = Cyan,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.width(40.dp),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun FmodAudioEventCheckRows(results: List<FmodAudioEventCheckResult>) {
-    results.forEach { result ->
-        val pcm = if (result.peakDbfs != null && result.rmsDbfs != null) {
-            String.format(Locale.US, "peak %.1f / rms %.1f dBFS", result.peakDbfs, result.rmsDbfs)
-        } else {
-            "no PCM level"
-        }
-        Text(
-            text = buildString {
-                append(if (result.passed) "PASS " else "FAIL ")
-                append(result.eventPath.substringAfterLast('/'))
-                append(" • starts ").append(result.instanceStarts)
-                append(" • sounds ").append(result.soundPlayedCallbacks)
-                append(" • frames ").append(result.renderedFrames)
-                append(" • ").append(pcm)
-                if (result.nonFiniteSamples > 0) {
-                    append(" • non-finite ").append(result.nonFiniteSamples)
-                }
-                if (result.detail.isNotBlank()) append(" • ").append(result.detail)
-            },
-            color = if (result.passed) Green else Red,
-            fontSize = 8.sp,
-            lineHeight = 10.sp,
-        )
-    }
-}
-
-@Composable
-private fun EventEnableChip(
+private fun MixToggleChip(
+    label: String,
     checked: Boolean,
-    accent: Color = Cyan,
+    accent: Color,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Text(
-        text = if (checked) "ON" else "OFF",
+        text = label,
         color = if (checked) accent else Muted,
         fontSize = 9.sp,
         fontWeight = FontWeight.Black,
         modifier = Modifier
-            .width(38.dp)
+            .width(24.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(if (checked) accent.copy(alpha = 0.18f) else Color(0xFF061018))
             .border(1.dp, if (checked) accent.copy(alpha = 0.85f) else Line.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
@@ -920,40 +941,15 @@ private fun EventEnableChip(
     )
 }
 
-private fun FmodEventKind.displayName(): String = when (this) {
-    FmodEventKind.ENGINE -> "ENGINE"
-    FmodEventKind.TRANSMISSION -> "TRANSMISSION"
-    FmodEventKind.TURBO -> "TURBO"
-    FmodEventKind.LIMITER -> "LIMITER"
-    FmodEventKind.SHIFTS -> "SHIFT SOUNDS"
-    FmodEventKind.BACKFIRE -> "BACKFIRE"
-}
-
-private fun FmodEventKind.description(): String = when (this) {
-    FmodEventKind.ENGINE -> "Cockpit engine and exhaust bank event"
-    FmodEventKind.TRANSMISSION -> "Authored drivetrain whine and load response"
-    FmodEventKind.TURBO -> "Boost spool and pressure response"
-    FmodEventKind.LIMITER -> "Authored redline pulse"
-    FmodEventKind.SHIFTS -> "Accepted upshift and downshift events"
-    FmodEventKind.BACKFIRE -> "High-RPM throttle-lift event"
-}
-
-private fun FmodAudioCapability.displayName(): String = when (this) {
-    FmodAudioCapability.ENGINE -> "ENGINE"
-    FmodAudioCapability.TURBO -> "TURBO"
-    FmodAudioCapability.LIMITER -> "LIMITER"
-    FmodAudioCapability.SHIFTS -> "SHIFT"
-    FmodAudioCapability.BACKFIRE -> "BACKFIRE"
-    FmodAudioCapability.TRANSMISSION -> "TRANSMISSION"
-    FmodAudioCapability.ENGINE_START -> "START"
-    FmodAudioCapability.ENGINE_SHUTDOWN -> "SHUTDOWN"
-}
-
-private fun formatGainDb(gainDb: Double): String {
-    return String.format(Locale.US, "%+.1f dB", gainDb.coerceIn(
-        FmodEventMixSettings.MIN_GAIN_DB,
-        FmodEventMixSettings.MAX_GAIN_DB,
-    ))
+/** Green → cyan → amber → red as the live output meter fills. */
+private fun outputMeterFillColor(level: Float): Color {
+    return when {
+        level <= 0.01f -> Muted.copy(alpha = 0.35f)
+        level < 0.30f -> blendColors(Green.copy(alpha = 0.65f), Cyan, level / 0.30f)
+        level < 0.60f -> blendColors(Cyan, Amber, (level - 0.30f) / 0.30f)
+        level < 0.85f -> blendColors(Amber, Color(0xFFFF7040), (level - 0.60f) / 0.25f)
+        else -> blendColors(Color(0xFFFF7040), Red, (level - 0.85f) / 0.15f)
+    }
 }
 
 private fun blendColors(start: Color, end: Color, fraction: Float): Color {

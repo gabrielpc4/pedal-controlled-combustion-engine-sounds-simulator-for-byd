@@ -26,10 +26,7 @@ class EngineRuntimeService : Service() {
         }
 
         startForeground(NOTIFICATION_ID, buildNotification())
-        // A process restart cannot reconstruct the live controller/FMOD session from this
-        // notification-only service. Keep normal in-process background mixing, but do not leave
-        // a restarted process alive with no audio work attached to it.
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

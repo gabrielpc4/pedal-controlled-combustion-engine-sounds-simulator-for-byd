@@ -43,6 +43,7 @@ internal object BydReadOnlyPermissionPolicy {
     private val allowedPermissions = setOf(
         BYD_SPEED_COMMON,
         BYD_SPEED_GET,
+        BYD_GEARBOX_GET,
     )
 
     fun treatAsGranted(permission: String?): Boolean = permission in allowedPermissions

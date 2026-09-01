@@ -1,5 +1,9 @@
 # Handoff: unresolved audible pitch stepping
 
+> Historical FMOD investigation only. The active `gpc/wav-audio-engine` branch deliberately
+> restores the WAV/AudioTrack renderer at the user's request, so the implementation instructions
+> below do not apply to that branch. The FMOD attempt is preserved in `gpc/fmod-pitch-attempt`.
+
 ## Current state
 
 - Repository: this checkout (all paths below are repository-relative unless stated otherwise).
@@ -18,10 +22,12 @@ That makes a bank-specific or Skyline-specific explanation unlikely.
 ## What has already been changed and disproven
 
 1. `03cdfcf` replaced direct integer-speed use with `QuantizedSpeedEstimator`.
-   - Real BYD speed is reported as whole km/h.
+   - Real BYD speed is reported as whole km/h and is now deliberately modeled as truncated, so a
+     reported `N` represents `[N, N + 1)` km/h.
    - The estimator predicts continuous motion between quantizer-boundary crossings rather than
      feeding integer values directly into RPM.
-   - Simulator mode has always kept continuous speed.
+   - Simulator physical speed remains continuous internally, but its RAW telemetry is truncated
+     before entering the same reconstruction path.
 
 2. `5553d2b` changed FMOD Studio from asynchronous to
    `FMOD_STUDIO_INIT_SYNCHRONOUS_UPDATE`.

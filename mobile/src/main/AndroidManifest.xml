@@ -5,18 +5,20 @@
     <!-- Read-only BYD DiLink telemetry. This app deliberately requests no vehicle SET permission. -->
     <uses-permission android:name="android.permission.BYDAUTO_SPEED_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_SPEED_GET" />
+    <uses-permission android:name="android.permission.BYDAUTO_GEARBOX_GET" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:name=".EngineSoundsApplication"
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:appCategory="audio"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:restoreAnyVersion="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.EngineSoundsSimulator"
         android:usesCleartextTraffic="false">

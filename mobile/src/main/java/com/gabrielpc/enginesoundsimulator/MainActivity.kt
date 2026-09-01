@@ -54,9 +54,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,14 +64,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -107,9 +105,8 @@ import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfiles
-import com.gabrielpc.enginesoundsimulator.audio.FmodEventKind
-import com.gabrielpc.enginesoundsimulator.audio.FmodRenderedAudioValidationResult
+import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -148,7 +145,6 @@ class MainActivity : ComponentActivity() {
     private val choreographer by lazy(LazyThreadSafetyMode.NONE) { Choreographer.getInstance() }
     private var driveState by mutableStateOf<DriveSnapshot?>(null)
     private var uiMonitoringActive by mutableStateOf(false)
-    private var fmodAudioCheckState by mutableStateOf<FmodAudioCheckUiState?>(null)
 
     private val refreshUi = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -156,25 +152,16 @@ class MainActivity : ComponentActivity() {
                 return
             }
 
-            val snapshot = controller.snapshot()
-            driveState = snapshot
-            val validation = controller.consumeRenderedAudioValidation()
-            when {
-                validation != null -> fmodAudioCheckState = validation.toUiState()
-                controller.isRenderedAudioValidationRunning() &&
-                    fmodAudioCheckState !is FmodAudioCheckUiState.Running -> {
-                    fmodAudioCheckState = FmodAudioCheckUiState.Running(snapshot.selectedCarName)
-                }
-            }
-            choreographer.postFrameCallbackDelayed(this, UI_REFRESH_INTERVAL_MILLIS)
+            driveState = controller.snapshot()
+            choreographer.postFrameCallback(this)
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (controller.handleShiftKey(keyCode)) {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && controller.handleShiftKey(event.keyCode)) {
             return true
         }
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -197,10 +184,18 @@ class MainActivity : ComponentActivity() {
                         onToggleInputSource = controller::toggleInputSource,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleSound = controller::toggleSound,
-                        onEventEnabled = controller::setFmodEventEnabled,
-                        onEventGainDb = controller::setFmodEventGainDb,
-                        onLoadOnlyEnabled = controller::setLoadOnlyEnabled,
-                        onCoastOnlyEnabled = controller::setCoastOnlyEnabled,
+                        onTogglePopsAndBangs = controller::togglePopsAndBangs,
+                        onPopsAndBangsGainChange = controller::setPopsAndBangsGain,
+                        onToggleSharedShiftSounds = controller::toggleSharedShiftSounds,
+                        onSharedShiftSoundsGainChange = controller::setSharedShiftSoundsGain,
+                        onToggleTransmission = controller::toggleTransmission,
+                        onTransmissionGainChange = controller::setTransmissionGain,
+                        onToggleTurboSounds = controller::toggleTurboSounds,
+                        onTurboSoundsGainChange = controller::setTurboSoundsGain,
+                        onLoadResponsiveRpmEnabledChange = controller::setLoadResponsiveRpmEnabled,
+                        onThrottleRpmBumpEnabledChange = controller::setThrottleRpmBumpEnabled,
+                        onSimulatedCoastRegenStrengthChange = controller::setSimulatedCoastRegenStrength,
+                        onSimulatedUphillDragGradeChange = controller::setSimulatedUphillDragGrade,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -208,33 +203,18 @@ class MainActivity : ComponentActivity() {
                         onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
                         onIncreaseMasterVolume = controller::increaseAppMasterVolume,
                         onConfigChange = controller::setTuning,
-                        onResetTuning = controller::resetTuning,
+                        onResetPreferences = controller::resetAllPreferences,
+                        onPreviousCar = controller::selectPreviousCar,
+                        onNextCar = controller::selectNextCar,
+                        onSelectCar = controller::selectCar,
+                        onLayerMixMuted = controller::setLayerMixMuted,
+                        onLayerMixSolo = controller::setLayerMixSolo,
+                        onLayerMixVolume = controller::setLayerMixVolume,
+                        onLoadProgramLayerGainChange = controller::setLoadProgramLayerGain,
+                        onCoastProgramLayerGainChange = controller::setCoastProgramLayerGain,
+                        onPrimaryLayerSourceChange = controller::setPrimaryLayerSource,
+                        onSoundPerspectiveChange = controller::setSoundPerspective,
                         onCarMasterVolumeChange = controller::setCarMasterVolume,
-                        onPreviousCar = {
-                            if (controller.selectPreviousCar()) fmodAudioCheckState = null
-                        },
-                        onNextCar = {
-                            if (controller.selectNextCar()) fmodAudioCheckState = null
-                        },
-                        onSelectCar = { profileId ->
-                            if (controller.selectCar(profileId)) fmodAudioCheckState = null
-                        },
-                        onRunFmodAudioCheck = {
-                            val current = controller.snapshot()
-                            fmodAudioCheckState = if (controller.requestRenderedAudioValidation()) {
-                                FmodAudioCheckUiState.Running(current.selectedCarName)
-                            } else {
-                                FmodAudioCheckUiState.Failed(
-                                    stage = "FMOD audio check could not start",
-                                    detail = if (current.carAudioReady) {
-                                        "Another rendered-audio check is already running."
-                                    } else {
-                                        "Wait for ${current.selectedCarName}'s bank to finish loading."
-                                    },
-                                )
-                            }
-                        },
-                        fmodAudioCheckState = fmodAudioCheckState,
                         onDismissUserMessage = controller::dismissUserMessage,
                     )
                 }
@@ -285,45 +265,6 @@ class MainActivity : ComponentActivity() {
 
 }
 
-private fun FmodRenderedAudioValidationResult.toUiState(): FmodAudioCheckUiState {
-    val rows = eventResults.map { result ->
-        FmodAudioEventCheckResult(
-            kind = result.kind,
-            eventPath = result.eventPath,
-            instanceStarts = result.instanceStarts,
-            soundPlayedCallbacks = result.soundPlayedCallbacks,
-            renderedFrames = result.renderedFrames,
-            peakDbfs = result.peakDbfs.takeIf(Double::isFinite),
-            rmsDbfs = result.rmsDbfs.takeIf(Double::isFinite),
-            nonFiniteSamples = result.nonFiniteSamples,
-            passed = result.passed,
-            detail = buildString {
-                if (result.detail.isNotBlank()) append(result.detail)
-                if (result.soundNames.isNotEmpty()) {
-                    if (isNotEmpty()) append(" • ")
-                    append("samples: ")
-                    append(result.soundNames.joinToString(limit = 4, truncated = "…"))
-                }
-            },
-        )
-    }
-    val failure = error
-    return if (failure != null) {
-        FmodAudioCheckUiState.Failed(
-            stage = "FMOD rendered-audio check",
-            detail = failure,
-            partialResults = rows,
-        )
-    } else {
-        FmodAudioCheckUiState.Complete(
-            profileName = FmodCarProfiles.find(profileId).displayName,
-            eventResults = rows,
-            excludedInstantiationCount = excludedInstantiationCount,
-            durationMilliseconds = durationMilliseconds,
-        )
-    }
-}
-
 @Composable
 private fun MotorSoundDashboard(
     state: DriveSnapshot,
@@ -335,10 +276,18 @@ private fun MotorSoundDashboard(
     onToggleInputSource: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleSound: () -> Unit,
-    onEventEnabled: (FmodEventKind, Boolean) -> Unit,
-    onEventGainDb: (FmodEventKind, Double) -> Unit,
-    onLoadOnlyEnabled: (Boolean) -> Unit,
-    onCoastOnlyEnabled: (Boolean) -> Unit,
+    onTogglePopsAndBangs: () -> Unit,
+    onPopsAndBangsGainChange: (Double) -> Unit,
+    onToggleSharedShiftSounds: () -> Unit,
+    onSharedShiftSoundsGainChange: (Double) -> Unit,
+    onToggleTransmission: () -> Unit,
+    onTransmissionGainChange: (Double) -> Unit,
+    onToggleTurboSounds: () -> Unit,
+    onTurboSoundsGainChange: (Double) -> Unit,
+    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
+    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
+    onSimulatedCoastRegenStrengthChange: (Double) -> Unit,
+    onSimulatedUphillDragGradeChange: (Double) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -346,14 +295,19 @@ private fun MotorSoundDashboard(
     onDecreaseMasterVolume: () -> Unit,
     onIncreaseMasterVolume: () -> Unit,
     onConfigChange: (TuningConfig) -> Unit,
-    onResetTuning: () -> Unit,
-    onCarMasterVolumeChange: (Double) -> Unit,
+    onResetPreferences: () -> Unit,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
+    onLayerMixMuted: (String, Boolean) -> Unit,
+    onLayerMixSolo: (String, Boolean) -> Unit,
+    onLayerMixVolume: (String, Double) -> Unit,
+    onLoadProgramLayerGainChange: (Double) -> Unit,
+    onCoastProgramLayerGainChange: (Double) -> Unit,
+    onPrimaryLayerSourceChange: (com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource) -> Unit,
+    onSoundPerspectiveChange: (com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective) -> Unit,
+    onCarMasterVolumeChange: (Double) -> Unit,
     onDismissUserMessage: () -> Unit,
-    onRunFmodAudioCheck: (() -> Unit)? = null,
-    fmodAudioCheckState: FmodAudioCheckUiState? = null,
 ) {
     var tuningOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
@@ -489,34 +443,37 @@ private fun MotorSoundDashboard(
                                     loading = state.engineStartLoading,
                                     onClick = onToggleSound,
                                 )
-                                DashboardBooleanToggle(
-                                    label = "Load Only",
-                                    enabled = state.loadOnlyEnabled,
-                                    onToggle = { onLoadOnlyEnabled(!state.loadOnlyEnabled) },
-                                    modifier = Modifier.padding(start = 10.dp),
+                                DashboardEffectControls(
+                                    popsAndBangsEnabled = state.popsAndBangsEnabled,
+                                    popsAndBangsGain = state.popsAndBangsGain,
+                                    onTogglePopsAndBangs = onTogglePopsAndBangs,
+                                    onPopsAndBangsGainChange = onPopsAndBangsGainChange,
+                                    sharedShiftSoundsEnabled = state.sharedShiftSoundsEnabled,
+                                    sharedShiftSoundsGain = state.sharedShiftSoundsGain,
+                                    onToggleSharedShiftSounds = onToggleSharedShiftSounds,
+                                    onSharedShiftSoundsGainChange = onSharedShiftSoundsGainChange,
+                                    transmissionEnabled = state.transmissionEnabled,
+                                    transmissionGain = state.transmissionGain,
+                                    onToggleTransmission = onToggleTransmission,
+                                    onTransmissionGainChange = onTransmissionGainChange,
+                                    hasTurboSounds = state.hasTurboSounds,
+                                    turboSoundsEnabled = state.turboSoundsEnabled,
+                                    turboSoundsGain = state.turboSoundsGain,
+                                    onToggleTurboSounds = onToggleTurboSounds,
+                                    onTurboSoundsGainChange = onTurboSoundsGainChange,
+                                    modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
                                 )
-                                DashboardBooleanToggle(
-                                    label = "Coast Only",
-                                    enabled = state.coastOnlyEnabled,
-                                    onToggle = { onCoastOnlyEnabled(!state.coastOnlyEnabled) },
-                                    modifier = Modifier.padding(start = 10.dp),
+                                ClassicDriveControls(
+                                    state = state,
+                                    onThrottle = onThrottle,
+                                    onBrake = onBrake,
+                                    onTransmissionChange = onTransmissionChange,
+                                    onManualUpshift = onManualUpshift,
+                                    onManualDownshift = onManualDownshift,
+                                    onSimulatedCoastRegenStrengthChange = onSimulatedCoastRegenStrengthChange,
+                                    onSimulatedUphillDragGradeChange = onSimulatedUphillDragGradeChange,
+                                    modifier = Modifier.padding(start = 64.dp),
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    contentAlignment = Alignment.BottomCenter,
-                                ) {
-                                    ClassicDriveControls(
-                                        state = state,
-                                        onThrottle = onThrottle,
-                                        onBrake = onBrake,
-                                        onTransmissionChange = onTransmissionChange,
-                                        onManualUpshift = onManualUpshift,
-                                        onManualDownshift = onManualDownshift,
-                                        modifier = Modifier.offset(x = (-64).dp),
-                                    )
-                                }
                             }
                             DashboardMixerLauncherButton(
                                 onClick = { mainScreen = DashboardMainScreen.MIXER },
@@ -530,16 +487,22 @@ private fun MotorSoundDashboard(
                             onThrottle = onThrottle,
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
+                            onSelectCar = onSelectCar,
                             onCarMasterVolumeChange = onCarMasterVolumeChange,
-                            onEventEnabled = onEventEnabled,
-                            onEventGainDb = onEventGainDb,
-                            onLoadOnlyEnabled = onLoadOnlyEnabled,
-                            onCoastOnlyEnabled = onCoastOnlyEnabled,
+                            onLayerMuted = onLayerMixMuted,
+                            onLayerSolo = onLayerMixSolo,
+                            onLayerVolume = onLayerMixVolume,
+                            onLoadProgramLayerGainChange = onLoadProgramLayerGainChange,
+                            onCoastProgramLayerGainChange = onCoastProgramLayerGainChange,
+                            primaryLayerSource = state.primaryLayerSource,
+                            canUseCoastAsPrimary = state.canUseCoastAsPrimary,
+                            onPrimaryLayerSourceChange = onPrimaryLayerSourceChange,
+                            soundPerspective = state.soundPerspective,
+                            hasExteriorProgram = state.hasExteriorProgram,
+                            onSoundPerspectiveChange = onSoundPerspectiveChange,
                             onManualUpshift = onManualUpshift,
                             onManualDownshift = onManualDownshift,
-                            onSelectCar = onSelectCar,
-                            onRunFmodAudioCheck = onRunFmodAudioCheck,
-                            fmodAudioCheckState = fmodAudioCheckState,
+                            loadOnlyProgram = state.loadOnlyProgram,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -551,7 +514,9 @@ private fun MotorSoundDashboard(
                     TuningPanel(
                         state = state,
                         onConfigChange = onConfigChange,
-                        onReset = onResetTuning,
+                        onLoadResponsiveRpmEnabledChange = onLoadResponsiveRpmEnabledChange,
+                        onThrottleRpmBumpEnabledChange = onThrottleRpmBumpEnabledChange,
+                        onReset = onResetPreferences,
                         onClose = { tuningOpen = false },
                     )
                 }
@@ -589,9 +554,7 @@ private fun DashboardHeader(
 
         val startupBurstEndsAtMs = System.currentTimeMillis() + HEADER_MEMORY_STARTUP_BURST_MS
         while (uiMonitoringActive) {
-            memoryLabels = withContext(Dispatchers.Default) {
-                AppMemoryUsage.readHeaderLabels(context)
-            }
+            memoryLabels = AppMemoryUsage.readHeaderLabels(context)
             val refreshMs = if (System.currentTimeMillis() < startupBurstEndsAtMs) {
                 HEADER_MEMORY_STARTUP_REFRESH_MS
             } else {
@@ -606,14 +569,10 @@ private fun DashboardHeader(
             return@LaunchedEffect
         }
 
-        withContext(Dispatchers.IO) {
-            AppCpuUsage.primeSample()
-        }
+        AppCpuUsage.primeSample()
         while (uiMonitoringActive) {
             delay(HEADER_CPU_REFRESH_MS)
-            cpuLabel = withContext(Dispatchers.IO) {
-                AppCpuUsage.sampleLabel()
-            }
+            cpuLabel = AppCpuUsage.sampleLabel()
         }
     }
 
@@ -627,9 +586,7 @@ private fun DashboardHeader(
         }
 
         withFrameNanos { }
-        memoryLabels = withContext(Dispatchers.Default) {
-            AppMemoryUsage.readHeaderLabels(context)
-        }
+        memoryLabels = AppMemoryUsage.readHeaderLabels(context)
     }
 
     Row(
@@ -681,6 +638,7 @@ private fun DashboardHeader(
                 fontWeight = FontWeight.Light,
                 letterSpacing = 2.0.sp,
             )
+            StatusTag("BUILD ${AppBuildInfo.buildNumber}", CyanSoft)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -704,11 +662,6 @@ private fun DashboardHeader(
             }
             if (state.manualShiftModeEnabled) {
                 StatusTag("MANUAL", CyanSoft)
-            }
-            if (state.coastOnlyEnabled) {
-                StatusTag("COAST ONLY", Amber)
-            } else if (state.loadOnlyEnabled) {
-                StatusTag("LOAD ONLY", CyanSoft)
             }
         }
 
@@ -804,11 +757,10 @@ private enum class VolumeStep {
 }
 
 private const val MASTER_VOLUME_HEADER_STEP = 0.10
-private const val UI_REFRESH_INTERVAL_MILLIS = 33L
-private const val HEADER_MEMORY_STARTUP_BURST_MS = 5_000L
-private const val HEADER_MEMORY_STARTUP_REFRESH_MS = 1_000L
+private const val HEADER_MEMORY_STARTUP_BURST_MS = 10_000L
+private const val HEADER_MEMORY_STARTUP_REFRESH_MS = 250L
 private const val HEADER_MEMORY_REFRESH_MS = 15_000L
-private const val HEADER_CPU_REFRESH_MS = 3_000L
+private const val HEADER_CPU_REFRESH_MS = 1_000L
 
 @Composable
 private fun ManualShiftHeaderControl(
@@ -1110,6 +1062,8 @@ private fun ClassicDriveControls(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
+    onSimulatedCoastRegenStrengthChange: (Double) -> Unit,
+    onSimulatedUphillDragGradeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1147,6 +1101,113 @@ private fun ClassicDriveControls(
             onPositionChange = onTransmissionChange,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = CLASSIC_DRIVE_CONTROL_SCALE,
+        )
+        if (!state.inputSourceIsRealPedals) {
+            SimulatedUphillDragControl(
+                grade = state.simulatedUphillDragGrade,
+                onGradeChange = onSimulatedUphillDragGradeChange,
+                scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            )
+            SimulatedCoastRegenControl(
+                strength = state.simulatedCoastRegenStrength,
+                onStrengthChange = onSimulatedCoastRegenStrengthChange,
+                scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SimulatedUphillDragControl(
+    grade: Double,
+    onGradeChange: (Double) -> Unit,
+    scale: Float,
+) {
+    val percent = (grade * 100).roundToInt()
+    SimulatedPedalStrengthControl(
+        label = "DRAG",
+        valueLabel = "$percent%",
+        footer = "UPHILL",
+        value = grade,
+        onValueChange = onGradeChange,
+        valueRange = 0f..0.30f,
+        scale = scale,
+    )
+}
+
+@Composable
+private fun SimulatedCoastRegenControl(
+    strength: Double,
+    onStrengthChange: (Double) -> Unit,
+    scale: Float,
+) {
+    val percent = (strength * 100).roundToInt()
+    SimulatedPedalStrengthControl(
+        label = "REGEN",
+        valueLabel = "$percent%",
+        footer = "LIFT-OFF",
+        value = strength,
+        onValueChange = onStrengthChange,
+        valueRange = 0f..1f,
+        scale = scale,
+    )
+}
+
+@Composable
+private fun SimulatedPedalStrengthControl(
+    label: String,
+    valueLabel: String,
+    footer: String,
+    value: Double,
+    onValueChange: (Double) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    scale: Float,
+) {
+    Column(
+        modifier = Modifier
+            .width((58f * scale).dp)
+            .height((202f * scale).dp)
+            .clip(RoundedCornerShape((16f * scale).dp))
+            .background(PanelBright)
+            .border((1.5f * scale).dp, Line, RoundedCornerShape((16f * scale).dp))
+            .padding(vertical = (8f * scale).dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy((3f * scale).dp),
+    ) {
+        Text(
+            text = label,
+            color = CyanSoft,
+            fontSize = (9f * scale).sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.55.sp,
+        )
+        Text(
+            text = valueLabel,
+            color = if (value <= 0.001) Muted else Cyan,
+            fontSize = (15f * scale).sp,
+            fontWeight = FontWeight.Black,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .width((32f * scale).dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Slider(
+                value = value.toFloat(),
+                onValueChange = { onValueChange(it.toDouble()) },
+                valueRange = valueRange,
+                modifier = Modifier
+                    .width((138f * scale).dp)
+                    .graphicsLayer { rotationZ = -90f },
+            )
+        }
+        Text(
+            text = footer,
+            color = Muted,
+            fontSize = (7f * scale).sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.25.sp,
         )
     }
 }
@@ -1308,18 +1369,13 @@ private fun CarStage(
             Text(
                 text = state.selectedCarName.uppercase(),
                 color = White,
-                fontSize = 30.sp,
-                lineHeight = 36.sp,
+                fontSize = 34.sp,
+                lineHeight = 42.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.2.sp,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().padding(end = 18.dp),
             )
             Text(
-                text = "FMOD COCKPIT BANK  •  ${state.tuning.engine.gearRatios.size}-GEAR VIRTUAL BOX  •  " +
-                    "${state.tuning.engine.maxRpm.roundToInt()} RPM TACH  •  " +
-                    "${state.selectedCarIndex + 1}/${state.availableCarCount}",
+                text = EngineSampleProfiles.specificationsFor(state.selectedCarId).summary(),
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -1344,60 +1400,23 @@ private fun CarStage(
                     .fillMaxWidth(0.88f)
                     .fillMaxHeight(0.65f)
                     .align(Alignment.Center)
-                    .offset(y = 18.dp),
+                    .offset(y = (-46).dp),
             )
         } else {
             Image(
                 painter = painterResource(R.drawable.apex_v10_car),
                 contentDescription = state.selectedCarName,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth(0.84f).fillMaxHeight(0.62f).align(Alignment.Center),
+                modifier = Modifier
+                    .fillMaxWidth(0.84f)
+                    .fillMaxHeight(0.62f)
+                    .align(Alignment.Center)
+                    .offset(y = (-46).dp),
             )
         }
 
-        if (state.availableCarCount > 1) {
-            CarSelectorArrow(
-                label = "‹",
-                contentDescription = "Previous car",
-                onClick = onPreviousCar,
-                modifier = Modifier.align(Alignment.CenterStart),
-            )
-            CarSelectorArrow(
-                label = "›",
-                contentDescription = "Next car",
-                onClick = onNextCar,
-                modifier = Modifier.align(Alignment.CenterEnd),
-            )
-        }
-    }
-}
-
-@Composable
-private fun CarSelectorArrow(
-    label: String,
-    contentDescription: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .size(58.dp)
-            .semantics { this.contentDescription = contentDescription },
-        shape = CircleShape,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF111111).copy(alpha = 0.92f),
-            contentColor = White,
-        ),
-        contentPadding = PaddingValues(0.dp),
-    ) {
-        Text(
-            text = label,
-            color = White,
-            fontSize = 42.sp,
-            fontWeight = FontWeight.Light,
-            textAlign = TextAlign.Center,
-        )
+        CarSelectorArrow("‹", "Previous car", onPreviousCar, Modifier.align(Alignment.CenterStart))
+        CarSelectorArrow("›", "Next car", onNextCar, Modifier.align(Alignment.CenterEnd))
     }
 }
 
@@ -1476,6 +1495,33 @@ internal fun TransmissionShifter(
 }
 
 @Composable
+private fun CarSelectorArrow(
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.size(58.dp).semantics { this.contentDescription = contentDescription },
+        shape = CircleShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF111111).copy(alpha = 0.92f),
+            contentColor = White,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    ) {
+        Text(
+            text = label,
+            color = White,
+            fontSize = 42.sp,
+            fontWeight = FontWeight.Light,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
 internal fun PedalControl(
     label: String,
     value: Double,
@@ -1498,18 +1544,22 @@ internal fun PedalControl(
             .border((2f * contentScale).dp, if (value > 0.01) accent else Color(0xFF60717D), RoundedCornerShape((16f * contentScale).dp))
             .pointerInput(onValue) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    fun updateAt(y: Float) {
-                        onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
+                    try {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        fun updateAt(y: Float) {
+                            onValue((1.0 - y / size.height.toDouble()).coerceIn(0.0, 1.0))
+                        }
+                        updateAt(down.position.y)
+                        var pointer = down
+                        do {
+                            val event = awaitPointerEvent()
+                            pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                            updateAt(pointer.position.y)
+                            pointer.consume()
+                        } while (pointer.pressed)
+                    } finally {
+                        onValue(0.0)
                     }
-                    updateAt(down.position.y)
-                    var pointer = down
-                    do {
-                        val event = awaitPointerEvent()
-                        pointer = event.changes.firstOrNull { it.id == down.id } ?: break
-                        updateAt(pointer.position.y)
-                        pointer.consume()
-                    } while (pointer.pressed)
                 }
             },
     ) {
@@ -1589,72 +1639,165 @@ private fun DismissableUserMessageBanner(
 }
 
 @Composable
-private fun DashboardBooleanToggle(
-    label: String,
-    enabled: Boolean,
-    onToggle: () -> Unit,
+private fun DashboardEffectControls(
+    popsAndBangsEnabled: Boolean,
+    popsAndBangsGain: Double,
+    onTogglePopsAndBangs: () -> Unit,
+    onPopsAndBangsGainChange: (Double) -> Unit,
+    sharedShiftSoundsEnabled: Boolean,
+    sharedShiftSoundsGain: Double,
+    onToggleSharedShiftSounds: () -> Unit,
+    onSharedShiftSoundsGainChange: (Double) -> Unit,
+    transmissionEnabled: Boolean,
+    transmissionGain: Double,
+    onToggleTransmission: () -> Unit,
+    onTransmissionGainChange: (Double) -> Unit,
+    hasTurboSounds: Boolean,
+    turboSoundsEnabled: Boolean,
+    turboSoundsGain: Double,
+    onToggleTurboSounds: () -> Unit,
+    onTurboSoundsGainChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val trackColor = if (enabled) {
-        Cyan.copy(alpha = 0.92f)
-    } else {
-        Line
-    }
-    val thumbProgress by animateFloatAsState(
-        targetValue = if (enabled) {
-            1f
-        } else {
-            0f
-        },
-        animationSpec = tween(durationMillis = 180),
-        label = "${label}Toggle",
-    )
-    val trackWidth = 46.dp
-    val trackHeight = 24.dp
-    val thumbSize = 18.dp
-    val trackInset = 3.dp
-    val accentColor = if (enabled) {
-        Cyan
-    } else {
-        Muted
-    }
-
     Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = modifier.width(750.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text(
-            text = label,
-            color = accentColor,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.4.sp,
-            textAlign = TextAlign.Center,
-            lineHeight = 12.sp,
-            modifier = Modifier.width(72.dp),
+        DashboardEffectRow(
+            label = "POPS & BANGS",
+            enabled = popsAndBangsEnabled,
+            gain = popsAndBangsGain,
+            onToggle = onTogglePopsAndBangs,
+            onGainChange = onPopsAndBangsGainChange,
         )
-        BoxWithConstraints(
-            modifier = Modifier
-                .width(trackWidth)
-                .height(trackHeight)
-                .clip(RoundedCornerShape(50))
-                .background(trackColor)
-                .clickable(onClick = onToggle),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            val travel = maxWidth - thumbSize - trackInset * 2
-            Box(
-                modifier = Modifier
-                    .padding(start = trackInset)
-                    .offset(x = travel * thumbProgress)
-                    .size(thumbSize)
-                    .clip(CircleShape)
-                    .background(White),
+        DashboardEffectRow(
+            label = "SHIFT SOUNDS",
+            enabled = sharedShiftSoundsEnabled,
+            gain = sharedShiftSoundsGain,
+            onToggle = onToggleSharedShiftSounds,
+            onGainChange = onSharedShiftSoundsGainChange,
+        )
+        DashboardEffectRow(
+            label = "TRANSMISSION",
+            enabled = transmissionEnabled,
+            gain = transmissionGain,
+            onToggle = onToggleTransmission,
+            onGainChange = onTransmissionGainChange,
+        )
+        if (hasTurboSounds) {
+            DashboardEffectRow(
+                label = "TURBO",
+                enabled = turboSoundsEnabled,
+                gain = turboSoundsGain,
+                gainPresets = TURBO_EFFECT_GAIN_PRESETS,
+                onToggle = onToggleTurboSounds,
+                onGainChange = onTurboSoundsGainChange,
             )
         }
     }
 }
+
+@Composable
+private fun DashboardEffectRow(
+    label: String,
+    enabled: Boolean,
+    gain: Double,
+    onToggle: () -> Unit,
+    onGainChange: (Double) -> Unit,
+    gainPresets: List<EffectGainPreset> = EFFECT_GAIN_PRESETS,
+) {
+    val accentColor = if (enabled) Cyan else Muted
+
+    Row(
+        modifier = Modifier.height(42.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = label,
+            color = accentColor,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.45.sp,
+            lineHeight = 14.sp,
+            modifier = Modifier.width(150.dp),
+        )
+        DashboardEffectSwitch(
+            label = label,
+            enabled = enabled,
+            onToggle = onToggle,
+        )
+        gainPresets.forEach { preset ->
+            val selected = gain == preset.gain
+            Text(
+                text = preset.label,
+                color = if (selected) Night else accentColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .width(123.dp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (selected) Cyan else PanelBright)
+                    .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
+                    .clickable { onGainChange(preset.gain) }
+                    .padding(top = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardEffectSwitch(
+    label: String,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val trackColor = if (enabled) Cyan.copy(alpha = 0.92f) else Line
+    val thumbProgress by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "${label}Toggle",
+    )
+    BoxWithConstraints(
+        modifier = Modifier
+            .width(64.dp)
+            .height(32.dp)
+            .clip(RoundedCornerShape(50))
+            .background(trackColor)
+            .clickable(onClick = onToggle),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val thumbSize = 24.dp
+        val trackInset = 4.dp
+        val travel = maxWidth - thumbSize - trackInset * 2
+        Box(
+            modifier = Modifier
+                .padding(start = trackInset)
+                .offset(x = travel * thumbProgress)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(White),
+        )
+    }
+}
+
+private data class EffectGainPreset(val label: String, val gain: Double)
+
+private val EFFECT_GAIN_PRESETS = listOf(
+    EffectGainPreset("LOWER", 0.5),
+    EffectGainPreset("NORMAL", 1.0),
+    EffectGainPreset("LOUD", 2.0),
+    EffectGainPreset("LOUDER", 3.0),
+)
+
+private val TURBO_EFFECT_GAIN_PRESETS = listOf(
+    EffectGainPreset("LOWER", 0.25),
+    EffectGainPreset("NORMAL", 0.5),
+    EffectGainPreset("LOUD", EngineAudioFrame.DEFAULT_TURBO_SOUNDS_GAIN),
+    EffectGainPreset("LOUDER", 3.0),
+)
 
 @Composable
 private fun EngineStartStopButton(
@@ -1853,15 +1996,6 @@ private fun TachometerGauge(
         limiterActive = drivetrain.limiterActive,
     )
     val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
-    val tickLabelPaint = remember {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textAlign = Paint.Align.CENTER
-            typeface = android.graphics.Typeface.create(
-                "sans-serif-condensed",
-                android.graphics.Typeface.BOLD_ITALIC,
-            )
-        }
-    }
 
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val gaugeSize = if (maxWidth < maxHeight) maxWidth else maxHeight
@@ -1942,20 +2076,16 @@ private fun TachometerGauge(
                 }
 
                 drawIntoCanvas { canvas ->
-                    tickLabelPaint.textSize = radius * 0.105f
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textAlign = Paint.Align.CENTER
+                        typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD_ITALIC)
+                        textSize = radius * 0.105f
+                    }
                     for (number in 0..majorIntervals) {
                         val point = polar(center, radius * 0.69f, startAngle + sweepAngle * (number / majorIntervals.toFloat()))
-                        tickLabelPaint.color = if (number * 1_000.0 >= redlineRpm) {
-                            android.graphics.Color.rgb(255, 57, 79)
-                        } else {
-                            android.graphics.Color.WHITE
-                        }
-                        canvas.nativeCanvas.drawText(
-                            number.toString(),
-                            point.x,
-                            point.y + tickLabelPaint.textSize * 0.34f,
-                            tickLabelPaint,
-                        )
+                        paint.color = if (number * 1_000.0 >= redlineRpm) android.graphics.Color.rgb(255, 57, 79) else android.graphics.Color.WHITE
+                        canvas.nativeCanvas.drawText(number.toString(), point.x, point.y + paint.textSize * 0.34f, paint)
                     }
                 }
 

@@ -53,8 +53,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.audio.FmodCarProfiles
-import com.gabrielpc.enginesoundsimulator.audio.FmodEventKind
+import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
@@ -87,6 +87,8 @@ private enum class TuningTab(val title: String, val subtitle: String) {
 internal fun TuningPanel(
     state: DriveSnapshot,
     onConfigChange: (TuningConfig) -> Unit,
+    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
+    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
     onReset: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -117,7 +119,14 @@ internal fun TuningPanel(
 
         Box(modifier = Modifier.weight(1f)) {
             when (TuningTab.entries[tabIndex]) {
-                TuningTab.ENGINE -> EngineTab(config, onConfigChange)
+                TuningTab.ENGINE -> EngineTab(
+                    config = config,
+                    loadResponsiveRpmEnabled = state.loadResponsiveRpmEnabled,
+                    onLoadResponsiveRpmEnabledChange = onLoadResponsiveRpmEnabledChange,
+                    throttleRpmBumpEnabled = state.throttleRpmBumpEnabled,
+                    onThrottleRpmBumpEnabledChange = onThrottleRpmBumpEnabledChange,
+                    onChange = onConfigChange,
+                )
                 TuningTab.DELAYS -> DelaysTab(config, onConfigChange)
                 TuningTab.AUDIO -> AudioTab(config, state.selectedCarId, onConfigChange)
             }
@@ -146,7 +155,7 @@ private fun TuningHeader(
                 )
             }
             Text(
-                "Changes apply immediately and are saved automatically • simulated sound and tach behavior only",
+                "Changes save immediately • RESET clears all saved app preferences",
                 color = TuneMuted,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
@@ -180,7 +189,14 @@ private fun TabButton(tab: TuningTab, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
+private fun EngineTab(
+    config: TuningConfig,
+    loadResponsiveRpmEnabled: Boolean,
+    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
+    throttleRpmBumpEnabled: Boolean,
+    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
+    onChange: (TuningConfig) -> Unit,
+) {
     val engine = config.engine
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard(
@@ -189,7 +205,19 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
             Modifier.weight(1f),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..FmodCarProfiles.maximumSupportedRpm, "%.0f RPM") {
+                ParameterToggle(
+                    label = "THROTTLE-RESPONSIVE RPM",
+                    enabled = loadResponsiveRpmEnabled,
+                    onToggle = onLoadResponsiveRpmEnabledChange,
+                )
+                Spacer(Modifier.height(8.dp))
+                ParameterToggle(
+                    label = "THROTTLE RPM BUMP (>20%)",
+                    enabled = throttleRpmBumpEnabled,
+                    onToggle = onThrottleRpmBumpEnabledChange,
+                )
+                Spacer(Modifier.height(8.dp))
+                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
                         redlineRpm = min(engine.redlineRpm, it - 100.0),
@@ -219,8 +247,9 @@ private fun EngineTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 @Composable
 private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
     val engine = config.engine
+    val audio = config.audio
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("EV RESPONSE + TACH", "Physical pedal response and speed-to-tach filtering", Modifier.weight(1f)) {
+        PanelCard("PEDAL + BYD SPEED", "How quickly pedal and car speed reach the sound engine", Modifier.weight(1f)) {
             ParameterSlider("THROTTLE ATTACK", engine.throttleAttackMs, 15.0..500.0, "%.0f ms") {
                 onChange(config.copy(engine = engine.copy(throttleAttackMs = it)))
             }
@@ -271,15 +300,32 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
                 }
             }
         }
+        PanelCard("AUDIO SMOOTHING", "Small fades that keep the sample-bank output seamless", Modifier.weight(1.15f)) {
+            ParameterSlider("RPM FOLLOW", audio.rpmSmoothingMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(rpmSmoothingMs = it)))
+            }
+            ParameterSlider("THROTTLE FOLLOW", audio.throttleSmoothingMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(throttleSmoothingMs = it)))
+            }
+            ParameterSlider("PROGRAM FADE", audio.programFadeMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(programFadeMs = it)))
+            }
+            ParameterSlider("ENABLE FADE", audio.enabledFadeMs, 1.0..500.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(enabledFadeMs = it)))
+            }
+            ParameterSlider("LAYER CROSSFADE", audio.layerFadeMs, 1.0..300.0, "%.0f ms") {
+                onChange(config.copy(audio = audio.copy(layerFadeMs = it)))
+            }
+        }
     }
 }
 
 @Composable
 private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (TuningConfig) -> Unit) {
     val audio = config.audio
-    val profile = FmodCarProfiles.find(selectedCarId)
+    val profile = EngineSampleProfiles.find(selectedCarId)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("FMOD OUTPUT", "The original Assetto bank is the only engine source", Modifier.weight(0.72f)) {
+        PanelCard("SAMPLE OUTPUT", "The recovered bank logic is the only engine source", Modifier.weight(0.72f)) {
             AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
             Spacer(Modifier.height(20.dp))
             Text("PROFILE", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
@@ -288,10 +334,10 @@ private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (Tun
             Text("NATIVE RPM DOMAIN", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
             Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            Text("${profile.events.size} whitelisted cockpit events · bank-authored mix and automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("${profile.layers.size} continuous layers · bank-authored RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        PanelCard("FMOD EVENT COVERAGE", "Core powertrain events on the bank's native RPM axis", Modifier.weight(1.85f)) {
-            FmodBankCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
+        PanelCard("RPM LAYER COVERAGE", "Recovered sample regions on the bank's native parameter axis", Modifier.weight(1.85f)) {
+            SampleBankCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
         }
     }
 }
@@ -1049,8 +1095,8 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun FmodBankCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
-    val profile = FmodCarProfiles.find(profileId)
+private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
+    val profile = EngineSampleProfiles.find(profileId)
     Canvas(modifier) {
         val left = 90f
         val right = size.width - 26f
@@ -1058,44 +1104,40 @@ private fun FmodBankCoverageGraph(profileId: String, redlineRpm: Double, modifie
         val bottom = size.height - 72f
         val width = right - left
         val height = bottom - top
-        val events = FmodEventKind.entries
-        val laneHeight = height / events.size
+        val roles = SampleLayerRole.entries
+        val laneHeight = height / roles.size
 
         for (rpm in 0..profile.maximumRpm.toInt() step 1_000) {
             val x = left + width * (rpm / profile.maximumRpm).toFloat()
             drawLine(TuneLine.copy(alpha = 0.75f), Offset(x, top), Offset(x, bottom), 1f)
         }
-        events.forEachIndexed { lane, event ->
+        roles.forEachIndexed { lane, role ->
             val laneTop = top + lane * laneHeight
-            val color = when (event) {
-                FmodEventKind.ENGINE -> TuneWhite
-                FmodEventKind.TURBO -> TuneCyan
-                FmodEventKind.LIMITER -> TuneRed
-                FmodEventKind.SHIFTS -> TuneAmber
-                FmodEventKind.BACKFIRE -> TuneGreen
-                FmodEventKind.TRANSMISSION -> TuneAmber
+            val color = when (role) {
+                SampleLayerRole.IDLE -> TuneWhite
+                SampleLayerRole.LOAD -> TuneGreen
+                SampleLayerRole.COAST -> TuneCyan
+                SampleLayerRole.TEXTURE -> TuneAmber
+                SampleLayerRole.LIMITER -> TuneRed
             }
-            val startRpm = when (event) {
-                FmodEventKind.ENGINE, FmodEventKind.SHIFTS, FmodEventKind.TRANSMISSION -> 0.0
-                FmodEventKind.TURBO -> profile.turbo?.referenceRpm ?: 0.0
-                FmodEventKind.LIMITER -> profile.redlineRpm
-                FmodEventKind.BACKFIRE -> profile.backfire?.minimumRpm ?: 0.0
-            }
-            val x = left + width * (startRpm / profile.maximumRpm).toFloat()
-            val y = laneTop + laneHeight * 0.20f
-            val barHeight = laneHeight * 0.60f
+            profile.layers.filter { it.role == role }.forEach { layer ->
+                val x = left + width * (layer.startRpm / profile.maximumRpm).toFloat()
+                val endX = left + width * (layer.endRpm / profile.maximumRpm).toFloat()
+                val y = laneTop + laneHeight * 0.20f
+                val barHeight = laneHeight * 0.60f
             drawRoundRect(
-                color = color.copy(alpha = 0.50f),
-                topLeft = Offset(x, y),
-                size = androidx.compose.ui.geometry.Size((right - x).coerceAtLeast(2f), barHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f),
-            )
-            drawLine(color, Offset(x, y), Offset(x, y + barHeight), 2f)
+                    color = color.copy(alpha = 0.50f),
+                    topLeft = Offset(x, y),
+                    size = androidx.compose.ui.geometry.Size((endX - x).coerceAtLeast(2f), barHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f),
+                )
+                drawLine(color, Offset(x, y), Offset(x, y + barHeight), 2f)
+            }
             drawLine(TuneLine, Offset(left, laneTop + laneHeight), Offset(right, laneTop + laneHeight), 1f)
         }
 
         val currentRedline = redlineRpm.coerceIn(
-            0.0,
+            profile.minimumRpm,
             profile.maximumRpm,
         )
         val redlineX = left + width * (currentRedline / profile.maximumRpm).toFloat()
@@ -1106,9 +1148,9 @@ private fun FmodBankCoverageGraph(profileId: String, redlineRpm: Double, modifie
             paint.textSize = 15f
             paint.color = GRAPH_AXIS_LABEL_COLOR
             paint.textAlign = Paint.Align.RIGHT
-            events.forEachIndexed { lane, event ->
+            roles.forEachIndexed { lane, role ->
                 canvas.nativeCanvas.drawText(
-                    event.name,
+                    role.name,
                     left - 12f,
                     top + lane * laneHeight + laneHeight * 0.55f,
                     paint,
