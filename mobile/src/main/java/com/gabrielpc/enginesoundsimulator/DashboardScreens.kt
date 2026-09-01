@@ -63,6 +63,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
+import com.gabrielpc.enginesoundsimulator.audio.LayerOutputMeter
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
 import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
@@ -366,7 +367,6 @@ private data class GroupedMixerTracks(
 )
 
 private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTracks {
-    val idle = tracks.filter { it.sortGroup == 0 }
     val coast = tracks.filter { it.sortGroup == 1 }
     val texture = tracks.filter { it.sortGroup == 3 }
     val load = tracks.filter { it.isLoadLayer }
@@ -375,7 +375,7 @@ private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTrac
     }
 
     return GroupedMixerTracks(
-        firstColumn = idle + coast,
+        firstColumn = coast,
         load = load,
         auxiliary = auxiliary + texture,
     )
@@ -858,7 +858,7 @@ private fun LayerMixTrackControl(
                 meterLabelPaint.color = fillColor.toArgb()
                 drawIntoCanvas { canvas ->
                     canvas.nativeCanvas.drawText(
-                        "${(level * 100f).roundToInt()}%",
+                        outputMeterLabel(track.outputDb),
                         size.width - 8f,
                         size.height * 0.70f,
                         meterLabelPaint,
@@ -921,6 +921,11 @@ private fun LayerMixTrackControl(
             }
         }
     }
+}
+
+private fun outputMeterLabel(rmsDb: Double): String = when {
+    !rmsDb.isFinite() || rmsDb <= LayerOutputMeter.QUIET_FLOOR_DB + 0.5 -> "SILENT"
+    else -> String.format(Locale.US, "%.0f dB", rmsDb)
 }
 
 @Composable

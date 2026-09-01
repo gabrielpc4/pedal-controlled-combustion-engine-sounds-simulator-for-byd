@@ -1167,6 +1167,7 @@ private fun buildLayerMixTracks(
             muted = control.muted,
             solo = control.solo,
             outputLevel = outputLevels.firstOrNull { it.id == track.id }?.outputLevel ?: 0.0,
+            outputDb = outputLevels.firstOrNull { it.id == track.id }?.rmsDb ?: LayerOutputMeter.QUIET_FLOOR_DB,
             isEffect = track.isEffect,
             showVolumeSlider = primaryLayerSource == PrimaryEngineLayerSource.BOTH || track.isEffect,
             isLoadLayer = track.isLoadLayer,

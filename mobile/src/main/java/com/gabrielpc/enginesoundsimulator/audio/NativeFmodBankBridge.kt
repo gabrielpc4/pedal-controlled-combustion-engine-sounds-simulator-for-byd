@@ -38,5 +38,8 @@ internal class NativeFmodBankBridge {
 
     external fun close()
 
+    /** RMS output in [FmodNativeMeterTrackIds] order, measured after the bank graph and host gains. */
+    external fun outputMeters(): FloatArray
+
     external fun activeEventNames(): Array<String>
 }

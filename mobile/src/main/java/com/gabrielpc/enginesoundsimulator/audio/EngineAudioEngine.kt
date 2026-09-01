@@ -253,7 +253,7 @@ class EngineAudioEngine(context: Context) {
                     reportLoadFailure(profile.id, error)
                     return
                 }
-                nativeMeters.set(gains.toMeters(source))
+                nativeMeters.set(nativeOutputMeters(bridge.outputMeters()))
                 sleepUntilNextControlTick(now)
             }
         } catch (throwable: Throwable) {
@@ -389,16 +389,6 @@ private data class FmodEventGains(
     val shift: Double,
     val overrun: Double,
 ) {
-    fun toMeters(source: PrimaryEngineLayerSource): List<LayerOutputMeter> = listOf(
-        LayerOutputMeter("engine_load", if (source == PrimaryEngineLayerSource.COAST) 0.0 else (master * load).coerceIn(0.0, 1.0)),
-        LayerOutputMeter("engine_coast", if (source == PrimaryEngineLayerSource.LOAD) 0.0 else (master * coast).coerceIn(0.0, 1.0)),
-        LayerOutputMeter("transmission", (master * transmission).coerceIn(0.0, 1.0)),
-        LayerOutputMeter("turbo", (master * turbo).coerceIn(0.0, 1.0)),
-        LayerOutputMeter("limiter", (master * limiter).coerceIn(0.0, 1.0)),
-        LayerOutputMeter("gear", (master * shift).coerceIn(0.0, 1.0)),
-        LayerOutputMeter("overrun", (master * overrun).coerceIn(0.0, 1.0)),
-    )
-
     companion object {
         fun from(frame: EngineAudioFrame, focusGain: Double): FmodEventGains {
             val mix = FmodMixControls(frame.layerMix)

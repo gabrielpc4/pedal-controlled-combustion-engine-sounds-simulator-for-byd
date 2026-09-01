@@ -30,6 +30,19 @@ constexpr int kPerspectiveExterior = 1;
 constexpr int kSourceLoad = 0;
 constexpr int kSourceCoast = 1;
 constexpr int kSourceBoth = 2;
+constexpr float kDisabledEventGain = 0.0001f;
+constexpr float kMeterFloorDb = -80.0f;
+
+enum MeterTrackIndex {
+    kMeterEngineLoad,
+    kMeterEngineCoast,
+    kMeterTransmission,
+    kMeterTurbo,
+    kMeterLimiter,
+    kMeterGear,
+    kMeterOverrun,
+    kMeterTrackCount,
+};
 
 constexpr std::array<const char*, 10> kAllowedEventNames = {
     "engine_int",
@@ -406,8 +419,16 @@ public:
         if (events_.find("limiter") != events_.end()) {
             limiter_ = createPersistentLocked("limiter", 1.0f);
         }
+        const std::string gearName = selectPerspectiveEventLocked("gear_int", "gear_ext", perspective);
+        if (!gearName.empty()) {
+            gear_ = createDormantLocked(gearName);
+        }
+        const std::string backfireName = selectPerspectiveEventLocked("backfire_int", "backfire_ext", perspective);
+        if (!backfireName.empty()) {
+            backfire_ = createDormantLocked(backfireName);
+        }
         if (events_.find(kStartupEvent) != events_.end()) {
-            playOneShotLocked(kStartupEvent, 1.0f, 1.0f, 0.0f, 0.0f);
+            playDetachedOneShotLocked(kStartupEvent, 1.0f, 1.0f, 0.0f, 0.0f);
         }
 
         result = studio_->update();
@@ -427,6 +448,8 @@ public:
         if (transmission_ != nullptr) activeNames_.push_back(transmissionName);
         if (turbo_ != nullptr) activeNames_.push_back("turbo");
         if (limiter_ != nullptr) activeNames_.push_back("limiter");
+        if (gear_ != nullptr) activeNames_.push_back(gearName);
+        if (backfire_ != nullptr) activeNames_.push_back(backfireName);
         return {};
     }
 
@@ -480,26 +503,25 @@ public:
             setVolumeQuietly(limiter_, cleanMaster * limiterGain);
         }
 
+        setVolumeQuietly(gear_, cleanMaster * shiftGain);
+        setVolumeQuietly(backfire_, cleanMaster * overrunGain);
+
         if (shiftSerial != lastShiftSerial_) {
             lastShiftSerial_ = shiftSerial;
-            if (shiftDirection != 0) {
-                const std::string gearName = selectPerspectiveEventLocked("gear_int", "gear_ext", perspective_);
-                if (!gearName.empty()) {
-                    playOneShotLocked(
-                        gearName,
-                        cleanMaster * shiftGain,
-                        shiftDirection > 0 ? 1.0f : 0.0f,
-                        cleanRpm,
-                        cleanThrottle
-                    );
-                }
+            if (shiftDirection != 0 && cleanMaster * shiftGain > kDisabledEventGain && !isPlayingLocked(gear_)) {
+                // Assetto Corsa owns one gear event per perspective. Do not stack a
+                // new instance over an authored shift that is still fading out.
+                stopQuietly(gear_, FMOD_STUDIO_STOP_ALLOWFADEOUT);
+                setParameterQuietly(gear_, "state", shiftDirection > 0 ? 1.0f : 0.0f);
+                setParameterQuietly(gear_, "rpms", cleanRpm);
+                setParameterQuietly(gear_, "throttle", cleanThrottle);
+                startQuietly(gear_);
             }
         }
-        if (triggerOverrun) {
-            const std::string backfireName = selectPerspectiveEventLocked("backfire_int", "backfire_ext", perspective_);
-            if (!backfireName.empty()) {
-                playOneShotLocked(backfireName, cleanMaster * overrunGain, 0.0f, cleanRpm, 0.0f);
-            }
+        if (triggerOverrun && cleanMaster * overrunGain > kDisabledEventGain && !isPlayingLocked(backfire_)) {
+            setParameterQuietly(backfire_, "rpms", cleanRpm);
+            setParameterQuietly(backfire_, "throttle", 0.0f);
+            startQuietly(backfire_);
         }
 
         const FMOD_RESULT result = studio_->update();
@@ -507,6 +529,30 @@ public:
             return resultText(result, "Studio::System::update");
         }
         return {};
+    }
+
+    std::array<float, kMeterTrackCount> outputMeters() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::array<float, kMeterTrackCount> meters{};
+        meters.fill(kMeterFloorDb);
+        if (!active_) {
+            return meters;
+        }
+
+        if (source_ == kSourceCoast) {
+            meters[kMeterEngineCoast] = meterDbLocked(engineLoad_);
+        } else {
+            meters[kMeterEngineLoad] = meterDbLocked(engineLoad_);
+        }
+        if (engineCoast_ != nullptr) {
+            meters[kMeterEngineCoast] = meterDbLocked(engineCoast_);
+        }
+        meters[kMeterTransmission] = meterDbLocked(transmission_);
+        meters[kMeterTurbo] = meterDbLocked(turbo_);
+        meters[kMeterLimiter] = meterDbLocked(limiter_);
+        meters[kMeterGear] = meterDbLocked(gear_);
+        meters[kMeterOverrun] = meterDbLocked(backfire_);
+        return meters;
     }
 
     void close() {
@@ -532,6 +578,8 @@ private:
         stopAndReleaseLocked(transmission_);
         stopAndReleaseLocked(turbo_);
         stopAndReleaseLocked(limiter_);
+        stopAndReleaseLocked(gear_);
+        stopAndReleaseLocked(backfire_);
         if (bank_ != nullptr) {
             bank_->unload();
         }
@@ -555,6 +603,8 @@ private:
         transmission_ = nullptr;
         turbo_ = nullptr;
         limiter_ = nullptr;
+        gear_ = nullptr;
+        backfire_ = nullptr;
         events_.clear();
         activeNames_.clear();
         active_ = false;
@@ -653,10 +703,26 @@ private:
             lastError_ = resultText(result, "start " + name);
             return nullptr;
         }
+        enableMeteringQuietly(instance);
         return instance;
     }
 
-    void playOneShotLocked(
+    FMOD::Studio::EventInstance* createDormantLocked(const std::string& name) {
+        const auto iterator = events_.find(name);
+        if (iterator == events_.end()) {
+            return nullptr;
+        }
+        FMOD::Studio::EventInstance* instance = nullptr;
+        if (iterator->second->createInstance(&instance) != FMOD_OK || instance == nullptr) {
+            return nullptr;
+        }
+        const FMOD_3D_ATTRIBUTES attributes = centeredAttributes();
+        instance->set3DAttributes(&attributes);
+        enableMeteringQuietly(instance);
+        return instance;
+    }
+
+    void playDetachedOneShotLocked(
         const std::string& name,
         float volume,
         float state,
@@ -679,6 +745,74 @@ private:
         setVolumeQuietly(instance, volume);
         instance->start();
         instance->release();
+    }
+
+    static void startQuietly(FMOD::Studio::EventInstance* instance) {
+        if (instance != nullptr) {
+            instance->start();
+            enableMeteringQuietly(instance);
+        }
+    }
+
+    static void stopQuietly(FMOD::Studio::EventInstance* instance, FMOD_STUDIO_STOP_MODE mode) {
+        if (instance != nullptr) {
+            instance->stop(mode);
+        }
+    }
+
+    static bool isPlayingLocked(FMOD::Studio::EventInstance* instance) {
+        if (instance == nullptr) {
+            return false;
+        }
+        FMOD_STUDIO_PLAYBACK_STATE state = FMOD_STUDIO_PLAYBACK_STOPPED;
+        return instance->getPlaybackState(&state) == FMOD_OK &&
+            (state == FMOD_STUDIO_PLAYBACK_PLAYING || state == FMOD_STUDIO_PLAYBACK_STARTING || state == FMOD_STUDIO_PLAYBACK_SUSTAINING);
+    }
+
+    static void enableMeteringQuietly(FMOD::Studio::EventInstance* instance) {
+        if (instance == nullptr) {
+            return;
+        }
+        FMOD::ChannelGroup* group = nullptr;
+        if (instance->getChannelGroup(&group) == FMOD_OK && group != nullptr) {
+            int dspCount = 0;
+            if (group->getNumDSPs(&dspCount) == FMOD_OK && dspCount > 0) {
+                FMOD::DSP* dsp = nullptr;
+                if (group->getDSP(dspCount - 1, &dsp) == FMOD_OK && dsp != nullptr) {
+                    dsp->setMeteringEnabled(false, true);
+                }
+            }
+        }
+    }
+
+    static float meterDbLocked(FMOD::Studio::EventInstance* instance) {
+        if (instance == nullptr) {
+            return kMeterFloorDb;
+        }
+        FMOD::ChannelGroup* group = nullptr;
+        if (instance->getChannelGroup(&group) != FMOD_OK || group == nullptr) {
+            return kMeterFloorDb;
+        }
+        int dspCount = 0;
+        if (group->getNumDSPs(&dspCount) != FMOD_OK || dspCount <= 0) {
+            return kMeterFloorDb;
+        }
+        FMOD::DSP* dsp = nullptr;
+        if (group->getDSP(dspCount - 1, &dsp) != FMOD_OK || dsp == nullptr) {
+            return kMeterFloorDb;
+        }
+        dsp->setMeteringEnabled(false, true);
+        FMOD_DSP_METERING_INFO output{};
+        if (dsp->getMeteringInfo(nullptr, &output) != FMOD_OK || output.numchannels <= 0) {
+            return kMeterFloorDb;
+        }
+        float sumSquares = 0.0f;
+        for (int channel = 0; channel < output.numchannels; ++channel) {
+            const float rms = std::max(0.0f, output.rmslevel[channel]);
+            sumSquares += rms * rms;
+        }
+        const float rms = std::sqrt(sumSquares / static_cast<float>(output.numchannels));
+        return rms <= 0.0000001f ? kMeterFloorDb : std::max(kMeterFloorDb, 20.0f * std::log10(rms));
     }
 
     static void setParameterQuietly(FMOD::Studio::EventInstance* instance, const char* name, float value) {
@@ -709,6 +843,8 @@ private:
     FMOD::Studio::EventInstance* transmission_ = nullptr;
     FMOD::Studio::EventInstance* turbo_ = nullptr;
     FMOD::Studio::EventInstance* limiter_ = nullptr;
+    FMOD::Studio::EventInstance* gear_ = nullptr;
+    FMOD::Studio::EventInstance* backfire_ = nullptr;
     FMOD_DSP_DESCRIPTION distanceFilter_{};
     FMOD_DSP_DESCRIPTION gain_{};
     std::unordered_map<std::string, FMOD::Studio::EventDescription*> events_;
@@ -812,6 +948,16 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
 extern "C" JNIEXPORT void JNICALL
 Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_close(JNIEnv*, jobject) {
     runtime.close();
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_outputMeters(JNIEnv* environment, jobject) {
+    const std::array<float, kMeterTrackCount> meters = runtime.outputMeters();
+    jfloatArray result = environment->NewFloatArray(kMeterTrackCount);
+    if (result != nullptr) {
+        environment->SetFloatArrayRegion(result, 0, kMeterTrackCount, meters.data());
+    }
+    return result;
 }
 
 extern "C" JNIEXPORT jobjectArray JNICALL

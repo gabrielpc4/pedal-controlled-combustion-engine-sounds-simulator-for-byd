@@ -22,8 +22,10 @@ data class LayerMixTrackState(
     val userVolume: Double,
     val muted: Boolean,
     val solo: Boolean,
-    /** Current host gain reaching this authored event group. */
+    /** Normalized post-FMOD RMS output used only to draw the live level bar. */
     val outputLevel: Double,
+    /** Post-FMOD RMS level for the actual event output, not a requested host gain. */
+    val outputDb: Double,
     val isEffect: Boolean,
     val showVolumeSlider: Boolean = true,
     val isLoadLayer: Boolean = false,
@@ -31,8 +33,38 @@ data class LayerMixTrackState(
 
 data class LayerOutputMeter(
     val id: String,
-    val outputLevel: Double,
+    val rmsDb: Double,
+) {
+    val outputLevel: Double
+        get() = ((rmsDb - QUIET_FLOOR_DB) / (0.0 - QUIET_FLOOR_DB)).coerceIn(0.0, 1.0)
+
+    companion object {
+        const val QUIET_FLOOR_DB = -80.0
+    }
+}
+
+/** The native bridge always returns the RMS meters in exactly this order. */
+internal val FmodNativeMeterTrackIds = listOf(
+    "engine_load",
+    "engine_coast",
+    "transmission",
+    "turbo",
+    "limiter",
+    "gear",
+    "overrun",
 )
+
+internal fun nativeOutputMeters(values: FloatArray): List<LayerOutputMeter> =
+    FmodNativeMeterTrackIds.mapIndexed { index, id ->
+        LayerOutputMeter(
+            id = id,
+            rmsDb = values.getOrNull(index)
+                ?.toDouble()
+                ?.takeIf(Double::isFinite)
+                ?.coerceAtLeast(LayerOutputMeter.QUIET_FLOOR_DB)
+                ?: LayerOutputMeter.QUIET_FLOOR_DB,
+        )
+    }
 
 internal data class FmodMixerTrack(
     val id: String,
