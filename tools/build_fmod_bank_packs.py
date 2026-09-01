@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Build installer payloads containing original FMOD Studio banks only.
 
-The Android app never consumes WAV files.  Each archive contains one verified
-source ``.bank`` and, where supplied, its matching ``GUIDs.txt`` lookup table.
+Each archive contains one verified source ``.bank`` and, where supplied, its matching ``GUIDs.txt`` lookup table.
 The lookup table lets the Android runtime resolve authored events even when a
 third-party bank omitted a Studio strings bank. The two original Assetto shared
 banks are independent packages, loaded ahead of every car bank at runtime.
