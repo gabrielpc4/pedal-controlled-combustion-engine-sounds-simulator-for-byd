@@ -14,6 +14,34 @@ class SampleEngineRendererTest {
     private val profile = EngineSampleProfiles.default
 
     @Test
+    fun genericProfilesExposeEveryAuditedAuxiliaryEffectAndNothingInvented() {
+        val genericProfiles = installedCarProfiles + assettoBankProfiles
+        val genericPackIds = genericProfiles.map { candidate -> candidate.audioPackId }.toSet()
+        assertTrue(genericPackIds.containsAll(genericCarEffectAvailability.keys))
+
+        genericCarEffectAvailability.forEach { (packId, availability) ->
+            genericProfiles
+                .filter { candidate -> candidate.audioPackId == packId }
+                .forEach { candidate ->
+                    assertAuditedEffects(candidate.program(EngineSoundPerspective.CABIN), availability.cabin)
+                    val exteriorExpected = if (
+                        candidate.program(EngineSoundPerspective.EXTERIOR) === candidate.cabinProgram
+                    ) {
+                        availability.cabin
+                    } else {
+                        availability.exterior
+                    }
+                    assertAuditedEffects(candidate.program(EngineSoundPerspective.EXTERIOR), exteriorExpected)
+                    assertEquals(
+                        GenericCarEffect.TURBO_LOOP in availability.cabin ||
+                            GenericCarEffect.TURBO_DUMP in availability.cabin,
+                        candidate.hasTurboSounds,
+                    )
+                }
+        }
+    }
+
+    @Test
     fun everySelectableCarHasACompleteDistinctSampleProfile() {
         val expectedProfileCount = 3 + installedCarProfiles.size + assettoBankProfiles.size
         assertEquals(expectedProfileCount, EngineSampleProfiles.all.size)
@@ -815,6 +843,28 @@ class SampleEngineRendererTest {
 
         assertTrue(failure is IllegalArgumentException)
         assertTrue(failure?.message?.startsWith("Missing ") == true)
+    }
+
+    private fun assertAuditedEffects(
+        program: EngineSampleProgram,
+        expected: Set<GenericCarEffect>,
+    ) {
+        val actual = buildSet {
+            program.effects.forEach { effect ->
+                when (effect.id) {
+                    "transmission_loop" -> add(GenericCarEffect.TRANSMISSION)
+                    "shift_up" -> add(GenericCarEffect.SHIFT_UP)
+                    "shift_down" -> add(GenericCarEffect.SHIFT_DOWN)
+                    "turbo_loop" -> add(GenericCarEffect.TURBO_LOOP)
+                    "turbo_dump" -> add(GenericCarEffect.TURBO_DUMP)
+                    "native_overrun" -> add(GenericCarEffect.OVERRUN)
+                }
+            }
+            if (program.layers.any { layer -> layer.role == SampleLayerRole.LIMITER }) {
+                add(GenericCarEffect.LIMITER)
+            }
+        }
+        assertEquals(expected, actual)
     }
 
     private fun strongestGain(rpm: Double, throttle: Double): Double =

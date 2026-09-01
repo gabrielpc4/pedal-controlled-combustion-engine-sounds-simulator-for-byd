@@ -75,6 +75,8 @@ internal fun genericInstalledProfile(
     val coast = loadRoots.mapIndexed { index, rpm -> RootedSample("coast_${index + 1}.wav", rpm) }
     val fullLoad = AutomationCurve(listOf(CurvePoint(0.0, 0.0), CurvePoint(1.0, 0.0)))
     val fullCoast = AutomationCurve(listOf(CurvePoint(0.0, 0.0), CurvePoint(1.0, 0.0)))
+    val cabinEffects = genericEffects(audioPackId, exterior = false, maximumRpm = maximumRpm)
+    val cabinLimiter = genericLimiter(audioPackId, exterior = false, maximumRpm = maximumRpm)
 
     val cabin = bandProfile(
         id = id,
@@ -96,11 +98,21 @@ internal fun genericInstalledProfile(
         bandGainDb = -6.0,
         loadThrottleCurve = fullLoad,
         coastThrottleCurve = fullCoast,
+        limiter = cabinLimiter,
+        effects = cabinEffects,
     )
     val exterior = if (id in exteriorFallsBackToInterior) {
         cabin.cabinProgram
     } else {
-        genericProgram("ext_", idleRpm, maximumRpm, fullLoad, fullCoast)
+        genericProgram(
+            prefix = "ext_",
+            idleRpm = idleRpm,
+            maximumRpm = maximumRpm,
+            loadCurve = fullLoad,
+            coastCurve = fullCoast,
+            limiter = genericLimiter(audioPackId, exterior = true, maximumRpm = maximumRpm),
+            effects = genericEffects(audioPackId, exterior = true, maximumRpm = maximumRpm),
+        )
     }
     return cabin.copy(
         audioPackId = audioPackId,
@@ -114,6 +126,8 @@ private fun genericProgram(
     maximumRpm: Double,
     loadCurve: AutomationCurve,
     coastCurve: AutomationCurve,
+    limiter: RootedSample? = null,
+    effects: List<SampleEffectSpec> = emptyList(),
 ): EngineSampleProgram {
     val roots = listOf(maximumRpm * 0.28, maximumRpm * 0.52, maximumRpm * 0.78)
     val layers = buildList {
@@ -157,8 +171,127 @@ private fun genericProgram(
                 )
             }
         }
+        limiter?.let { sample ->
+            add(
+                SampleLayerSpec(
+                    id = "${prefix}limiter",
+                    assetName = sample.asset,
+                    role = SampleLayerRole.LIMITER,
+                    startRpm = (sample.rpm * 0.90).coerceAtLeast(idleRpm),
+                    endRpm = maximumRpm,
+                    autopitchRootRpm = sample.rpm,
+                    baseGainDb = sample.gainDb - 3.0,
+                    applyIdleGainBoost = false,
+                    throttleGainDb = loadCurve,
+                    rpmAmplitudeCurves = listOf(
+                        AutomationCurve(
+                            listOf(
+                                CurvePoint(sample.rpm * 0.90, 0.0),
+                                CurvePoint(sample.rpm, 1.0),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }
     }
-    return EngineSampleProgram(layers = layers, supportsLoadOnlyProgram = true)
+    return EngineSampleProgram(layers = layers, effects = effects, supportsLoadOnlyProgram = true)
+}
+
+private fun genericEffects(
+    audioPackId: String,
+    exterior: Boolean,
+    maximumRpm: Double,
+): List<SampleEffectSpec> {
+    val availability = genericCarEffectAvailability[audioPackId] ?: return emptyList()
+    val captured = if (exterior) availability.exterior else availability.cabin
+    val prefix = if (exterior) "ext_" else ""
+    return buildList {
+        if (GenericCarEffect.TRANSMISSION in captured) {
+            add(
+                SampleEffectSpec(
+                    id = "transmission_loop",
+                    control = SampleEffectControls.transmission,
+                    assetName = "${prefix}fx_transmission.wav",
+                    trigger = SampleEffectTrigger.TRANSMISSION_LOOP,
+                    baseGainDb = -10.0,
+                ),
+            )
+        }
+        if (GenericCarEffect.SHIFT_UP in captured) {
+            add(
+                SampleEffectSpec(
+                    id = "shift_up",
+                    control = SampleEffectControls.gearChanges,
+                    assetName = "${prefix}fx_shift_up.wav",
+                    trigger = SampleEffectTrigger.SHIFT_UP,
+                    baseGainDb = -4.0,
+                    minimumRpm = maximumRpm * 0.16,
+                ),
+            )
+        }
+        if (GenericCarEffect.SHIFT_DOWN in captured) {
+            add(
+                SampleEffectSpec(
+                    id = "shift_down",
+                    control = SampleEffectControls.gearChanges,
+                    assetName = "${prefix}fx_shift_down.wav",
+                    trigger = SampleEffectTrigger.SHIFT_DOWN,
+                    baseGainDb = -5.0,
+                    minimumRpm = maximumRpm * 0.16,
+                ),
+            )
+        }
+        if (GenericCarEffect.TURBO_LOOP in captured) {
+            add(
+                SampleEffectSpec(
+                    id = "turbo_loop",
+                    control = SampleEffectControls.turbo,
+                    assetName = "${prefix}fx_turbo_loop.wav",
+                    trigger = SampleEffectTrigger.TURBO_LOOP,
+                    baseGainDb = -9.0,
+                    minimumRpm = maximumRpm * 0.20,
+                ),
+            )
+        }
+        if (GenericCarEffect.TURBO_DUMP in captured) {
+            add(
+                SampleEffectSpec(
+                    id = "turbo_dump",
+                    control = SampleEffectControls.turbo,
+                    assetName = "${prefix}fx_turbo_dump.wav",
+                    trigger = SampleEffectTrigger.TURBO_DUMP,
+                    baseGainDb = -5.0,
+                    minimumRpm = maximumRpm * 0.20,
+                ),
+            )
+        }
+        if (GenericCarEffect.OVERRUN in captured) {
+            add(
+                SampleEffectSpec(
+                    id = "native_overrun",
+                    control = SampleEffectControls.exhaustOverrun,
+                    assetName = "${prefix}fx_overrun.wav",
+                    trigger = SampleEffectTrigger.THROTTLE_LIFT,
+                    baseGainDb = -6.0,
+                    minimumRpm = maximumRpm * 0.35,
+                ),
+            )
+        }
+    }
+}
+
+private fun genericLimiter(
+    audioPackId: String,
+    exterior: Boolean,
+    maximumRpm: Double,
+): RootedSample? {
+    val availability = genericCarEffectAvailability[audioPackId] ?: return null
+    val captured = if (exterior) availability.exterior else availability.cabin
+    if (GenericCarEffect.LIMITER !in captured) return null
+
+    val prefix = if (exterior) "ext_" else ""
+    return RootedSample("${prefix}fx_limiter.wav", maximumRpm * 0.96, gainDb = -12.0)
 }
 
 /**

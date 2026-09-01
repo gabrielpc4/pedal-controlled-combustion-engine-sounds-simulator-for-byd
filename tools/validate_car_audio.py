@@ -256,6 +256,19 @@ def main() -> int:
                     f"{row['status']:>16} {car.pack_id:<48} {event:<10} "
                     f"rms={row.get('rms', 0):.5f} peak={row.get('peak', 0):.5f}"
                 )
+            # The runtime now also consumes per-bank WAV side events. Inspect
+            # the finished pack for every generic car so a non-silent FMOD
+            # probe cannot hide a silent/invalid transmission, shift, turbo,
+            # limiter, or native-overrun asset.
+            row = validate_pack_archive(REPO_ROOT / "audio_packs" / f"{pack_id}.bydpack", car, pack_id)
+            report.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            report.flush()
+            summary[row["status"]] += 1
+            validations += 1
+            print(
+                f"{row['status']:>16} {car.pack_id:<48} {'pack':<10} "
+                f"files={row.get('audioFiles', 0)} peak={row.get('maxPeak', 0):.5f}"
+            )
     print(json.dumps({"cars": len(cars), "validations": validations, "summary": summary}, sort_keys=True))
     return 0 if summary["error"] == 0 and summary["silent"] == 0 else 1
 
