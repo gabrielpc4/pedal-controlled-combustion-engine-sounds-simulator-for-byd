@@ -28,4 +28,5 @@ reference/
 audio_samples/
 audio_banks/
 audio_packs/
+fmod_bank_packs/
 docs/source-material/*.pdf

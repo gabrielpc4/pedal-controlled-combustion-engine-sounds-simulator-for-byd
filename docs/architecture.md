@@ -2,133 +2,83 @@
 
 ## Purpose
 
-The application combines an electric-vehicle road simulation with a **presentation-only**
-combustion-engine layer. The presentation layer produces gauge RPM, shifts, and audio; it must not
-change vehicle control or claim to be an accurate combustion drivetrain model.
-
-The code is arranged around a one-way realtime data flow:
+The application adds a presentation-only combustion-engine layer to a BYD road-speed input. It
+owns the tachometer, presentation gears, and audio only; it never changes vehicle control.
 
 ```text
-BYD getters or simulator controls
+BYD getters or simulated pedals
              |
-       DriveController (fixed-step coordinator)
+       DriveController
              |
-        EngineSimulation ------> Compose UI snapshot
+     EngineSimulation  ---> Compose dashboard snapshot
              |
-       EngineAudioFrame
+       EngineAudioFrame (continuous presentation RPM)
              |
-SampleEngineRenderer -> stereo PCM AudioTrack -> factory DSP/speakers
+ EngineAudioEngine -> native FMOD Studio -> authored bank events -> Android audio route
 ```
 
-The names above are search anchors, not a promise that every implementation detail will remain in
-one file. Start from `DriveController`, `EngineSimulation`, `EngineAudioEngine`, and
-`SampleEngineRenderer` when tracing the current implementation.
+Start from `DriveController`, `EngineSimulation`, `EngineAudioEngine`, and `FmodBankProfile`.
 
-## Separation of responsibilities
+## Input and presentation simulation
 
-### Input and coordination
+`DriveController` owns lifecycle, input selection, selected-car state, persistence, and the
+handoff to the audio worker. `EngineSimulation` owns virtual road speed, pedal smoothing,
+transmission position, and presentation RPM. In Drive, `LoadedEngineDynamics` adds bounded
+combustion-style crank response without influencing the electric vehicle's movement. Park and
+Neutral use `FreeRevEngineDynamics` instead.
 
-`DriveController` owns application-level lifecycle, input selection, fixed-step updates, selected
-car state, user preferences, and the handoff from simulation to audio. The telemetry reader and
-the on-screen simulator are alternate input sources; they should feed the same normalized input
-model rather than create separate audio or physics paths.
+The BYD speed value is treated as truncated: a report of `N` km/h represents `[N, N + 1)`.
+`QuantizedPresentationSpeedEstimator` reconstructs a continuous presentation-only speed from
+boundary timing and bounded pedal direction. Gearbox decisions, speed display, launch control,
+and virtual vehicle forces retain the authoritative raw-speed route. FMOD receives presentation
+RPM only, never a whole-km/h input, so a telemetry boundary cannot directly become an authored
+parameter step.
 
-### Simulation and presentation gearbox
+## FMOD-bank audio
 
-`EngineSimulation` owns virtual road speed, braking, pedal smoothing, transmission position, and
-the state shown on the dashboard. In Drive, road speed establishes the fictional clutch-synchronized
-RPM, while `LoadedEngineDynamics` applies combustion torque and crank/gearbox inertia so the audible
-engine can react to pedal load before the next integer speed sample. Its bounded slip always returns
-to the real speed anchor and never changes vehicle motion. In Park/Neutral, `FreeRevEngineDynamics`
-integrates the disconnected crankshaft without road coupling.
+`FmodBankProfile` contains the display and presentation-drive data for one installable FMOD bank.
+The bank itself remains authoritative for its stereo source material, event graph, randomisation,
+effects, and parameter automation. `FmodBankStore` verifies a package before atomically publishing
+the `.bank` and optional `GUIDs.txt` under the dashboard's private storage. The original Assetto
+`common.strings.bank` and `common.bank` are installed once as FMOD dependencies and loaded before
+the selected car bank, so official source banks without a local event-name table retain their
+authored event routes.
 
-The selected sample profile supplies the sound-facing RPM domain and presentation gearing. Those
-gears are a storytelling and audio device: changing a presentation gear must not introduce a
-clutch, torque interruption, or feedback into the electric road-force calculation.
+`EngineAudioEngine` has one 4 ms, audio-priority control worker. It opens the selected bank through
+`NativeFmodBankBridge`, then advances its `rpms`, `throttle`, `drivetrain_speed`, `boost`, `bov`,
+and `bov_decay` controls. Its short smoother receives the already-continuous presentation RPM and
+is the only extra host-side filter. Native FMOD events used are:
 
-### Sample engine audio
+- `engine_int` or `engine_ext` for the continuous engine, selected per listener perspective.
+- `transmission`, `transmission_ext`, `turbo`, and `limiter` when the source bank provides them.
+- `gear_int`, `gear_ext`, `backfire_int`, `backfire_ext`, and `start` when triggered by the current
+  drive state.
 
-`EngineSampleProfile` is the data boundary between a car recording set and the renderer. A profile
-describes its own RPM domain, playback rate, cabin and exterior programs, optional effects,
-automation curves, preview, and presentation parameters. Each perspective may expose LOAD,
-COAST, and BOTH independently. The active perspective and engine program are persisted per car;
-only that program is decoded so switching listening position cannot double the steady-state PCM
-memory footprint. Do not normalize every profile to a guessed common redline or sample rate just
-to simplify a UI assumption.
+Tires, wind, chassis, doors, traction, and gear-grind events are intentionally never discovered or
+started. There is no PCM decoding, synthetic engine, unrelated-car fallback, or alternative audio
+renderer.
 
-`SampleEngineRenderer` decodes and continuously mixes authored PCM loops. It preserves source
-stereo, honours embedded WAV loop metadata where present, keeps phase/cursors continuous, and uses
-interpolation for varispeed playback. Assetto Corsa and FMOD are authoring/reference sources only;
-the installed Android app uses packaged WAV assets and does not depend on either at runtime.
+## Native build boundary
 
-`EngineAudioEngine` owns one continuous, low-latency stereo `AudioTrack` and audio focus. Fixed
-stereo is intentional: on-car testing established this route reaches the full BYD factory speaker
-system. Do not reintroduce channel-layout negotiation, channel duplication, or an output selector
-without new, reproducible evidence on the target car.
+FMOD 1.10.11 is supplied outside the repository through `fmod.sdk.dir`. Gradle copies headers and
+native libraries into generated build staging. `tools/repair_fmod_dynsym.py` fixes only the copied
+legacy ELF marker ordering needed for modern NDK linking; it never changes the downloaded SDK.
+`fmod_bank_bridge.cpp` contains the direct Studio calls and compatible registrations for the Assetto
+`FMOD Distance Filter` and `FMOD Gain` plugins.
 
-### UI and persistence
+## Realtime and failure rules
 
-Compose renders snapshots rather than touching audio or telemetry directly. Tuning, selected car,
-layer mix, effect choices, and per-car volume are user preferences; validate and clamp persisted
-data at their boundary. Treat the tuning UI as a simulation/audio authoring surface, not proof of
-real vehicle specifications.
-
-## Realtime rules
-
-These constraints exist to keep car audio continuous on a constrained head unit:
-
-- Keep file I/O, asset decoding, collection churn, logging, and blocking synchronization outside
-  the render/write loop.
-- Reuse buffers and avoid allocations in the audio hot path. Meter data crosses to the UI through
-  preallocated primitive storage rather than per-write Compose state.
-- Stop/restart renderer resources atomically when a sample profile or renderer configuration
-  genuinely requires it. A car, listening-perspective, or LOAD/COAST/BOTH switch must release the
-  old renderer and `AudioTrack` before the new program takes ownership.
-- Preserve source channels and use each profile's verified source/playback rate. Diagnose a
-  car-specific rate or asset problem locally; do not globally degrade unaffected profiles.
-- A renderer or asset-loading failure must fail closed (silence), not silently fall back to a
-  synthetic engine or an unrelated car's samples.
-
-## Safe change patterns
-
-### Adding or changing a car
-
-Keep the profile declarative. Add only assets for which the user has local playback rights,
-register them explicitly in the asset-preparation task, define the profile and its specs, and add
-coverage that every required asset decodes and every intended operating region is audible. Build
-configuration is the authoritative list of packaged local assets; do not rely on a directory scan.
-
-### Changing audio behavior
-
-Test a sweep across the profile's actual RPM domain and both throttle/lift conditions. Check for
-layer gaps, phase resets, rate mismatch, clipping, memory growth, and underruns. Subjective
-listening must include the real head unit because emulator output cannot establish BYD DSP routing
-or perceived cabin quality.
-
-### Changing vehicle integration or physics
-
-Maintain the read-only boundary and keep observed data separate from estimated calibration. A
-speed-derived signal must be smoothed before it controls presentation RPM/audio, especially when
-the source reports whole km/h values. The current vehicle model deliberately assumes BYD truncates
-those readings, so a reported `N` represents `[N, N + 1)` km/h. Pedal input seeds a bounded
-presentation direction inside the current interval at any road speed, before another whole-km/h
-sample arrives. A pedal edge establishes a small, smoothly followed directional target; the target
-stays in the reported interval except for the existing 0.08 km/h poll allowance. A pedal release
-invalidates both an opposing velocity and an unfinished upward boundary correction immediately; the
-next integer crossing then restores telemetry-derived velocity. If the first new integer arrives
-after crossing history was reset, the estimator recovers any missed distance over multiple frames
-instead of stepping the tach and audio immediately. Any claim of real-car fidelity needs a cited
-measurement or must be labelled as an approximation in code/tests, not hidden in a UI label.
+- Bank archive I/O, checksum verification, and car switching stay outside the control loop.
+- A car, perspective, or LOAD/COAST/BOTH switch replaces the old Studio system atomically.
+- A missing bank or FMOD load failure fails closed and reports the selected car; it never plays a
+  different car.
+- Compose only reads snapshots and estimated event-group levels. It does not manipulate FMOD.
+- On-device listening is required for BYD DSP routing and perceived realism; the emulator validates
+  lifecycle and event loading, not cabin acoustics.
 
 ## Verification
 
-The normal local gate is:
-
-```powershell
-.\gradlew.bat :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:assembleDebugAndroidTest :mobile:lintDebug --no-daemon
-```
-
-Then install the newest generated debug APK and foreground
-`com.gabrielpc.enginesoundsimulator/.MainActivity`. The emulator can validate startup, rendering,
-asset packaging, deterministic simulation, and basic audio lifecycle. It cannot validate BYD
-permissions, pedal latency, DSP speaker routing, or cabin acoustics.
+Run unit tests, build both APKs, use the installer, then run the instrumentation sweep. The sweep
+opens every installed profile in both perspectives and drives fast continuous RPM/throttle updates
+through the same JNI bridge used by the dashboard. Its `CarAudioRuntimeValidation` log lines list
+the allowed events that activated for each source bank.

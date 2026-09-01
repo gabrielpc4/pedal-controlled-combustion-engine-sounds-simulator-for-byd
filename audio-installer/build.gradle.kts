@@ -6,8 +6,8 @@ import org.gradle.api.tasks.Sync
 
 val generatedPackAssets = file("build/generated/packAssets")
 val preparePackAssets = tasks.register<Sync>("preparePackAssets") {
-    from(rootProject.file("audio_packs")) {
-        include("*.bydpack", "index.json")
+    from(rootProject.file("fmod_bank_packs")) {
+        include("*.bydbank", "index.json")
         into("packs")
     }
     into(generatedPackAssets)

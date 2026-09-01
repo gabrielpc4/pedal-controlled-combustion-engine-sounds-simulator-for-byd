@@ -6,6 +6,7 @@ plugins {
 import java.io.File
 import java.time.Instant
 import java.util.Properties
+import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
 
 val buildNumberFile = file("build-number.properties")
@@ -45,6 +46,52 @@ val gitSha = gitShortShaFromFiles(rootProject.projectDir)
 val buildTimeUtc: String = Instant.now().toString()
 
 val generatedPreviewAssets = file("build/generated/carPreviewAssets")
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { localProperties.load(it) }
+}
+val fmodSdkDirectory = file(
+    providers.gradleProperty("fmod.sdk.dir").orNull
+        ?: localProperties.getProperty("fmod.sdk.dir")
+        ?: throw GradleException("Set fmod.sdk.dir to the local FMOD Android SDK directory."),
+)
+val generatedFmodSdk = file("build/generated/fmodSdk")
+
+val prepareFmodSdk = tasks.register<Sync>("prepareFmodSdk") {
+    require(fmodSdkDirectory.isDirectory) { "FMOD Android SDK directory does not exist: $fmodSdkDirectory" }
+    from(File(fmodSdkDirectory, "api/lowlevel/inc")) {
+        include("*.h", "*.hpp")
+        into("include")
+    }
+    from(File(fmodSdkDirectory, "api/studio/inc")) {
+        include("*.h", "*.hpp")
+        into("include")
+    }
+    from(File(fmodSdkDirectory, "api/lowlevel/lib")) {
+        include("**/libfmod.so")
+        into("lib")
+    }
+    from(File(fmodSdkDirectory, "api/studio/lib")) {
+        include("**/libfmodstudio.so")
+        into("lib")
+    }
+    into(generatedFmodSdk)
+}
+val stagedFmodLibraries = listOf(
+    "arm64-v8a", "armeabi-v7a", "x86", "x86_64",
+).flatMap { abi ->
+    listOf("libfmod.so", "libfmodstudio.so").map { library ->
+        File(generatedFmodSdk, "lib/$abi/$library")
+    }
+}
+val repairFmodSdk = tasks.register<Exec>("repairFmodSdk") {
+    dependsOn(prepareFmodSdk)
+    inputs.files(stagedFmodLibraries)
+    outputs.files(stagedFmodLibraries)
+    commandLine("python3", rootProject.file("tools/repair_fmod_dynsym.py").absolutePath)
+    args(stagedFmodLibraries.map(File::getAbsolutePath))
+}
 val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
     listOf(
         rootProject.file("../original_cars"),
@@ -110,10 +157,14 @@ if (isAssembling && stampCarBuild) {
 
 tasks.named("preBuild").configure {
     dependsOn(prepareCarPreviewAssets)
+    dependsOn(repairFmodSdk)
 }
 
 android {
     namespace = "com.gabrielpc.enginesoundsimulator"
+    // FMOD 1.10's Android binaries require the older compatible linker behavior
+    // supplied by NDK r27; newer r28 rejects their vendor symbol table.
+    ndkVersion = "27.1.12297006"
     compileSdk {
         version = release(37)
     }
@@ -150,10 +201,23 @@ android {
         buildConfig = true
     }
     sourceSets.getByName("main").assets.srcDir(generatedPreviewAssets)
+    sourceSets.getByName("main").jniLibs.srcDir(File(generatedFmodSdk, "lib"))
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
     lint {
         // This APK is intentionally sideloaded on a BYD DiLink head unit. Target 25 is a
         // compatibility requirement for its vendor framework, not a Google Play configuration.
         disable += "ExpiredTargetSdkVersion"
+    }
+}
+
+tasks.configureEach {
+    if (name.contains("externalNativeBuild", ignoreCase = true)) {
+        dependsOn(repairFmodSdk)
     }
 }
 
@@ -184,4 +248,5 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(files(File(fmodSdkDirectory, "api/lowlevel/lib/fmod.jar")))
 }

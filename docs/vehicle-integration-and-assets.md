@@ -54,35 +54,36 @@ record only non-sensitive observations:
 Do not store identifiers or full driving traces in the app. A short, redacted manual test note is
 more useful than a permanent private log.
 
-## Sample asset contract
+## FMOD-bank asset contract
 
-The app uses local WAV samples and preview images supplied outside the repository, primarily in
-`audio_samples/`. They are intentionally ignored because their redistribution rights have not been
-established. The Gradle asset-preparation task copies only an explicit allow-list into the APK;
-this is both a reproducibility rule and a licensing guardrail.
+The app uses local source FMOD banks and preview images supplied outside the repository, primarily
+from sibling `original_cars`, `new_cars`, and `assettocorsa_banks` folders. They are intentionally
+ignored because their redistribution rights have not been established. `tools/build_fmod_bank_packs.py`
+copies each selected source bank unchanged into a verified installer package; this is both a
+reproducibility rule and a licensing guardrail.
 
-The current implementation is sample-dependent. There is no procedural-synth fallback, and the
-app does not require Assetto Corsa, FMOD, or a game installation at runtime. Bank extraction and
-sample interpretation are authoring/research steps only.
+The dashboard needs the FMOD Android SDK to build and an installed source bank to play. It has no
+procedural-synth, decoded-audio, or unrelated-car fallback. Game installation is not needed after
+the companion installer has copied a verified bank into the dashboard's private storage.
 
 When using third-party recordings:
 
 - Confirm the user has the right to use the material in this private installation.
-- Keep raw banks, decoded WAVs, game files, reference APKs, and previews out of Git.
-- Preserve source rates, channel layout, loop metadata, and the profile's authored RPM domain.
-- Prefer exterior idle only when that sample is explicitly mapped by the profile; do not infer a
-  full exterior event from a single exterior loop.
+- Keep raw banks, generated installer packages, game files, reference APKs, and previews out of Git.
+- Preserve the bank's authored stereo event graph, parameter ranges, effects, and RPM domain.
+- Use the authored `engine_ext` event only when it exists; otherwise the runtime intentionally
+  retains the same bank's `engine_int` event rather than inventing an exterior source.
 
 ## Audio route decision
 
-The application always renders true stereo PCM. Real-car testing established that stereo is the
-Android route BYD's DSP distributes across the complete factory system. The application must not
-attempt to make its own surround layout, duplicate stereo into extra channels, or expose an output
-format toggle unless new on-car evidence overturns that decision.
+FMOD is configured for true stereo. Real-car testing established that stereo is the Android route
+BYD's DSP distributes across the complete factory system. The application must not attempt to make
+its own surround layout, duplicate stereo into extra channels, or expose an output-format toggle
+unless new on-car evidence overturns that decision.
 
 Speaker distribution after the stereo stream leaves the app belongs to the vehicle's audio system,
-not this app. The implementation should preserve the recording's left/right channels and focus on
-clean, continuous stereo delivery.
+not this app. The implementation should preserve each bank event's left/right channels and focus
+on clean, continuous parameter delivery.
 
 ## Research provenance
 

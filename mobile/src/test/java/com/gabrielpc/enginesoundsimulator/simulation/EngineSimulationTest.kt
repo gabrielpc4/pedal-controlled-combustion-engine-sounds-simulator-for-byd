@@ -1,6 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -402,7 +402,7 @@ class EngineSimulationTest {
 
     @Test
     fun upshiftTriggerUsesEachCarsShiftAndLimiterRpm() {
-        EngineSampleProfiles.all.forEach { sample ->
+        FmodBankProfiles.all.forEach { sample ->
             val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
                 idleRpm = sample.idleRpm,
                 limiterRpm = sample.limiterRpm,
@@ -975,7 +975,7 @@ class EngineSimulationTest {
 
     @Test
     fun skylineNeutralRevMatchesTheAudioLabTorqueAndInertiaTrace() {
-        val skyline = EngineSampleProfiles.find("nissan_skyline_r34_cabin")
+        val skyline = FmodBankProfiles.find("nissan_skyline_r34_cabin")
         val profile = EngineProfile.SAMPLE_BANK_ENGINE.copy(
             name = skyline.displayName,
             idleRpm = skyline.idleRpm,

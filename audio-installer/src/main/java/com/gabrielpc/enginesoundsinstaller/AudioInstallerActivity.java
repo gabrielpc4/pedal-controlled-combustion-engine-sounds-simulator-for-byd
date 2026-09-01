@@ -24,9 +24,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Installs the bundled WAV packages into the dashboard's private pack store. */
+/** Installs the bundled FMOD Studio banks into the dashboard's private bank store. */
 public final class AudioInstallerActivity extends Activity {
-    private static final Uri INVENTORY_URI = Uri.parse("content://com.gabrielpc.enginesoundsimulator.audiopacks/packs");
+    private static final Uri INVENTORY_URI = Uri.parse("content://com.gabrielpc.enginesoundsimulator.fmodbanks/packs");
     private final Handler main = new Handler(Looper.getMainLooper());
     private TextView status;
     private ProgressBar progress;
@@ -42,7 +42,7 @@ public final class AudioInstallerActivity extends Activity {
             packs = readIndex();
             refreshIdleState();
         } catch (Exception exception) {
-            status.setText("No bundled audio packs were found. Build this installer after generating the WAV packs.");
+            status.setText("No bundled FMOD banks were found. Build this installer after preparing the bank packages.");
             installAll.setEnabled(false);
         }
     }
@@ -54,9 +54,9 @@ public final class AudioInstallerActivity extends Activity {
         root.setGravity(Gravity.CENTER_VERTICAL);
         root.setBackgroundColor(0xff05080a);
 
-        TextView title = text("ENGINE AUDIO PACKS", 30, 0xff00d7e8);
+        TextView title = text("ENGINE FMOD BANKS", 30, 0xff00d7e8);
         root.addView(title);
-        root.addView(text("Install every car audio pack into Engine Sounds Simulator.", 17, 0xffd5e2e8));
+        root.addView(text("Install every car FMOD bank into Engine Sounds Simulator.", 17, 0xffd5e2e8));
         status = text("Preparing…", 18, 0xffffffff);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = 32;
@@ -86,7 +86,7 @@ public final class AudioInstallerActivity extends Activity {
 
     private void refreshIdleState() {
         Set<String> installed = installedIds();
-        status.setText(installed.size() + " of " + packs.size() + " audio packs installed");
+        status.setText(installed.size() + " of " + packs.size() + " FMOD banks installed");
         progress.setProgress(packs.isEmpty() ? 0 : installed.size() * 1000 / packs.size());
     }
 
@@ -105,7 +105,7 @@ public final class AudioInstallerActivity extends Activity {
                     waitForPublication(pack.id);
                 }
                 main.post(() -> {
-                    status.setText("All " + packs.size() + " audio packs are installed.");
+                    status.setText("All " + packs.size() + " FMOD banks are installed.");
                     progress.setProgress(1000);
                     setBusy(false);
                 });
@@ -116,7 +116,7 @@ public final class AudioInstallerActivity extends Activity {
                     setBusy(false);
                 });
             }
-        }, "install-audio-packs").start();
+        }, "install-fmod-banks").start();
     }
 
     private long copyPack(Pack pack, long totalBytes, long completedBytes) throws IOException {
@@ -158,17 +158,17 @@ public final class AudioInstallerActivity extends Activity {
             try {
                 getContentResolver().delete(INVENTORY_URI, null, null);
                 main.post(() -> {
-                    status.setText("All installed audio packs were deleted.");
+                    status.setText("All installed FMOD banks were deleted.");
                     progress.setProgress(0);
                     setBusy(false);
                 });
             } catch (Exception exception) {
                 main.post(() -> {
-                    status.setText("Could not delete the audio packs: " + exception.getMessage());
+                    status.setText("Could not delete the FMOD banks: " + exception.getMessage());
                     setBusy(false);
                 });
             }
-        }, "delete-audio-packs").start();
+        }, "delete-fmod-banks").start();
     }
 
     private Set<String> installedIds() {

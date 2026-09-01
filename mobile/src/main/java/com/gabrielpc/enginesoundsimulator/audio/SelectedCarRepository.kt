@@ -9,9 +9,9 @@ internal class SelectedCarRepository(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun load(): EngineSampleProfile = EngineSampleProfiles.find(preferences.getString("profile_id", null))
+    fun load(): FmodBankProfile = FmodBankProfiles.find(preferences.getString("profile_id", null))
 
-    fun save(profile: EngineSampleProfile) {
+    fun save(profile: FmodBankProfile) {
         preferences.edit().putString("profile_id", profile.id).commit()
     }
 }

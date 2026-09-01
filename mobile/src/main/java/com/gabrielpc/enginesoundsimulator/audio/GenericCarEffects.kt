@@ -1,9 +1,9 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 /**
- * Source-bank effect availability measured by the WAV pack exporter. A car is
- * only wired to a layer when its own FMOD event produced audible PCM; empty
- * entries are intentional rather than a generic sound fallback.
+ * Source-bank effect availability measured against the authored FMOD events.
+ * A car is only started on an event when its own bank supplied that route;
+ * empty entries are intentional rather than a generic sound fallback.
  */
 internal enum class GenericCarEffect {
     TRANSMISSION,

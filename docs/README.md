@@ -9,7 +9,7 @@ changes.
 
 Engine Sounds Simulator is a private Android dashboard for a BYD Seal DiLink head unit. It turns
 **read-only** vehicle telemetry, or the built-in simulator controls, into a fictional
-combustion-engine tachometer and sample-based engine audio. It never controls a vehicle.
+combustion-engine tachometer and direct FMOD Studio-bank audio. It never controls a vehicle.
 
 The intended environment is a rotated BYD tablet. The observed target software is
 `13.1.33.2503250.1` (family `2503`), but each DiLink firmware must be treated as a separate
@@ -36,7 +36,7 @@ from a similarly named class, a different firmware, or an old document.
   package spoofing, or broader permission bypasses.
 - Never expose, commit, or log vehicle identifiers, credentials, location, or complete driving
   traces. Some supplied screenshots contain IMEI/ICCID and must be treated as sensitive.
-- The sample recordings and reference APKs are local, ignored inputs. They are not part of this
+- The source banks and reference APKs are local, ignored inputs. They are not part of this
   repository's redistribution rights.
 - Treat vehicle testing as parked or controlled testing. Synthetic sound can mask safety alerts.
 - The app owns audio only while its visible Activity is running. Background playback needs a
@@ -51,7 +51,7 @@ For every source or documentation change, the expected delivery is:
 
 1. Run relevant tests, assemble the debug APK, and run lint.
 2. Install and foreground the generated APK on the `Simple_Automotive` emulator when available.
-3. Commit and push. Do not commit APKs, build output, raw samples, decoded samples, reference
+3. Commit and push. Do not commit APKs, build output, raw source banks, generated bank packages, reference
    APKs, or private reference material.
 
 The build increments a local build number on assembly and names the artifact
@@ -64,9 +64,9 @@ intentionally ignored.
   how to make safe changes.
 - [Vehicle integration and assets](vehicle-integration-and-assets.md) records the BYD API
   evidence, testing discipline, and local sample-asset contract.
-- [WAV engine calibration recipe](wav-engine-calibration-recipe.md) provides the reproducible
-  process for building and listening-tuning any car profile.
-- [WAV audio pack installation](wav-audio-pack-installation.md) describes the separate installer
+- [FMOD bank calibration](fmod-bank-calibration.md) provides the reproducible process for
+  validating an authored event route without replacing it.
+- [FMOD bank installation](fmod-bank-installation.md) describes the separate installer
   APK and its generated-pack boundary.
 - [Car audio validation](car-audio-validation.md) records the rapid trajectory measurements and
   the latest per-car audit result.

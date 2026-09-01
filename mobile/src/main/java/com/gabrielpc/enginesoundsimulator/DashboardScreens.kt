@@ -59,8 +59,8 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
-import com.gabrielpc.enginesoundsimulator.audio.EngineAudioAssetResolver
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
@@ -109,7 +109,6 @@ internal fun MixerDashboardScreen(
     onCoastProgramLayerGainChange: (Double) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
-    loadOnlyProgram: Boolean,
     primaryLayerSource: PrimaryEngineLayerSource,
     canUseCoastAsPrimary: Boolean,
     onPrimaryLayerSourceChange: (PrimaryEngineLayerSource) -> Unit,
@@ -170,7 +169,6 @@ internal fun MixerDashboardScreen(
         ) {
             MixerTrackColumn(
                 tracks = groupedTracks.firstColumn,
-                loadOnlyProgram = loadOnlyProgram,
                 onLayerMuted = onLayerMuted,
                 onLayerSolo = onLayerSolo,
                 onLayerVolume = onLayerVolume,
@@ -178,7 +176,6 @@ internal fun MixerDashboardScreen(
             )
             MixerTrackColumn(
                 tracks = groupedTracks.load,
-                loadOnlyProgram = loadOnlyProgram,
                 onLayerMuted = onLayerMuted,
                 onLayerSolo = onLayerSolo,
                 onLayerVolume = onLayerVolume,
@@ -191,7 +188,6 @@ internal fun MixerDashboardScreen(
             ) {
                 MixerTrackColumn(
                     tracks = groupedTracks.auxiliary,
-                    loadOnlyProgram = loadOnlyProgram,
                     onLayerMuted = onLayerMuted,
                     onLayerSolo = onLayerSolo,
                     onLayerVolume = onLayerVolume,
@@ -388,7 +384,6 @@ private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTrac
 @Composable
 private fun MixerTrackColumn(
     tracks: List<LayerMixTrackState>,
-    loadOnlyProgram: Boolean,
     onLayerMuted: (String, Boolean) -> Unit,
     onLayerSolo: (String, Boolean) -> Unit,
     onLayerVolume: (String, Double) -> Unit,
@@ -403,7 +398,6 @@ private fun MixerTrackColumn(
         items(tracks, key = { it.id }) { track ->
             LayerMixTrackControl(
                 track = track,
-                loadOnlyProgram = loadOnlyProgram,
                 onMuted = { onLayerMuted(track.id, it) },
                 onSolo = { onLayerSolo(track.id, it) },
                 onVolume = { onLayerVolume(track.id, it) },
@@ -628,7 +622,7 @@ private fun CarDropdownSelector(
     var expanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val audioAssetResolver = remember(context) {
-        EngineAudioAssetResolver(context.applicationContext)
+        FmodBankResolver(context.applicationContext)
     }
     Box(
         modifier = modifier.padding(start = 12.dp),
@@ -708,7 +702,7 @@ private fun CarDropdownSelector(
             }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            EngineSampleProfiles.all.forEach { profile ->
+            FmodBankProfiles.all.forEach { profile ->
                 val installed = audioAssetResolver.isInstalled(profile)
                 DropdownMenuItem(
                     text = {
@@ -798,14 +792,13 @@ private data class LoadedCarPreview(
 @Composable
 private fun LayerMixTrackControl(
     track: LayerMixTrackState,
-    loadOnlyProgram: Boolean,
     onMuted: (Boolean) -> Unit,
     onSolo: (Boolean) -> Unit,
     onVolume: (Double) -> Unit,
 ) {
     val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
-    val showTrimSlider = loadOnlyProgram && track.showVolumeSlider
+    val showTrimSlider = track.showVolumeSlider
     val meterLabelPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.WHITE

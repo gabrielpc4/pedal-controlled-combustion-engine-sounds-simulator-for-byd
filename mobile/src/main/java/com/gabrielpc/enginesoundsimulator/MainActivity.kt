@@ -106,7 +106,7 @@ import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
@@ -187,8 +187,8 @@ class MainActivity : ComponentActivity() {
                         onToggleSound = controller::toggleSound,
                         onTogglePopsAndBangs = controller::togglePopsAndBangs,
                         onPopsAndBangsGainChange = controller::setPopsAndBangsGain,
-                        onToggleSharedShiftSounds = controller::toggleSharedShiftSounds,
-                        onSharedShiftSoundsGainChange = controller::setSharedShiftSoundsGain,
+                        onToggleShiftSounds = controller::toggleShiftSounds,
+                        onShiftSoundsGainChange = controller::setShiftSoundsGain,
                         onToggleTransmission = controller::toggleTransmission,
                         onTransmissionGainChange = controller::setTransmissionGain,
                         onToggleTurboSounds = controller::toggleTurboSounds,
@@ -279,8 +279,8 @@ private fun MotorSoundDashboard(
     onToggleSound: () -> Unit,
     onTogglePopsAndBangs: () -> Unit,
     onPopsAndBangsGainChange: (Double) -> Unit,
-    onToggleSharedShiftSounds: () -> Unit,
-    onSharedShiftSoundsGainChange: (Double) -> Unit,
+    onToggleShiftSounds: () -> Unit,
+    onShiftSoundsGainChange: (Double) -> Unit,
     onToggleTransmission: () -> Unit,
     onTransmissionGainChange: (Double) -> Unit,
     onToggleTurboSounds: () -> Unit,
@@ -449,10 +449,10 @@ private fun MotorSoundDashboard(
                                     popsAndBangsGain = state.popsAndBangsGain,
                                     onTogglePopsAndBangs = onTogglePopsAndBangs,
                                     onPopsAndBangsGainChange = onPopsAndBangsGainChange,
-                                    sharedShiftSoundsEnabled = state.sharedShiftSoundsEnabled,
-                                    sharedShiftSoundsGain = state.sharedShiftSoundsGain,
-                                    onToggleSharedShiftSounds = onToggleSharedShiftSounds,
-                                    onSharedShiftSoundsGainChange = onSharedShiftSoundsGainChange,
+                                    shiftSoundsEnabled = state.shiftSoundsEnabled,
+                                    shiftSoundsGain = state.shiftSoundsGain,
+                                    onToggleShiftSounds = onToggleShiftSounds,
+                                    onShiftSoundsGainChange = onShiftSoundsGainChange,
                                     transmissionEnabled = state.transmissionEnabled,
                                     transmissionGain = state.transmissionGain,
                                     onToggleTransmission = onToggleTransmission,
@@ -503,7 +503,6 @@ private fun MotorSoundDashboard(
                             onSoundPerspectiveChange = onSoundPerspectiveChange,
                             onManualUpshift = onManualUpshift,
                             onManualDownshift = onManualDownshift,
-                            loadOnlyProgram = state.loadOnlyProgram,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -1376,7 +1375,7 @@ private fun CarStage(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                text = EngineSampleProfiles.specificationsFor(state.selectedCarId).summary(),
+                text = FmodBankProfiles.specificationsFor(state.selectedCarId).summary(),
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -1645,10 +1644,10 @@ private fun DashboardEffectControls(
     popsAndBangsGain: Double,
     onTogglePopsAndBangs: () -> Unit,
     onPopsAndBangsGainChange: (Double) -> Unit,
-    sharedShiftSoundsEnabled: Boolean,
-    sharedShiftSoundsGain: Double,
-    onToggleSharedShiftSounds: () -> Unit,
-    onSharedShiftSoundsGainChange: (Double) -> Unit,
+    shiftSoundsEnabled: Boolean,
+    shiftSoundsGain: Double,
+    onToggleShiftSounds: () -> Unit,
+    onShiftSoundsGainChange: (Double) -> Unit,
     transmissionEnabled: Boolean,
     transmissionGain: Double,
     onToggleTransmission: () -> Unit,
@@ -1673,10 +1672,10 @@ private fun DashboardEffectControls(
         )
         DashboardEffectRow(
             label = "SHIFT SOUNDS",
-            enabled = sharedShiftSoundsEnabled,
-            gain = sharedShiftSoundsGain,
-            onToggle = onToggleSharedShiftSounds,
-            onGainChange = onSharedShiftSoundsGainChange,
+            enabled = shiftSoundsEnabled,
+            gain = shiftSoundsGain,
+            onToggle = onToggleShiftSounds,
+            onGainChange = onShiftSoundsGainChange,
         )
         DashboardEffectRow(
             label = "TRANSMISSION",

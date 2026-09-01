@@ -3,22 +3,16 @@ package com.gabrielpc.enginesoundsimulator.audio
 import android.content.Context
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 
-/** Per-car gain for optional effects. */
+/** Per-car gain for authored native-bank effects. */
 internal class CarEffectGainRepository(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
         AppPreferenceStores.CAR_EFFECT_GAINS,
         Context.MODE_PRIVATE,
     )
-    private val legacyPreferences = context.applicationContext.getSharedPreferences(
-        AppPreferenceStores.AUDIO_EXPERIMENTS,
-        Context.MODE_PRIVATE,
-    )
-
     fun popsAndBangsGain(profileId: String): Double {
         return readGain(
             profileId = profileId,
             keySuffix = "pops_gain",
-            legacyKey = LEGACY_POPS_GAIN_KEY,
             default = EngineAudioFrame.DEFAULT_POPS_AND_BANGS_GAIN,
         )
     }
@@ -27,16 +21,15 @@ internal class CarEffectGainRepository(context: Context) {
         return saveGain(profileId, "pops_gain", gain)
     }
 
-    fun sharedShiftSoundsGain(profileId: String): Double {
+    fun shiftSoundsGain(profileId: String): Double {
         return readGain(
             profileId = profileId,
             keySuffix = "shift_gain",
-            legacyKey = LEGACY_SHIFT_GAIN_KEY,
-            default = EngineAudioFrame.DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
+            default = EngineAudioFrame.DEFAULT_SHIFT_SOUNDS_GAIN,
         )
     }
 
-    fun saveSharedShiftSoundsGain(profileId: String, gain: Double): Double {
+    fun saveShiftSoundsGain(profileId: String, gain: Double): Double {
         return saveGain(profileId, "shift_gain", gain)
     }
 
@@ -44,7 +37,6 @@ internal class CarEffectGainRepository(context: Context) {
         return readGain(
             profileId = profileId,
             keySuffix = "transmission_gain",
-            legacyKey = null,
             default = EngineAudioFrame.DEFAULT_TRANSMISSION_GAIN,
         )
     }
@@ -57,7 +49,6 @@ internal class CarEffectGainRepository(context: Context) {
         return readGain(
             profileId = profileId,
             keySuffix = "turbo_gain",
-            legacyKey = null,
             default = EngineAudioFrame.DEFAULT_TURBO_SOUNDS_GAIN,
             minimum = EngineAudioFrame.MIN_TURBO_SOUNDS_GAIN,
         )
@@ -75,20 +66,11 @@ internal class CarEffectGainRepository(context: Context) {
     private fun readGain(
         profileId: String,
         keySuffix: String,
-        legacyKey: String?,
         default: Double,
         minimum: Double = MIN,
     ): Double {
         val key = gainKey(profileId, keySuffix)
-        if (preferences.contains(key)) {
-            return preferences.getFloat(key, default.toFloat()).toDouble().coerceIn(minimum, MAX)
-        }
-
-        if (legacyKey != null && legacyPreferences.contains(legacyKey)) {
-            return legacyPreferences.getFloat(legacyKey, default.toFloat()).toDouble().coerceIn(minimum, MAX)
-        }
-
-        return default.coerceIn(minimum, MAX)
+        return preferences.getFloat(key, default.toFloat()).toDouble().coerceIn(minimum, MAX)
     }
 
     private fun saveGain(
@@ -105,17 +87,13 @@ internal class CarEffectGainRepository(context: Context) {
         return readGain(
             profileId = profileId,
             keySuffix = keySuffix,
-            legacyKey = null,
             default = clamped,
             minimum = minimum,
         )
     }
 
     private fun gainKey(profileId: String, keySuffix: String): String = "$profileId.$keySuffix"
-
     private companion object {
-        const val LEGACY_POPS_GAIN_KEY = "pops_and_bangs_gain"
-        const val LEGACY_SHIFT_GAIN_KEY = "shared_shift_sounds_gain"
         const val MIN = EngineAudioFrame.MIN_EFFECT_GAIN
         const val MAX = EngineAudioFrame.MAX_EFFECT_GAIN
     }

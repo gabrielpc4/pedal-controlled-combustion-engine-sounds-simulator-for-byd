@@ -6,13 +6,13 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.IsolatedPreferenceContext
 import com.gabrielpc.enginesoundsimulator.audio.CarEffectGainRepository
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspectiveRepository
+import com.gabrielpc.enginesoundsimulator.audio.FmodEngineLayerRole
 import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
 import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSourceRepository
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
-import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -39,7 +39,7 @@ class PersistedDrivePreferencesIntegrationTest {
         val context = isolatedContext("repository_visibility")
         val selectedCarRepository = SelectedCarRepository(context)
         val originalCar = selectedCarRepository.load()
-        val differentCar = EngineSampleProfiles.all.first { it.id != originalCar.id }
+        val differentCar = FmodBankProfiles.all.first { it.id != originalCar.id }
         val testProfileId = "instrumentation_persistence_test"
 
         try {
@@ -92,7 +92,7 @@ class PersistedDrivePreferencesIntegrationTest {
     @Test
     fun exteriorPerspectiveAndItsEngineProgramPersistIndependentlyFromCabin() {
         val context = isolatedContext("sound_program")
-        val profile = EngineSampleProfiles.default
+        val profile = FmodBankProfiles.default
         val perspectiveRepository = EngineSoundPerspectiveRepository(context)
         val sourceRepository = PrimaryEngineLayerSourceRepository(context)
         val originalPerspective = perspectiveRepository.load(profile)
@@ -127,14 +127,14 @@ class PersistedDrivePreferencesIntegrationTest {
     @Test
     fun loadAndCoastGroupGainsPersistIndependentlyForCabinAndExterior() {
         val context = isolatedContext("program_layer_gains")
-        val profile = EngineSampleProfiles.default
+        val profile = FmodBankProfiles.default
         val repository = LayerMixRepository(context)
 
         try {
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.CABIN, SampleLayerRole.LOAD, 1.5)
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.CABIN, SampleLayerRole.COAST, 0.4)
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.EXTERIOR, SampleLayerRole.LOAD, 2.5)
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.EXTERIOR, SampleLayerRole.COAST, 0.8)
+            repository.setProgramLayerGain(profile, EngineSoundPerspective.CABIN, FmodEngineLayerRole.LOAD, 1.5)
+            repository.setProgramLayerGain(profile, EngineSoundPerspective.CABIN, FmodEngineLayerRole.COAST, 0.4)
+            repository.setProgramLayerGain(profile, EngineSoundPerspective.EXTERIOR, FmodEngineLayerRole.LOAD, 2.5)
+            repository.setProgramLayerGain(profile, EngineSoundPerspective.EXTERIOR, FmodEngineLayerRole.COAST, 0.8)
 
             assertEquals(1.5, repository.loadProgramLayerGains(profile, EngineSoundPerspective.CABIN).load, 0.001)
             assertEquals(0.4, repository.loadProgramLayerGains(profile, EngineSoundPerspective.CABIN).coast, 0.001)
@@ -148,7 +148,7 @@ class PersistedDrivePreferencesIntegrationTest {
     @Test
     fun resetClearsEveryAppPreferenceStoreWithoutTouchingProductionFiles() {
         val context = isolatedContext("complete_reset")
-        val nonDefaultCar = EngineSampleProfiles.all.first { it.id != EngineSampleProfiles.default.id }
+        val nonDefaultCar = FmodBankProfiles.all.first { it.id != FmodBankProfiles.default.id }
         SelectedCarRepository(context).save(nonDefaultCar)
         DriveBehaviorRepository(context).saveLoadResponsiveRpmEnabled(true)
         DriveBehaviorRepository(context).saveThrottleRpmBumpEnabled(true)
@@ -167,7 +167,7 @@ class PersistedDrivePreferencesIntegrationTest {
 
             assertFalse(controller.snapshot().loadResponsiveRpmEnabled)
             assertFalse(controller.snapshot().throttleRpmBumpEnabled)
-            assertEquals(EngineSampleProfiles.default.id, SelectedCarRepository(context).load().id)
+            assertEquals(FmodBankProfiles.default.id, SelectedCarRepository(context).load().id)
             AppPreferenceStores.all.forEach { storeName ->
                 assertTrue(
                     "$storeName still contains preferences after reset",

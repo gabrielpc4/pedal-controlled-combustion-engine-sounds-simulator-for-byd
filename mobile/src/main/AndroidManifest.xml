@@ -23,8 +23,8 @@
         android:theme="@style/Theme.EngineSoundsSimulator"
         android:usesCleartextTraffic="false">
         <provider
-            android:name=".audio.AudioPackContentProvider"
-            android:authorities="com.gabrielpc.enginesoundsimulator.audiopacks"
+            android:name=".audio.FmodBankContentProvider"
+            android:authorities="com.gabrielpc.enginesoundsimulator.fmodbanks"
             android:exported="true"
             android:grantUriPermissions="false" />
         <activity

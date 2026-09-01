@@ -3,11 +3,14 @@ package com.gabrielpc.enginesoundsimulator.audio
 import android.content.Context
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 
-/** Chooses the continuous engine WAV program. */
-enum class PrimaryEngineLayerSource(val displayName: String) {
-    LOAD("LOAD"),
-    COAST("COAST"),
-    FMOD_MIX("BOTH"),
+/** Chooses the throttle endpoint used by the native FMOD engine event. */
+enum class PrimaryEngineLayerSource(
+    val displayName: String,
+    internal val nativeValue: Int,
+) {
+    LOAD("LOAD", 0),
+    COAST("COAST", 1),
+    BOTH("BOTH", 2),
 }
 
 internal class PrimaryEngineLayerSourceRepository(context: Context) {
@@ -17,34 +20,22 @@ internal class PrimaryEngineLayerSourceRepository(context: Context) {
     )
 
     fun load(
-        profile: EngineSampleProfile,
+        profile: FmodBankProfile,
         perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     ): PrimaryEngineLayerSource {
         val saved = preferences.getString(sourceKey(profile.id, perspective), null)
-            ?: if (perspective == EngineSoundPerspective.CABIN) {
-                preferences.getString(legacySourceKey(profile.id), null)
-            } else {
-                null
-            }
-        return profile.resolvedPrimaryLayerSource(
-            PrimaryEngineLayerSource.entries.firstOrNull { it.name == saved } ?: PrimaryEngineLayerSource.LOAD,
-            perspective,
-        )
+        return PrimaryEngineLayerSource.entries.firstOrNull { it.name == saved } ?: PrimaryEngineLayerSource.LOAD
     }
 
     fun save(
-        profile: EngineSampleProfile,
+        profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
         source: PrimaryEngineLayerSource,
     ): PrimaryEngineLayerSource {
-        val resolved = profile.resolvedPrimaryLayerSource(source, perspective)
-        preferences.edit().putString(sourceKey(profile.id, perspective), resolved.name).commit()
-        return resolved
+        preferences.edit().putString(sourceKey(profile.id, perspective), source.name).commit()
+        return source
     }
 
     private fun sourceKey(profileId: String, perspective: EngineSoundPerspective): String =
         "$profileId.${perspective.name.lowercase()}.primary_engine_layer_source"
-
-    private fun legacySourceKey(profileId: String): String = "$profileId.primary_engine_layer_source"
-
 }

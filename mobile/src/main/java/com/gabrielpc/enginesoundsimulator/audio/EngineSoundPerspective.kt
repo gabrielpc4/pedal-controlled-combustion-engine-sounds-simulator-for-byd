@@ -15,7 +15,7 @@ internal class EngineSoundPerspectiveRepository(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun load(profile: EngineSampleProfile): EngineSoundPerspective {
+    fun load(profile: FmodBankProfile): EngineSoundPerspective {
         val saved = preferences.getString(perspectiveKey(profile.id), null)
         return profile.resolvedPerspective(
             EngineSoundPerspective.entries.firstOrNull { perspective -> perspective.name == saved }
@@ -23,7 +23,7 @@ internal class EngineSoundPerspectiveRepository(context: Context) {
         )
     }
 
-    fun save(profile: EngineSampleProfile, perspective: EngineSoundPerspective): EngineSoundPerspective {
+    fun save(profile: FmodBankProfile, perspective: EngineSoundPerspective): EngineSoundPerspective {
         val resolved = profile.resolvedPerspective(perspective)
         preferences.edit().putString(perspectiveKey(profile.id), resolved.name).commit()
         return resolved

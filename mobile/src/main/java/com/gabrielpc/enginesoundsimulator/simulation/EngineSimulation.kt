@@ -1,6 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
 import com.gabrielpc.enginesoundsimulator.tuning.interpolateCurve
@@ -60,7 +60,7 @@ data class EngineProfile(
     val secondGearEarlyShiftEnabled: Boolean = true,
 ) {
     companion object {
-        private val bank = EngineSampleProfiles.default
+        private val bank = FmodBankProfiles.default
         val SAMPLE_BANK_ENGINE = EngineProfile(
             name = bank.displayName,
             idleRpm = bank.idleRpm,

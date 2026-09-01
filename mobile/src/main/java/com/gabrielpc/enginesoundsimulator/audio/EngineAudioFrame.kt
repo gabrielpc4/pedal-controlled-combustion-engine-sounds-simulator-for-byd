@@ -2,9 +2,9 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import com.gabrielpc.enginesoundsimulator.tuning.AudioTuning
 
-/** Realtime controls consumed by the sample-bank renderer. */
+/** Realtime controls consumed by the native FMOD Studio runtime. */
 data class EngineAudioFrame(
-    val rpm: Double = EngineSampleProfiles.default.idleRpm,
+    val rpm: Double = FmodBankProfiles.default.idleRpm,
     val throttle: Double = 0.0,
     val enabled: Boolean = true,
     val shiftSerial: Long = 0L,
@@ -14,15 +14,13 @@ data class EngineAudioFrame(
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** Per-perspective master trims for all continuous Load and Coast layers. */
     val programLayerGains: ProgramLayerGains = ProgramLayerGains(),
-    /** When true, mute coast layers and hold the engine program at full load while RPM still changes. */
-    val loadOnlyProgram: Boolean = true,
-    /** Recorded family used as the continuous driving engine sound for profiles that support it. */
+    /** Authored throttle endpoint(s) used by the continuous engine event. */
     val primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
-    /** When true, play the shared recorded pops on throttle lift and mute each car's native overrun. */
+    /** Enables the selected bank's authored backfire event after a deliberate throttle lift. */
     val popsAndBangsEnabled: Boolean = false,
-    /** Linear multiplier applied on top of the shared pops sample gain (default 2×). */
+    /** Linear multiplier applied to the selected bank's authored backfire event. */
     val popsAndBangsGain: Double = DEFAULT_POPS_AND_BANGS_GAIN,
-    /** False in Park/Neutral so exhaust overrun and shared pops cannot fire on a free rev. */
+    /** False in Park/Neutral so exhaust overrun cannot fire on a free rev. */
     val throttleLiftEffectsEnabled: Boolean = true,
     /** Multiplier for turbo response when the pedal is pressed; Drive uses the authored 1× rate. */
     val turboSpoolAttackMultiplier: Double = 1.0,
@@ -30,18 +28,18 @@ data class EngineAudioFrame(
     val turboSoundsEnabled: Boolean = true,
     /** Linear multiplier applied to every turbo loop, flutter, and dump sound. */
     val turboSoundsGain: Double = DEFAULT_TURBO_SOUNDS_GAIN,
-    /** When true, play Huracán shift one-shots on every car and mute native shift effects. */
-    val sharedShiftSoundsEnabled: Boolean = false,
-    /** Linear multiplier applied on top of the shared shift sample gain (default 3×). */
-    val sharedShiftSoundsGain: Double = DEFAULT_SHARED_SHIFT_SOUNDS_GAIN,
-    /** Enables each car's continuous transmission sample, when its bank provides one. */
+    /** Enables the selected bank's authored gear-shift event. */
+    val shiftSoundsEnabled: Boolean = true,
+    /** Linear multiplier applied to the selected bank's authored gear-shift event. */
+    val shiftSoundsGain: Double = DEFAULT_SHIFT_SOUNDS_GAIN,
+    /** Enables each car's continuous transmission event, when its bank provides one. */
     val transmissionEnabled: Boolean = true,
-    /** Linear multiplier applied to each car's continuous transmission sample. */
+    /** Linear multiplier applied to each car's continuous transmission event. */
     val transmissionGain: Double = DEFAULT_TRANSMISSION_GAIN,
 ) {
     companion object {
         const val DEFAULT_POPS_AND_BANGS_GAIN = 2.0
-        const val DEFAULT_SHARED_SHIFT_SOUNDS_GAIN = 3.0
+        const val DEFAULT_SHIFT_SOUNDS_GAIN = 3.0
         const val DEFAULT_TRANSMISSION_GAIN = 1.0
         const val DEFAULT_TURBO_SOUNDS_GAIN = 1.0
         const val MIN_EFFECT_GAIN = 0.5

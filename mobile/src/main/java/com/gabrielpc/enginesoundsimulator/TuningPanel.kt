@@ -53,8 +53,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
-import com.gabrielpc.enginesoundsimulator.audio.SampleLayerRole
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
+import com.gabrielpc.enginesoundsimulator.audio.mixerTracks
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
@@ -217,7 +218,7 @@ private fun EngineTab(
                     onToggle = onThrottleRpmBumpEnabledChange,
                 )
                 Spacer(Modifier.height(8.dp))
-                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..EngineSampleProfiles.maximumSupportedRpm, "%.0f RPM") {
+                ParameterSlider("TACHOMETER MAX", engine.maxRpm, 6_000.0..FmodBankProfiles.maximumSupportedRpm, "%.0f RPM") {
                     onChange(config.copy(engine = engine.copy(
                         maxRpm = it,
                         redlineRpm = min(engine.redlineRpm, it - 100.0),
@@ -300,7 +301,7 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
                 }
             }
         }
-        PanelCard("AUDIO SMOOTHING", "Small fades that keep the sample-bank output seamless", Modifier.weight(1.15f)) {
+        PanelCard("AUDIO SMOOTHING", "Small fades that keep the native FMOD output seamless", Modifier.weight(1.15f)) {
             ParameterSlider("RPM FOLLOW", audio.rpmSmoothingMs, 1.0..300.0, "%.0f ms") {
                 onChange(config.copy(audio = audio.copy(rpmSmoothingMs = it)))
             }
@@ -323,9 +324,10 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 @Composable
 private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (TuningConfig) -> Unit) {
     val audio = config.audio
-    val profile = EngineSampleProfiles.find(selectedCarId)
+    val profile = FmodBankProfiles.find(selectedCarId)
+    val authoredEventGroups = profile.mixerTracks(EngineSoundPerspective.CABIN)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        PanelCard("SAMPLE OUTPUT", "The recovered bank logic is the only engine source", Modifier.weight(0.72f)) {
+        PanelCard("FMOD OUTPUT", "The native Studio bank is the only engine source", Modifier.weight(0.72f)) {
             AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
             Spacer(Modifier.height(20.dp))
             Text("PROFILE", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
@@ -334,10 +336,10 @@ private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (Tun
             Text("NATIVE RPM DOMAIN", color = TuneMuted, fontSize = 10.sp, letterSpacing = 1.sp)
             Text("0–${profile.maximumRpm.roundToInt()} RPM · DIRECT 1:1", color = TuneCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            Text("${profile.layers.size} continuous layers · bank-authored RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("${authoredEventGroups.size} authored event groups · bank-owned RPM and throttle automation", color = TuneWhite, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        PanelCard("RPM LAYER COVERAGE", "Recovered sample regions on the bank's native parameter axis", Modifier.weight(1.85f)) {
-            SampleBankCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
+        PanelCard("FMOD EVENT COVERAGE", "Direct events active across the native RPM parameter", Modifier.weight(1.85f)) {
+            FmodEventCoverageGraph(profile.id, config.engine.redlineRpm, Modifier.fillMaxSize())
         }
     }
 }
@@ -1095,8 +1097,9 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
-    val profile = EngineSampleProfiles.find(profileId)
+private fun FmodEventCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
+    val profile = FmodBankProfiles.find(profileId)
+    val eventGroups = profile.mixerTracks(EngineSoundPerspective.CABIN)
     Canvas(modifier) {
         val left = 90f
         val right = size.width - 26f
@@ -1104,35 +1107,30 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
         val bottom = size.height - 72f
         val width = right - left
         val height = bottom - top
-        val roles = SampleLayerRole.entries
-        val laneHeight = height / roles.size
+        val laneHeight = height / eventGroups.size.coerceAtLeast(1)
 
         for (rpm in 0..profile.maximumRpm.toInt() step 1_000) {
             val x = left + width * (rpm / profile.maximumRpm).toFloat()
             drawLine(TuneLine.copy(alpha = 0.75f), Offset(x, top), Offset(x, bottom), 1f)
         }
-        roles.forEachIndexed { lane, role ->
+        eventGroups.forEachIndexed { lane, group ->
             val laneTop = top + lane * laneHeight
-            val color = when (role) {
-                SampleLayerRole.IDLE -> TuneWhite
-                SampleLayerRole.LOAD -> TuneGreen
-                SampleLayerRole.COAST -> TuneCyan
-                SampleLayerRole.TEXTURE -> TuneAmber
-                SampleLayerRole.LIMITER -> TuneRed
+            val color = when (group.id) {
+                "engine_load" -> TuneGreen
+                "engine_coast" -> TuneCyan
+                "turbo" -> TuneAmber
+                "limiter", "overrun" -> TuneRed
+                else -> TuneWhite
             }
-            profile.layers.filter { it.role == role }.forEach { layer ->
-                val x = left + width * (layer.startRpm / profile.maximumRpm).toFloat()
-                val endX = left + width * (layer.endRpm / profile.maximumRpm).toFloat()
-                val y = laneTop + laneHeight * 0.20f
-                val barHeight = laneHeight * 0.60f
+            val y = laneTop + laneHeight * 0.20f
+            val barHeight = laneHeight * 0.60f
             drawRoundRect(
-                    color = color.copy(alpha = 0.50f),
-                    topLeft = Offset(x, y),
-                    size = androidx.compose.ui.geometry.Size((endX - x).coerceAtLeast(2f), barHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f),
-                )
-                drawLine(color, Offset(x, y), Offset(x, y + barHeight), 2f)
-            }
+                color = color.copy(alpha = 0.50f),
+                topLeft = Offset(left, y),
+                size = androidx.compose.ui.geometry.Size(width, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f),
+            )
+            drawLine(color, Offset(left, y), Offset(left, y + barHeight), 2f)
             drawLine(TuneLine, Offset(left, laneTop + laneHeight), Offset(right, laneTop + laneHeight), 1f)
         }
 
@@ -1148,9 +1146,9 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
             paint.textSize = 15f
             paint.color = GRAPH_AXIS_LABEL_COLOR
             paint.textAlign = Paint.Align.RIGHT
-            roles.forEachIndexed { lane, role ->
+            eventGroups.forEachIndexed { lane, group ->
                 canvas.nativeCanvas.drawText(
-                    role.name,
+                    group.displayName,
                     left - 12f,
                     top + lane * laneHeight + laneHeight * 0.55f,
                     paint,
@@ -1166,7 +1164,7 @@ private fun SampleBankCoverageGraph(profileId: String, redlineRpm: Double, modif
             canvas.nativeCanvas.drawText("REDLINE ${currentRedline.roundToInt()}", redlineX - 122f, top - 15f, paint)
             paint.textAlign = Paint.Align.CENTER
             paint.color = GRAPH_AXIS_LABEL_COLOR
-            canvas.nativeCanvas.drawText("NATIVE BANK RPM — DIRECT 1:1", left + width / 2f, bottom + 58f, paint)
+            canvas.nativeCanvas.drawText("FMOD BANK RPM — DIRECT 1:1", left + width / 2f, bottom + 58f, paint)
         }
     }
 }

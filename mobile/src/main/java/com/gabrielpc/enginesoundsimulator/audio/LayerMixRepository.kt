@@ -9,7 +9,7 @@ internal class LayerMixRepository(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun load(profile: EngineSampleProfile): Map<String, LayerMixControl> {
+    fun load(profile: FmodBankProfile): Map<String, LayerMixControl> {
         val tracks = profile.allMixerTrackOrder().map { it.first }
         return tracks.associateWith { trackId ->
             LayerMixControl(
@@ -20,7 +20,7 @@ internal class LayerMixRepository(context: Context) {
         }
     }
 
-    fun setVolume(profile: EngineSampleProfile, trackId: String, volume: Double): Map<String, LayerMixControl> {
+    fun setVolume(profile: FmodBankProfile, trackId: String, volume: Double): Map<String, LayerMixControl> {
         preferences.edit()
             .putFloat(
                 volumeKey(profile.id, trackId),
@@ -30,14 +30,14 @@ internal class LayerMixRepository(context: Context) {
         return load(profile)
     }
 
-    fun setMuted(profile: EngineSampleProfile, trackId: String, muted: Boolean): Map<String, LayerMixControl> {
+    fun setMuted(profile: FmodBankProfile, trackId: String, muted: Boolean): Map<String, LayerMixControl> {
         preferences.edit()
             .putBoolean(muteKey(profile.id, trackId), muted)
             .commit()
         return load(profile)
     }
 
-    fun setSolo(profile: EngineSampleProfile, trackId: String, solo: Boolean): Map<String, LayerMixControl> {
+    fun setSolo(profile: FmodBankProfile, trackId: String, solo: Boolean): Map<String, LayerMixControl> {
         preferences.edit()
             .putBoolean(soloKey(profile.id, trackId), solo)
             .commit()
@@ -45,7 +45,7 @@ internal class LayerMixRepository(context: Context) {
     }
 
     fun loadProgramLayerGains(
-        profile: EngineSampleProfile,
+        profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
     ): ProgramLayerGains {
         return ProgramLayerGains(
@@ -55,15 +55,14 @@ internal class LayerMixRepository(context: Context) {
     }
 
     fun setProgramLayerGain(
-        profile: EngineSampleProfile,
+        profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
-        role: SampleLayerRole,
+        role: FmodEngineLayerRole,
         gain: Double,
     ): ProgramLayerGains {
         val key = when (role) {
-            SampleLayerRole.LOAD -> "load"
-            SampleLayerRole.COAST -> "coast"
-            else -> return loadProgramLayerGains(profile, perspective)
+            FmodEngineLayerRole.LOAD -> "load"
+            FmodEngineLayerRole.COAST -> "coast"
         }
         preferences.edit()
             .putFloat(

@@ -1,18 +1,14 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.AudioTrack
-import android.os.Build
 import android.os.Process
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
-import kotlin.math.max
+import kotlin.math.exp
 
 enum class AudioFocusEvent {
     TRANSIENT_LOSS,
@@ -21,27 +17,27 @@ enum class AudioFocusEvent {
     PERMANENT_LOSS,
 }
 
-/** Streams the stereo sample-bank program to the vehicle media route. */
+/**
+ * Drives the original Studio events from one installed FMOD bank. The control
+ * worker receives presentation RPM only, never the truncated raw vehicle speed.
+ */
 class EngineAudioEngine(context: Context) {
     private val appContext = context.applicationContext
-    private val assetResolver = EngineAudioAssetResolver(appContext)
-    private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val bankResolver = FmodBankResolver(appContext)
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val lifecycleLock = Any()
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0)
     private val parameters = AtomicReference(EngineAudioFrame())
-    private val selectedProfile = AtomicReference(EngineSampleProfiles.default)
+    private val selectedProfile = AtomicReference(FmodBankProfiles.default)
     private val soundPerspective = AtomicReference(EngineSoundPerspective.CABIN)
     private val primaryLayerSource = AtomicReference(PrimaryEngineLayerSource.LOAD)
-    private val loadedSampleProfileId = AtomicReference<String?>(null)
+    private val loadedBankProfileId = AtomicReference<String?>(null)
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
-    private val renderThread = AtomicReference<Thread?>(null)
-    private val activeTrack = AtomicReference<AudioTrack?>(null)
-
-    @Volatile
-    private var layerMeterBus: RealtimeLayerMeterBus? = null
+    private val controlThread = AtomicReference<Thread?>(null)
+    private val nativeMeters = AtomicReference<List<LayerOutputMeter>>(emptyList())
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -50,43 +46,40 @@ class EngineAudioEngine(context: Context) {
         when (change) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 if (focusHeld.get() && running.get()) {
-                    focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_GAIN)
                     focusMultiplier.set(1.0)
+                    focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_GAIN)
                 }
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_DUCK)
                 focusMultiplier.set(0.20)
+                focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_DUCK)
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_LOSS)
                 focusMultiplier.set(0.0)
+                focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_LOSS)
             }
 
             AudioManager.AUDIOFOCUS_LOSS -> {
-                focusChangeListener?.invoke(AudioFocusEvent.PERMANENT_LOSS)
                 focusMultiplier.set(0.0)
                 focusHeld.set(false)
+                focusChangeListener?.invoke(AudioFocusEvent.PERMANENT_LOSS)
                 synchronized(lifecycleLock) {
-                    if (running.get() || renderThread.get() != null) {
-                        stopLocked()
-                    }
+                    stopLocked()
                 }
             }
         }
     }
 
-    fun layerOutputMeters(): List<LayerOutputMeter> = layerMeterBus?.snapshot().orEmpty()
+    fun layerOutputMeters(): List<LayerOutputMeter> = nativeMeters.get()
 
-    fun loadedSampleProfileId(): String? = loadedSampleProfileId.get()
+    fun loadedBankProfileId(): String? = loadedBankProfileId.get()
 
-    /** Returns and clears the profile id when the most recent render loop failed before playback. */
     internal fun consumeLoadFailure(): AudioLoadFailure? = loadFailure.getAndSet(null)
 
     fun isAudioActive(): Boolean = synchronized(lifecycleLock) {
-        running.get() && renderThread.get()?.isAlive == true
+        running.get() && controlThread.get()?.isAlive == true
     }
 
     fun update(frame: EngineAudioFrame) {
@@ -99,7 +92,7 @@ class EngineAudioEngine(context: Context) {
 
     fun start() {
         synchronized(lifecycleLock) {
-            if (running.get() && renderThread.get()?.isAlive == true) return
+            if (running.get() && controlThread.get()?.isAlive == true) return
             startLocked()
         }
     }
@@ -111,214 +104,170 @@ class EngineAudioEngine(context: Context) {
     }
 
     internal fun setSoundProgram(
-        profile: EngineSampleProfile,
+        profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
         source: PrimaryEngineLayerSource,
     ) {
         synchronized(lifecycleLock) {
             val resolvedPerspective = profile.resolvedPerspective(perspective)
-            val resolvedSource = profile.resolvedPrimaryLayerSource(source, resolvedPerspective)
             val changed = selectedProfile.getAndSet(profile).id != profile.id ||
                 soundPerspective.getAndSet(resolvedPerspective) != resolvedPerspective ||
-                primaryLayerSource.getAndSet(resolvedSource) != resolvedSource
+                primaryLayerSource.getAndSet(source) != source
             if (!changed) return
-            loadedSampleProfileId.set(null)
-            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
-            if (shouldRestart && stopLocked()) startLocked()
+
+            loadedBankProfileId.set(null)
+            if (running.get() || controlThread.get()?.isAlive == true) {
+                stopLocked()
+                startLocked()
+            }
         }
     }
 
     internal fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
         synchronized(lifecycleLock) {
-            val resolved = selectedProfile.get().resolvedPrimaryLayerSource(source, soundPerspective.get())
-            if (primaryLayerSource.getAndSet(resolved) == resolved) return
-            val shouldRestart = running.get() || renderThread.get()?.isAlive == true
-            if (shouldRestart && stopLocked()) startLocked()
+            if (primaryLayerSource.getAndSet(source) == source) return
+            if (running.get() || controlThread.get()?.isAlive == true) {
+                stopLocked()
+                startLocked()
+            }
         }
     }
 
     private fun startLocked() {
-        if (
-            running.get() ||
-            renderThread.get() != null ||
-            activeTrack.get() != null ||
-            focusHeld.get()
-        ) {
-            if (!stopLocked()) return
+        if (running.get() || controlThread.get() != null || focusHeld.get()) {
+            stopLocked()
         }
 
-        val sampleProfile = selectedProfile.get()
-        val perspective = sampleProfile.resolvedPerspective(soundPerspective.get())
-        val source = sampleProfile.resolvedPrimaryLayerSource(primaryLayerSource.get(), perspective)
-        layerMeterBus = null
-        focusMultiplier.set(0.0)
-        val focusResult = runCatching { requestFocus() }
-        val focusGranted = focusResult.getOrDefault(false)
+        val profile = selectedProfile.get()
+        val focusGranted = runCatching(::requestFocus).getOrDefault(false)
         if (!focusGranted) {
-            running.set(false)
-            reportLoadFailure(
-                sampleProfile.id,
-                focusResult.exceptionOrNull()?.message ?: "Audio focus was not granted by the system.",
-            )
+            reportLoadFailure(profile.id, "Audio focus was not granted by the system.")
             return
         }
 
         focusHeld.set(true)
         focusMultiplier.set(1.0)
+        nativeMeters.set(emptyList())
         loadFailure.set(null)
         running.set(true)
         val runId = generation.incrementAndGet()
-        val thread = Thread({ renderLoop(runId, sampleProfile, perspective, source) }, "engine-audio-renderer").apply { isDaemon = true }
-        renderThread.set(thread)
-        try {
-            thread.start()
-        } catch (throwable: Throwable) {
-            renderThread.compareAndSet(thread, null)
+        val perspective = profile.resolvedPerspective(soundPerspective.get())
+        val source = primaryLayerSource.get()
+        val thread = Thread(
+            { controlLoop(runId, profile, perspective, source) },
+            "fmod-bank-control",
+        ).apply { isDaemon = true }
+        controlThread.set(thread)
+        runCatching(thread::start).onFailure {
+            controlThread.compareAndSet(thread, null)
             running.set(false)
             focusMultiplier.set(0.0)
-            reportLoadFailure(sampleProfile.id, "Could not start the audio renderer thread.")
+            reportLoadFailure(profile.id, "Could not start the FMOD control worker.")
             abandonFocusIfHeld()
         }
     }
 
     /** Must be called with [lifecycleLock] held. */
-    private fun stopLocked(): Boolean {
+    private fun stopLocked() {
         running.set(false)
         generation.incrementAndGet()
-
-        val thread = renderThread.get()
-        val track = activeTrack.get()
-        unblockTrack(track)
+        val thread = controlThread.get()
         thread?.interrupt()
-
-        var stopped = thread == null || !thread.isAlive
-        val liveThread = thread?.takeIf { it.isAlive }
-        if (!stopped && liveThread != null && liveThread !== Thread.currentThread()) {
-            stopped = joinThread(liveThread, RENDER_JOIN_TIMEOUT_MS)
-            if (!stopped) {
-                // A vendor AudioTrack implementation may ignore interrupt/pause while write() blocks.
-                // Release is the last-resort unblock, and the renderer's duplicate release is guarded.
-                activeTrack.compareAndSet(track, null)
-                runCatching { track?.release() }
-                liveThread.interrupt()
-                stopped = joinThread(liveThread, RENDER_FORCE_RELEASE_JOIN_MS)
-            }
+        if (thread != null && thread !== Thread.currentThread()) {
+            joinThread(thread, CONTROL_JOIN_TIMEOUT_MS)
         }
-        if (stopped && track != null && activeTrack.compareAndSet(track, null)) {
-            releaseTrack(track)
+        if (thread == null || !thread.isAlive) {
+            controlThread.compareAndSet(thread, null)
         }
-        if (stopped) renderThread.compareAndSet(thread, null)
-
+        loadedBankProfileId.set(null)
+        nativeMeters.set(emptyList())
         focusMultiplier.set(0.0)
-        layerMeterBus = null
-        loadedSampleProfileId.set(null)
         abandonFocusIfHeld()
-        return stopped
     }
 
-    private fun renderLoop(
+    private fun controlLoop(
         runId: Long,
-        sampleProfile: EngineSampleProfile,
+        profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
         source: PrimaryEngineLayerSource,
     ) {
-        var opened: OpenedTrack? = null
+        val bridge = NativeFmodBankBridge()
+        val smoother = FmodControlSmoother(profile.idleRpm)
+        val turbo = TurboSpoolModel()
+        val overrun = FmodOverrunTrigger()
+        var opened = false
+        var lastTickNanos = System.nanoTime()
 
         try {
-            // Profiles normally match their authored rate. Huracan is rendered app-side to the
-            // BYD route's native 48 kHz so its 44.1 kHz bank never enters the vendor resampler.
-            val sampleRate = sampleProfile.playbackSampleRate
-            val sampleRenderer = try {
-                SampleEngineRenderer.load(
-                    assetResolver.sourceFor(sampleProfile),
-                    sampleRate,
-                    sampleProfile,
-                    perspective = perspective,
-                    loadOnlyProgram = true,
-                    primaryLayerSource = source,
-                )
-            } catch (throwable: Throwable) {
-                Log.e(TAG, "Failed to decode ${sampleProfile.id} sample bank", throwable)
-                reportLoadFailure(sampleProfile.id, formatLoadFailureDetail(throwable))
+            org.fmod.FMOD.init(appContext)
+            val bankFiles = bankResolver.bankFiles(profile)
+            val startupError = bridge.open(
+                commonStringsBankPath = bankFiles.commonStrings.absolutePath,
+                commonBankPath = bankFiles.common.absolutePath,
+                carBankPath = bankFiles.car.absolutePath,
+                perspective = perspective.ordinal,
+                source = source.nativeValue,
+            )
+            if (startupError != null) {
+                reportLoadFailure(profile.id, startupError)
                 return
             }
-            // Exercise decode/mix/resampling code before AudioTrack starts so first-use class
-            // loading and JIT work cannot starve the newly opened output buffer.
-            val warmup = ShortArray(512)
-            repeat(3) { sampleRenderer.render(parameters.get(), warmup, gain = 0.0) }
-            if (!isCurrent(runId)) return
+            opened = true
+            loadedBankProfileId.set(profile.id)
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-            val active = openTrack(sampleRate)
-            if (active == null) {
-                Log.e(TAG, "AudioTrack failed to initialize for ${sampleProfile.id} at ${sampleRate}Hz")
-                reportLoadFailure(
-                    sampleProfile.id,
-                    "Audio output could not be opened at ${sampleRate} Hz.",
-                )
-                return
-            }
-            opened = active
-            if (!activeTrack.compareAndSet(null, active.track)) {
-                throw IllegalStateException("another AudioTrack is still active")
-            }
-            if (!isCurrent(runId)) return
 
-            active.track.play()
-            if (active.track.playState != AudioTrack.PLAYSTATE_PLAYING) {
-                throw IllegalStateException("AudioTrack did not enter PLAYING state")
-            }
-            loadedSampleProfileId.set(sampleProfile.id)
-
-            val track = active.track
-            val stereoProgram = ShortArray(active.framesPerWrite * STEREO_CHANNEL_COUNT)
-            var writes = 0
-            var lastUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0
-            var effectiveBufferFrames = if (Build.VERSION.SDK_INT >= 24) {
-                track.bufferSizeInFrames
-            } else {
-                active.capacityFrames
-            }
-            val meterBus = RealtimeLayerMeterBus(sampleRenderer.meterTrackIds)
-            layerMeterBus = meterBus
             while (isCurrent(runId)) {
+                val now = System.nanoTime()
+                val dt = ((now - lastTickNanos).coerceAtLeast(1L) / 1_000_000_000.0)
+                    .coerceIn(MIN_CONTROL_STEP_SECONDS, MAX_CONTROL_STEP_SECONDS)
+                lastTickNanos = now
+
                 val frame = parameters.get()
-                sampleRenderer.render(frame, stereoProgram, focusMultiplier.get())
-                if (!writeFully(track, stereoProgram, runId)) break
-                writes += 1
-                if (writes % METER_PUBLISH_WRITE_INTERVAL == 0) {
-                    meterBus.publish(sampleRenderer, frame)
+                val controls = smoother.advance(frame, dt)
+                turbo.update(
+                    dt = dt,
+                    rpm = controls.rpm,
+                    throttle = controls.throttle,
+                    attackMultiplier = frame.turboSpoolAttackMultiplier,
+                )
+                val triggerOverrun = overrun.update(frame, controls.throttle, dt)
+                val gains = FmodEventGains.from(frame, focusMultiplier.get())
+                val error = bridge.update(
+                    rpm = controls.rpm.toFloat(),
+                    throttle = controls.throttle.toFloat(),
+                    masterGain = gains.master.toFloat(),
+                    loadGain = gains.load.toFloat(),
+                    coastGain = gains.coast.toFloat(),
+                    transmissionGain = gains.transmission.toFloat(),
+                    turboGain = gains.turbo.toFloat(),
+                    limiterGain = gains.limiter.toFloat(),
+                    shiftGain = gains.shift.toFloat(),
+                    overrunGain = gains.overrun.toFloat(),
+                    boost = turbo.boost.toFloat(),
+                    bovDecay = turbo.bovDecay.toFloat(),
+                    shiftSerial = frame.shiftSerial,
+                    shiftDirection = frame.shiftDirection,
+                    triggerOverrun = triggerOverrun,
+                )
+                if (error != null) {
+                    reportLoadFailure(profile.id, error)
+                    return
                 }
-                if (writes % UNDERRUN_CHECK_WRITE_INTERVAL == 0) {
-                    val currentUnderruns = if (Build.VERSION.SDK_INT >= 24) track.underrunCount else 0
-                    if (Build.VERSION.SDK_INT >= 24 && currentUnderruns > lastUnderruns) {
-                        val requestedFrames = (effectiveBufferFrames + active.framesPerWrite)
-                            .coerceAtMost(active.capacityFrames)
-                        if (requestedFrames > effectiveBufferFrames) {
-                            val appliedFrames = runCatching {
-                                track.setBufferSizeInFrames(requestedFrames)
-                            }.getOrDefault(effectiveBufferFrames)
-                            if (appliedFrames > 0) effectiveBufferFrames = appliedFrames
-                        }
-                    }
-                    lastUnderruns = currentUnderruns
-                }
+                nativeMeters.set(gains.toMeters(source))
+                sleepUntilNextControlTick(now)
             }
         } catch (throwable: Throwable) {
-            Log.e(TAG, "Engine audio render loop stopped for ${sampleProfile.id}", throwable)
-            if (loadedSampleProfileId.get() != sampleProfile.id) {
-                reportLoadFailure(sampleProfile.id, formatLoadFailureDetail(throwable))
-            }
+            Log.e(TAG, "FMOD bank control stopped for ${profile.id}", throwable)
+            reportLoadFailure(profile.id, throwable.message ?: throwable::class.java.simpleName)
         } finally {
-            loadedSampleProfileId.set(null)
-            opened?.track?.let { track ->
-                activeTrack.compareAndSet(track, null)
-                releaseTrack(track)
-            }
-            renderThread.compareAndSet(Thread.currentThread(), null)
+            loadedBankProfileId.set(null)
+            if (opened) bridge.close()
+            runCatching { org.fmod.FMOD.close() }
+            nativeMeters.set(emptyList())
+            controlThread.compareAndSet(Thread.currentThread(), null)
             if (generation.get() == runId) {
                 running.set(false)
                 focusMultiplier.set(0.0)
-                layerMeterBus = null
                 abandonFocusIfHeld()
             }
         }
@@ -326,101 +275,12 @@ class EngineAudioEngine(context: Context) {
 
     private fun isCurrent(runId: Long): Boolean = running.get() && generation.get() == runId
 
-    private fun openTrack(sampleRate: Int): OpenedTrack? {
-        val minBytes = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_STEREO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        if (minBytes <= 0) return null
-
-        val framesPerBurst = audioManager
-            .getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
-            ?.toIntOrNull()
-            ?.coerceIn(64, 2_048)
-            ?: 256
-        val bytesPerFrame = STEREO_CHANNEL_COUNT * Short.SIZE_BYTES
-        val minimumFrames = (minBytes + bytesPerFrame - 1) / bytesPerFrame
-        val capacityFrames = max(minimumFrames, framesPerBurst * 4)
-
-        val attributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .build()
-        val format = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(sampleRate)
-            .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-            .build()
-        val builder = AudioTrack.Builder()
-            .setAudioAttributes(attributes)
-            .setAudioFormat(format)
-            .setBufferSizeInBytes(capacityFrames * bytesPerFrame)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-        if (Build.VERSION.SDK_INT >= 26) {
-            builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+    private fun sleepUntilNextControlTick(tickStartedNanos: Long) {
+        val elapsed = System.nanoTime() - tickStartedNanos
+        val remaining = CONTROL_PERIOD_NANOS - elapsed
+        if (remaining > 0L) {
+            LockSupport.parkNanos(remaining)
         }
-        val track = builder.build()
-        if (track.state != AudioTrack.STATE_INITIALIZED) {
-            track.release()
-            return null
-        }
-        if (Build.VERSION.SDK_INT >= 24) {
-            runCatching { track.setBufferSizeInFrames(max(framesPerBurst * 2, minimumFrames)) }
-        }
-        return OpenedTrack(
-            track = track,
-            framesPerWrite = framesPerBurst,
-            capacityFrames = capacityFrames,
-        )
-    }
-
-    private fun writeFully(track: AudioTrack, samples: ShortArray, runId: Long): Boolean {
-        var offset = 0
-        var consecutiveEmptyWrites = 0
-        while (offset < samples.size && isCurrent(runId)) {
-            val written = track.write(
-                samples,
-                offset,
-                samples.size - offset,
-                AudioTrack.WRITE_NON_BLOCKING,
-            )
-            if (written < 0) throw IllegalStateException("AudioTrack.write returned $written")
-            if (written == 0) {
-                consecutiveEmptyWrites += 1
-                if (consecutiveEmptyWrites >= MAX_CONSECUTIVE_EMPTY_WRITES) {
-                    throw IllegalStateException("AudioTrack.write made no progress")
-                }
-                // Some vehicle routes reject a full write transiently even after play(). Avoid
-                // blocking the renderer forever; wait briefly for the output buffer to drain.
-                LockSupport.parkNanos(EMPTY_WRITE_RETRY_NANOS)
-                continue
-            }
-            consecutiveEmptyWrites = 0
-            offset += written
-        }
-        return offset == samples.size
-    }
-
-    private fun unblockTrack(track: AudioTrack?) {
-        if (track == null) return
-        runCatching { track.pause() }
-        runCatching { track.flush() }
-        runCatching { track.stop() }
-    }
-
-    private fun releaseTrack(track: AudioTrack) {
-        unblockTrack(track)
-        runCatching { track.release() }
-    }
-
-    private fun joinThread(thread: Thread, timeoutMs: Long): Boolean {
-        try {
-            thread.join(timeoutMs)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        }
-        return !thread.isAlive
     }
 
     @Suppress("DEPRECATION")
@@ -438,33 +298,134 @@ class EngineAudioEngine(context: Context) {
         }
     }
 
-    private data class OpenedTrack(
-        val track: AudioTrack,
-        val framesPerWrite: Int,
-        val capacityFrames: Int,
-    )
+    private fun joinThread(thread: Thread, timeoutMs: Long) {
+        try {
+            thread.join(timeoutMs)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
 
     private fun reportLoadFailure(profileId: String, detail: String) {
         loadFailure.set(AudioLoadFailure(profileId, detail))
     }
 
-    private fun formatLoadFailureDetail(throwable: Throwable): String {
-        val message = throwable.message?.trim().orEmpty()
-        if (message.isNotEmpty()) {
-            return message
+    private companion object {
+        const val TAG = "EngineAudioEngine"
+        const val CONTROL_PERIOD_NANOS = 4_000_000L
+        const val CONTROL_JOIN_TIMEOUT_MS = 1_000L
+        const val MIN_CONTROL_STEP_SECONDS = 1.0 / 1_000.0
+        const val MAX_CONTROL_STEP_SECONDS = 0.040
+    }
+}
+
+/**
+ * Smooths only presentation values already produced by EngineSimulation. It
+ * never sees raw km/h, so a whole-km/h telemetry edge cannot become an FMOD
+ * parameter step.
+ */
+internal class FmodControlSmoother(initialRpm: Double) {
+    private var rpm = initialRpm
+    private var throttle = 0.0
+
+    fun advance(frame: EngineAudioFrame, dt: Double): FmodControlValues {
+        val tuning = frame.tuning.sanitized()
+        rpm = follow(rpm, frame.rpm.coerceAtLeast(0.0), tuning.rpmSmoothingMs, dt)
+        throttle = follow(throttle, frame.throttle.coerceIn(0.0, 1.0), tuning.throttleSmoothingMs, dt)
+        return FmodControlValues(rpm = rpm, throttle = throttle)
+    }
+
+    private fun follow(current: Double, target: Double, timeMs: Double, dt: Double): Double {
+        val timeSeconds = (timeMs / 1_000.0).coerceAtLeast(0.001)
+        val fraction = 1.0 - exp(-dt / timeSeconds)
+        return current + (target - current) * fraction
+    }
+}
+
+internal data class FmodControlValues(
+    val rpm: Double,
+    val throttle: Double,
+)
+
+/** A native-bank backfire needs a deliberate pull, then a meaningful lift. */
+private class FmodOverrunTrigger {
+    private var accumulatedThrottleSeconds = 0.0
+    private var previousThrottle = 0.0
+
+    fun update(frame: EngineAudioFrame, throttle: Double, dt: Double): Boolean {
+        if (throttle >= MINIMUM_SERIOUS_THROTTLE) {
+            accumulatedThrottleSeconds = (accumulatedThrottleSeconds + dt).coerceAtMost(MAX_CHARGE_SECONDS)
+        } else {
+            accumulatedThrottleSeconds = (accumulatedThrottleSeconds - dt * CHARGE_DECAY_PER_SECOND).coerceAtLeast(0.0)
         }
-        return throwable::class.java.simpleName
+
+        val triggered = frame.popsAndBangsEnabled &&
+            frame.throttleLiftEffectsEnabled &&
+            accumulatedThrottleSeconds >= REQUIRED_CHARGE_SECONDS &&
+            previousThrottle - throttle >= REQUIRED_LIFT_DROP
+        if (triggered) {
+            accumulatedThrottleSeconds = 0.0
+        }
+        previousThrottle = throttle
+        return triggered
     }
 
     private companion object {
-        const val TAG = "EngineAudioEngine"
-        const val RENDER_JOIN_TIMEOUT_MS = 750L
-        const val RENDER_FORCE_RELEASE_JOIN_MS = 250L
-        const val METER_PUBLISH_WRITE_INTERVAL = 3
-        const val UNDERRUN_CHECK_WRITE_INTERVAL = 12
-        const val STEREO_CHANNEL_COUNT = 2
-        const val EMPTY_WRITE_RETRY_NANOS = 1_000_000L
-        const val MAX_CONSECUTIVE_EMPTY_WRITES = 2_000
+        const val MINIMUM_SERIOUS_THROTTLE = 0.40
+        const val REQUIRED_CHARGE_SECONDS = 1.0
+        const val CHARGE_DECAY_PER_SECOND = 0.30
+        const val MAX_CHARGE_SECONDS = 2.0
+        const val REQUIRED_LIFT_DROP = 0.20
+    }
+}
+
+private data class FmodEventGains(
+    val master: Double,
+    val load: Double,
+    val coast: Double,
+    val transmission: Double,
+    val turbo: Double,
+    val limiter: Double,
+    val shift: Double,
+    val overrun: Double,
+) {
+    fun toMeters(source: PrimaryEngineLayerSource): List<LayerOutputMeter> = listOf(
+        LayerOutputMeter("engine_load", if (source == PrimaryEngineLayerSource.COAST) 0.0 else (master * load).coerceIn(0.0, 1.0)),
+        LayerOutputMeter("engine_coast", if (source == PrimaryEngineLayerSource.LOAD) 0.0 else (master * coast).coerceIn(0.0, 1.0)),
+        LayerOutputMeter("transmission", (master * transmission).coerceIn(0.0, 1.0)),
+        LayerOutputMeter("turbo", (master * turbo).coerceIn(0.0, 1.0)),
+        LayerOutputMeter("limiter", (master * limiter).coerceIn(0.0, 1.0)),
+        LayerOutputMeter("gear", (master * shift).coerceIn(0.0, 1.0)),
+        LayerOutputMeter("overrun", (master * overrun).coerceIn(0.0, 1.0)),
+    )
+
+    companion object {
+        fun from(frame: EngineAudioFrame, focusGain: Double): FmodEventGains {
+            val mix = FmodMixControls(frame.layerMix)
+            val enabled = if (frame.enabled) 1.0 else 0.0
+            val master = (frame.tuning.masterGain * focusGain * enabled).coerceIn(0.0, 1.2)
+            val programGains = frame.programLayerGains.sanitized()
+            return FmodEventGains(
+                master = master,
+                load = mix.gain("engine_load") * programGains.load,
+                coast = mix.gain("engine_coast") * programGains.coast,
+                transmission = if (frame.transmissionEnabled) mix.gain("transmission") * frame.transmissionGain else 0.0,
+                turbo = if (frame.turboSoundsEnabled) mix.gain("turbo") * frame.turboSoundsGain else 0.0,
+                limiter = mix.gain("limiter"),
+                shift = if (frame.shiftSoundsEnabled) mix.gain("gear") * frame.shiftSoundsGain else 0.0,
+                overrun = if (frame.popsAndBangsEnabled) mix.gain("overrun") * frame.popsAndBangsGain else 0.0,
+            )
+        }
+    }
+}
+
+private class FmodMixControls(private val controls: Map<String, LayerMixControl>) {
+    private val hasSolo = controls.values.any(LayerMixControl::solo)
+
+    fun gain(id: String): Double {
+        val control = controls[id] ?: LayerMixControl.DEFAULT
+        if (control.muted || (hasSolo && !control.solo)) return 0.0
+        return control.volume.coerceIn(LayerMixControl.MIN_GAIN_MULTIPLIER, LayerMixControl.MAX_GAIN_MULTIPLIER)
     }
 }
 
