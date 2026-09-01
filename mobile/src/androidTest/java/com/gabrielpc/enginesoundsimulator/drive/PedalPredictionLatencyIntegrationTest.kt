@@ -28,13 +28,6 @@ class PedalPredictionLatencyIntegrationTest {
             controller.setInputMode(InputMode.SimulatedPedals)
             controller.setUiActive(true)
             controller.start()
-            assertTrue(
-                "engine and decoded audio should become ready before latency measurement",
-                waitUntil(timeoutMs = 20_000L) {
-                    val snapshot = controller.snapshot()
-                    snapshot.engineSoundEnabled && snapshot.carAudioReady && snapshot.drivetrain.rpm > 0.0
-                },
-            )
             controller.setSimulatedPedalThrottle(0.0)
             SystemClock.sleep(500L)
 

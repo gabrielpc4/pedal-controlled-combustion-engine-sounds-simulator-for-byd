@@ -4,16 +4,19 @@ import android.app.Application
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 
 class EngineSoundsApplication : Application() {
-    lateinit var driveController: DriveController
-        private set
+    @Volatile
+    private var controller: DriveController? = null
+
+    val driveController: DriveController
+        get() {
+            controller?.let { return it }
+            return synchronized(this) {
+                controller ?: DriveController(this).also { created -> controller = created }
+            }
+        }
 
     @Volatile
     private var engineShutdown = false
-
-    override fun onCreate() {
-        super.onCreate()
-        driveController = DriveController(this)
-    }
 
     fun shutdownEngine() {
         if (engineShutdown) {
@@ -21,7 +24,7 @@ class EngineSoundsApplication : Application() {
         }
 
         engineShutdown = true
-        driveController.stop()
+        controller?.stop()
         stopService(EngineRuntimeService.stopIntent(this))
     }
 }

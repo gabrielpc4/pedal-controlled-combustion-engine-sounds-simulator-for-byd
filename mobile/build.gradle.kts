@@ -44,150 +44,21 @@ fun gitShortShaFromFiles(rootDir: File): String {
 val gitSha = gitShortShaFromFiles(rootProject.projectDir)
 val buildTimeUtc: String = Instant.now().toString()
 
-data class LocalEngineProfileAssets(
-    val assetDirectory: String,
-    val sourceDirectory: File,
-    val assetNames: List<String>,
-    val previewSource: File,
-    val previewAssetName: String,
-)
-
-val localEngineProfiles = listOf(
-    LocalEngineProfileAssets(
-        assetDirectory = "lamborghini_huracan_trofeo_evo2",
-        sourceDirectory = rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted"),
-        assetNames = listOf(
-            "s010_hur_n1_high.wav", "s031_hur_high_l1.wav", "s032_hur_l2a.wav",
-            "s037_hur_idle_noise.wav", "s038_hur_high_l3.wav", "s039_hur_c1.wav",
-            "s044_hur_l3.wav", "s049_eng_noise9_high.wav", "s059_hur_c2.wav",
-            "s061_hur_n_up.wav", "s065_hur_l5.wav", "s073_hur_lim.wav",
-            "s077_eng_noise7.wav", "s078_hur_idle_low.wav", "s081_hur_high_l2a.wav",
-            "s089_hur_n2.wav", "s093_hur_c4.wav", "s113_hur_l1.wav",
-            "s117_hur_l4h.wav", "s126_amrgt3_sine.wav", "s127_hur_l4.wav",
-            "s134_hur_c3.wav", "s139_hur_l6.wav", "s149_hur_l4l.wav",
-            "fx_transmission.wav", "fx_shift_up.wav", "fx_shift_down.wav",
-        ),
-        previewSource = rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/preview1.jpg"),
-        previewAssetName = "lamborghini_huracan_trofeo_evo2.jpg",
-    ),
-    LocalEngineProfileAssets(
-        assetDirectory = "lamborghini_aventador_sv",
-        sourceDirectory = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted"),
-        assetNames = listOf(
-            "aventadorintidle.wav",
-            "aventadorintaccf2825.wav", "aventadorintaccf3685.wav",
-            "aventadorintacc5250.wav", "aventadorintacc5600.wav", "aventadorintacc6000.wav",
-            "aventadorintacc6501.wav", "aventadorintacc7103.wav", "aventadorintacc7592.wav",
-            "aventadorintacc8294.wav",
-            "aventadorintoff3165.wav", "aventadorintoff4309.wav", "aventadorintoff5853.wav",
-            "aventadorintoff6300.wav", "aventadorintoff7200.wav", "aventadorintoff8373.wav",
-            "transmission.wav", "GEAR_CHANGING_CABIN.wav",
-        ),
-        previewSource = rootProject.file("audio_samples/tr_lamborghini_aventador_sv/preview1.jpg"),
-        previewAssetName = "lamborghini_aventador_sv.jpg",
-    ),
-    LocalEngineProfileAssets(
-        assetDirectory = "nissan_skyline_r34",
-        sourceDirectory = rootProject.file("audio_samples/fx_nissan_skyline_r34/converted"),
-        assetNames = listOf(
-            "rb26_4_ex_idle.wav",
-            "rb26_2_in_on_verylow.wav",
-            "rb26_in_2_onverylow.wav",
-            "rb26_2_in_on_verylow2.wav",
-            "rb26_2_in_on_low3.wav",
-            "rb26_in_2_onlow.wav",
-            "rb26_in_2_onmid.wav",
-            "rb26_2_in_on_mid3.wav",
-            "rb26_in_2_onmid2.wav",
-            "rb26_in_2_onhigh.wav",
-            "rb26_in_on_high2.wav",
-            "rb26_in_2_onhigh2.wav",
-            "rb26_in_on_veryhigh.wav",
-            "rb26_4_ex_off_verylow.wav",
-            "rb26_ex_5_offverylow.wav",
-            "rb26_ex_5_offlow.wav",
-            "rb26_ex_5_offmid.wav",
-            "rb26_3_revlim_EQ.wav",
-            "s1_turbo.wav",
-            "flutter_4.wav",
-            "rb26_bf1.wav",
-            "rb26_bf2.wav",
-            "sin5.wav",
-            "gearup.wav",
-            "gearupEXT.wav",
-            "geardnEXT.wav",
-            "missgear.wav",
-            "RB26DET_pop_1.wav",
-            "RB26DET_pop_2.wav",
-            "RB26DET_pop_3.wav",
-            "rb26_pop1.wav",
-            "rb26_pop2.wav",
-            "s1_pop.wav",
-        ),
-        previewSource = rootProject.file("audio_samples/fx_nissan_skyline_r34/preview1.jpg"),
-        previewAssetName = "nissan_skyline_r34.jpg",
-    ),
-)
-val generatedSampleEngineAssets = file("build/generated/sampleEngineAssets")
-val prepareSampleEngineAssets = tasks.register<Sync>("prepareSampleEngineAssets") {
-    localEngineProfiles.forEach { profile ->
-        from(profile.sourceDirectory) {
-            include(profile.assetNames)
-            into("sample_engine/${profile.assetDirectory}")
-        }
-        from(profile.previewSource) {
-            rename { profile.previewAssetName }
-            into("car_previews")
+val generatedPreviewAssets = file("build/generated/carPreviewAssets")
+val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
+    listOf(
+        rootProject.file("../original_cars"),
+        rootProject.file("../new_cars"),
+    ).filter(File::isDirectory).forEach { sourceRoot ->
+        from(sourceRoot) {
+            include("*/preview1.jpg")
+            eachFile {
+                path = "car_previews/${file.parentFile.name}.jpg"
+            }
+            includeEmptyDirs = false
         }
     }
-    // The Huracán bank supplies this explicitly named exterior idle loop separately from the
-    // reconstructed interior event. It replaces only the idle layer; driving layers remain
-    // the recovered cabin program.
-    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted_exterior")) {
-        include(
-            "s009_ex_l3.wav",
-            "s013_ex_idle.wav",
-            "s016_ex_c2.wav",
-            "s042_ex_l6.wav",
-            "s058_ex_c1e.wav",
-            "s083_ex_c6.wav",
-            "s088_ex_l1b.wav",
-            "s123_ex_l4.wav",
-            "s131_ex_l5.wav",
-            "s136_ex_l2a_far.wav",
-            "s138_ex_c4.wav",
-            "s145_ex_c3.wav",
-        )
-        into("sample_engine/lamborghini_huracan_trofeo_evo2")
-    }
-    from(rootProject.file("audio_samples/tr_lamborghini_aventador_sv/converted_exterior")) {
-        include(
-            "ex_aventador_idle.wav",
-            "ex_aventador_onlow.wav",
-            "ex_aventador_onmid.wav",
-            "ex_aventador_onmidhigh.wav",
-            "ex_aventador_onhigh.wav",
-            "ex_aventador_onveryhigh.wav",
-            "ex_aventador_offverylow.wav",
-            "ex_aventador_offmid.wav",
-            "ex_aventador_offveryhigh.wav",
-        )
-        into("sample_engine/lamborghini_aventador_sv")
-    }
-    from(rootProject.file("reference/alfa_romeo_4c_exhaust_effects/01_backfire_internal")) {
-        include(
-            "backfire_1.wav",
-            "backfire_2.wav",
-            "backfire_3.wav",
-            "backfire_4.wav",
-        )
-        into("sample_engine/shared/pops_and_bangs")
-    }
-    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted")) {
-        include("fx_shift_up.wav", "fx_shift_down.wav")
-        into("sample_engine/shared/huracan_shift_sounds")
-    }
-    into(generatedSampleEngineAssets)
+    into(generatedPreviewAssets)
 }
 
 if (isAssembling && stampCarBuild) {
@@ -208,7 +79,7 @@ if (isAssembling && stampCarBuild) {
 }
 
 tasks.named("preBuild").configure {
-    dependsOn(prepareSampleEngineAssets)
+    dependsOn(prepareCarPreviewAssets)
 }
 
 android {
@@ -248,7 +119,7 @@ android {
         compose = true
         buildConfig = true
     }
-    sourceSets.getByName("main").assets.srcDir(generatedSampleEngineAssets)
+    sourceSets.getByName("main").assets.srcDir(generatedPreviewAssets)
     lint {
         // This APK is intentionally sideloaded on a BYD DiLink head unit. Target 25 is a
         // compatibility requirement for its vendor framework, not a Google Play configuration.

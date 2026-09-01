@@ -103,7 +103,7 @@ internal fun huracanTrofeoEvo2Profile(): EngineSampleProfile {
         id = "lamborghini_huracan_trofeo_evo2_cabin",
         displayName = "Lamborghini Huracán Super Trofeo EVO2",
         assetDirectory = "lamborghini_huracan_trofeo_evo2",
-        previewAssetName = "car_previews/lamborghini_huracan_trofeo_evo2.jpg",
+        previewAssetName = "car_previews/lamborghini-huracan-trofeo-evo2.jpg",
         outputSampleRate = 44_100,
         playbackSampleRate = 48_000,
         minimumRpm = 0.0,

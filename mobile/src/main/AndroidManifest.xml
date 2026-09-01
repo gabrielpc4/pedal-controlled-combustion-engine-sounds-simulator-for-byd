@@ -22,6 +22,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.EngineSoundsSimulator"
         android:usesCleartextTraffic="false">
+        <provider
+            android:name=".audio.AudioPackContentProvider"
+            android:authorities="com.gabrielpc.enginesoundsimulator.audiopacks"
+            android:exported="true"
+            android:grantUriPermissions="false" />
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"

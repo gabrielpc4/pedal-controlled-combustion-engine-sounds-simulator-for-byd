@@ -4,7 +4,7 @@ internal fun lamborghiniAventadorSvProfile() = bandProfile(
     id = "lamborghini_aventador_sv_cabin",
     displayName = "Lamborghini Aventador SV",
     assetDirectory = "lamborghini_aventador_sv",
-    preview = "car_previews/lamborghini_aventador_sv.jpg",
+    preview = "car_previews/lamborghini-aventador-sv.jpg",
     outputSampleRate = 48_000,
     idleRpm = 1_000.0,
     maximumRpm = 9_200.0,
@@ -54,7 +54,7 @@ internal fun nissanSkylineR34Profile() = EngineSampleProfile(
     id = "nissan_skyline_r34_cabin",
     displayName = "Nissan Skyline GT-R R34",
     assetDirectory = "nissan_skyline_r34",
-    previewAssetName = "car_previews/nissan_skyline_r34.jpg",
+    previewAssetName = "car_previews/nissan-skyline-gt-r34-v-spec.jpg",
     outputSampleRate = 44_100,
     minimumRpm = 0.0,
     maximumRpm = 8_500.0,
@@ -502,9 +502,9 @@ private fun skylineLayer(
 
 private fun fmodCurve(vararg points: CurvePoint) = AutomationCurve(points.toList())
 
-private data class RootedSample(val asset: String, val rpm: Double, val gainDb: Double = 0.0)
+internal data class RootedSample(val asset: String, val rpm: Double, val gainDb: Double = 0.0)
 
-private fun bandProfile(
+internal fun bandProfile(
     id: String,
     displayName: String,
     assetDirectory: String,

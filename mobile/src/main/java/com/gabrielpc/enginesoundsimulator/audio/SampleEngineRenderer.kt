@@ -1,6 +1,5 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-import android.content.res.AssetManager
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
@@ -900,7 +899,7 @@ internal class SampleEngineRenderer private constructor(
 
     companion object {
         fun load(
-            assetManager: AssetManager,
+            assetSource: AudioAssetSource,
             outputSampleRate: Int,
             profile: EngineSampleProfile = EngineSampleProfiles.default,
             perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
@@ -915,7 +914,7 @@ internal class SampleEngineRenderer private constructor(
             }
             val decoded = assetsToLoad.associateWith { assetName ->
                 val path = "sample_engine/${profile.assetDirectory}/$assetName"
-                assetManager.open(path, AssetManager.ACCESS_STREAMING).use(WavPcmDecoder::decode)
+                assetSource.open(path).use(WavPcmDecoder::decode)
             }
             val voices = if (profile.appliesLoadOnlyProgram(loadOnlyProgram, perspective)) {
                 profile.loopLayersForPrimarySource(primaryLayerSource, perspective)
@@ -931,17 +930,15 @@ internal class SampleEngineRenderer private constructor(
                 EffectVoice(spec, samples, outputSampleRate)
             }
             val popsSamples = SharedPopsAndBangs.assetNames.map { assetName ->
-                assetManager.open(SharedPopsAndBangs.assetPath(assetName), AssetManager.ACCESS_STREAMING)
+                assetSource.open(SharedPopsAndBangs.assetPath(assetName))
                     .use(WavPcmDecoder::decode)
             }
             val popsVoice = EffectVoice(SharedPopsAndBangs.effectSpec, popsSamples, outputSampleRate)
-            val shiftUpSample = assetManager.open(
+            val shiftUpSample = assetSource.open(
                 SharedHuracanShiftSounds.assetPath(SharedHuracanShiftSounds.shiftUpSpec.assetName),
-                AssetManager.ACCESS_STREAMING,
             ).use(WavPcmDecoder::decode)
-            val shiftDownSample = assetManager.open(
+            val shiftDownSample = assetSource.open(
                 SharedHuracanShiftSounds.assetPath(SharedHuracanShiftSounds.shiftDownSpec.assetName),
-                AssetManager.ACCESS_STREAMING,
             ).use(WavPcmDecoder::decode)
             val sharedShiftUpVoice = EffectVoice(
                 SharedHuracanShiftSounds.shiftUpSpec,

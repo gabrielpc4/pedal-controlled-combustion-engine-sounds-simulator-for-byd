@@ -24,6 +24,7 @@ enum class AudioFocusEvent {
 /** Streams the stereo sample-bank program to the vehicle media route. */
 class EngineAudioEngine(context: Context) {
     private val appContext = context.applicationContext
+    private val assetResolver = EngineAudioAssetResolver(appContext)
     private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val lifecycleLock = Any()
     private val running = AtomicBoolean(false)
@@ -229,7 +230,7 @@ class EngineAudioEngine(context: Context) {
             val sampleRate = sampleProfile.playbackSampleRate
             val sampleRenderer = try {
                 SampleEngineRenderer.load(
-                    appContext.assets,
+                    assetResolver.sourceFor(sampleProfile),
                     sampleRate,
                     sampleProfile,
                     perspective = perspective,

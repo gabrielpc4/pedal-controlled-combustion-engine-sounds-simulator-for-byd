@@ -222,7 +222,14 @@ internal data class SampleLayerSpec(
             !loadOnlyProgram || role == SampleLayerRole.IDLE -> throttle
             primaryLayerSource == PrimaryEngineLayerSource.LOAD -> 1.0
             primaryLayerSource == PrimaryEngineLayerSource.COAST -> 0.0
-            primaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX -> throttle
+            // BOTH is a stable simultaneous program. It must not become a
+            // coast-only mix after a pedal lift: LOAD remains at its authored
+            // full-load endpoint and COAST remains at its authored coast endpoint.
+            primaryLayerSource == PrimaryEngineLayerSource.FMOD_MIX -> when (role) {
+                SampleLayerRole.LOAD -> 1.0
+                SampleLayerRole.COAST -> 0.0
+                else -> throttle
+            }
             else -> throttle
         }
         val throttleGainContribution = throttleGainDb?.valueAt(effectiveThrottle) ?: 0.0
@@ -247,6 +254,8 @@ internal data class EngineSampleProgram(
 
 internal data class EngineSampleProfile(
     val id: String,
+    /** The installed payload owner. Equal to [id] unless two cars share the exact source bank. */
+    val audioPackId: String = id,
     val displayName: String,
     val assetDirectory: String,
     val previewAssetName: String,
@@ -278,10 +287,12 @@ internal data class EngineSampleProfile(
     }
 
     fun resolvedPerspective(perspective: EngineSoundPerspective): EngineSoundPerspective {
-        return if (perspective == EngineSoundPerspective.EXTERIOR && exteriorProgram == null) {
-            EngineSoundPerspective.CABIN
+        if (exteriorProgram == null) return EngineSoundPerspective.CABIN
+
+        return if (perspective == EngineSoundPerspective.EXTERIOR) {
+            EngineSoundPerspective.EXTERIOR
         } else {
-            perspective
+            EngineSoundPerspective.CABIN
         }
     }
 
@@ -384,8 +395,13 @@ internal data class CarSpecifications(
     val weight: String,
     val priceBrl: String,
 ) {
-    fun summary(): String =
-        "$horsepower HP  •  $torqueKgfm kgfm  •  0–100 $zeroToHundred  •  $weight kg  •  PRICE $priceBrl"
+    fun summary(): String = buildList {
+        add("$horsepower HP")
+        add("$torqueKgfm kgfm")
+        add("0–100 $zeroToHundred")
+        add("$weight kg")
+        if (priceBrl != "—") add("PRICE $priceBrl")
+    }.joinToString("  •  ")
 }
 
 internal object EngineSampleProfiles {
@@ -394,7 +410,7 @@ internal object EngineSampleProfiles {
         default,
         lamborghiniAventadorSvProfile(),
         nissanSkylineR34Profile(),
-    )
+    ) + installedCarProfiles
     val maximumSupportedRpm = all.maxOf { it.maximumRpm }
 
     fun find(id: String?): EngineSampleProfile = all.firstOrNull { it.id == id } ?: default
@@ -436,5 +452,5 @@ internal object EngineSampleProfiles {
             weight = "1,560",
             priceBrl = "R$ 1.200.000",
         ),
-    )
+    ) + installedCarSpecifications
 }

@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
+import com.gabrielpc.enginesoundsimulator.audio.EngineAudioAssetResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
 import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
@@ -625,6 +626,10 @@ private fun CarDropdownSelector(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val audioAssetResolver = remember(context) {
+        EngineAudioAssetResolver(context.applicationContext)
+    }
     Box(
         modifier = modifier.padding(start = 12.dp),
         contentAlignment = Alignment.CenterStart,
@@ -704,6 +709,7 @@ private fun CarDropdownSelector(
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             EngineSampleProfiles.all.forEach { profile ->
+                val installed = audioAssetResolver.isInstalled(profile)
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -717,12 +723,18 @@ private fun CarDropdownSelector(
                                     .height(40.dp)
                                     .clip(RoundedCornerShape(6.dp)),
                             )
-                            Text(
-                                profile.displayName,
-                                fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
-                            )
+                            Column {
+                                Text(
+                                    profile.displayName,
+                                    fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
+                                )
+                                if (!installed) {
+                                    Text("AUDIO NOT INSTALLED", color = Amber, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                                }
+                            }
                         }
                     },
+                    enabled = installed,
                     onClick = {
                         expanded = false
                         onSelectCar(profile.id)

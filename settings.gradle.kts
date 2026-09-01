@@ -26,3 +26,4 @@ rootProject.name = "BYD Motor Sound"
 include(":mobile")
 include(":automotive")
 include(":shared")
+include(":audio-installer")

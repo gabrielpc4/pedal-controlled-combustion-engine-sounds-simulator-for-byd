@@ -6,6 +6,7 @@
 local.properties
 mobile/build-number.properties
 .DS_Store
+__pycache__/
 
 # Build and native tooling output
 **/build/
@@ -26,4 +27,5 @@ keystore.properties
 reference/
 audio_samples/
 audio_banks/
+audio_packs/
 docs/source-material/*.pdf

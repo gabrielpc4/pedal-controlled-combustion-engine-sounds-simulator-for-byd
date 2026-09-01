@@ -15,9 +15,9 @@ class SampleEngineRendererTest {
 
     @Test
     fun everySelectableCarHasACompleteDistinctSampleProfile() {
-        assertEquals(3, EngineSampleProfiles.all.size)
-        assertEquals(3, EngineSampleProfiles.all.map { it.id }.distinct().size)
-        assertEquals(3, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
+        assertEquals(37, EngineSampleProfiles.all.size)
+        assertEquals(37, EngineSampleProfiles.all.map { it.id }.distinct().size)
+        assertEquals(37, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
 
         EngineSampleProfiles.all.forEach { candidate ->
             assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())
@@ -111,6 +111,34 @@ class SampleEngineRendererTest {
             )
             assertEquals(exterior.layers.size, both.size)
         }
+    }
+
+    @Test
+    fun bothKeepsTheSameLoadAndCoastBlendOnThrottleLift() {
+        val profile = EngineSampleProfiles.find("nissan-350z")
+        val program = profile.program(EngineSoundPerspective.CABIN)
+        val rpm = profile.maximumRpm * 0.52
+
+        program.layers
+            .filter { it.role == SampleLayerRole.LOAD || it.role == SampleLayerRole.COAST }
+            .forEach { layer ->
+                assertEquals(
+                    "${layer.id} changed its BOTH gain on lift",
+                    layer.gainAt(
+                        rpm = rpm,
+                        throttle = 1.0,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+                    ),
+                    layer.gainAt(
+                        rpm = rpm,
+                        throttle = 0.0,
+                        loadOnlyProgram = true,
+                        primaryLayerSource = PrimaryEngineLayerSource.FMOD_MIX,
+                    ),
+                    0.000001,
+                )
+            }
     }
 
     @Test

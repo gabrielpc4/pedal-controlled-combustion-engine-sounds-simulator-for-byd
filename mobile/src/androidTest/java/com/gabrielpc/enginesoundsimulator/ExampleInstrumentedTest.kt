@@ -2,10 +2,15 @@ package com.gabrielpc.enginesoundsimulator
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.gabrielpc.enginesoundsimulator.audio.AudioPackStore
 import com.gabrielpc.enginesoundsimulator.audio.EngineSampleProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
-import com.gabrielpc.enginesoundsimulator.audio.WavPcmDecoder
-
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -26,27 +31,53 @@ class ExampleInstrumentedTest {
     }
 
     @Test
-    fun everyProfilePackagesItsRequiredEffectsAsDecodablePcm() {
-        val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
-
+    fun everyProfileDeclaresInstallerSuppliedWavAssets() {
         EngineSampleProfiles.all.forEach { profile ->
             EngineSoundPerspective.entries.forEach { perspective ->
-                profile.requiredAssets(perspective).forEach { assetName ->
-                    val path = "sample_engine/${profile.assetDirectory}/$assetName"
-                    assets.open(path).use { stream ->
-                        val header = ByteArray(4)
-                        assertEquals(4, stream.read(header))
-                        assertEquals("RIFF", String(header, Charsets.US_ASCII))
-                    }
-                }
+                assertTrue(profile.requiredAssets(perspective).all { assetName -> assetName.endsWith(".wav") })
                 profile.program(perspective).layers.forEach { layer ->
-                    val path = "sample_engine/${profile.assetDirectory}/${layer.assetName}"
-                    val decoded = assets.open(path).use(WavPcmDecoder::decode)
-                    assertTrue("$path has no audio", decoded.frameCount > 32)
-                    assertTrue("$path is not mono/stereo", decoded.sourceChannels in 1..2)
-                    assertTrue("$path has unsupported rate", decoded.sampleRate == 44_100 || decoded.sampleRate == 48_000)
+                    assertTrue(layer.assetName.endsWith(".wav"))
                 }
             }
         }
+    }
+
+    @Test
+    fun sharedBankProfileReadsTheVerifiedOwnerPack() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val testRoot = File(context.cacheDir, "audio-pack-store-test").apply { deleteRecursively(); mkdirs() }
+        try {
+            val owner = EngineSampleProfiles.find("nissan-350z")
+            val sharedProfile = EngineSampleProfiles.find("nissan-370z-widebody")
+            val payload = "test wav payload".toByteArray()
+            val path = "audio/idle.wav"
+            AudioPackStore(testRoot).also { store ->
+                store.install(owner.audioPackId, pack(owner.audioPackId, path, payload))
+
+                assertTrue(store.isInstalled(sharedProfile))
+                assertArrayEquals(
+                    payload,
+                    store.open(sharedProfile, "sample_engine/${sharedProfile.assetDirectory}/idle.wav").use { it.readBytes() },
+                )
+            }
+        } finally {
+            testRoot.deleteRecursively()
+        }
+    }
+
+    private fun pack(id: String, path: String, payload: ByteArray): ByteArrayInputStream {
+        val digest = MessageDigest.getInstance("SHA-256").digest(payload).joinToString("") { "%02x".format(it) }
+        val manifest = """{"schema":"byd-wav-audio-pack-v1","id":"$id","version":1,"files":[{"path":"$path","bytes":${payload.size},"sha256":"$digest"}]}"""
+        return ByteArrayInputStream(ByteArrayOutputStream().use { bytes ->
+            ZipOutputStream(bytes).use { archive ->
+                archive.putNextEntry(ZipEntry("manifest.json"))
+                archive.write(manifest.toByteArray())
+                archive.closeEntry()
+                archive.putNextEntry(ZipEntry(path))
+                archive.write(payload)
+                archive.closeEntry()
+            }
+            bytes.toByteArray()
+        })
     }
 }
