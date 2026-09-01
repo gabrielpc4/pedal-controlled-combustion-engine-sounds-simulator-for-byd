@@ -410,7 +410,7 @@ internal object EngineSampleProfiles {
         default,
         lamborghiniAventadorSvProfile(),
         nissanSkylineR34Profile(),
-    ) + installedCarProfiles
+    ) + installedCarProfiles + assettoBankProfiles
     val maximumSupportedRpm = all.maxOf { it.maximumRpm }
 
     fun find(id: String?): EngineSampleProfile = all.firstOrNull { it.id == id } ?: default
@@ -452,5 +452,5 @@ internal object EngineSampleProfiles {
             weight = "1,560",
             priceBrl = "R$ 1.200.000",
         ),
-    ) + installedCarSpecifications
+    ) + installedCarSpecifications + assettoBankSpecifications
 }

@@ -53,9 +53,39 @@ val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
         from(sourceRoot) {
             include("*/preview1.jpg")
             eachFile {
-                path = "car_previews/${file.parentFile.name}.jpg"
+                val normalizedCarId = file.parentFile.name.lowercase().replace("_", "-")
+                path = "car_previews/$normalizedCarId.jpg"
             }
             includeEmptyDirs = false
+        }
+    }
+    val bankPreviewAliases = mapOf(
+        "assetto-audi-r8-lms-2016" to rootProject.file("../new_cars/audi-r8-lms-gt2/preview1.jpg"),
+        "assetto-audi-r8-plus" to rootProject.file("../new_cars/audi-r8-lms-gt2/preview1.jpg"),
+        "assetto-audi-tt-cup" to rootProject.file("../new_cars/audi-tt-cup-2015/preview1.jpg"),
+        "assetto-bmw-m4" to rootProject.file("../new_cars/bmw-m8-gtlm/preview1.jpg"),
+        "assetto-corvette-c7-stingray" to rootProject.file("../new_cars/chevrolet-corvette-c7-stingray-hellspec/preview1.jpg"),
+        "assetto-ferrari-458" to rootProject.file("../new_cars/ferrari-458-italia-tune/preview1.jpg"),
+        "assetto-ferrari-458-gt2" to rootProject.file("../new_cars/ferrari-458-italia-tune/preview1.jpg"),
+        "assetto-ferrari-488-gtb" to rootProject.file("../new_cars/ferrari-488-gte-evo-michelotto/preview1.jpg"),
+        "assetto-ferrari-488-gt3" to rootProject.file("../new_cars/ferrari-488-gte-evo-michelotto/preview1.jpg"),
+        "assetto-ferrari-fxx-k" to rootProject.file("../new_cars/ferrari-laferrari-trio/preview1.jpg"),
+        "assetto-ferrari-laferrari" to rootProject.file("../new_cars/ferrari-laferrari-trio/preview1.jpg"),
+        "assetto-lamborghini-aventador-sv" to rootProject.file("../original_cars/lamborghini-aventador-sv/preview1.jpg"),
+        "assetto-lamborghini-gallardo-sl" to rootProject.file("../original_cars/lamborghini-huracan-trofeo-evo2/preview1.jpg"),
+        "assetto-lamborghini-huracan-performante" to rootProject.file("../original_cars/lamborghini-huracan-trofeo-evo2/preview1.jpg"),
+        "assetto-lamborghini-huracan-st" to rootProject.file("../original_cars/lamborghini-huracan-trofeo-evo2/preview1.jpg"),
+        "assetto-mercedes-amg-gt3" to rootProject.file("../new_cars/mercedes-benz-amg-gt3-evo-2020-sprint/preview1.jpg"),
+        "assetto-nissan-370z" to rootProject.file("../new_cars/nissan-370z-widebody/preview1.jpg"),
+        "assetto-nissan-gtr" to rootProject.file("../new_cars/nissan-gt-r-nismo-godzilla/preview1.jpg"),
+        "assetto-porsche-911-gt3-rs" to rootProject.file("../new_cars/porsche-911-gt3-rs-hellspec/preview1.jpg"),
+        "assetto-porsche-991-turbo-s" to rootProject.file("../new_cars/porsche-911-turbo-s/preview1.jpg"),
+        "assetto-toyota-supra-mkiv" to rootProject.file("../new_cars/toyota-supra-wangan/preview1.jpg"),
+    )
+    bankPreviewAliases.forEach { (assetName, source) ->
+        from(source) {
+            rename { "$assetName.jpg" }
+            into("car_previews")
         }
     }
     into(generatedPreviewAssets)

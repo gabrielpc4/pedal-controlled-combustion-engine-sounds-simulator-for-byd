@@ -15,9 +15,10 @@ class SampleEngineRendererTest {
 
     @Test
     fun everySelectableCarHasACompleteDistinctSampleProfile() {
-        assertEquals(37, EngineSampleProfiles.all.size)
-        assertEquals(37, EngineSampleProfiles.all.map { it.id }.distinct().size)
-        assertEquals(37, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
+        val expectedProfileCount = 3 + installedCarProfiles.size + assettoBankProfiles.size
+        assertEquals(expectedProfileCount, EngineSampleProfiles.all.size)
+        assertEquals(expectedProfileCount, EngineSampleProfiles.all.map { it.id }.distinct().size)
+        assertEquals(expectedProfileCount, EngineSampleProfiles.all.map { it.previewAssetName }.distinct().size)
 
         EngineSampleProfiles.all.forEach { candidate ->
             assertTrue("${candidate.id} has no layers", candidate.layers.isNotEmpty())

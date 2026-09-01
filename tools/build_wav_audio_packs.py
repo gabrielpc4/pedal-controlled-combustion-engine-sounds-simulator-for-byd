@@ -78,10 +78,47 @@ SILENT_LAYER_FALLBACKS = {
 
 @dataclass(frozen=True)
 class SourceCar:
-    source_directory: Path
+    source_directory: Path | None
     pack_id: str
     display_name: str
     generic: bool
+    bank_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class BankCarDefinition:
+    pack_id: str
+    bank_name: str
+    display_name: str
+
+
+# These are official Assetto Corsa banks that are close enough to a supplied
+# new-car model to be useful as additional selectable sound profiles. The
+# relationship is explicit and reviewable; it is never inferred from a name at
+# runtime. Models without a defensible counterpart remain out of the app.
+BANK_CAR_DEFINITIONS = (
+    BankCarDefinition("assetto-audi-r8-lms-2016", "ks_audi_r8_lms_2016.bank", "Audi R8 LMS 2016"),
+    BankCarDefinition("assetto-audi-r8-plus", "ks_audi_r8_plus.bank", "Audi R8 Plus"),
+    BankCarDefinition("assetto-audi-tt-cup", "ks_audi_tt_cup.bank", "Audi TT Cup"),
+    BankCarDefinition("assetto-bmw-m4", "ks_bmw_m4.bank", "BMW M4"),
+    BankCarDefinition("assetto-corvette-c7-stingray", "ks_corvette_c7_stingray.bank", "Chevrolet Corvette C7 Stingray"),
+    BankCarDefinition("assetto-ferrari-458", "ferrari_458.bank", "Ferrari 458 Italia"),
+    BankCarDefinition("assetto-ferrari-458-gt2", "ferrari_458_GT2.bank", "Ferrari 458 GT2"),
+    BankCarDefinition("assetto-ferrari-488-gtb", "ks_ferrari_488_gtb.bank", "Ferrari 488 GTB"),
+    BankCarDefinition("assetto-ferrari-488-gt3", "ks_ferrari_488_gt3.bank", "Ferrari 488 GT3"),
+    BankCarDefinition("assetto-ferrari-fxx-k", "ks_ferrari_fxx_k.bank", "Ferrari FXX K"),
+    BankCarDefinition("assetto-ferrari-laferrari", "ferrari_LaFerrari.bank", "Ferrari LaFerrari"),
+    BankCarDefinition("assetto-lamborghini-aventador-sv", "ks_lamborghini_aventador_sv.bank", "Lamborghini Aventador SV"),
+    BankCarDefinition("assetto-lamborghini-gallardo-sl", "ks_lamborghini_gallardo_sl.bank", "Lamborghini Gallardo Superleggera"),
+    BankCarDefinition("assetto-lamborghini-huracan-performante", "ks_lamborghini_huracan_performante.bank", "Lamborghini Huracán Performante"),
+    BankCarDefinition("assetto-lamborghini-huracan-st", "ks_lamborghini_huracan_st.bank", "Lamborghini Huracán ST"),
+    BankCarDefinition("assetto-mercedes-amg-gt3", "ks_mercedes_amg_gt3.bank", "Mercedes-AMG GT3"),
+    BankCarDefinition("assetto-nissan-370z", "ks_nissan_370z.bank", "Nissan 370Z"),
+    BankCarDefinition("assetto-nissan-gtr", "ks_nissan_gtr.bank", "Nissan GT-R"),
+    BankCarDefinition("assetto-porsche-911-gt3-rs", "ks_porsche_911_gt3_rs.bank", "Porsche 911 GT3 RS"),
+    BankCarDefinition("assetto-porsche-991-turbo-s", "ks_porsche_991_turbo_s.bank", "Porsche 911 Turbo S (991)"),
+    BankCarDefinition("assetto-toyota-supra-mkiv", "ks_toyota_supra_mkiv.bank", "Toyota Supra Mk IV"),
+)
 
 
 def sha256(path: Path) -> str:
@@ -105,7 +142,7 @@ def normalized_id(directory: Path) -> str:
     return directory.name.casefold().replace("_", "-")
 
 
-def discover_cars(original_root: Path, new_root: Path) -> list[SourceCar]:
+def discover_cars(original_root: Path, new_root: Path, bank_root: Path | None = None) -> list[SourceCar]:
     cars: list[SourceCar] = []
     original_special = {
         "lamborghini-huracan-trofeo-evo2": "lamborghini_huracan_trofeo_evo2_cabin",
@@ -123,10 +160,27 @@ def discover_cars(original_root: Path, new_root: Path) -> list[SourceCar]:
                     generic=normalized not in original_special,
                 )
             )
+    if bank_root is not None:
+        for definition in BANK_CAR_DEFINITIONS:
+            bank_path = bank_root / definition.bank_name
+            if bank_path.is_file():
+                cars.append(
+                    SourceCar(
+                        source_directory=None,
+                        pack_id=definition.pack_id,
+                        display_name=definition.display_name,
+                        generic=True,
+                        bank_path=bank_path,
+                    )
+                )
     return cars
 
 
 def active_bank(car: SourceCar) -> Path:
+    if car.bank_path is not None:
+        return car.bank_path
+    if car.source_directory is None:
+        raise RuntimeError(f"No source directory or bank was declared for {car.pack_id}")
     fallback_name = CAPTURE_BANK_FALLBACKS.get(car.pack_id)
     if fallback_name is not None:
         fallback = DEFAULT_BANK_FALLBACK_ROOT / fallback_name
@@ -146,6 +200,27 @@ def active_bank(car: SourceCar) -> Path:
 
 def max_rpm(pack_id: str) -> float:
     values = {
+        "assetto-audi-r8-lms-2016": 9000.0,
+        "assetto-audi-r8-plus": 8500.0,
+        "assetto-audi-tt-cup": 7500.0,
+        "assetto-bmw-m4": 8500.0,
+        "assetto-corvette-c7-stingray": 7000.0,
+        "assetto-ferrari-458": 9000.0,
+        "assetto-ferrari-458-gt2": 9000.0,
+        "assetto-ferrari-488-gtb": 8500.0,
+        "assetto-ferrari-488-gt3": 8500.0,
+        "assetto-ferrari-fxx-k": 9000.0,
+        "assetto-ferrari-laferrari": 9250.0,
+        "assetto-lamborghini-aventador-sv": 9200.0,
+        "assetto-lamborghini-gallardo-sl": 8500.0,
+        "assetto-lamborghini-huracan-performante": 8500.0,
+        "assetto-lamborghini-huracan-st": 8500.0,
+        "assetto-mercedes-amg-gt3": 8500.0,
+        "assetto-nissan-370z": 7500.0,
+        "assetto-nissan-gtr": 7500.0,
+        "assetto-porsche-911-gt3-rs": 9500.0,
+        "assetto-porsche-991-turbo-s": 7500.0,
+        "assetto-toyota-supra-mkiv": 7500.0,
         "ferrari-f1-2000": 16000.0,
         "ferrari-laferrari-trio": 9500.0,
         "ferrari-sf90-xx-stradale-2024": 9500.0,
@@ -341,6 +416,7 @@ def main() -> int:
     parser.add_argument("--new-root", type=Path, default=DEFAULT_NEW_ROOT)
     parser.add_argument("--audio-samples", type=Path, default=DEFAULT_AUDIO_SAMPLES)
     parser.add_argument("--assetto-root", type=Path, default=DEFAULT_ASSETTO_ROOT)
+    parser.add_argument("--bank-root", type=Path, default=DEFAULT_BANK_FALLBACK_ROOT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--work", type=Path, default=DEFAULT_WORK)
     parser.add_argument("--only", action="append", default=[])
@@ -368,7 +444,7 @@ def main() -> int:
     selected = set(arguments.only)
     cars = [
         car
-        for car in discover_cars(arguments.original_root, arguments.new_root)
+        for car in discover_cars(arguments.original_root, arguments.new_root, arguments.bank_root)
         if (
             car.pack_id not in EXACT_BANK_AUDIO_OWNER
             and (not selected or car.pack_id in selected)

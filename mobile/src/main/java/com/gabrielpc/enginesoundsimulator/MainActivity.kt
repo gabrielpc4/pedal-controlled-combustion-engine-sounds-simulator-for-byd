@@ -157,6 +157,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && controller.handleShiftKey(event.keyCode)) {
             return true

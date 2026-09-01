@@ -27,7 +27,7 @@ internal val installedCarProfiles = listOf(
     genericInstalledProfile("chevrolet-corvette-c7-stingray-hellspec", "Chevrolet Corvette Singray"),
     genericInstalledProfile("ferrari-360-challenge-stradale", "Ferrari 360"),
     genericInstalledProfile("ferrari-458-italia-tune", "Ferrari 458 Italia"),
-    genericInstalledProfile("ferrari-458_italia-gte-ferruccio", "Ferrari 458 Spider"),
+    genericInstalledProfile("ferrari-458-italia-gte-ferruccio", "Ferrari 458 Spider"),
     genericInstalledProfile("ferrari-488-gte-evo-michelotto", "Ferrari 488 Pista"),
     genericInstalledProfile("ferrari-f1-2000", "Ferrari F1 2000", maximumRpm = 16_000.0),
     genericInstalledProfile("ferrari-f430-gt2-2007", "Ferrari 430"),
@@ -61,12 +61,13 @@ internal val installedCarProfiles = listOf(
     genericInstalledProfile("toyota-supra-wangan", "Toyota Supra"),
 )
 
-private fun genericInstalledProfile(
+internal fun genericInstalledProfile(
     id: String,
     displayName: String,
     maximumRpm: Double = 8_500.0,
     audioPackId: String = id,
     assetDirectory: String = id,
+    previewAssetName: String = "car_previews/$id.jpg",
 ): EngineSampleProfile {
     val idleRpm = 900.0
     val loadRoots = listOf(maximumRpm * 0.28, maximumRpm * 0.52, maximumRpm * 0.78)
@@ -79,7 +80,7 @@ private fun genericInstalledProfile(
         id = id,
         displayName = displayName,
         assetDirectory = assetDirectory,
-        preview = "car_previews/$id.jpg",
+        preview = previewAssetName,
         outputSampleRate = 48_000,
         idleRpm = idleRpm,
         maximumRpm = maximumRpm,
@@ -178,7 +179,7 @@ internal val installedCarSpecifications = mapOf(
     "chevrolet-corvette-c7-stingray-hellspec" to CarSpecifications("739", "103", "3.8 s", "1,496", "—"),
     "ferrari-360-challenge-stradale" to CarSpecifications("419", "38", "4.0 s", "1,280", "—"),
     "ferrari-458-italia-tune" to CarSpecifications("574", "55", "—", "1,140", "—"),
-    "ferrari-458_italia-gte-ferruccio" to CarSpecifications("465", "46", "—", "1,245", "—"),
+    "ferrari-458-italia-gte-ferruccio" to CarSpecifications("465", "46", "—", "1,245", "—"),
     "ferrari-488-gte-evo-michelotto" to CarSpecifications("583", "82", "—", "1,270", "—"),
     "ferrari-f1-2000" to CarSpecifications("764", "36", "2.6 s", "535", "—"),
     "ferrari-f430-gt2-2007" to CarSpecifications("550", "50", "—", "1,100", "—"),
