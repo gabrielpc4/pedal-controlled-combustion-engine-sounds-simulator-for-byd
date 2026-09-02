@@ -4,9 +4,9 @@ import kotlin.math.PI
 import kotlin.math.abs
 
 /**
- * SIMULATED PEDALS keeps the chosen bank's engine model but maps its sound gears to the Seal's
- * 190 km/h road-speed range. Every forward gear occupies the same road-speed span and reaches
- * the bank's limiter at the top of that span.
+ * The dashboard presentation gearbox maps every selected bank to the Seal's 190 km/h road-speed
+ * range. Every forward gear occupies the same road-speed span and reaches the bank's limiter at
+ * the top of that span. This applies in D for both real and simulated pedal inputs; P/N bypass it.
  */
 internal data class SimulatedPedalsGearCalibration(
     val forwardRatios: List<Double>,

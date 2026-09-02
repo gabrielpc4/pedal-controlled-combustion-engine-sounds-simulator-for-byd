@@ -21,9 +21,9 @@ Use the current Kotlin/C++ source and the original Assetto installation data. Au
 reference for authored physics and FMOD event ordering. The FMOD bank, its parameters, and the
 original per-car physics remain authoritative for real pedals, RPM, clutch, turbo, and authored
 events. SIMULATED PEDALS is intentionally different: its road-speed envelope follows the BYD Seal
-AWD, caps at 190 km/h, and maps every sound gear to an equal road-speed band. This keeps the
-synthetic road motion representative of the car that hosts the dashboard without changing the
-selected bank's audio behaviour.
+AWD and caps at 190 km/h. In D, both pedal modes use the same presentation gearbox, mapping every
+sound gear to an equal road-speed band and the selected bank's limiter at the band boundary. P/N
+remains a pure free-rev path.
 
 The real BYD speed is truncated to an integer for the physical input. The bounded
 presentation-speed estimator is retained only to keep tachometer and pitch continuous between

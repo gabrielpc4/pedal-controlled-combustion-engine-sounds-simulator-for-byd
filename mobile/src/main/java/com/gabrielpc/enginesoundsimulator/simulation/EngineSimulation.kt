@@ -112,7 +112,10 @@ class EngineSimulation {
         }
         val roadSpeedKmh = rawSpeed ?: simulatedMotion?.speedKmh
         val gearCalibration = if (input.transmissionPosition == TransmissionPosition.DRIVE) {
-            simulatedMotion?.let { simulatedPedalsGearCalibration }
+            // Both input modes use the same presentation gearbox in D: each
+            // gear spans an equal share of 0..190 km/h and reaches the authored
+            // limiter at its upper boundary. P/N remains a pure free-rev path.
+            simulatedPedalsGearCalibration
         } else {
             // P/N must remain a true free-rev path: the Lab uses zero gear ratio and
             // engine inertia alone here. Never let the SIM road-speed gear calibration

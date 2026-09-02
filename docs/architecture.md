@@ -31,11 +31,10 @@ revving, and manual shifting.
 SIMULATED PEDALS intentionally uses a BYD Seal AWD road-speed model. Its full-throttle curve is
 digitized from the supplied Seal trace and reaches 100 km/h in approximately 3.97 seconds; partial
 throttle scales that acceleration linearly. It coasts with passive speed-dependent resistance,
-uses a 190 km/h cap, and stops immediately in Park. For every selected bank, virtual forward ratios
-split 0–190 km/h into equal bands and put that bank's limiter at each band end. Automatic SIM
-upshifts and downshifts use the legacy dashboard's short 95 ms/220 ms timing so unusually long
-authored shifts do not make the host-vehicle simulation feel sluggish. This SIM-only mapping does
-not change the original bank ratios or physics used by real pedals.
+uses a 190 km/h cap, and stops immediately in Park. For every selected bank, presentation forward
+ratios split 0–190 km/h into equal bands and put that bank's limiter at each band end in D for both
+pedal modes. Automatic upshifts and downshifts use the short 95 ms/220 ms presentation timing. P/N
+bypasses this mapping and remains a free-rev path using engine inertia alone.
 
 BYD reports are treated as truncated `[N, N + 1)` km/h values. `QuantizedPresentationSpeedEstimator`
 uses only boundary timing and bounded pedal direction to produce a continuous presentation speed.
