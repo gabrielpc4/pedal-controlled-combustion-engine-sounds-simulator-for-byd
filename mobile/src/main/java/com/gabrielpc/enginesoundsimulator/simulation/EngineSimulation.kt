@@ -111,7 +111,14 @@ class EngineSimulation {
             simulatedMotion?.speedKmh
         }
         val roadSpeedKmh = rawSpeed ?: simulatedMotion?.speedKmh
-        val gearCalibration = simulatedMotion?.let { simulatedPedalsGearCalibration }
+        val gearCalibration = if (input.transmissionPosition == TransmissionPosition.DRIVE) {
+            simulatedMotion?.let { simulatedPedalsGearCalibration }
+        } else {
+            // P/N must remain a true free-rev path: the Lab uses zero gear ratio and
+            // engine inertia alone here. Never let the SIM road-speed gear calibration
+            // alter neutral or park, even if the selector changes while still moving.
+            null
+        }
         val frame = activeDrivetrain.step(
             throttle = input.throttle.coerceIn(0.0, 1.0),
             brake = input.brake.coerceIn(0.0, 1.0),
