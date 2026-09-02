@@ -80,6 +80,16 @@ class FmodBankProfileTest {
         assertTrue(sent.zipWithNext().all { (left, right) -> right >= left })
     }
 
+    @Test
+    fun limiterDecayPulsesOnlyWhenEnteringTheActualLimiter() {
+        val tracker = FmodLimiterDecayTracker()
+
+        assertEquals(10.0f, tracker.advance(limiterActive = false, deltaSeconds = 0.02), 0.001f)
+        assertEquals(0.0f, tracker.advance(limiterActive = true, deltaSeconds = 0.02), 0.001f)
+        assertEquals(0.25f, tracker.advance(limiterActive = true, deltaSeconds = 0.25), 0.001f)
+        assertEquals(0.75f, tracker.advance(limiterActive = false, deltaSeconds = 0.5), 0.001f)
+    }
+
     private companion object {
         val ALLOWED_TRACK_IDS = setOf(
             "engine_load",

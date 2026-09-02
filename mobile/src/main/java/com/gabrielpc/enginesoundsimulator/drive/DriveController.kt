@@ -978,6 +978,7 @@ class DriveController(context: Context) {
                     ShiftDirection.NONE -> 0
                 },
                 isShifting = drivetrain.isShifting,
+                limiterActive = drivetrain.limiterActive,
                 tuning = effectiveAudioTuning(tuning, simulation.ignitionAudioGain()),
                 layerMix = layerMixControls.get(),
                 programLayerGains = programLayerGains.get(),

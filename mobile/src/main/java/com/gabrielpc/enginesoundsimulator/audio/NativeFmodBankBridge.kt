@@ -27,6 +27,7 @@ internal class NativeFmodBankBridge {
         transmissionGain: Float,
         turboGain: Float,
         limiterGain: Float,
+        limiterDecay: Float,
         shiftGain: Float,
         overrunGain: Float,
         boost: Float,

@@ -10,6 +10,8 @@ data class EngineAudioFrame(
     val shiftSerial: Long = 0L,
     val shiftDirection: Int = 0,
     val isShifting: Boolean = false,
+    /** True only while the drivetrain is at its configured RPM limiter. */
+    val limiterActive: Boolean = false,
     val tuning: AudioTuning = AudioTuning(),
     val layerMix: Map<String, LayerMixControl> = emptyMap(),
     /** Per-perspective master trims for all continuous Load and Coast layers. */

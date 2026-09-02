@@ -2,11 +2,11 @@
 
 #include <android/log.h>
 #include <fmod.hpp>
-#include <fmod_dsp.h>
 #include <fmod_studio.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -43,6 +43,25 @@ enum MeterTrackIndex {
     kMeterOverrun,
     kMeterTrackCount,
 };
+
+// This is fed by a custom terminal DSP on each event channel group. Reading
+// FMOD's built-in final group DSP returned silence on Android for Studio event
+// groups even while the event was audible, so it cannot be used as a mixer
+// source of truth. The custom DSP sees the post-event samples themselves.
+std::array<std::atomic<float>, kMeterTrackCount> eventMeterLinear{};
+
+void resetEventMeters() {
+    for (auto& meter : eventMeterLinear) {
+        meter.store(0.0f, std::memory_order_relaxed);
+    }
+}
+
+void decayEventMeters() {
+    for (auto& meter : eventMeterLinear) {
+        const float prior = meter.load(std::memory_order_relaxed);
+        meter.store(prior * 0.94f, std::memory_order_relaxed);
+    }
+}
 
 constexpr std::array<const char*, 10> kAllowedEventNames = {
     "engine_int",
@@ -108,7 +127,7 @@ FMOD_3D_ATTRIBUTES centeredAttributes() {
     return attributes;
 }
 
-FMOD_RESULT F_CALLBACK passthroughRead(
+FMOD_RESULT F_CALL passthroughRead(
     FMOD_DSP_STATE*,
     float* inbuffer,
     float* outbuffer,
@@ -125,7 +144,7 @@ FMOD_RESULT F_CALLBACK passthroughRead(
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALLBACK acceptDistanceFilterAttributes(FMOD_DSP_STATE*, int, void*, unsigned int) {
+FMOD_RESULT F_CALL acceptDistanceFilterAttributes(FMOD_DSP_STATE*, int, void*, unsigned int) {
     return FMOD_OK;
 }
 
@@ -182,7 +201,7 @@ struct GainState {
     bool inverted = false;
 };
 
-FMOD_RESULT F_CALLBACK createGain(FMOD_DSP_STATE* state) {
+FMOD_RESULT F_CALL createGain(FMOD_DSP_STATE* state) {
     if (state == nullptr) {
         return FMOD_ERR_INVALID_PARAM;
     }
@@ -190,7 +209,7 @@ FMOD_RESULT F_CALLBACK createGain(FMOD_DSP_STATE* state) {
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALLBACK releaseGain(FMOD_DSP_STATE* state) {
+FMOD_RESULT F_CALL releaseGain(FMOD_DSP_STATE* state) {
     if (state != nullptr) {
         delete static_cast<GainState*>(state->plugindata);
         state->plugindata = nullptr;
@@ -198,21 +217,21 @@ FMOD_RESULT F_CALLBACK releaseGain(FMOD_DSP_STATE* state) {
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALLBACK setGainDecibels(FMOD_DSP_STATE* state, int, float value) {
+FMOD_RESULT F_CALL setGainDecibels(FMOD_DSP_STATE* state, int, float value) {
     if (state != nullptr && state->plugindata != nullptr) {
         static_cast<GainState*>(state->plugindata)->decibels = value;
     }
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALLBACK setGainInverted(FMOD_DSP_STATE* state, int, FMOD_BOOL value) {
+FMOD_RESULT F_CALL setGainInverted(FMOD_DSP_STATE* state, int, FMOD_BOOL value) {
     if (state != nullptr && state->plugindata != nullptr) {
         static_cast<GainState*>(state->plugindata)->inverted = value != 0;
     }
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALLBACK applyGain(
+FMOD_RESULT F_CALL applyGain(
     FMOD_DSP_STATE* state,
     float* inbuffer,
     float* outbuffer,
@@ -284,6 +303,130 @@ FMOD_DSP_DESCRIPTION createGainDescriptor() {
     return description;
 }
 
+struct MeterState {
+    std::atomic<int> trackIndex{-1};
+    std::atomic<float> outputGain{1.0f};
+};
+
+FMOD_RESULT F_CALL createMeter(FMOD_DSP_STATE* state) {
+    if (state == nullptr) {
+        return FMOD_ERR_INVALID_PARAM;
+    }
+    state->plugindata = new MeterState();
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL releaseMeter(FMOD_DSP_STATE* state) {
+    if (state != nullptr) {
+        delete static_cast<MeterState*>(state->plugindata);
+        state->plugindata = nullptr;
+    }
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL setMeterTrack(FMOD_DSP_STATE* state, int, int value) {
+    if (state != nullptr && state->plugindata != nullptr) {
+        static_cast<MeterState*>(state->plugindata)->trackIndex.store(value, std::memory_order_relaxed);
+    }
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL setMeterOutputGain(FMOD_DSP_STATE* state, int, float value) {
+    if (state != nullptr && state->plugindata != nullptr) {
+        static_cast<MeterState*>(state->plugindata)->outputGain.store(
+            std::max(0.0f, value),
+            std::memory_order_relaxed
+        );
+    }
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL measureEventOutput(
+    FMOD_DSP_STATE* state,
+    float* inbuffer,
+    float* outbuffer,
+    unsigned int length,
+    int inchannels,
+    int* outchannels
+) {
+    const int channels = std::max(0, inchannels);
+    if (outchannels != nullptr) {
+        *outchannels = channels;
+    }
+    if (inbuffer == nullptr || outbuffer == nullptr || channels == 0) {
+        return FMOD_OK;
+    }
+
+    const unsigned int samples = length * static_cast<unsigned int>(channels);
+    std::memcpy(outbuffer, inbuffer, samples * sizeof(float));
+
+    const auto* meter = state == nullptr ? nullptr : static_cast<const MeterState*>(state->plugindata);
+    const int trackIndex = meter == nullptr ? -1 : meter->trackIndex.load(std::memory_order_relaxed);
+    if (trackIndex < 0 || trackIndex >= kMeterTrackCount) {
+        return FMOD_OK;
+    }
+
+    double sumSquares = 0.0;
+    for (unsigned int index = 0; index < samples; ++index) {
+        const float sample = inbuffer[index];
+        sumSquares += static_cast<double>(sample) * static_cast<double>(sample);
+    }
+    const float rms = static_cast<float>(std::sqrt(sumSquares / static_cast<double>(samples))) *
+        meter->outputGain.load(std::memory_order_relaxed);
+    auto& trackMeter = eventMeterLinear[static_cast<std::size_t>(trackIndex)];
+    const float prior = trackMeter.load(std::memory_order_relaxed);
+    trackMeter.store(
+        std::max(prior, std::isfinite(rms) ? rms : 0.0f),
+        std::memory_order_relaxed
+    );
+    return FMOD_OK;
+}
+
+FMOD_DSP_DESCRIPTION createMeterDescriptor() {
+    static FMOD_DSP_PARAMETER_DESC track{};
+    static FMOD_DSP_PARAMETER_DESC outputGain{};
+    static FMOD_DSP_PARAMETER_DESC* parameters[] = {&track, &outputGain};
+    static bool initialized = false;
+    if (!initialized) {
+        FMOD_DSP_INIT_PARAMDESC_INT(
+            track,
+            "Track",
+            "",
+            "Logical mixer track receiving this event output.",
+            0,
+            kMeterTrackCount - 1,
+            0,
+            false,
+            nullptr
+        );
+        FMOD_DSP_INIT_PARAMDESC_FLOAT(
+            outputGain,
+            "Output Gain",
+            "linear",
+            "Final host gain applied after the event channel group.",
+            0.0f,
+            4.0f,
+            1.0f
+        );
+        initialized = true;
+    }
+
+    FMOD_DSP_DESCRIPTION description{};
+    description.pluginsdkversion = FMOD_PLUGIN_SDK_VERSION;
+    std::strncpy(description.name, "BYD Event Output Meter", sizeof(description.name) - 1);
+    description.version = 0x00010000;
+    description.numinputbuffers = 1;
+    description.numoutputbuffers = 1;
+    description.create = createMeter;
+    description.release = releaseMeter;
+    description.read = measureEventOutput;
+    description.numparameters = 2;
+    description.paramdesc = parameters;
+    description.setparameterint = setMeterTrack;
+    description.setparameterfloat = setMeterOutputGain;
+    return description;
+}
+
 bool parseGuid(const std::string& text, FMOD_GUID* output) {
     if (output == nullptr) {
         return false;
@@ -338,7 +481,7 @@ public:
             return resultText(result, "Studio::System::create");
         }
 
-        result = studio_->getLowLevelSystem(&core_);
+        result = studio_->getCoreSystem(&core_);
         if (result != FMOD_OK) {
             return failAndCloseLocked(resultText(result, "getLowLevelSystem"));
         }
@@ -370,6 +513,12 @@ public:
         if (result != FMOD_OK) {
             return failAndCloseLocked(resultText(result, "register FMOD Gain"));
         }
+        meter_ = createMeterDescriptor();
+        result = core_->registerDSP(&meter_, &meterPluginHandle_);
+        if (result != FMOD_OK) {
+            return failAndCloseLocked(resultText(result, "register event output meter"));
+        }
+        resetEventMeters();
 
         result = studio_->loadBankFile(
             commonStringsBankPath.c_str(),
@@ -418,6 +567,7 @@ public:
         }
         if (events_.find("limiter") != events_.end()) {
             limiter_ = createPersistentLocked("limiter", 1.0f);
+            setParameterQuietly(limiter_, "decay", 10.0f);
         }
         const std::string gearName = selectPerspectiveEventLocked("gear_int", "gear_ext", perspective);
         if (!gearName.empty()) {
@@ -431,13 +581,15 @@ public:
             playDetachedOneShotLocked(kStartupEvent, 1.0f, 1.0f, 0.0f, 0.0f);
         }
 
+        source_ = source;
+        perspective_ = perspective;
+        resetEventMeters();
         result = studio_->update();
         if (result != FMOD_OK) {
             return failAndCloseLocked(resultText(result, "initial Studio::System::update"));
         }
+        attachAvailableMetersLocked();
 
-        source_ = source;
-        perspective_ = perspective;
         active_ = true;
         lastShiftSerial_ = 0;
         activeNames_.clear();
@@ -462,6 +614,7 @@ public:
         float transmissionGain,
         float turboGain,
         float limiterGain,
+        float limiterDecay,
         float shiftGain,
         float overrunGain,
         float boost,
@@ -478,56 +631,78 @@ public:
         const float cleanRpm = std::max(0.0f, rpm);
         const float cleanThrottle = std::clamp(throttle, 0.0f, 1.0f);
         const float cleanMaster = std::clamp(masterGain, 0.0f, 1.2f);
+        const float engineLoadGain = cleanMaster * (source_ == kSourceCoast ? coastGain : loadGain);
+        const float engineCoastGain = cleanMaster * coastGain;
+        const float transmissionOutputGain = cleanMaster * transmissionGain;
+        const float turboOutputGain = cleanMaster * turboGain;
+        const float limiterOutputGain = cleanMaster * limiterGain;
+        const float gearOutputGain = cleanMaster * shiftGain;
+        const float overrunOutputGain = cleanMaster * overrunGain;
         applyEngineParametersLocked(engineLoad_, cleanRpm, source_ == kSourceCoast ? 0.0f : 1.0f);
-        setVolumeQuietly(engineLoad_, cleanMaster * (source_ == kSourceCoast ? coastGain : loadGain));
+        setVolumeQuietly(engineLoad_, engineLoadGain);
+        setMeterOutputGainLocked(
+            source_ == kSourceCoast ? kMeterEngineCoast : kMeterEngineLoad,
+            engineLoadGain
+        );
         if (engineCoast_ != nullptr) {
             applyEngineParametersLocked(engineCoast_, cleanRpm, 0.0f);
-            setVolumeQuietly(engineCoast_, cleanMaster * coastGain);
+            setVolumeQuietly(engineCoast_, engineCoastGain);
+            setMeterOutputGainLocked(kMeterEngineCoast, engineCoastGain);
         }
 
         if (transmission_ != nullptr) {
             setParameterQuietly(transmission_, "drivetrain_speed", cleanRpm * 0.10471976f);
             setParameterQuietly(transmission_, "throttle", 1.0f);
-            setVolumeQuietly(transmission_, cleanMaster * transmissionGain);
+            setVolumeQuietly(transmission_, transmissionOutputGain);
         }
+        setMeterOutputGainLocked(kMeterTransmission, transmissionOutputGain);
         if (turbo_ != nullptr) {
             setParameterQuietly(turbo_, "rpms", cleanRpm);
             setParameterQuietly(turbo_, "boost", std::clamp(boost, 0.0f, 1.0f));
             setParameterQuietly(turbo_, "bov", std::clamp(bovDecay, 0.0f, 1.0f));
             setParameterQuietly(turbo_, "bov_decay", std::clamp(bovDecay, 0.0f, 1.0f));
-            setVolumeQuietly(turbo_, cleanMaster * turboGain);
+            setVolumeQuietly(turbo_, turboOutputGain);
         }
+        setMeterOutputGainLocked(kMeterTurbo, turboOutputGain);
         if (limiter_ != nullptr) {
             setParameterQuietly(limiter_, "rpms", cleanRpm);
-            setParameterQuietly(limiter_, "decay", cleanThrottle > 0.05f ? 0.0f : 10.0f);
-            setVolumeQuietly(limiter_, cleanMaster * limiterGain);
+            // Assetto's limiter graph expects seconds since an actual limiter
+            // pulse. Throttle is not a limiter signal: feeding zero while the
+            // pedal is down makes several banks fire their limiter forever.
+            setParameterQuietly(limiter_, "decay", std::clamp(limiterDecay, 0.0f, 10.0f));
+            setVolumeQuietly(limiter_, limiterOutputGain);
         }
+        setMeterOutputGainLocked(kMeterLimiter, limiterOutputGain);
 
-        setVolumeQuietly(gear_, cleanMaster * shiftGain);
-        setVolumeQuietly(backfire_, cleanMaster * overrunGain);
+        setVolumeQuietly(gear_, gearOutputGain);
+        setVolumeQuietly(backfire_, overrunOutputGain);
+        setMeterOutputGainLocked(kMeterGear, gearOutputGain);
+        setMeterOutputGainLocked(kMeterOverrun, overrunOutputGain);
 
         if (shiftSerial != lastShiftSerial_) {
             lastShiftSerial_ = shiftSerial;
-            if (shiftDirection != 0 && cleanMaster * shiftGain > kDisabledEventGain && !isPlayingLocked(gear_)) {
+            if (shiftDirection != 0 && gearOutputGain > kDisabledEventGain && !isPlayingLocked(gear_)) {
                 // Assetto Corsa owns one gear event per perspective. Do not stack a
                 // new instance over an authored shift that is still fading out.
                 stopQuietly(gear_, FMOD_STUDIO_STOP_ALLOWFADEOUT);
                 setParameterQuietly(gear_, "state", shiftDirection > 0 ? 1.0f : 0.0f);
                 setParameterQuietly(gear_, "rpms", cleanRpm);
                 setParameterQuietly(gear_, "throttle", cleanThrottle);
-                startQuietly(gear_);
+                restartOneShotLocked(gear_);
             }
         }
-        if (triggerOverrun && cleanMaster * overrunGain > kDisabledEventGain && !isPlayingLocked(backfire_)) {
+        if (triggerOverrun && overrunOutputGain > kDisabledEventGain && !isPlayingLocked(backfire_)) {
             setParameterQuietly(backfire_, "rpms", cleanRpm);
             setParameterQuietly(backfire_, "throttle", 0.0f);
-            startQuietly(backfire_);
+            restartOneShotLocked(backfire_);
         }
 
+        decayEventMeters();
         const FMOD_RESULT result = studio_->update();
         if (result != FMOD_OK) {
             return resultText(result, "Studio::System::update");
         }
+        attachAvailableMetersLocked();
         return {};
     }
 
@@ -539,19 +714,12 @@ public:
             return meters;
         }
 
-        if (source_ == kSourceCoast) {
-            meters[kMeterEngineCoast] = meterDbLocked(engineLoad_);
-        } else {
-            meters[kMeterEngineLoad] = meterDbLocked(engineLoad_);
+        for (int index = 0; index < kMeterTrackCount; ++index) {
+            const float linear = eventMeterLinear[static_cast<std::size_t>(index)].load(std::memory_order_relaxed);
+            meters[static_cast<std::size_t>(index)] = linear <= 0.0000001f
+                ? kMeterFloorDb
+                : std::max(kMeterFloorDb, 20.0f * std::log10(linear));
         }
-        if (engineCoast_ != nullptr) {
-            meters[kMeterEngineCoast] = meterDbLocked(engineCoast_);
-        }
-        meters[kMeterTransmission] = meterDbLocked(transmission_);
-        meters[kMeterTurbo] = meterDbLocked(turbo_);
-        meters[kMeterLimiter] = meterDbLocked(limiter_);
-        meters[kMeterGear] = meterDbLocked(gear_);
-        meters[kMeterOverrun] = meterDbLocked(backfire_);
         return meters;
     }
 
@@ -605,6 +773,10 @@ private:
         limiter_ = nullptr;
         gear_ = nullptr;
         backfire_ = nullptr;
+        meterPluginHandle_ = 0;
+        meterAttached_.fill(false);
+        meterDsps_.fill(nullptr);
+        resetEventMeters();
         events_.clear();
         activeNames_.clear();
         active_ = false;
@@ -703,7 +875,6 @@ private:
             lastError_ = resultText(result, "start " + name);
             return nullptr;
         }
-        enableMeteringQuietly(instance);
         return instance;
     }
 
@@ -718,7 +889,6 @@ private:
         }
         const FMOD_3D_ATTRIBUTES attributes = centeredAttributes();
         instance->set3DAttributes(&attributes);
-        enableMeteringQuietly(instance);
         return instance;
     }
 
@@ -747,11 +917,16 @@ private:
         instance->release();
     }
 
-    static void startQuietly(FMOD::Studio::EventInstance* instance) {
-        if (instance != nullptr) {
-            instance->start();
-            enableMeteringQuietly(instance);
+    static void restartOneShotLocked(FMOD::Studio::EventInstance* instance) {
+        if (instance == nullptr) {
+            return;
         }
+        // A retained FMOD event does not implicitly rewind after its authored
+        // one-shot timeline reaches the end. Assetto explicitly rewinds before
+        // every accepted shift/backfire request; without this, later requests
+        // can be silent even though their dashboard control is enabled.
+        instance->setTimelinePosition(0);
+        instance->start();
     }
 
     static void stopQuietly(FMOD::Studio::EventInstance* instance, FMOD_STUDIO_STOP_MODE mode) {
@@ -769,55 +944,59 @@ private:
             (state == FMOD_STUDIO_PLAYBACK_PLAYING || state == FMOD_STUDIO_PLAYBACK_STARTING || state == FMOD_STUDIO_PLAYBACK_SUSTAINING);
     }
 
-    static void enableMeteringQuietly(FMOD::Studio::EventInstance* instance) {
-        if (instance == nullptr) {
+    void attachAvailableMetersLocked() {
+        attachMeterLocked(engineLoad_, source_ == kSourceCoast ? kMeterEngineCoast : kMeterEngineLoad);
+        attachMeterLocked(engineCoast_, kMeterEngineCoast);
+        attachMeterLocked(transmission_, kMeterTransmission);
+        attachMeterLocked(turbo_, kMeterTurbo);
+        attachMeterLocked(limiter_, kMeterLimiter);
+        attachMeterLocked(gear_, kMeterGear);
+        attachMeterLocked(backfire_, kMeterOverrun);
+    }
+
+    void attachMeterLocked(FMOD::Studio::EventInstance* instance, MeterTrackIndex track) {
+        const std::size_t index = static_cast<std::size_t>(track);
+        if (instance == nullptr || meterAttached_[index] || core_ == nullptr || meterPluginHandle_ == 0) {
             return;
         }
         FMOD::ChannelGroup* group = nullptr;
-        if (instance->getChannelGroup(&group) == FMOD_OK && group != nullptr) {
-            int dspCount = 0;
-            if (group->getNumDSPs(&dspCount) == FMOD_OK && dspCount > 0) {
-                FMOD::DSP* dsp = nullptr;
-                if (group->getDSP(dspCount - 1, &dsp) == FMOD_OK && dsp != nullptr) {
-                    dsp->setMeteringEnabled(false, true);
-                }
-            }
+        const FMOD_RESULT groupResult = instance->getChannelGroup(&group);
+        if (groupResult != FMOD_OK || group == nullptr) {
+            __android_log_print(ANDROID_LOG_WARN, kLogTag, "meter track=%d has no channel group (%d)", track, groupResult);
+            return;
         }
+        FMOD::DSP* meter = nullptr;
+        const FMOD_RESULT createResult = core_->createDSPByPlugin(meterPluginHandle_, &meter);
+        if (createResult != FMOD_OK || meter == nullptr) {
+            __android_log_print(ANDROID_LOG_WARN, kLogTag, "meter track=%d DSP creation failed (%d)", track, createResult);
+            return;
+        }
+        const FMOD_RESULT parameterResult = meter->setParameterInt(0, static_cast<int>(track));
+        const FMOD_RESULT attachResult = parameterResult == FMOD_OK
+            ? group->addDSP(FMOD_CHANNELCONTROL_DSP_TAIL, meter)
+            : parameterResult;
+        if (attachResult != FMOD_OK) {
+            __android_log_print(ANDROID_LOG_WARN, kLogTag, "meter track=%d attachment failed (%d)", track, attachResult);
+            meter->release();
+            return;
+        }
+        meterDsps_[index] = meter;
+        meterAttached_[index] = true;
     }
 
-    static float meterDbLocked(FMOD::Studio::EventInstance* instance) {
-        if (instance == nullptr) {
-            return kMeterFloorDb;
+    void setMeterOutputGainLocked(MeterTrackIndex track, float outputGain) {
+        FMOD::DSP* meter = meterDsps_[static_cast<std::size_t>(track)];
+        if (meter != nullptr) {
+            meter->setParameterFloat(1, std::clamp(outputGain, 0.0f, 4.0f));
         }
-        FMOD::ChannelGroup* group = nullptr;
-        if (instance->getChannelGroup(&group) != FMOD_OK || group == nullptr) {
-            return kMeterFloorDb;
-        }
-        int dspCount = 0;
-        if (group->getNumDSPs(&dspCount) != FMOD_OK || dspCount <= 0) {
-            return kMeterFloorDb;
-        }
-        FMOD::DSP* dsp = nullptr;
-        if (group->getDSP(dspCount - 1, &dsp) != FMOD_OK || dsp == nullptr) {
-            return kMeterFloorDb;
-        }
-        dsp->setMeteringEnabled(false, true);
-        FMOD_DSP_METERING_INFO output{};
-        if (dsp->getMeteringInfo(nullptr, &output) != FMOD_OK || output.numchannels <= 0) {
-            return kMeterFloorDb;
-        }
-        float sumSquares = 0.0f;
-        for (int channel = 0; channel < output.numchannels; ++channel) {
-            const float rms = std::max(0.0f, output.rmslevel[channel]);
-            sumSquares += rms * rms;
-        }
-        const float rms = std::sqrt(sumSquares / static_cast<float>(output.numchannels));
-        return rms <= 0.0000001f ? kMeterFloorDb : std::max(kMeterFloorDb, 20.0f * std::log10(rms));
     }
 
     static void setParameterQuietly(FMOD::Studio::EventInstance* instance, const char* name, float value) {
         if (instance != nullptr) {
-            instance->setParameterValue(name, value);
+            // FMOD 2.x honours an authored parameter seek speed by default.
+            // Keep it enabled so continuous RPM reaches the bank graph without
+            // forcing abrupt parameter jumps at each host update.
+            instance->setParameterByName(name, value, false);
         }
     }
 
@@ -847,6 +1026,10 @@ private:
     FMOD::Studio::EventInstance* backfire_ = nullptr;
     FMOD_DSP_DESCRIPTION distanceFilter_{};
     FMOD_DSP_DESCRIPTION gain_{};
+    FMOD_DSP_DESCRIPTION meter_{};
+    unsigned int meterPluginHandle_ = 0;
+    std::array<bool, kMeterTrackCount> meterAttached_{};
+    std::array<FMOD::DSP*, kMeterTrackCount> meterDsps_{};
     std::unordered_map<std::string, FMOD::Studio::EventDescription*> events_;
     std::vector<std::string> activeNames_;
     std::string lastError_;
@@ -915,6 +1098,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jfloat transmissionGain,
     jfloat turboGain,
     jfloat limiterGain,
+    jfloat limiterDecay,
     jfloat shiftGain,
     jfloat overrunGain,
     jfloat boost,
@@ -934,6 +1118,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             transmissionGain,
             turboGain,
             limiterGain,
+            limiterDecay,
             shiftGain,
             overrunGain,
             boost,

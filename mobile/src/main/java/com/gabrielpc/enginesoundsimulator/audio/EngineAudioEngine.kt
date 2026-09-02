@@ -195,6 +195,7 @@ class EngineAudioEngine(context: Context) {
         val smoother = FmodControlSmoother(profile.idleRpm)
         val turbo = TurboSpoolModel()
         val overrun = FmodOverrunTrigger()
+        val limiterDecay = FmodLimiterDecayTracker()
         var opened = false
         var lastTickNanos = System.nanoTime()
 
@@ -241,6 +242,7 @@ class EngineAudioEngine(context: Context) {
                     transmissionGain = gains.transmission.toFloat(),
                     turboGain = gains.turbo.toFloat(),
                     limiterGain = gains.limiter.toFloat(),
+                    limiterDecay = limiterDecay.advance(frame.limiterActive, dt),
                     shiftGain = gains.shift.toFloat(),
                     overrunGain = gains.overrun.toFloat(),
                     boost = turbo.boost.toFloat(),

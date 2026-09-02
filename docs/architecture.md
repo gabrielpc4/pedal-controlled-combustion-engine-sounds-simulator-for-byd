@@ -60,9 +60,9 @@ renderer.
 
 ## Native build boundary
 
-FMOD 1.10.11 is supplied outside the repository through `fmod.sdk.dir`. Gradle copies headers and
-native libraries into generated build staging. `tools/repair_fmod_dynsym.py` fixes only the copied
-legacy ELF marker ordering needed for modern NDK linking; it never changes the downloaded SDK.
+FMOD 2.03.14 is supplied outside the repository through `fmod.sdk.dir`. Gradle copies its Core and
+Studio headers and native libraries into generated build staging. The newer Android libraries do
+not need the legacy 1.10 ELF symbol-table repair.
 `fmod_bank_bridge.cpp` contains the direct Studio calls and compatible registrations for the Assetto
 `FMOD Distance Filter` and `FMOD Gain` plugins.
 

@@ -16,6 +16,30 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ExteriorSoundProgramIntegrationTest {
     @Test
+    fun exteriorDefaultsToBothWhileCabinDefaultsToLoad() {
+        val context = IsolatedPreferenceContext(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+            "exterior_sound_program_defaults",
+        ).also { it.clear() }
+        val sourceRepository = PrimaryEngineLayerSourceRepository(context)
+
+        try {
+            FmodBankProfiles.all.forEach { profile ->
+                assertEquals(
+                    PrimaryEngineLayerSource.LOAD,
+                    sourceRepository.load(profile, EngineSoundPerspective.CABIN),
+                )
+                assertEquals(
+                    PrimaryEngineLayerSource.BOTH,
+                    sourceRepository.load(profile, EngineSoundPerspective.EXTERIOR),
+                )
+            }
+        } finally {
+            context.clear()
+        }
+    }
+
+    @Test
     fun everyCarPersistsIndependentCabinAndExteriorProgramChoicesBeforeItsPackIsInstalled() {
         val context = IsolatedPreferenceContext(
             InstrumentationRegistry.getInstrumentation().targetContext,
@@ -37,7 +61,7 @@ class ExteriorSoundProgramIntegrationTest {
                 assertEquals(profile.id, selectedCarRepository.load().id)
                 EngineSoundPerspective.entries.forEach { perspective ->
                     perspectiveRepository.save(profile, perspective)
-                    assertEquals(perspective, perspectiveRepository.load(profile))
+                    assertEquals(profile.resolvedPerspective(perspective), perspectiveRepository.load(profile))
                     PrimaryEngineLayerSource.entries
                         .filter { source -> profile.supportsPrimaryLayerSource(source) }
                         .forEach { source ->

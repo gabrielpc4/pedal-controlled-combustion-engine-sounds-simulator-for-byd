@@ -9,7 +9,14 @@ internal class SelectedCarRepository(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun load(): FmodBankProfile = FmodBankProfiles.find(preferences.getString("profile_id", null))
+    fun load(): FmodBankProfile {
+        val savedId = preferences.getString("profile_id", null)
+        return if (savedId == null) {
+            FmodBankProfiles.find("alfa-romeo-4c")
+        } else {
+            FmodBankProfiles.find(savedId)
+        }
+    }
 
     fun save(profile: FmodBankProfile) {
         preferences.edit().putString("profile_id", profile.id).commit()

@@ -24,7 +24,8 @@ internal class PrimaryEngineLayerSourceRepository(context: Context) {
         perspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     ): PrimaryEngineLayerSource {
         val saved = preferences.getString(sourceKey(profile.id, perspective), null)
-        return PrimaryEngineLayerSource.entries.firstOrNull { it.name == saved } ?: PrimaryEngineLayerSource.LOAD
+        return PrimaryEngineLayerSource.entries.firstOrNull { it.name == saved }
+            ?: defaultFor(perspective)
     }
 
     fun save(
@@ -38,4 +39,11 @@ internal class PrimaryEngineLayerSourceRepository(context: Context) {
 
     private fun sourceKey(profileId: String, perspective: EngineSoundPerspective): String =
         "$profileId.${perspective.name.lowercase()}.primary_engine_layer_source"
+
+    private fun defaultFor(perspective: EngineSoundPerspective): PrimaryEngineLayerSource =
+        if (perspective == EngineSoundPerspective.EXTERIOR) {
+            PrimaryEngineLayerSource.BOTH
+        } else {
+            PrimaryEngineLayerSource.LOAD
+        }
 }

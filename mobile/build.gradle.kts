@@ -60,7 +60,7 @@ val generatedFmodSdk = file("build/generated/fmodSdk")
 
 val prepareFmodSdk = tasks.register<Sync>("prepareFmodSdk") {
     require(fmodSdkDirectory.isDirectory) { "FMOD Android SDK directory does not exist: $fmodSdkDirectory" }
-    from(File(fmodSdkDirectory, "api/lowlevel/inc")) {
+    from(File(fmodSdkDirectory, "api/core/inc")) {
         include("*.h", "*.hpp")
         into("include")
     }
@@ -68,7 +68,7 @@ val prepareFmodSdk = tasks.register<Sync>("prepareFmodSdk") {
         include("*.h", "*.hpp")
         into("include")
     }
-    from(File(fmodSdkDirectory, "api/lowlevel/lib")) {
+    from(File(fmodSdkDirectory, "api/core/lib")) {
         include("**/libfmod.so")
         into("lib")
     }
@@ -77,20 +77,6 @@ val prepareFmodSdk = tasks.register<Sync>("prepareFmodSdk") {
         into("lib")
     }
     into(generatedFmodSdk)
-}
-val stagedFmodLibraries = listOf(
-    "arm64-v8a", "armeabi-v7a", "x86", "x86_64",
-).flatMap { abi ->
-    listOf("libfmod.so", "libfmodstudio.so").map { library ->
-        File(generatedFmodSdk, "lib/$abi/$library")
-    }
-}
-val repairFmodSdk = tasks.register<Exec>("repairFmodSdk") {
-    dependsOn(prepareFmodSdk)
-    inputs.files(stagedFmodLibraries)
-    outputs.files(stagedFmodLibraries)
-    commandLine("python3", rootProject.file("tools/repair_fmod_dynsym.py").absolutePath)
-    args(stagedFmodLibraries.map(File::getAbsolutePath))
 }
 val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
     listOf(
@@ -157,7 +143,7 @@ if (isAssembling && stampCarBuild) {
 
 tasks.named("preBuild").configure {
     dependsOn(prepareCarPreviewAssets)
-    dependsOn(repairFmodSdk)
+    dependsOn(prepareFmodSdk)
 }
 
 android {
@@ -217,7 +203,7 @@ android {
 
 tasks.configureEach {
     if (name.contains("externalNativeBuild", ignoreCase = true)) {
-        dependsOn(repairFmodSdk)
+        dependsOn(prepareFmodSdk)
     }
 }
 
@@ -248,5 +234,5 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
-    implementation(files(File(fmodSdkDirectory, "api/lowlevel/lib/fmod.jar")))
+    implementation(files(File(fmodSdkDirectory, "api/core/lib/fmod.jar")))
 }
