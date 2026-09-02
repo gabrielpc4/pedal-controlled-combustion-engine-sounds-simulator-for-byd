@@ -160,7 +160,11 @@ internal fun MixerDashboardScreen(
         // were previously live remain as SILENT diagnostics instead of READY.
         knownSources.values
             .groupBy(FmodSourceState::section)
-            .toSortedMap(compareBy(FmodEventSection::order))
+            .toSortedMap(compareBy<FmodEventSection> {
+                // Keep the many engine-region cards out of the way of the
+                // shorter effect sections by presenting ENGINE last.
+                if (it == FmodEventSection.ENGINE) Int.MAX_VALUE else it.order
+            })
             .mapValues { (_, sources) ->
                 sources.sortedWith(
                     compareByDescending<FmodSourceState> { it.isActive }
