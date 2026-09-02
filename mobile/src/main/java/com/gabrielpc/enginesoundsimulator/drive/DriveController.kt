@@ -275,7 +275,13 @@ class DriveController(context: Context) {
         if (transmission.lockedToVehicle) transmissionPosition.set(transmission.position)
         simulation.manualShiftEnabled = manualShiftEnabled.get()
         val drivetrain = simulation.update(
-            DriverInput(input.throttle, input.brake, input.externalSpeedKmh, transmission.position),
+            DriverInput(
+                throttle = input.throttle,
+                brake = input.brake,
+                simulatedPedals = input.usesSimulatedPedals,
+                externalSpeedKmh = input.externalSpeedKmh,
+                transmissionPosition = transmission.position,
+            ),
             dt,
         )
         audioEngine.update(

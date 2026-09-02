@@ -25,23 +25,32 @@ button, ignition state, ramp, fade, or synthetic shutdown.
 
 Each official profile carries its own original physics metadata: idle and limiter RPM, shift-light
 and automatic shift RPM, ratios, final drive, wheel radius, clutch, turbo, and authored timing.
-`AssettoDrivetrain` is the sole engine and transmission model. It is also used for Park/Neutral
-free revving and manual shifting. The app does not add a 190 km/h limit, equal gear intervals,
-generic RPM maximum, custom hysteresis/cooldown, launch controller, throttle-RPM boost, virtual
-drag, or virtual regenerative braking.
+`AssettoDrivetrain` remains the engine and transmission model for real pedals, Park/Neutral free
+revving, and manual shifting.
+
+SIMULATED PEDALS intentionally uses a BYD Seal AWD road-speed model. Its full-throttle curve is
+digitized from the supplied Seal trace and reaches 100 km/h in approximately 3.97 seconds; partial
+throttle scales that acceleration linearly. It coasts with passive speed-dependent resistance,
+uses a 190 km/h cap, and stops immediately in Park. For every selected bank, virtual forward ratios
+split 0–190 km/h into equal bands and put that bank's limiter at each band end. Automatic SIM
+upshifts and downshifts use the legacy dashboard's short 95 ms/220 ms timing so unusually long
+authored shifts do not make the host-vehicle simulation feel sluggish. This SIM-only mapping does
+not change the original bank ratios or physics used by real pedals.
 
 BYD reports are treated as truncated `[N, N + 1)` km/h values. `QuantizedPresentationSpeedEstimator`
 uses only boundary timing and bounded pedal direction to produce a continuous presentation speed.
 Raw truncated speed remains authoritative for display and drivetrain/shift/load decisions; the
 presentation value is used only for road-coupled tachometer and pitch so FMOD never receives a
-synthetic stepped wave.
+synthetic stepped wave. SIMULATED PEDALS supplies continuous Seal-model speed directly and does
+not quantize it first.
 
 ## Authored FMOD
 
 FMOD 2.03.14 owns event graphs, source material, automation, randomisation, effects, and gains.
 The native bridge sends only the physical parameters and lifecycle transitions required by the
-bank. It does not write event, bus, channel-group, or source volume, and it has no app gain,
-per-car gain, LOAD/COAST mode, forced-load, mute, solo, drag, regen, or event-suppression layer.
+bank. It has no per-car gain, LOAD/COAST mode, forced-load, drag, regen, or event-suppression
+layer. The mixer can apply temporary event mute/solo and host engine/effects gains strictly for
+interactive diagnosis; those controls reset outside the current session.
 Engine, transmission, turbo, limiter, shift, gear-grind, backfire, traction-control, and authored
 start events are used only when present. Tires, wind, chassis, and doors remain excluded.
 
@@ -50,11 +59,11 @@ performed inside the active FMOD system without a host-side crossfade or restart
 
 ## Mixer
 
-The mixer is read-only diagnostics. Native sound-start/stop callbacks and Core channel ownership
-associate each active voice with its exact event path and raw sound name. Cards report state,
-voice count, FMOD audibility, and route gain; identical event/source pairs may be aggregated. UI
-polling is separate from the 3 ms audio-control loop, so no mixer allocations or gain writes occur
-on the realtime path.
+The mixer is diagnostics with temporary event-level mute/solo and host-gain controls. Native
+sound-start/stop callbacks and Core channel ownership associate each active voice with its exact
+event path and raw sound name. Cards report state, voice count, FMOD audibility, and route gain;
+identical event/source pairs may be aggregated. UI polling is separate from the 3 ms audio-control
+loop, so no mixer allocations occur on the realtime path.
 
 ## Packaging and failure behavior
 

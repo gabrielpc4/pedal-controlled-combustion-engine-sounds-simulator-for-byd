@@ -19,13 +19,16 @@ See [FMOD bank installation](fmod-bank-installation.md).
 
 Use the current Kotlin/C++ source and the original Assetto installation data. Audio Lab is the
 reference for authored physics and FMOD event ordering. The FMOD bank, its parameters, and the
-original per-car physics are authoritative; the application adds no ignition simulation, synthetic
-torque curve, speed cap, gear table, tuning, gain, mute, solo, drag, or regenerative-braking
-override.
+original per-car physics remain authoritative for real pedals, RPM, clutch, turbo, and authored
+events. SIMULATED PEDALS is intentionally different: its road-speed envelope follows the BYD Seal
+AWD, caps at 190 km/h, and maps every sound gear to an equal road-speed band. This keeps the
+synthetic road motion representative of the car that hosts the dashboard without changing the
+selected bank's audio behaviour.
 
-The BYD speed is truncated to an integer for the physical input. The bounded presentation-speed
-estimator is retained only to keep tachometer and pitch continuous between telemetry updates; it
-never changes the reported speed, gear decisions, vehicle load, or FMOD gains.
+The real BYD speed is truncated to an integer for the physical input. The bounded
+presentation-speed estimator is retained only to keep tachometer and pitch continuous between
+telemetry updates; it never changes the reported speed, gear decisions, vehicle load, or FMOD
+gains. Simulated speed is already continuous and therefore bypasses that estimator.
 
 ## Safety and privacy
 
@@ -47,7 +50,8 @@ python3 tools/build_fmod_bank_packs.py --force
 ```
 
 Install the dashboard, install the installer, and use **INSTALL ORIGINAL CARS**. The installer can
-remove all published packs with **DELETE ALL**. The mixer is diagnostic and read-only.
+remove all published packs with **DELETE ALL**. The mixer is diagnostic; its temporary mute/solo
+and host-gain controls reset when the car changes or the app starts.
 
 ## Documents
 

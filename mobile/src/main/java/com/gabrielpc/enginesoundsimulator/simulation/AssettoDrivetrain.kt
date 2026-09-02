@@ -116,6 +116,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         transmissionPosition: TransmissionPosition,
         automaticShifting: Boolean,
         externalSpeedMetersPerSecond: Double?,
+        simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration?,
         deltaSeconds: Double,
     ): AssettoDrivetrainFrame {
         val dt = f32(deltaSeconds.coerceIn(0.0001, 0.020))
@@ -123,9 +124,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         externalSpeedMetersPerSecond?.let(::anchorSpeed)
 
         if (transmissionPosition != TransmissionPosition.DRIVE) {
-            if (gear != 0 || shifting) setGearImmediately(0)
+            if (gear != 0 || shifting) setGearImmediately(0, simulatedPedalsGearCalibration)
         } else if (gear == 0 && !shifting) {
-            setGearImmediately(1)
+            setGearImmediately(1, simulatedPedalsGearCalibration)
         }
 
         var shiftStarted = false
@@ -149,7 +150,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             }
         }
 
-        val automaticRequest = automaticShiftDecision(controlsGas, clutch, automaticShifting, dt)
+        val automaticRequest = automaticShiftDecision(
+            controlsGas,
+            clutch,
+            automaticShifting,
+            simulatedPedalsGearCalibration,
+            dt,
+        )
         if (automaticGasCutoff > 0.0) {
             automaticGasCutoff = f32(automaticGasCutoff - dt)
             controlsGas = 0.0
@@ -157,7 +164,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
         val requestedDirection = manualShiftRequest.takeIf { it != 0 } ?: automaticRequest
         manualShiftRequest = 0
-        if (acceptShift(requestedDirection, clutch, dt)) {
+        if (acceptShift(requestedDirection, clutch, simulatedPedalsGearCalibration, dt)) {
             shiftStarted = true
             eventDirection = requestedDirection
         } else if (requestedDirection != 0) {
@@ -201,7 +208,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val effectiveMass = vehicle.massKg +
             2.0 * vehicle.frontWheelInertia / frontRadius.pow(2) +
             2.0 * vehicle.rearWheelInertia / rearRadius.pow(2)
-        val ratio = abs(physics.drivetrain.ratioForGear(gear) * physics.drivetrain.finalDrive)
+        val ratio = abs(ratioForGear(gear, simulatedPedalsGearCalibration) * physics.drivetrain.finalDrive)
         var engineOmega = rpm * RADIAN_SECONDS_PER_RPM
         var driveForce = 0.0
         var tractionTorqueLimited = false
@@ -270,8 +277,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         previousWheelSpeed = speedMetersPerSecond / drivenAxle(physics.drivetrain.vehicle).radius
     }
 
-    private fun setGearImmediately(target: Int) {
-        physics.drivetrain.ratioForGear(target)
+    private fun setGearImmediately(target: Int, calibration: SimulatedPedalsGearCalibration?) {
+        ratioForGear(target, calibration)
         gear = target
         shiftDirection = 0
         shiftTarget = target
@@ -303,22 +310,32 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return clutchSignal.coerceIn(0.0, 1.0)
     }
 
-    private fun automaticShiftDecision(gas: Double, clutch: Double, enabled: Boolean, dt: Double): Int {
+    private fun automaticShiftDecision(
+        gas: Double,
+        clutch: Double,
+        enabled: Boolean,
+        calibration: SimulatedPedalsGearCalibration?,
+        dt: Double,
+    ): Int {
         if (!enabled || gear == -1 || shifting) return 0
         var request = 0
         if (clutch > 0.99 || gear == 0) {
+            val shiftRpm = calibration?.let { roadCoupledRpm(gear, it) } ?: rpm
+            val upshiftRpm = calibration?.limiterRpm ?: physics.drivetrain.automaticUpshiftRpm.toDouble()
             if (
-                rpm > physics.drivetrain.automaticUpshiftRpm &&
-                gear < physics.drivetrain.forwardRatios.size && gas > 0.2 && automaticGasCutoff <= 0.0
+                shiftRpm >= upshiftRpm &&
+                gear < (calibration?.forwardGearCount ?: physics.drivetrain.forwardRatios.size) &&
+                gas > 0.2 && automaticGasCutoff <= 0.0
             ) {
                 request = 1
                 automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
-                val downshiftRpm = physics.drivetrain.automaticDownshiftRpm.toDouble()
+                val downshiftRpm = calibration?.automaticDownshiftRpm(gear)
+                    ?: physics.drivetrain.automaticDownshiftRpm.toDouble()
                 if (
-                    rpm < downshiftRpm &&
+                    shiftRpm < downshiftRpm &&
                     gear > 1 && clutch > 0.85 &&
-                    downshiftAllowed(gear - 1, dt) &&
+                    downshiftAllowed(gear - 1, calibration, dt) &&
                     automaticGasCutoff <= 0.0
                 ) request = -1
             }
@@ -326,16 +343,26 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return request
     }
 
-    private fun acceptShift(direction: Int, clutch: Double, dt: Double): Boolean {
+    private fun acceptShift(
+        direction: Int,
+        clutch: Double,
+        calibration: SimulatedPedalsGearCalibration?,
+        dt: Double,
+    ): Boolean {
         if (direction == 0 || shifting) return false
         val target = gear + direction
-        if (target !in -1..physics.drivetrain.forwardRatios.size) return false
-        if (direction < 0 && !downshiftAllowed(target, dt)) return false
+        val forwardGearCount = calibration?.forwardGearCount ?: physics.drivetrain.forwardRatios.size
+        if (target !in -1..forwardGearCount) return false
+        if (direction < 0 && !downshiftAllowed(target, calibration, dt)) return false
 
         shiftDirection = direction
         shiftTarget = target
         shiftElapsed = 0.0
-        shiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds else physics.drivetrain.gearDownTimeSeconds
+        shiftDuration = if (direction > 0) {
+            calibration?.gearUpTimeSeconds ?: physics.drivetrain.gearUpTimeSeconds
+        } else {
+            calibration?.gearDownTimeSeconds ?: physics.drivetrain.gearDownTimeSeconds
+        }
         gear = 0
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
             engineCutoff = physics.drivetrain.autoCutoffTimeSeconds
@@ -353,21 +380,37 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return true
     }
 
-    private fun downshiftAllowed(target: Int, dt: Double): Boolean {
+    private fun downshiftAllowed(target: Int, calibration: SimulatedPedalsGearCalibration?, dt: Double): Boolean {
         val spec = physics.drivetrain
         if (!spec.downshiftProtection) return true
         if (target == 0 && spec.downshiftLocksNeutral && speedMetersPerSecond * 3.6 > 2.0) return false
         if (target <= 0) return true
-        return projectedRpmForGear(target, dt) <= physics.engine.limiterRpm + spec.downshiftOverrevRpm
+        return projectedRpmForGear(target, calibration, dt) <= physics.engine.limiterRpm + spec.downshiftOverrevRpm
     }
 
-    private fun projectedRpmForGear(target: Int, dt: Double): Double {
+    private fun projectedRpmForGear(
+        target: Int,
+        calibration: SimulatedPedalsGearCalibration?,
+        dt: Double,
+    ): Double {
         val spec = physics.drivetrain
         val wheelSpeed = speedMetersPerSecond / drivenAxle(spec.vehicle).radius
         val wheelAcceleration = max(0.0, (wheelSpeed - previousWheelSpeed) / dt.coerceAtLeast(1e-9))
-        val projected = wheelSpeed + spec.gearDownTimeSeconds * wheelAcceleration
-        return projected * abs(spec.ratioForGear(target) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
+        val shiftTime = calibration?.gearDownTimeSeconds ?: spec.gearDownTimeSeconds
+        val projected = wheelSpeed + shiftTime * wheelAcceleration
+        return projected * abs(ratioForGear(target, calibration) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
     }
+
+    private fun roadCoupledRpm(gear: Int, calibration: SimulatedPedalsGearCalibration): Double {
+        if (gear <= 0) return rpm
+        val wheelSpeed = speedMetersPerSecond / drivenAxle(physics.drivetrain.vehicle).radius
+        return wheelSpeed *
+            abs(ratioForGear(gear, calibration) * physics.drivetrain.finalDrive) *
+            RPM_PER_RADIAN_SECOND
+    }
+
+    private fun ratioForGear(gear: Int, calibration: SimulatedPedalsGearCalibration?): Double =
+        calibration?.ratioForGear(gear, physics.drivetrain) ?: physics.drivetrain.ratioForGear(gear)
 
     private fun engineTorque(dt: Double, controlsGas: Double, engineGas: Double): EngineTorqueFrame {
         val engine = physics.engine

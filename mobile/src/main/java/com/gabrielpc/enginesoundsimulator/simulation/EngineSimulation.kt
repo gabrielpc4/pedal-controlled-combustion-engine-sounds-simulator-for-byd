@@ -9,6 +9,8 @@ import kotlin.math.abs
 data class DriverInput(
     val throttle: Double = 0.0,
     val brake: Double = 0.0,
+    /** True only for the app's touch-pedal scenario; real BYD speed remains authoritative. */
+    val simulatedPedals: Boolean = false,
     val externalSpeedKmh: Double? = null,
     val transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
 )
@@ -59,6 +61,8 @@ class EngineSimulation {
     private var drivetrain: AssettoDrivetrain? = null
     private var latestState = DrivetrainState()
     private val presentationSpeedEstimator = QuantizedPresentationSpeedEstimator()
+    private val bydSealSimulatedPedalsMotion = BydSealSimulatedPedalsMotion()
+    private var simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration? = null
 
     val state: DrivetrainState get() = latestState
 
@@ -66,12 +70,15 @@ class EngineSimulation {
         physics = updated
         drivetrain = AssettoDrivetrain(updated).also { it.reset(engineRunning = true) }
         presentationSpeedEstimator.reset()
+        bydSealSimulatedPedalsMotion.reset()
+        simulatedPedalsGearCalibration = SimulatedPedalsGearCalibration.from(updated)
         latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0, false)
     }
 
     fun reset() {
         drivetrain?.reset(engineRunning = true)
         presentationSpeedEstimator.reset()
+        bydSealSimulatedPedalsMotion.reset()
         physics?.let { latestState = buildState(it, drivetrain!!.frame(), 0.0, 0.0, 0.0, false) }
     }
 
@@ -80,6 +87,17 @@ class EngineSimulation {
         val activeDrivetrain = drivetrain ?: return latestState
         val dt = deltaSeconds.coerceIn(0.001, 0.020)
         val rawSpeed = input.externalSpeedKmh?.coerceAtLeast(0.0)?.let(::truncateRawSpeedKmh)
+        val simulatedMotion = if (input.simulatedPedals) {
+            bydSealSimulatedPedalsMotion.step(
+                throttle = input.throttle,
+                brake = input.brake,
+                transmissionPosition = input.transmissionPosition,
+                deltaSeconds = dt,
+            )
+        } else {
+            bydSealSimulatedPedalsMotion.reset()
+            null
+        }
         val presentationSpeed = if (rawSpeed != null) {
             presentationSpeedEstimator.update(
                 measurementKmh = rawSpeed,
@@ -90,19 +108,23 @@ class EngineSimulation {
             )
         } else {
             presentationSpeedEstimator.reset()
-            null
+            simulatedMotion?.speedKmh
         }
+        val roadSpeedKmh = rawSpeed ?: simulatedMotion?.speedKmh
+        val gearCalibration = simulatedMotion?.let { simulatedPedalsGearCalibration }
         val frame = activeDrivetrain.step(
             throttle = input.throttle.coerceIn(0.0, 1.0),
             brake = input.brake.coerceIn(0.0, 1.0),
             transmissionPosition = input.transmissionPosition,
             automaticShifting = !manualShiftEnabled,
-            externalSpeedMetersPerSecond = rawSpeed?.div(3.6),
+            externalSpeedMetersPerSecond = roadSpeedKmh?.div(3.6),
+            simulatedPedalsGearCalibration = gearCalibration,
             deltaSeconds = dt,
         )
         val present = presentationSpeed ?: frame.speedMetersPerSecond * 3.6
         val presentAcceleration = if (presentationSpeed != null) {
-            presentationSpeedEstimator.presentationVelocityKmhPerSecond
+            if (rawSpeed != null) presentationSpeedEstimator.presentationVelocityKmhPerSecond
+            else simulatedMotion?.accelerationKmhPerSecond ?: 0.0
         } else {
             0.0
         }
@@ -111,8 +133,9 @@ class EngineSimulation {
             frame = frame,
             presentationSpeedKmh = present,
             presentationAccelerationKmhPerSecond = presentAcceleration,
-            rawSpeedKmh = rawSpeed ?: truncateRawSpeedKmh(frame.speedMetersPerSecond * 3.6),
-            usePresentationRoadSpeed = rawSpeed != null,
+            rawSpeedKmh = rawSpeed ?: truncateRawSpeedKmh(roadSpeedKmh ?: frame.speedMetersPerSecond * 3.6),
+            usePresentationRoadSpeed = roadSpeedKmh != null,
+            simulatedPedalsGearCalibration = gearCalibration,
         )
         return latestState
     }
@@ -128,10 +151,14 @@ class EngineSimulation {
         presentationAccelerationKmhPerSecond: Double,
         rawSpeedKmh: Double,
         usePresentationRoadSpeed: Boolean,
+        simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration? = null,
     ): DrivetrainState {
         val audibleRpm = if (usePresentationRoadSpeed && frame.gear != 0 && presentationSpeedKmh > 0.01) {
             val wheelOmega = presentationSpeedKmh / 3.6 / drivenWheelRadius(activePhysics)
-            val ratio = abs(activePhysics.drivetrain.ratioForGear(frame.gear) * activePhysics.drivetrain.finalDrive)
+            val ratio = abs(
+                (simulatedPedalsGearCalibration?.ratioForGear(frame.gear, activePhysics.drivetrain)
+                    ?: activePhysics.drivetrain.ratioForGear(frame.gear)) * activePhysics.drivetrain.finalDrive,
+            )
             (wheelOmega * ratio * 60.0 / (2.0 * PI)).coerceIn(activePhysics.engine.idleRpm, activePhysics.engine.limiterRpm)
         } else {
             frame.rpm.coerceAtLeast(activePhysics.engine.idleRpm)
@@ -171,19 +198,11 @@ class EngineSimulation {
             tachometerMaximumRpm = activePhysics.engine.tachometerMaximumRpm,
             redlineRpm = redline,
             limiterRpm = activePhysics.engine.limiterRpm,
-            automaticUpshiftRpm = activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
-            automaticDownshiftRpm = activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
+            automaticUpshiftRpm = simulatedPedalsGearCalibration?.limiterRpm
+                ?: activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
+            automaticDownshiftRpm = simulatedPedalsGearCalibration?.automaticDownshiftRpm(frame.gear)
+                ?: activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
         )
-    }
-
-    private fun drivenWheelRadius(activePhysics: AssettoPhysics): Double {
-        val vehicle = activePhysics.drivetrain.vehicle
-        return when {
-            activePhysics.drivetrain.traction.equals("FWD", true) -> vehicle.frontWheelRadiusMeters
-            activePhysics.drivetrain.traction.startsWith("AWD", true) ->
-                (vehicle.frontWheelRadiusMeters + vehicle.rearWheelRadiusMeters) * 0.5
-            else -> vehicle.rearWheelRadiusMeters
-        }.coerceAtLeast(1e-6)
     }
 }
 
