@@ -24,7 +24,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Installs the active original Assetto Corsa FMOD group into the dashboard. */
+/** Installs either FMOD car group, or both, into the dashboard. */
 public final class AudioInstallerActivity extends Activity {
     private static final String ORIGINAL_GROUP = "original_cars_pack";
     private static final String MODDED_GROUP = "modded_car_packs";
@@ -32,10 +32,11 @@ public final class AudioInstallerActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private TextView status;
     private ProgressBar progress;
-    private Button installAll;
+    private Button installOriginal;
+    private Button installModded;
+    private Button installBoth;
     private Button deleteAll;
     private List<Pack> packs = List.of();
-    private int preparedModdedCount;
 
     @Override
     public void onCreate(Bundle state) {
@@ -46,7 +47,9 @@ public final class AudioInstallerActivity extends Activity {
             refreshIdleState();
         } catch (Exception exception) {
             status.setText("No current original FMOD banks were found. Rebuild this installer after preparing the packs.");
-            installAll.setEnabled(false);
+            installOriginal.setEnabled(false);
+            installModded.setEnabled(false);
+            installBoth.setEnabled(false);
         }
     }
 
@@ -58,7 +61,7 @@ public final class AudioInstallerActivity extends Activity {
         root.setBackgroundColor(0xff05080a);
         root.addView(text("ENGINE FMOD BANKS", 30, 0xff00d7e8));
         root.addView(text("ORIGINAL ASSETTO CORSA CARS", 17, 0xffd5e2e8));
-        root.addView(text("MODDED CAR PACKS · PREPARED / DISABLED", 14, 0xff71858e));
+        root.addView(text("MODDED CAR PACKS", 14, 0xff71858e));
         status = text("Preparing…", 18, 0xffffffff);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = 32;
@@ -71,10 +74,22 @@ public final class AudioInstallerActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.START);
         actions.setPadding(0, 32, 0, 0);
-        installAll = new Button(this);
-        installAll.setText("INSTALL ORIGINAL CARS");
-        installAll.setOnClickListener(view -> installAll());
-        actions.addView(installAll);
+        installOriginal = new Button(this);
+        installOriginal.setText("INSTALL ORIGINAL CARS");
+        installOriginal.setOnClickListener(view -> installGroups(Set.of(ORIGINAL_GROUP)));
+        actions.addView(installOriginal);
+        installModded = new Button(this);
+        installModded.setText("INSTALL MODDED CARS");
+        installModded.setOnClickListener(view -> installGroups(Set.of(MODDED_GROUP)));
+        LinearLayout.LayoutParams moddedParams = new LinearLayout.LayoutParams(-2, -2);
+        moddedParams.leftMargin = 16;
+        actions.addView(installModded, moddedParams);
+        installBoth = new Button(this);
+        installBoth.setText("INSTALL BOTH");
+        installBoth.setOnClickListener(view -> installGroups(Set.of(ORIGINAL_GROUP, MODDED_GROUP)));
+        LinearLayout.LayoutParams bothParams = new LinearLayout.LayoutParams(-2, -2);
+        bothParams.leftMargin = 16;
+        actions.addView(installBoth, bothParams);
         deleteAll = new Button(this);
         deleteAll.setText("DELETE ALL");
         deleteAll.setOnClickListener(view -> deleteAll());
@@ -87,31 +102,33 @@ public final class AudioInstallerActivity extends Activity {
 
     private void refreshIdleState() {
         Set<String> installed = installedIds();
-        long carCount = packs.stream().filter(pack -> !pack.dependency).count();
-        long installedCars = packs.stream()
-                .filter(pack -> !pack.dependency && installed.contains(pack.group + "/" + pack.id))
-                .count();
-        status.setText(installedCars + " of " + carCount + " original cars installed (" + installed.size() +
-                " packages including shared dependencies)" +
-                (preparedModdedCount == 0 ? "" : " · " + preparedModdedCount + " modded prepared, disabled"));
+        long originalCount = packs.stream().filter(pack -> ORIGINAL_GROUP.equals(pack.group) && !pack.dependency).count();
+        long moddedCount = packs.stream().filter(pack -> MODDED_GROUP.equals(pack.group) && !pack.dependency).count();
+        long installedOriginal = packs.stream().filter(pack -> ORIGINAL_GROUP.equals(pack.group) && !pack.dependency && installed.contains(pack.group + "/" + pack.id)).count();
+        long installedModded = packs.stream().filter(pack -> MODDED_GROUP.equals(pack.group) && !pack.dependency && installed.contains(pack.group + "/" + pack.id)).count();
+        status.setText("Original: " + installedOriginal + "/" + originalCount + " · Modded: " + installedModded + "/" + moddedCount +
+                " (" + installed.size() + " packages including shared dependencies)");
         progress.setProgress(packs.isEmpty() ? 0 : installed.size() * 1000 / packs.size());
     }
 
-    private void installAll() {
+    private void installGroups(Set<String> groups) {
         setBusy(true);
         new Thread(() -> {
-            long totalBytes = packs.stream().mapToLong(pack -> pack.bytes).sum();
+            List<Pack> selected = packs.stream()
+                    .filter(pack -> groups.contains(pack.group) || pack.dependency)
+                    .toList();
+            long totalBytes = selected.stream().mapToLong(pack -> pack.bytes).sum();
             long copied = 0L;
             try {
-                for (int index = 0; index < packs.size(); index++) {
-                    Pack pack = packs.get(index);
-                    postStatus("Installing " + pack.name + " (" + (index + 1) + "/" + packs.size() + ")", copied, totalBytes);
+                for (int index = 0; index < selected.size(); index++) {
+                    Pack pack = selected.get(index);
+                    postStatus("Installing " + pack.name + " (" + (index + 1) + "/" + selected.size() + ")", copied, totalBytes);
                     copied += copyPack(pack, totalBytes, copied);
-                    waitForPublication(pack.id);
+                    waitForPublication(pack.group, pack.id);
                 }
                 main.post(() -> {
-                    long carCount = packs.stream().filter(pack -> !pack.dependency).count();
-                    status.setText("All " + carCount + " original cars and shared dependencies are installed.");
+                    status.setText("Selected car group(s) installed successfully.");
+                    refreshIdleState();
                     progress.setProgress(1000);
                     setBusy(false);
                 });
@@ -145,9 +162,9 @@ public final class AudioInstallerActivity extends Activity {
         return copied;
     }
 
-    private void waitForPublication(String packId) throws IOException {
+    private void waitForPublication(String group, String packId) throws IOException {
         for (int attempt = 0; attempt < 100; attempt++) {
-            if (installedIds().contains(ORIGINAL_GROUP + "/" + packId)) return;
+            if (installedIds().contains(group + "/" + packId)) return;
             try {
                 Thread.sleep(100L);
             } catch (InterruptedException interrupted) {
@@ -198,7 +215,9 @@ public final class AudioInstallerActivity extends Activity {
     }
 
     private void setBusy(boolean busy) {
-        installAll.setEnabled(!busy);
+        installOriginal.setEnabled(!busy);
+        installModded.setEnabled(!busy);
+        installBoth.setEnabled(!busy);
         deleteAll.setEnabled(!busy);
     }
 
@@ -220,8 +239,7 @@ public final class AudioInstallerActivity extends Activity {
                     reader.beginArray();
                     while (reader.hasNext()) {
                         Pack pack = readPack(reader);
-                        if (ORIGINAL_GROUP.equals(pack.group) && pack.active) result.add(pack);
-                        else if (MODDED_GROUP.equals(pack.group)) preparedModdedCount++;
+                        if (pack.active) result.add(pack);
                     }
                     reader.endArray();
                 } else {

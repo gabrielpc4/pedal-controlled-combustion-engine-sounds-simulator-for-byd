@@ -69,7 +69,11 @@ class DriveController(context: Context) {
     private val bankResolver = FmodBankResolver(appContext)
     private val shiftModeRepository = ShiftModeRepository(appContext)
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
-    private val selectedProfile = AtomicReference(selectedCarRepository.load())
+    private val selectedProfile = AtomicReference(
+        selectedCarRepository.load().takeIf(bankResolver::isInstalled)
+            ?: FmodBankProfiles.all.firstOrNull(bankResolver::isInstalled)
+            ?: FmodBankProfiles.default,
+    )
     private val selectedPerspective = AtomicReference(soundPerspectiveRepository.load(selectedProfile.get()))
     private val manualShiftEnabled = AtomicBoolean(shiftModeRepository.isManualEnabled())
     private val activePhysics = AtomicReference<AssettoPhysics?>(null)
@@ -101,8 +105,8 @@ class DriveController(context: Context) {
         selectedCarId = selectedProfile.get().id,
         selectedCarName = selectedProfile.get().displayName,
         selectedCarPreviewAsset = selectedProfile.get().previewAssetName,
-        selectedCarIndex = FmodBankProfiles.all.indexOf(selectedProfile.get()),
-        availableCarCount = FmodBankProfiles.all.size,
+        selectedCarIndex = installedProfiles().indexOf(selectedProfile.get()),
+        availableCarCount = installedProfiles().size,
         soundPerspective = selectedPerspective.get(),
     )
 
@@ -209,7 +213,9 @@ class DriveController(context: Context) {
 
     fun selectPreviousCar() { selectAdjacentCar(-1) }
     fun selectNextCar() { selectAdjacentCar(1) }
-    fun selectCar(profileId: String) { applySelectedCar(FmodBankProfiles.find(profileId)) }
+    fun selectCar(profileId: String) {
+        FmodBankProfiles.find(profileId).takeIf(bankResolver::isInstalled)?.let(::applySelectedCar)
+    }
 
     fun toggleManualShiftMode() {
         val enabled = !manualShiftEnabled.get()
@@ -238,7 +244,10 @@ class DriveController(context: Context) {
     fun dismissUserMessage() { userMessage = null }
 
     private fun selectAdjacentCar(offset: Int) {
-        applySelectedCar(FmodBankProfiles.adjacent(selectedProfile.get().id, offset))
+        val installed = installedProfiles()
+        if (installed.isEmpty()) return
+        val current = installed.indexOfFirst { it.id == selectedProfile.get().id }.coerceAtLeast(0)
+        applySelectedCar(installed[(current + offset).mod(installed.size)])
     }
 
     private fun applySelectedCar(profile: FmodBankProfile) {
@@ -258,10 +267,13 @@ class DriveController(context: Context) {
         if (physics != null) simulation.updateAssettoPhysics(physics)
         else userMessage = UserVisibleMessage(
             id = SystemClock.elapsedRealtime(),
-            title = "Original car audio is not installed",
-            detail = "Install the original_cars_pack before selecting ${profile.displayName}.",
+            title = "Car audio is not installed",
+            detail = "Install the package group containing ${profile.displayName} in the audio installer.",
         )
     }
+
+    private fun installedProfiles(): List<FmodBankProfile> =
+        FmodBankProfiles.all.filter(bankResolver::isInstalled)
 
     private fun runLoop(runId: Long) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
@@ -343,8 +355,8 @@ class DriveController(context: Context) {
                 selectedCarId = selected.id,
                 selectedCarName = selected.displayName,
                 selectedCarPreviewAsset = selected.previewAssetName,
-                selectedCarIndex = FmodBankProfiles.all.indexOf(selected),
-                availableCarCount = FmodBankProfiles.all.size,
+                selectedCarIndex = installedProfiles().indexOf(selected),
+                availableCarCount = installedProfiles().size,
                 soundPerspective = selectedPerspective.get(),
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = audioEngine.loadedBankProfileId() == selected.id,

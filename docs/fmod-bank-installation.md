@@ -9,8 +9,11 @@ dashboard's exported provider.
 `tools/build_fmod_bank_packs.py` reads official cars only from
 `assetto_corsa_installation/content/cars`. It creates:
 
-- `original_cars_pack`: exactly 22 fixed profiles, active and installable.
-- `modded_car_packs`: profiles discovered under `new_cars`, prepared for later work but inactive.
+- `original_cars_pack`: official cars sourced from the Assetto Corsa installation.
+- `modded_car_packs`: profiles discovered under `new_cars`.
+
+Both groups are installable independently. The installer can publish the original group, the
+modded group, or both; shared FMOD dependencies are installed automatically in all cases.
 
 Each active car package contains one original `.bank`, optional `GUIDs.txt`, the original preview
 selected from `ui/dlc_preview.png` or an official skin preview, and that car's exported
@@ -26,7 +29,7 @@ python3 tools/build_fmod_bank_packs.py --force
 ## Android installation
 
 Install the dashboard before the installer, open **ENGINE FMOD BANKS**, and tap
-**INSTALL ORIGINAL CARS**. The installer publishes each pack at:
+The installer publishes each selected pack at:
 
 ```text
 content://com.gabrielpc.enginesoundsimulator.fmodbanks/packs/original_cars_pack/<pack-id>

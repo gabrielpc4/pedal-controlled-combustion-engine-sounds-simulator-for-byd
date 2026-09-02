@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build the two-group native FMOD bank catalog.
 
-The original group is intentionally sourced only from the installed Assetto
-Corsa content. Modded cars are prepared from ``new_cars`` for a later release,
-but are marked inactive in the index and never selected by the Android app.
+The original group is sourced only from the installed Assetto Corsa content;
+the modded group is sourced from ``new_cars``. Both groups are packaged so the
+installer can publish either one or both independently.
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ def discover_modded_sources() -> list[CarSource]:
             source_directory=directory,
             bank_path=bank,
             preview_path=preview_for(directory),
-            active=False,
+            active=True,
         ))
     return sources
 
@@ -286,7 +286,7 @@ def main() -> int:
         "version": 2,
         "groups": [
             {"id": ORIGINAL_GROUP, "name": "Original Assetto Corsa cars", "active": True},
-            {"id": MODDED_GROUP, "name": "Modded cars (not enabled yet)", "active": False},
+            {"id": MODDED_GROUP, "name": "Modded cars", "active": True},
         ],
         "packs": sorted(packs, key=lambda item: (item["group"], item["id"])),
         "exceptions": exceptions,

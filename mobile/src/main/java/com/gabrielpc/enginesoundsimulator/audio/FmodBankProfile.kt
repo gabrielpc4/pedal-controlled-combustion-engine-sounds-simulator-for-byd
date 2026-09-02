@@ -9,9 +9,10 @@ internal data class FmodBankProfile(
     val packGroup: String = FmodBankProfiles.originalCarsPackId,
 )
 
-/** The first release deliberately exposes only the 22 first-party Assetto Corsa cars. */
+/** Catalog metadata for both installable bank groups. Runtime selection filters to installed packs. */
 internal object FmodBankProfiles {
     const val originalCarsPackId = "original_cars_pack"
+    const val moddedCarsPackId = "modded_car_packs"
     const val commonStringsPackId = "assetto-common-strings"
     const val commonPackId = "assetto-common"
 
@@ -41,6 +42,39 @@ internal object FmodBankProfiles {
         profile("assetto-porsche-911-gt3-rs", "Porsche 911 GT3 RS"),
         profile("assetto-porsche-991-turbo-s", "Porsche 911 Turbo S (991)"),
         profile("assetto-toyota-supra-mkiv", "Toyota Supra Mk IV"),
+        profile("modded-aston-martin-dbrs9-gt3", "Aston Martin DBS", moddedCarsPackId),
+        profile("modded-audi-r8-lms-gt2", "Audi R8", moddedCarsPackId),
+        profile("modded-audi-tt-cup-2015", "Audi TT", moddedCarsPackId),
+        profile("modded-bmw-m8-gtlm", "BMW M8 Competition", moddedCarsPackId),
+        profile("modded-bugatti-chiron-pur-sport", "Bugatti Chiron", moddedCarsPackId),
+        profile("modded-cadillac-escalade-esv", "Cadillac Escalade", moddedCarsPackId),
+        profile("modded-chevrolet-camaro-concept", "Chevrolet Camaro", moddedCarsPackId),
+        profile("modded-chevrolet-corvette-c6-z06-stanced", "Chevrolet Corvette C6 ZO6", moddedCarsPackId),
+        profile("modded-chevrolet-corvette-c7-stingray-hellspec", "Chevrolet Corvette Stingray", moddedCarsPackId),
+        profile("modded-ferrari-360-challenge-stradale", "Ferrari 360", moddedCarsPackId),
+        profile("modded-ferrari-458-italia-gte-ferruccio", "Ferrari 458 Spider", moddedCarsPackId),
+        profile("modded-ferrari-458-italia-tune", "Ferrari 458 Italia Tune", moddedCarsPackId),
+        profile("modded-ferrari-488-gte-evo-michelotto", "Ferrari 488 Pista", moddedCarsPackId),
+        profile("modded-ferrari-f1-2000", "Ferrari F1 2000", moddedCarsPackId),
+        profile("modded-ferrari-f430-gt2-2007", "Ferrari 430", moddedCarsPackId),
+        profile("modded-ferrari-laferrari-trio", "Ferrari LaFerrari Trio", moddedCarsPackId),
+        profile("modded-ferrari-sf90-xx-stradale-2024", "Ferrari SF90 Stradale", moddedCarsPackId),
+        profile("modded-lexus-lfa", "Lexus LFA", moddedCarsPackId),
+        profile("modded-lexus-lfa-concept-gt500", "Lexus LFA Concept GT500", moddedCarsPackId),
+        profile("modded-lexus-lfa-no-hesi-spec", "Lexus LFA No Hesi Spec", moddedCarsPackId),
+        profile("modded-lexus-lfa-nurburgring-edition", "Lexus LFA Nürburgring Edition", moddedCarsPackId),
+        profile("modded-mercedes-amg-project-one-hypercar", "Mercedes-AMG Project One Hypercar", moddedCarsPackId),
+        profile("modded-mercedes-benz-amg-gt3-evo-2020-sprint", "Mercedes-Benz AMG GT3 EVO 2020", moddedCarsPackId),
+        profile("modded-mitsubishi-eclipse-gsx-r", "Mitsubishi Eclipse", moddedCarsPackId),
+        profile("modded-mitsubishi-lancer-evolution-viii-gsr", "Mitsubishi Lancer Evolution VIII", moddedCarsPackId),
+        profile("modded-nissan-350z", "Nissan 350Z", moddedCarsPackId),
+        profile("modded-nissan-370z-widebody", "Nissan 370Z Widebody", moddedCarsPackId),
+        profile("modded-nissan-gt-r-nismo-godzilla", "Nissan GT-R NISMO Godzilla", moddedCarsPackId),
+        profile("modded-porsche-911-992-turbo-s-pdk", "Porsche 911 992 Turbo S PDK", moddedCarsPackId),
+        profile("modded-porsche-911-gt3-rs-hellspec", "Porsche 911 GT3 RS Hellspec", moddedCarsPackId),
+        profile("modded-porsche-911-turbo-s", "Porsche 911 Turbo S", moddedCarsPackId),
+        profile("modded-porsche-carrera-gt-rs", "Porsche Carrera GT RS", moddedCarsPackId),
+        profile("modded-toyota-supra-wangan", "Toyota Supra Wangan", moddedCarsPackId),
     )
 
     fun find(id: String?): FmodBankProfile = all.firstOrNull { it.id == id } ?: default
@@ -50,9 +84,14 @@ internal object FmodBankProfiles {
         return all[(current + offset).mod(all.size)]
     }
 
-    private fun profile(id: String, displayName: String): FmodBankProfile = FmodBankProfile(
+    private fun profile(
+        id: String,
+        displayName: String,
+        packGroup: String = originalCarsPackId,
+    ): FmodBankProfile = FmodBankProfile(
         id = id,
         displayName = displayName,
         previewAssetName = "car_previews/$id.jpg",
+        packGroup = packGroup,
     )
 }

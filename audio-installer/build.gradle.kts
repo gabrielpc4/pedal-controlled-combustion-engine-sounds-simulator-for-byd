@@ -7,10 +7,8 @@ import org.gradle.api.tasks.Sync
 val generatedPackAssets = file("build/generated/packAssets")
 val preparePackAssets = tasks.register<Sync>("preparePackAssets") {
     from(rootProject.file("fmod_bank_packs")) {
-        // Keep the future modded catalog in index.json so the UI can report it,
-        // but ship only active original payloads in this first installer build.
+        // Ship both groups; the installer lets the user choose which payloads to publish.
         include("*.bydbank", "index.json")
-        exclude("modded-*.bydbank")
         into("packs")
     }
     into(generatedPackAssets)

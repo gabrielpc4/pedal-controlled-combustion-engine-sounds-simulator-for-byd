@@ -568,8 +568,7 @@ private fun CarDropdownSelector(
             }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            FmodBankProfiles.all.forEach { profile ->
-                val installed = audioAssetResolver.isInstalled(profile)
+            FmodBankProfiles.all.filter(audioAssetResolver::isInstalled).forEach { profile ->
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -588,13 +587,10 @@ private fun CarDropdownSelector(
                                     profile.displayName,
                                     fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
                                 )
-                                if (!installed) {
-                                    Text("AUDIO NOT INSTALLED", color = Amber, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                                }
                             }
                         }
                     },
-                    enabled = installed,
+                    enabled = true,
                     onClick = {
                         expanded = false
                         onSelectCar(profile.id)
