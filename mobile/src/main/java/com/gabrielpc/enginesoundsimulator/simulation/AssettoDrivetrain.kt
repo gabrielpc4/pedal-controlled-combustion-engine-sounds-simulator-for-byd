@@ -228,7 +228,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val effectiveMass = vehicle.massKg +
             2.0 * vehicle.frontWheelInertia / frontRadius.pow(2) +
             2.0 * vehicle.rearWheelInertia / rearRadius.pow(2)
-        val ratio = abs(ratioForGear(gear, simulatedPedalsGearCalibration) * physics.drivetrain.finalDrive)
+        // Keep the selected gear visible during a shift, but briefly uncouple
+        // the drivetrain exactly as the Lab does while the clutch changes.
+        val ratio = abs(ratioForGear(physicsGear, simulatedPedalsGearCalibration) * physics.drivetrain.finalDrive)
         var engineOmega = rpm * RADIAN_SECONDS_PER_RPM
         var driveForce = 0.0
         var tractionTorqueLimited = false
@@ -266,7 +268,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         lastFrame = AssettoDrivetrainFrame(
             rpm = rpm,
             speedMetersPerSecond = speedMetersPerSecond,
-            gear = gear,
+            // Do not expose the internal neutral interval as gear 0 during a
+            // normal shift; effects still use shiftStarted below.
+            gear = if (shifting) shiftTarget else gear,
             drivetrainSpeedRadiansPerSecond = speedMetersPerSecond / driven.radius,
             driverThrottle = rawGas,
             effectiveThrottle = engine.effectiveThrottle,
@@ -315,14 +319,15 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         }
 
         val spec = physics.drivetrain
+        val controlGear = physicsGear
         val target = when {
-            gear == -1 || gear == 1 -> when {
+            controlGear == -1 || controlGear == 1 -> when {
                 rpm < spec.autoclutchMinimumRpm -> 0.0
                 rpm > spec.autoclutchMaximumRpm -> 1.0
                 else -> (rpm - spec.autoclutchMinimumRpm) /
                     (spec.autoclutchMaximumRpm - spec.autoclutchMinimumRpm).coerceAtLeast(1.0)
             }
-            gear == 0 -> if (speedMetersPerSecond * 3.6 >= 5.0 || gas > 0.2) 1.0 else 0.0
+            controlGear == 0 -> if (speedMetersPerSecond * 3.6 >= 5.0 || gas > 0.2) 1.0 else 0.0
             else -> if (rpm >= spec.autoclutchMinimumRpm) 1.0 else 0.0
         }
         val maximumStep = spec.autoclutchSpeed * dt
@@ -383,7 +388,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         } else {
             calibration?.gearDownTimeSeconds ?: physics.drivetrain.gearDownTimeSeconds
         }
-        gear = 0
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
             engineCutoff = physics.drivetrain.autoCutoffTimeSeconds
         }
@@ -431,6 +435,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
     private fun ratioForGear(gear: Int, calibration: SimulatedPedalsGearCalibration?): Double =
         calibration?.ratioForGear(gear, physics.drivetrain) ?: physics.drivetrain.ratioForGear(gear)
+
+    private val physicsGear: Int
+        get() = if (shifting) 0 else gear
 
     private fun engineTorque(dt: Double, controlsGas: Double, engineGas: Double): EngineTorqueFrame {
         val engine = physics.engine
