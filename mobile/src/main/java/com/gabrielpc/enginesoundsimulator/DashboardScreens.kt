@@ -72,6 +72,8 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
+import java.io.File
+import java.io.FileInputStream
 import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
@@ -538,6 +540,7 @@ private fun CarDropdownSelector(
         ) {
             CarPreviewThumbnail(
                 previewAsset = selectedCarPreviewAsset,
+                previewFile = audioAssetResolver.previewFile(FmodBankProfiles.find(selectedCarId)),
                 contentDescription = selectedCarName,
                 modifier = Modifier
                     .fillMaxHeight()
@@ -620,6 +623,7 @@ private fun CarDropdownSelector(
                                 ) {
                                     CarPreviewThumbnail(
                                         previewAsset = profile.previewAssetName,
+                                        previewFile = audioAssetResolver.previewFile(profile),
                                         contentDescription = profile.displayName,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -649,14 +653,16 @@ private fun CarDropdownSelector(
 @Composable
 private fun CarPreviewThumbnail(
     previewAsset: String,
+    previewFile: File? = null,
     contentDescription: String,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val preview = remember(previewAsset) {
+    val preview = remember(previewAsset, previewFile?.path) {
         runCatching {
-            context.assets.open(previewAsset).use { input ->
-                val bitmap = requireNotNull(BitmapFactory.decodeStream(input))
+            val input = previewFile?.let(::FileInputStream) ?: context.assets.open(previewAsset)
+            input.use {
+                val bitmap = requireNotNull(BitmapFactory.decodeStream(it))
                 LoadedCarPreview(
                     image = bitmap.asImageBitmap(),
                     aspectRatio = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1).toFloat(),

@@ -101,6 +101,8 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.ui.theme.EngineSoundsSimulatorTheme
@@ -109,6 +111,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import java.io.FileInputStream
 
 private val Night = Color(0xFF060606)
 private val Navy = Color(0xFF071321)
@@ -1032,10 +1035,13 @@ private fun CarStage(
         }
 
         val context = LocalContext.current
-        val preview = remember(state.selectedCarPreviewAsset) {
+        val audioResolver = remember(context) { FmodBankResolver(context.applicationContext) }
+        val previewFile = audioResolver.previewFile(FmodBankProfiles.find(state.selectedCarId))
+        val preview = remember(state.selectedCarPreviewAsset, previewFile?.path) {
             runCatching {
-                context.assets.open(state.selectedCarPreviewAsset).use { input ->
-                    requireNotNull(BitmapFactory.decodeStream(input)).asImageBitmap()
+                val input = previewFile?.let(::FileInputStream) ?: context.assets.open(state.selectedCarPreviewAsset)
+                input.use {
+                    requireNotNull(BitmapFactory.decodeStream(it)).asImageBitmap()
                 }
             }.getOrNull()
         }

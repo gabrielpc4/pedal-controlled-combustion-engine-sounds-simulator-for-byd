@@ -59,6 +59,13 @@ internal class FmodBankStore(filesDirectory: File) {
         }
     }
 
+    fun previewFile(profile: FmodBankProfile): File? = runCatching {
+        val directory = installedDirectory(profile.packGroup, profile.bankPackId) ?: return null
+        val manifest = File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
+        val path = manifest.files.firstOrNull { it.path.startsWith("preview/") }?.path ?: return null
+        safeDestination(directory, path).takeIf(File::isFile)
+    }.getOrNull()
+
     private fun bankFile(group: String, packId: String, displayName: String): File {
         val directory = requireNotNull(installedDirectory(group, packId)) {
             "Install the $displayName bank before playing it."
@@ -258,6 +265,8 @@ internal class FmodBankResolver(context: Context) {
     fun isInstalled(profile: FmodBankProfile): Boolean = store.isInstalled(profile)
 
     fun physics(profile: FmodBankProfile): AssettoPhysics = AssettoPhysicsLoader.load(store.physicsFile(profile))
+
+    fun previewFile(profile: FmodBankProfile): File? = store.previewFile(profile)
 }
 
 internal data class FmodBankFiles(
