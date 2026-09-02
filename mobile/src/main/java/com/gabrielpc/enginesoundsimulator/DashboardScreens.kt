@@ -24,12 +24,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
@@ -61,6 +62,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
@@ -567,35 +569,78 @@ private fun CarDropdownSelector(
 
             }
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            FmodBankProfiles.all.filter(audioAssetResolver::isInstalled).forEach { profile ->
-                DropdownMenuItem(
-                    text = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        if (expanded) {
+            val installedProfiles = FmodBankProfiles.all.filter(audioAssetResolver::isInstalled)
+            Dialog(onDismissRequest = { expanded = false }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .fillMaxHeight(0.84f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(PanelBright)
+                        .border(1.dp, Line, RoundedCornerShape(14.dp))
+                        .padding(18.dp),
+                ) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Text(
+                            text = "SELECT CAR",
+                            color = CyanSoft,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.2.sp,
+                        )
+                        Text(
+                            text = "${installedProfiles.size} INSTALLED",
+                            color = Muted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                        )
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            CarPreviewThumbnail(
-                                previewAsset = profile.previewAssetName,
-                                contentDescription = profile.displayName,
-                                modifier = Modifier
-                                    .height(40.dp)
-                                    .clip(RoundedCornerShape(6.dp)),
-                            )
-                            Column {
-                                Text(
-                                    profile.displayName,
-                                    fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Normal,
-                                )
+                            items(installedProfiles, key = { it.id }) { profile ->
+                                Column(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (profile.id == selectedCarId) Cyan.copy(alpha = 0.18f) else Panel)
+                                        .border(
+                                            1.dp,
+                                            if (profile.id == selectedCarId) Cyan else Line,
+                                            RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable {
+                                            expanded = false
+                                            onSelectCar(profile.id)
+                                        }
+                                        .padding(8.dp),
+                                ) {
+                                    CarPreviewThumbnail(
+                                        previewAsset = profile.previewAssetName,
+                                        contentDescription = profile.displayName,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(72.dp)
+                                            .clip(RoundedCornerShape(6.dp)),
+                                    )
+                                    Text(
+                                        text = profile.displayName,
+                                        color = White,
+                                        fontSize = 11.sp,
+                                        lineHeight = 13.sp,
+                                        fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 7.dp),
+                                    )
+                                }
                             }
                         }
-                    },
-                    enabled = true,
-                    onClick = {
-                        expanded = false
-                        onSelectCar(profile.id)
-                    },
-                )
+                    }
+                }
             }
         }
     }
