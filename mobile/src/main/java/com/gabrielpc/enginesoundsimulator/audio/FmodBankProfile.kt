@@ -37,6 +37,7 @@ internal object FmodBankProfiles {
         profile("assetto-mercedes-amg-gt3", "Mercedes-AMG GT3"),
         profile("assetto-nissan-370z", "Nissan 370Z"),
         profile("assetto-nissan-gtr", "Nissan GT-R"),
+        profile("assetto-nissan-skyline-r34", "Nissan Skyline GT-R R34"),
         profile("assetto-porsche-911-gt3-rs", "Porsche 911 GT3 RS"),
         profile("assetto-porsche-991-turbo-s", "Porsche 911 Turbo S (991)"),
         profile("assetto-toyota-supra-mkiv", "Toyota Supra Mk IV"),

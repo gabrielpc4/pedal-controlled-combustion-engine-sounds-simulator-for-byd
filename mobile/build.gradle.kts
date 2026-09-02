@@ -100,6 +100,7 @@ val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
         "assetto-mercedes-amg-gt3" to "ks_mercedes_amg_gt3",
         "assetto-nissan-370z" to "ks_nissan_370z",
         "assetto-nissan-gtr" to "ks_nissan_gtr",
+        "assetto-nissan-skyline-r34" to "ks_nissan_skyline_r34",
         "assetto-porsche-911-gt3-rs" to "ks_porsche_911_gt3_rs",
         "assetto-porsche-991-turbo-s" to "ks_porsche_991_turbo_s",
         "assetto-toyota-supra-mkiv" to "ks_toyota_supra_mkiv",

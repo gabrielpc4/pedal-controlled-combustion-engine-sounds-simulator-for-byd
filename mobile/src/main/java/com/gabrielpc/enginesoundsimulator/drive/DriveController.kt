@@ -166,6 +166,10 @@ class DriveController(context: Context) {
 
     fun setSimulatedPedalThrottle(value: Double) { simulatedPedals.updateAndGet { it.copy(throttle = value.coerceIn(0.0, 1.0)) } }
     fun setSimulatedPedalBrake(value: Double) { simulatedPedals.updateAndGet { it.copy(brake = value.coerceIn(0.0, 1.0)) } }
+
+    fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
+    fun setFmodEventMute(eventName: String, muted: Boolean) = audioEngine.setEventMute(eventName, muted)
+    fun setFmodEventSolo(eventName: String, solo: Boolean) = audioEngine.setEventSolo(eventName, solo)
     fun setInputMode(mode: InputMode) { inputMode.set(mode) }
     fun selectSimulatedPedals() { inputMode.set(InputMode.SimulatedPedals) }
     fun selectRealPedals() { if (vehicleReader.snapshot().vehiclePedalsAvailable()) inputMode.set(InputMode.RealPedals) }

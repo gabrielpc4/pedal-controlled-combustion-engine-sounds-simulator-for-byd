@@ -29,6 +29,14 @@ constexpr int kFmodDspBlocks = 4;
 constexpr int kFmodLogicalChannelCap = 2048;
 constexpr int kFmodRealChannelCap = 256;
 constexpr int kPerspectiveExterior = 1;
+// Intentional FMOD parity choice: the Lab keeps these authored event inputs at
+// full load. The physical pedal still controls drivetrain simulation, but it
+// must not attenuate or swap the bank's load layers.
+constexpr float kFullLoadAudioThrottle = 1.0f;
+// Intentional behavior decision: backfire uses the same full-load endpoint
+// here so its authored event remains audible; this is not the physical
+// throttle value and must not be changed to follow the pedal.
+constexpr float kBackfireAudioThrottle = 1.0f;
 constexpr double kRecentSourceSeconds = 1.5;
 constexpr char kFieldSeparator = '\x1f';
 constexpr char kStableIdSeparator = '\x1e';
@@ -504,14 +512,14 @@ public:
 
         for (const char* name : {"engine_int", "engine_ext"}) {
             setParameterQuietly(slotInstance(name), "rpms", cleanRpm);
-            setParameterQuietly(slotInstance(name), "throttle", cleanThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
         for (const char* name : {"backfire_int", "backfire_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", cleanThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", kBackfireAudioThrottle);
         }
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", drivetrainSpeed);
-            setParameterQuietly(slotInstance(name), "throttle", cleanThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
 
         EventSlot* turbo = slot("turbo");
@@ -579,6 +587,31 @@ public:
             return resultText(result, "Studio::System::update");
         }
         return {};
+    }
+
+    void setHostGains(float engineGain, float effectsGain) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!active_) return;
+        const float engine = std::max(0.0f, engineGain);
+        const float effects = std::max(0.0f, effectsGain);
+        hostEngineGain_ = engine;
+        hostEffectsGain_ = effects;
+        for (auto& pair : slots_) {
+            const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
+            pair.second->instance->setVolume(isEngine ? engine : effects);
+        }
+    }
+
+    void setEventMute(const std::string& name, bool muted) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        mutedEvents_[name] = muted;
+        applyEventOverridesLocked();
+    }
+
+    void setEventSolo(const std::string& name, bool solo) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        soloEvents_[name] = solo;
+        applyEventOverridesLocked();
     }
 
     std::vector<std::string> voiceSnapshots() {
@@ -657,6 +690,18 @@ public:
     }
 
 private:
+    void applyEventOverridesLocked() {
+        bool anySolo = false;
+        for (const auto& entry : soloEvents_) anySolo = anySolo || entry.second;
+        for (auto& pair : slots_) {
+            const bool muted = mutedEvents_[pair.first];
+            const bool soloed = anySolo && !soloEvents_[pair.first];
+            const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
+            const float baseGain = isEngine ? hostEngineGain_ : hostEffectsGain_;
+            pair.second->instance->setVolume((muted || soloed) ? 0.0f : baseGain);
+        }
+    }
+
     static FMOD_RESULT F_CALL eventCallback(
         FMOD_STUDIO_EVENT_CALLBACK_TYPE type,
         FMOD_STUDIO_EVENTINSTANCE* instance,
@@ -788,6 +833,9 @@ private:
             lastError_ = resultText(result, "create " + name);
             return nullptr;
         }
+        // Match the requested host mix: engine at unity, ancillary events at +6 dB.
+        // This multiplies the authored Studio mix without replacing its automation.
+        event->instance->setVolume(name == "engine_int" || name == "engine_ext" ? 1.0f : 2.0f);
         EventSlot* stable = event.get();
         event->instance->setUserData(stable);
         event->instance->setCallback(
@@ -821,17 +869,17 @@ private:
     void initializeParametersLocked() {
         for (const char* name : {"engine_int", "engine_ext"}) {
             setParameterQuietly(slotInstance(name), "rpms", idleRpm_);
-            setParameterQuietly(slotInstance(name), "throttle", 0.0f);
+            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
         for (const char* name : {"backfire_int", "backfire_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", 0.0f);
+            setParameterQuietly(slotInstance(name), "throttle", kBackfireAudioThrottle);
         }
         for (const char* name : {"gear_int", "gear_ext"}) {
             setParameterQuietly(slotInstance(name), "state", 1.0f);
         }
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", 0.0f);
-            setParameterQuietly(slotInstance(name), "throttle", 0.0f);
+            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
         for (const char* name : {"tractioncontrol_int", "tractioncontrol_ext"}) {
             setParameterQuietly(slotInstance(name), "decay", tractionDecay_);
@@ -1045,6 +1093,10 @@ private:
     std::unordered_map<std::string, FMOD::Studio::EventDescription*> events_;
     std::unordered_map<std::string, std::string> eventPaths_;
     std::unordered_map<std::string, std::unique_ptr<EventSlot>> slots_;
+    std::unordered_map<std::string, bool> mutedEvents_;
+    std::unordered_map<std::string, bool> soloEvents_;
+    float hostEngineGain_ = 1.0f;
+    float hostEffectsGain_ = 2.0f;
     std::unordered_map<std::string, RecentSource> recentSources_;
     FMOD_3D_ATTRIBUTES engineAttributes_{};
     FMOD_3D_ATTRIBUTES backfireAttributes_{};
@@ -1183,6 +1235,27 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_voiceSnapshot
     jobject
 ) {
     return toJavaStringArray(environment, runtime.voiceSnapshots());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setEventMute(
+    JNIEnv* environment, jobject, jstring eventName, jboolean muted
+) {
+    runtime.setEventMute(utfString(environment, eventName), muted == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setEventSolo(
+    JNIEnv* environment, jobject, jstring eventName, jboolean solo
+) {
+    runtime.setEventSolo(utfString(environment, eventName), solo == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setHostGains(
+    JNIEnv*, jobject, jfloat engine, jfloat effects
+) {
+    runtime.setHostGains(engine, effects);
 }
 
 extern "C" JNIEXPORT void JNICALL

@@ -41,5 +41,10 @@ internal class NativeFmodBankBridge {
     /** Immutable source rows captured from FMOD's actual event/channel hierarchy. */
     external fun voiceSnapshots(): Array<String>
 
+    external fun setHostGains(engine: Float, effects: Float)
+
+    external fun setEventMute(eventName: String, muted: Boolean)
+    external fun setEventSolo(eventName: String, solo: Boolean)
+
     external fun close()
 }

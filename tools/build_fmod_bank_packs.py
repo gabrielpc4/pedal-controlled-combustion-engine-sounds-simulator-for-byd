@@ -65,6 +65,7 @@ ORIGINAL_CARS = (
     ("assetto-mercedes-amg-gt3", "Mercedes-AMG GT3", "ks_mercedes_amg_gt3"),
     ("assetto-nissan-370z", "Nissan 370Z", "ks_nissan_370z"),
     ("assetto-nissan-gtr", "Nissan GT-R", "ks_nissan_gtr"),
+    ("assetto-nissan-skyline-r34", "Nissan Skyline GT-R R34", "ks_nissan_skyline_r34"),
     ("assetto-porsche-911-gt3-rs", "Porsche 911 GT3 RS", "ks_porsche_911_gt3_rs"),
     ("assetto-porsche-991-turbo-s", "Porsche 911 Turbo S (991)", "ks_porsche_991_turbo_s"),
     ("assetto-toyota-supra-mkiv", "Toyota Supra Mk IV", "ks_toyota_supra_mkiv"),

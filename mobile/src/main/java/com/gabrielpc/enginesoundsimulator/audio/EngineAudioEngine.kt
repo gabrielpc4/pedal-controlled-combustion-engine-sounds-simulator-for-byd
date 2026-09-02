@@ -40,6 +40,10 @@ class EngineAudioEngine(context: Context) {
     private val backfirePulseSerial = AtomicLong(0L)
     private val rejectedShiftSerial = AtomicLong(0L)
     private val tractionPulseSerial = AtomicLong(0L)
+    private val hostEngineGain = AtomicReference(1.0f)
+    private val hostEffectsGain = AtomicReference(2.0f)
+    private val nativeEventMutes = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val nativeEventSolos = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -69,6 +73,15 @@ class EngineAudioEngine(context: Context) {
     }
 
     fun sourceSnapshots(): List<FmodSourceState> = nativeSources.get()
+
+    fun setHostGains(engine: Float, effects: Float) {
+        hostEngineGain.set(engine.coerceAtLeast(0f))
+        hostEffectsGain.set(effects.coerceAtLeast(0f))
+    }
+
+    fun setEventMute(eventName: String, muted: Boolean) { nativeEventMutes[eventName] = muted }
+
+    fun setEventSolo(eventName: String, solo: Boolean) { nativeEventSolos[eventName] = solo }
 
     fun loadedBankProfileId(): String? = loadedBankProfileId.get()
 
@@ -124,6 +137,8 @@ class EngineAudioEngine(context: Context) {
         if (running.get() || controlThread.get() != null || focusHeld.get()) stopLocked()
 
         val profile = selectedProfile.get()
+        nativeEventMutes.clear()
+        nativeEventSolos.clear()
         if (!runCatching(::requestFocus).getOrDefault(false)) {
             reportLoadFailure(profile.id, "Audio focus was not granted by the system.")
             return
@@ -155,8 +170,10 @@ class EngineAudioEngine(context: Context) {
         thread?.interrupt()
         if (thread != null && thread !== Thread.currentThread()) joinThread(thread, CONTROL_JOIN_TIMEOUT_MS)
         if (thread == null || !thread.isAlive) controlThread.compareAndSet(thread, null)
-        loadedBankProfileId.set(null)
-        nativeSources.set(emptyList())
+            loadedBankProfileId.set(null)
+            nativeSources.set(emptyList())
+            nativeEventMutes.clear()
+            nativeEventSolos.clear()
         abandonFocusIfHeld()
     }
 
@@ -199,6 +216,9 @@ class EngineAudioEngine(context: Context) {
                 lastTickNanos = now
 
                 val frame = parameters.get()
+                bridge.setHostGains(hostEngineGain.get(), hostEffectsGain.get())
+                nativeEventMutes.forEach { (name, value) -> bridge.setEventMute(name, value) }
+                nativeEventSolos.forEach { (name, value) -> bridge.setEventSolo(name, value) }
                 val currentLimiterPulse = limiterPulseSerial.get()
                 val currentBackfirePulse = backfirePulseSerial.get()
                 val currentRejectedShift = rejectedShiftSerial.get()

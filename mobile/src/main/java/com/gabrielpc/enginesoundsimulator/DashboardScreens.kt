@@ -31,11 +31,14 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -101,12 +104,42 @@ internal fun MixerDashboardScreen(
     onSelectCar: (String) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
+    onHostGains: (Float, Float) -> Unit,
+    onEventMute: (String, Boolean) -> Unit,
+    onEventSolo: (String, Boolean) -> Unit,
     soundPerspective: EngineSoundPerspective,
     onSoundPerspectiveChange: (EngineSoundPerspective) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sections = remember(state.fmodSources) {
-        state.fmodSources
+    var knownSources by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptyMap<String, FmodSourceState>()) }
+    var previousActive by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptySet<String>()) }
+    var initialized by remember(soundPerspective, state.selectedCarId) { mutableStateOf(false) }
+    var highlightedIds by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptySet<String>()) }
+    val activeIds = state.fmodSources.filter { it.isActive }.mapTo(mutableSetOf(), FmodSourceState::id)
+    val enteredIds = activeIds - previousActive
+
+    LaunchedEffect(state.fmodSources) {
+        knownSources = knownSources + state.fmodSources.associateBy(FmodSourceState::id)
+        val shouldHighlight = initialized
+        previousActive = activeIds
+        initialized = true
+        if (shouldHighlight && enteredIds.isNotEmpty()) {
+            val highlightable = enteredIds.filter { id ->
+                state.fmodSources.firstOrNull { it.id == id }?.let { it.eventName != "engine_int" && it.eventName != "engine_ext" } == true
+            }.toSet()
+            highlightedIds = highlightedIds + highlightable
+        }
+    }
+
+    LaunchedEffect(highlightedIds) {
+        if (highlightedIds.isNotEmpty()) {
+            delay(1000)
+            highlightedIds = emptySet()
+        }
+    }
+
+    val sections = remember(knownSources, state.fmodSources) {
+        knownSources.values
             .groupBy(FmodSourceState::section)
             .toSortedMap(compareBy(FmodEventSection::order))
             .mapValues { (_, sources) ->
@@ -139,6 +172,14 @@ internal fun MixerDashboardScreen(
             perspective = soundPerspective,
             onPerspectiveSelected = onSoundPerspectiveChange,
         )
+        var engineGain by remember { mutableStateOf(1.0f) }
+        var effectsGain by remember { mutableStateOf(2.0f) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("ENGINE ${String.format(Locale.US, "%.1fx", engineGain)}", color = CyanSoft, fontSize = 11.sp)
+            Slider(engineGain, { engineGain = it; onHostGains(it, effectsGain) }, valueRange = 0f..3f, modifier = Modifier.weight(1f))
+            Text("EFFECTS ${String.format(Locale.US, "%.1fx", effectsGain)}", color = CyanSoft, fontSize = 11.sp)
+            Slider(effectsGain, { effectsGain = it; onHostGains(engineGain, it) }, valueRange = 0f..4f, modifier = Modifier.weight(1f))
+        }
         Spacer(Modifier.height(10.dp))
         BoxWithConstraints(
             modifier = Modifier
@@ -162,7 +203,7 @@ internal fun MixerDashboardScreen(
                             modifier = Modifier.padding(top = 2.dp, start = 2.dp),
                         )
                     }
-                    items(sources.chunked(columnCount), key = { row -> row.joinToString { it.id } }) { row ->
+                    items(sources.chunked(columnCount), key = { row -> "${state.selectedCarId}-${soundPerspective.name}-" + row.joinToString { it.id } }) { row ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -170,6 +211,9 @@ internal fun MixerDashboardScreen(
                             row.forEach { source ->
                                 FmodSourceMeter(
                                     source = source,
+                                    highlight = source.id in highlightedIds,
+                                    onMute = onEventMute,
+                                    onSolo = onEventSolo,
                                     modifier = Modifier.weight(1f),
                                 )
                             }
@@ -583,8 +627,13 @@ private data class LoadedCarPreview(
 @Composable
 private fun FmodSourceMeter(
     source: FmodSourceState,
+    highlight: Boolean,
+    onMute: (String, Boolean) -> Unit,
+    onSolo: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var muted by remember(source.id) { mutableStateOf(false) }
+    var soloed by remember(source.id) { mutableStateOf(false) }
     val level = source.audibility.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
     val meterLabelPaint = remember {
@@ -599,7 +648,7 @@ private fun FmodSourceMeter(
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(Panel.copy(alpha = 0.88f))
-            .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+            .border(2.dp, if (highlight) Cyan else Line.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Row(
@@ -608,16 +657,19 @@ private fun FmodSourceMeter(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = source.eventName.uppercase().replace('_', ' '),
+                text = source.soundName,
                 color = White,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 13.sp,
                 modifier = Modifier.weight(1f),
             )
-            Column(horizontalAlignment = Alignment.End) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     text = when {
                         source.isVirtual -> "VIRTUAL"
@@ -625,32 +677,28 @@ private fun FmodSourceMeter(
                             "SILENT • ${source.voiceCount} VOICE${if (source.voiceCount == 1) "" else "S"}"
                         source.isActive ->
                             "${source.voiceCount} VOICE${if (source.voiceCount == 1) "" else "S"}"
-                        else -> "RECENT"
+                        else -> "READY"
                     },
                     color = if (source.isActive) Cyan else Muted,
-                    fontSize = 8.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     text = String.format(Locale.US, "ROUTE %.2fx", source.routeGain),
                     color = Muted,
-                    fontSize = 7.sp,
+                    fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                 )
+                Text("M", color = if (muted) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { muted = !muted; onMute(source.eventName, muted) })
+                Text("S", color = if (soloed) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { soloed = !soloed; onSolo(source.eventName, soloed) })
             }
         }
         Text(
-            text = source.soundName,
+            text = source.eventName.uppercase().replace('_', ' '),
             color = CyanSoft,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = source.eventPath,
-            color = Muted,
-            fontSize = 8.sp,
+            fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
