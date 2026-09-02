@@ -48,6 +48,7 @@ data class DriveSnapshot(
     val brake: Double,
     val transmissionPosition: TransmissionPosition,
     val engineSoundEnabled: Boolean,
+    val audioMuted: Boolean = false,
     val selectedCarId: String,
     val selectedCarName: String,
     val selectedCarPreviewAsset: String,
@@ -83,6 +84,7 @@ class DriveController(context: Context) {
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val uiActive = AtomicBoolean(false)
     private val audioInterrupted = AtomicBoolean(false)
+    private val audioMuted = AtomicBoolean(false)
 
     @Volatile private var loopThread: Thread? = null
     @Volatile private var userMessage: UserVisibleMessage? = null
@@ -119,6 +121,7 @@ class DriveController(context: Context) {
         val base = latest
         return base.copy(
             engineSoundEnabled = audioEngine.isAudioActive(),
+            audioMuted = audioMuted.get(),
             manualShiftModeEnabled = manualShiftEnabled.get(),
             fmodSources = if (uiActive.get()) audioEngine.sourceSnapshots() else emptyList(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
@@ -139,7 +142,7 @@ class DriveController(context: Context) {
             loopThread = thread
             try {
                 vehicleReader.start()
-                audioEngine.start()
+                if (!audioMuted.get()) audioEngine.start()
                 thread.start()
             } catch (error: Throwable) {
                 running.set(false)
@@ -171,6 +174,22 @@ class DriveController(context: Context) {
     fun setFmodEventMute(eventName: String, muted: Boolean) = audioEngine.setEventMute(eventName, muted)
     fun setFmodEventSolo(eventName: String, solo: Boolean) = audioEngine.setEventSolo(eventName, solo)
     fun setInputMode(mode: InputMode) { inputMode.set(mode) }
+
+    /**
+     * Muting stops FMOD completely. Unmuting deliberately performs a full stop/start cycle so
+     * stale event instances, voices, and decoder state cannot survive the user's reset gesture.
+     */
+    fun toggleAudioMute(): Boolean = synchronized(lifecycleLock) {
+        val shouldMute = !audioMuted.get()
+        audioMuted.set(shouldMute)
+        if (shouldMute) {
+            audioEngine.stop()
+        } else if (running.get() && !audioInterrupted.get()) {
+            audioEngine.stop()
+            audioEngine.start()
+        }
+        shouldMute
+    }
     fun selectSimulatedPedals() { inputMode.set(InputMode.SimulatedPedals) }
     fun selectRealPedals() { if (vehicleReader.snapshot().vehiclePedalsAvailable()) inputMode.set(InputMode.RealPedals) }
     fun toggleInputSource() {
@@ -320,6 +339,7 @@ class DriveController(context: Context) {
                 brake = input.brake,
                 transmissionPosition = transmission.position,
                 engineSoundEnabled = audioEngine.isAudioActive(),
+                audioMuted = audioMuted.get(),
                 selectedCarId = selected.id,
                 selectedCarName = selected.displayName,
                 selectedCarPreviewAsset = selected.previewAssetName,
@@ -353,7 +373,7 @@ class DriveController(context: Context) {
             }
             AudioFocusEvent.TRANSIENT_GAIN -> {
                 audioInterrupted.set(false)
-                if (running.get()) audioEngine.start()
+                if (running.get() && !audioMuted.get()) audioEngine.start()
             }
             AudioFocusEvent.PERMANENT_LOSS -> {
                 audioInterrupted.set(true)

@@ -170,6 +170,7 @@ class MainActivity : ComponentActivity() {
                         onSelectSimulatedPedals = controller::selectSimulatedPedals,
                         onSelectRealPedals = controller::selectRealPedals,
                         onToggleInputSource = controller::toggleInputSource,
+                        onToggleAudioMute = controller::toggleAudioMute,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
@@ -240,6 +241,7 @@ private fun MotorSoundDashboard(
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
+    onToggleAudioMute: () -> Boolean,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
@@ -325,6 +327,7 @@ private fun MotorSoundDashboard(
                         onSelectSimulatedPedals = onSelectSimulatedPedals,
                         onSelectRealPedals = onSelectRealPedals,
                         onToggleInputSource = onToggleInputSource,
+                        onToggleAudioMute = onToggleAudioMute,
                         onToggleManualShiftMode = onToggleManualShiftMode,
                     )
 
@@ -427,6 +430,7 @@ private fun DashboardHeader(
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
+    onToggleAudioMute: () -> Boolean,
     onToggleManualShiftMode: () -> Unit,
 ) {
     var memoryLabels by remember {
@@ -562,6 +566,42 @@ private fun DashboardHeader(
         ManualShiftHeaderControl(
             manualEnabled = state.manualShiftModeEnabled,
             onToggle = onToggleManualShiftMode,
+        )
+        MasterMuteHeaderControl(
+            muted = state.audioMuted,
+            onToggle = onToggleAudioMute,
+        )
+    }
+}
+
+@Composable
+private fun MasterMuteHeaderControl(
+    muted: Boolean,
+    onToggle: () -> Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (muted) Red.copy(alpha = 0.18f) else Panel)
+            .border(1.dp, if (muted) Red.copy(alpha = 0.65f) else Line, RoundedCornerShape(12.dp))
+            .clickable { onToggle() }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = if (muted) Icons.AutoMirrored.Filled.VolumeDown else Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = if (muted) "Unmute and reset audio engine" else "Mute audio",
+            tint = if (muted) Red else Cyan,
+            modifier = Modifier.size(22.dp),
+        )
+        Text(
+            text = if (muted) "UNMUTE" else "MUTE",
+            color = if (muted) Red else White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.7.sp,
         )
     }
 }
