@@ -506,6 +506,11 @@ public:
         const float cleanDt = std::clamp(dt, 0.0001f, 0.1f);
         const float cleanRpm = std::max(1.0f, rpm);
         const float cleanThrottle = std::clamp(throttle, 0.0f, 1.0f);
+        // Intentional lift-off policy: the authored engine event keeps its full-load
+        // input while the drivetrain RPM falls naturally. This preserves the same
+        // LOAD/COAST layer balance on deceleration as on acceleration; the pedal
+        // still affects physics, but it is not allowed to mute or remap FMOD layers.
+        (void)cleanThrottle;
         if (perspective != perspective_) {
             switchPerspectiveLocked(perspective);
         }
@@ -564,21 +569,16 @@ public:
             startEventLocked(selected);
         }
 
-        if (tractionActive || tractionPulse) {
-            tractionDecay_ = 0.0f;
-        } else {
-            tractionDecay_ = std::min(10.0f, tractionDecay_ + cleanDt);
-        }
+        (void)tractionActive;
+        (void)tractionPulse;
+        // Intentional audio policy: drivetrain traction limiting remains part of
+        // the physics, but its authored sound is disabled because this simulator
+        // should not announce the internal correction as a driver-event effect.
+        tractionDecay_ = 10.0f;
         for (const char* name : {"tractioncontrol_int", "tractioncontrol_ext"}) {
             setParameterQuietly(slotInstance(name), "decay", tractionDecay_);
-        }
-        if (tractionActive || tractionPulse) {
-            const std::string selected = perspectiveEventLocked(
-                "tractioncontrol_int",
-                "tractioncontrol_ext"
-            );
-            if (!selected.empty() && !isPlayingLocked(slotInstance(selected))) {
-                startEventLocked(selected);
+            if (isPlayingLocked(slotInstance(name))) {
+                stopEventLocked(name, FMOD_STUDIO_STOP_IMMEDIATE);
             }
         }
 
@@ -898,13 +898,10 @@ private:
     void switchPerspectiveLocked(int perspective) {
         const std::string oldEngine = perspectiveEventLocked("engine_int", "engine_ext");
         const std::string oldTransmission = perspectiveEventLocked("transmission", "transmission_ext");
-        const std::string oldTraction = perspectiveEventLocked("tractioncontrol_int", "tractioncontrol_ext");
-        const bool tractionWasPlaying = isPlayingLocked(slotInstance(oldTraction));
         perspective_ = perspective;
         setListenerLocked();
         const std::string newEngine = perspectiveEventLocked("engine_int", "engine_ext");
         const std::string newTransmission = perspectiveEventLocked("transmission", "transmission_ext");
-        const std::string newTraction = perspectiveEventLocked("tractioncontrol_int", "tractioncontrol_ext");
         if (oldEngine != newEngine) {
             stopEventLocked(oldEngine, FMOD_STUDIO_STOP_ALLOWFADEOUT);
             startEventLocked(newEngine);
@@ -912,10 +909,6 @@ private:
         if (oldTransmission != newTransmission) {
             stopEventLocked(oldTransmission, FMOD_STUDIO_STOP_ALLOWFADEOUT);
             startEventLocked(newTransmission);
-        }
-        if (oldTraction != newTraction && tractionWasPlaying) {
-            stopEventLocked(oldTraction, FMOD_STUDIO_STOP_ALLOWFADEOUT);
-            startEventLocked(newTraction);
         }
     }
 

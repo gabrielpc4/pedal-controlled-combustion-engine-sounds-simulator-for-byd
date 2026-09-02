@@ -115,11 +115,28 @@ internal fun MixerDashboardScreen(
     var previousActive by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptySet<String>()) }
     var initialized by remember(soundPerspective, state.selectedCarId) { mutableStateOf(false) }
     var highlightedIds by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptySet<String>()) }
+    // FMOD swaps sound names inside one authored event as RPM changes. Keep
+    // M/S on that event identity so a control never disappears with a source.
+    var mutedEvents by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptyMap<String, Boolean>()) }
+    var soloedEvents by remember(soundPerspective, state.selectedCarId) { mutableStateOf(emptyMap<String, Boolean>()) }
     val activeIds = state.fmodSources.filter { it.isActive }.mapTo(mutableSetOf(), FmodSourceState::id)
     val enteredIds = activeIds - previousActive
 
     LaunchedEffect(state.fmodSources) {
-        knownSources = knownSources + state.fmodSources.associateBy(FmodSourceState::id)
+        val currentSources = state.fmodSources
+            .filter(FmodSourceState::isActive)
+            .associateBy(FmodSourceState::id)
+        val inactiveKnownSources = knownSources.mapValues { (_, source) ->
+            source.copy(
+                audibility = 0.0,
+                voiceCount = 0,
+                isVirtual = false,
+                isActive = false,
+            )
+        }
+        // Once FMOD has exposed a source, keep its diagnostic card so its
+        // disappearance is visible as SILENT instead of looking like a reset.
+        knownSources = inactiveKnownSources + currentSources
         val shouldHighlight = initialized
         previousActive = activeIds
         initialized = true
@@ -138,7 +155,9 @@ internal fun MixerDashboardScreen(
         }
     }
 
-    val sections = remember(knownSources, state.fmodSources) {
+    val sections = remember(knownSources) {
+        // Dormant sources that FMOD has never exposed are omitted. Sources that
+        // were previously live remain as SILENT diagnostics instead of READY.
         knownSources.values
             .groupBy(FmodSourceState::section)
             .toSortedMap(compareBy(FmodEventSection::order))
@@ -212,8 +231,16 @@ internal fun MixerDashboardScreen(
                                 FmodSourceMeter(
                                     source = source,
                                     highlight = source.id in highlightedIds,
-                                    onMute = onEventMute,
-                                    onSolo = onEventSolo,
+                                    muted = mutedEvents[source.eventName] == true,
+                                    soloed = soloedEvents[source.eventName] == true,
+                                    onMute = { muted ->
+                                        mutedEvents = mutedEvents + (source.eventName to muted)
+                                        onEventMute(source.eventName, muted)
+                                    },
+                                    onSolo = { solo ->
+                                        soloedEvents = soloedEvents + (source.eventName to solo)
+                                        onEventSolo(source.eventName, solo)
+                                    },
                                     modifier = Modifier.weight(1f),
                                 )
                             }
@@ -628,12 +655,12 @@ private data class LoadedCarPreview(
 private fun FmodSourceMeter(
     source: FmodSourceState,
     highlight: Boolean,
-    onMute: (String, Boolean) -> Unit,
-    onSolo: (String, Boolean) -> Unit,
+    muted: Boolean,
+    soloed: Boolean,
+    onMute: (Boolean) -> Unit,
+    onSolo: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var muted by remember(source.id) { mutableStateOf(false) }
-    var soloed by remember(source.id) { mutableStateOf(false) }
     val level = source.audibility.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
     val meterLabelPaint = remember {
@@ -677,7 +704,7 @@ private fun FmodSourceMeter(
                             "SILENT • ${source.voiceCount} VOICE${if (source.voiceCount == 1) "" else "S"}"
                         source.isActive ->
                             "${source.voiceCount} VOICE${if (source.voiceCount == 1) "" else "S"}"
-                        else -> "READY"
+                        else -> "SILENT"
                     },
                     color = if (source.isActive) Cyan else Muted,
                     fontSize = 10.sp,
@@ -690,9 +717,9 @@ private fun FmodSourceMeter(
                     fontFamily = FontFamily.Monospace,
                 )
                 Text("M", color = if (muted) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black,
-                    modifier = Modifier.clickable { muted = !muted; onMute(source.eventName, muted) })
+                    modifier = Modifier.clickable { onMute(!muted) })
                 Text("S", color = if (soloed) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black,
-                    modifier = Modifier.clickable { soloed = !soloed; onSolo(source.eventName, soloed) })
+                    modifier = Modifier.clickable { onSolo(!soloed) })
             }
         }
         Text(
