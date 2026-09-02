@@ -125,6 +125,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
         if (transmissionPosition != TransmissionPosition.DRIVE) {
             if (gear != 0 || shifting) setGearImmediately(0, simulatedPedalsGearCalibration)
+            // A selector change to P/N cancels any D-only shift cut or clutch
+            // profile immediately, so a free rev cannot inherit a prior shift.
+            automaticGasCutoff = 0.0
+            engineCutoff = 0.0
+            clutchSequence = emptyList()
+            clutchSequenceElapsed = 0.0
+            autoblipStartMilliseconds = null
         } else if (gear == 0 && !shifting) {
             setGearImmediately(1, simulatedPedalsGearCalibration)
         }
@@ -150,19 +157,32 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             }
         }
 
-        val automaticRequest = automaticShiftDecision(
-            controlsGas,
-            clutch,
-            automaticShifting,
-            simulatedPedalsGearCalibration,
-            dt,
-        )
+        // Neutral and Park are free-revving positions. The zero gear used by
+        // the drivetrain integrator must never be mistaken for a request to
+        // select first gear when the engine reaches its authored shift RPM.
+        val automaticRequest = if (transmissionPosition == TransmissionPosition.DRIVE) {
+            automaticShiftDecision(
+                controlsGas,
+                clutch,
+                automaticShifting,
+                simulatedPedalsGearCalibration,
+                dt,
+            )
+        } else {
+            0
+        }
         if (automaticGasCutoff > 0.0) {
             automaticGasCutoff = f32(automaticGasCutoff - dt)
             controlsGas = 0.0
         }
 
-        val requestedDirection = manualShiftRequest.takeIf { it != 0 } ?: automaticRequest
+        val requestedDirection = if (transmissionPosition == TransmissionPosition.DRIVE) {
+            manualShiftRequest.takeIf { it != 0 } ?: automaticRequest
+        } else {
+            // Discard a stale request if the selector changed while a control
+            // frame was in flight; P/N must not enter a synthetic shift cycle.
+            0
+        }
         manualShiftRequest = 0
         if (acceptShift(requestedDirection, clutch, simulatedPedalsGearCalibration, dt)) {
             shiftStarted = true
