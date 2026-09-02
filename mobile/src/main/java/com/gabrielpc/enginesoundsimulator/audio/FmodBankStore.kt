@@ -2,6 +2,8 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
 import android.util.JsonReader
+import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysics
+import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysicsLoader
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -19,19 +21,42 @@ internal class FmodBankStore(filesDirectory: File) {
     private val packsDirectory = File(filesDirectory, "fmod-banks")
 
     fun isInstalled(profile: FmodBankProfile): Boolean =
-        installedDirectory(profile.bankPackId) != null &&
-            installedDirectory(FmodBankProfiles.commonStringsPackId) != null &&
-            installedDirectory(FmodBankProfiles.commonPackId) != null
+        runCatching {
+            bankFile(profile)
+            physicsFile(profile)
+            sharedBankFile(FmodBankProfiles.commonStringsPackId)
+            sharedBankFile(FmodBankProfiles.commonPackId)
+        }.isSuccess
 
     fun installedPackIds(): Set<String> = packsDirectory.listFiles()
         .orEmpty()
         .filter(File::isDirectory)
         .filter { File(it, MANIFEST_NAME).isFile }
+        .filter { directory ->
+            runCatching {
+                val manifest = File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
+                manifest.id == directory.name
+            }.getOrDefault(false)
+        }
         .mapTo(linkedSetOf()) { it.name }
 
     fun bankFile(profile: FmodBankProfile): File = bankFile(profile.bankPackId, profile.displayName)
 
     fun sharedBankFile(packId: String): File = bankFile(packId, "required shared FMOD")
+
+    fun physicsFile(profile: FmodBankProfile): File {
+        val directory = requireNotNull(installedDirectory(profile.bankPackId)) {
+            "Install the ${profile.displayName} bank before playing it."
+        }
+        val manifest = File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
+        val expectedPath = "profiles/${profile.id}/physics.json"
+        require(manifest.files.any { it.path == expectedPath }) {
+            "Installed ${profile.displayName} package has no matching Assetto physics."
+        }
+        return safeDestination(directory, expectedPath).also {
+            require(it.isFile) { "Installed ${profile.displayName} physics is missing." }
+        }
+    }
 
     private fun bankFile(packId: String, displayName: String): File {
         val directory = requireNotNull(installedDirectory(packId)) {
@@ -126,7 +151,9 @@ internal class FmodBankStore(filesDirectory: File) {
             }
         }
         reader.endObject()
-        require(schema == SCHEMA) { "Unsupported FMOD bank package format" }
+        require(schema == SCHEMA) {
+            "This is an old or unsupported audio pack. Use DELETE ALL in the audio installer, then reinstall every v2 pack."
+        }
         require(SAFE_PACK_ID.matches(requireNotNull(id))) { "Invalid FMOD bank id" }
         require(requireNotNull(version) > 0) { "Invalid FMOD bank package version" }
         val parsedFiles = requireNotNull(files)
@@ -134,7 +161,9 @@ internal class FmodBankStore(filesDirectory: File) {
             "FMOD bank package has duplicate files"
         }
         parsedFiles.forEach { file ->
-            require(file.path.startsWith("bank/")) { "FMOD bank package path is outside its payload" }
+            require(file.path.startsWith("bank/") || file.path.startsWith("profiles/")) {
+                "FMOD bank package path is outside its payload"
+            }
             require(isSafeRelativePath(file.path)) { "FMOD bank package has unsafe path" }
             require(file.bytes > 0L && SHA256.matches(file.sha256)) { "FMOD bank package has invalid file metadata" }
         }
@@ -198,7 +227,7 @@ internal class FmodBankStore(filesDirectory: File) {
 
     private companion object {
         const val MANIFEST_NAME = "manifest.json"
-        const val SCHEMA = "byd-fmod-bank-pack-v1"
+        const val SCHEMA = "byd-fmod-bank-pack-v2"
         const val COPY_BUFFER_BYTES = 256 * 1024
         val SAFE_PACK_ID = Regex("^[a-z0-9][a-z0-9._-]{0,95}$")
         val SHA256 = Regex("^[0-9a-f]{64}$")
@@ -212,13 +241,17 @@ internal class FmodBankResolver(context: Context) {
         commonStrings = store.sharedBankFile(FmodBankProfiles.commonStringsPackId),
         common = store.sharedBankFile(FmodBankProfiles.commonPackId),
         car = store.bankFile(profile),
+        physics = store.physicsFile(profile),
     )
 
     fun isInstalled(profile: FmodBankProfile): Boolean = store.isInstalled(profile)
+
+    fun physics(profile: FmodBankProfile): AssettoPhysics = AssettoPhysicsLoader.load(store.physicsFile(profile))
 }
 
 internal data class FmodBankFiles(
     val commonStrings: File,
     val common: File,
     val car: File,
+    val physics: File,
 )

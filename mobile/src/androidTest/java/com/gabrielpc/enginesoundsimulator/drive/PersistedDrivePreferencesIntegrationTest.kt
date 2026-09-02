@@ -9,10 +9,7 @@ import com.gabrielpc.enginesoundsimulator.audio.CarEffectGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspectiveRepository
-import com.gabrielpc.enginesoundsimulator.audio.FmodEngineLayerRole
-import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
-import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSourceRepository
-import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
+import com.gabrielpc.enginesoundsimulator.audio.SourceMixRepository
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -90,56 +87,43 @@ class PersistedDrivePreferencesIntegrationTest {
     }
 
     @Test
-    fun exteriorPerspectiveAndItsEngineProgramPersistIndependentlyFromCabin() {
+    fun exteriorPerspectivePersistsIndependently() {
         val context = isolatedContext("sound_program")
         val profile = FmodBankProfiles.default
         val perspectiveRepository = EngineSoundPerspectiveRepository(context)
-        val sourceRepository = PrimaryEngineLayerSourceRepository(context)
         val originalPerspective = perspectiveRepository.load(profile)
-        val originalCabinSource = sourceRepository.load(profile, EngineSoundPerspective.CABIN)
-        val originalExteriorSource = sourceRepository.load(profile, EngineSoundPerspective.EXTERIOR)
 
         try {
             perspectiveRepository.save(profile, EngineSoundPerspective.EXTERIOR)
-            sourceRepository.save(profile, EngineSoundPerspective.EXTERIOR, PrimaryEngineLayerSource.COAST)
-            sourceRepository.save(profile, EngineSoundPerspective.CABIN, PrimaryEngineLayerSource.LOAD)
-
             assertEquals(
                 EngineSoundPerspective.EXTERIOR,
                 EngineSoundPerspectiveRepository(context).load(profile),
             )
-            assertEquals(
-                PrimaryEngineLayerSource.COAST,
-                PrimaryEngineLayerSourceRepository(context).load(profile, EngineSoundPerspective.EXTERIOR),
-            )
-            assertEquals(
-                PrimaryEngineLayerSource.LOAD,
-                PrimaryEngineLayerSourceRepository(context).load(profile, EngineSoundPerspective.CABIN),
-            )
         } finally {
             perspectiveRepository.save(profile, originalPerspective)
-            sourceRepository.save(profile, EngineSoundPerspective.CABIN, originalCabinSource)
-            sourceRepository.save(profile, EngineSoundPerspective.EXTERIOR, originalExteriorSource)
             context.clear()
         }
     }
 
     @Test
-    fun loadAndCoastGroupGainsPersistIndependentlyForCabinAndExterior() {
-        val context = isolatedContext("program_layer_gains")
+    fun exactSourceControlsPersistIndependentlyForCabinAndExterior() {
+        val context = isolatedContext("source_mix_controls")
         val profile = FmodBankProfiles.default
-        val repository = LayerMixRepository(context)
+        val repository = SourceMixRepository(context)
+        val sourceId = "event:/cars/test/engine_int\u001etest_engine_mid"
 
         try {
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.CABIN, FmodEngineLayerRole.LOAD, 1.5)
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.CABIN, FmodEngineLayerRole.COAST, 0.4)
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.EXTERIOR, FmodEngineLayerRole.LOAD, 2.5)
-            repository.setProgramLayerGain(profile, EngineSoundPerspective.EXTERIOR, FmodEngineLayerRole.COAST, 0.8)
+            repository.setGain(profile.id, EngineSoundPerspective.CABIN, sourceId, 1.5)
+            repository.setMuted(profile.id, EngineSoundPerspective.CABIN, sourceId, true)
+            repository.setGain(profile.id, EngineSoundPerspective.EXTERIOR, sourceId, 2.5)
+            repository.setSolo(profile.id, EngineSoundPerspective.EXTERIOR, sourceId, true)
 
-            assertEquals(1.5, repository.loadProgramLayerGains(profile, EngineSoundPerspective.CABIN).load, 0.001)
-            assertEquals(0.4, repository.loadProgramLayerGains(profile, EngineSoundPerspective.CABIN).coast, 0.001)
-            assertEquals(2.5, repository.loadProgramLayerGains(profile, EngineSoundPerspective.EXTERIOR).load, 0.001)
-            assertEquals(0.8, repository.loadProgramLayerGains(profile, EngineSoundPerspective.EXTERIOR).coast, 0.001)
+            val cabin = repository.load(profile.id, EngineSoundPerspective.CABIN, listOf(sourceId)).getValue(sourceId)
+            val exterior = repository.load(profile.id, EngineSoundPerspective.EXTERIOR, listOf(sourceId)).getValue(sourceId)
+            assertEquals(1.5, cabin.gain, 0.001)
+            assertTrue(cabin.muted)
+            assertEquals(2.5, exterior.gain, 0.001)
+            assertTrue(exterior.solo)
         } finally {
             context.clear()
         }

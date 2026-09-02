@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,10 +63,9 @@ import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
-import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
-import com.gabrielpc.enginesoundsimulator.audio.LayerOutputMeter
-import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
-import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
+import com.gabrielpc.enginesoundsimulator.audio.FmodEventSection
+import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
+import com.gabrielpc.enginesoundsimulator.audio.SourceMixControl
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -103,23 +103,27 @@ internal fun MixerDashboardScreen(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onSelectCar: (String) -> Unit,
     onCarMasterVolumeChange: (Double) -> Unit,
-    onLayerMuted: (String, Boolean) -> Unit,
-    onLayerSolo: (String, Boolean) -> Unit,
-    onLayerVolume: (String, Double) -> Unit,
-    onLoadProgramLayerGainChange: (Double) -> Unit,
-    onCoastProgramLayerGainChange: (Double) -> Unit,
+    onSourceMuted: (String, Boolean) -> Unit,
+    onSourceSolo: (String, Boolean) -> Unit,
+    onSourceVolume: (String, Double) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
-    primaryLayerSource: PrimaryEngineLayerSource,
-    canUseCoastAsPrimary: Boolean,
-    onPrimaryLayerSourceChange: (PrimaryEngineLayerSource) -> Unit,
     soundPerspective: EngineSoundPerspective,
-    hasExteriorProgram: Boolean,
     onSoundPerspectiveChange: (EngineSoundPerspective) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val groupedTracks = remember(state.layerMixTracks) {
-        groupMixerTracks(state.layerMixTracks)
+    val sections = remember(state.fmodSources) {
+        state.fmodSources
+            .groupBy(FmodSourceState::section)
+            .toSortedMap(compareBy(FmodEventSection::order))
+            .mapValues { (_, sources) ->
+                sources.sortedWith(
+                    compareByDescending<FmodSourceState> { it.isActive }
+                        .thenByDescending { it.audibility }
+                        .thenBy(FmodSourceState::eventPath)
+                        .thenBy(FmodSourceState::soundName),
+                )
+            }
     }
 
     Column(
@@ -139,160 +143,70 @@ internal fun MixerDashboardScreen(
             onSelectCar = onSelectCar,
             onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
-        if (hasExteriorProgram) {
-            Spacer(Modifier.height(6.dp))
-            EngineProgramSelector(
-                selected = primaryLayerSource,
-                canUseCoastAsPrimary = canUseCoastAsPrimary,
-                onSelected = onPrimaryLayerSourceChange,
-                perspective = soundPerspective,
-                onPerspectiveSelected = onSoundPerspectiveChange,
-            )
-        }
-        val hasLoadLayers = groupedTracks.load.isNotEmpty() || primaryLayerSource == PrimaryEngineLayerSource.COAST
-        if (hasLoadLayers || canUseCoastAsPrimary) {
-            Spacer(Modifier.height(6.dp))
-            MixerProgramLayerGainControls(
-                showLoad = hasLoadLayers,
-                loadGain = state.programLayerGains.load,
-                onLoadGainChange = onLoadProgramLayerGainChange,
-                showCoast = canUseCoastAsPrimary,
-                coastGain = state.programLayerGains.coast,
-                onCoastGainChange = onCoastProgramLayerGainChange,
-            )
-        }
+        Spacer(Modifier.height(6.dp))
+        MixerPerspectiveSelector(
+            perspective = soundPerspective,
+            onPerspectiveSelected = onSoundPerspectiveChange,
+        )
         Spacer(Modifier.height(10.dp))
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            MixerTrackColumn(
-                tracks = groupedTracks.firstColumn,
-                onLayerMuted = onLayerMuted,
-                onLayerSolo = onLayerSolo,
-                onLayerVolume = onLayerVolume,
-                modifier = Modifier.weight(1f),
-            )
-            MixerTrackColumn(
-                tracks = groupedTracks.load,
-                onLayerMuted = onLayerMuted,
-                onLayerSolo = onLayerSolo,
-                onLayerVolume = onLayerVolume,
-                modifier = Modifier.weight(1f),
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
+            val columnCount = (maxWidth.value / 390f).toInt().coerceIn(1, 4)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = MIXER_PEDALS_OVERLAY_HEIGHT),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MixerTrackColumn(
-                    tracks = groupedTracks.auxiliary,
-                    onLayerMuted = onLayerMuted,
-                    onLayerSolo = onLayerSolo,
-                    onLayerVolume = onLayerVolume,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = MIXER_PEDALS_OVERLAY_HEIGHT),
-                )
-                MixerDriveControls(
-                    state = state,
-                    onThrottle = onThrottle,
-                    onBrake = onBrake,
-                    onTransmissionChange = onTransmissionChange,
-                    onManualUpshift = onManualUpshift,
-                    onManualDownshift = onManualDownshift,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 2.dp),
-                )
+                sections.forEach { (section, sources) ->
+                    item(key = "section-${section.name}") {
+                        Text(
+                            text = section.displayName,
+                            color = CyanSoft,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(top = 2.dp, start = 2.dp),
+                        )
+                    }
+                    items(sources.chunked(columnCount), key = { row -> row.joinToString { it.id } }) { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            row.forEach { source ->
+                                FmodSourceControl(
+                                    source = source,
+                                    onMuted = { onSourceMuted(source.id, it) },
+                                    onSolo = { onSourceSolo(source.id, it) },
+                                    onGain = { onSourceVolume(source.id, it) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            repeat(columnCount - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
             }
-        }
-    }
-}
-
-@Composable
-private fun MixerProgramLayerGainControls(
-    showLoad: Boolean,
-    loadGain: Double,
-    onLoadGainChange: (Double) -> Unit,
-    showCoast: Boolean,
-    coastGain: Double,
-    onCoastGainChange: (Double) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (showLoad) {
-            MixerProgramLayerGainControl(
-                label = "LOAD ALL",
-                gain = loadGain,
-                onGainChange = onLoadGainChange,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        if (showCoast) {
-            MixerProgramLayerGainControl(
-                label = "COAST ALL",
-                gain = coastGain,
-                onGainChange = onCoastGainChange,
-                modifier = Modifier.weight(1f),
+            MixerDriveControls(
+                state = state,
+                onThrottle = onThrottle,
+                onBrake = onBrake,
+                onTransmissionChange = onTransmissionChange,
+                onManualUpshift = onManualUpshift,
+                onManualDownshift = onManualDownshift,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 2.dp),
             )
         }
     }
 }
 
 @Composable
-private fun MixerProgramLayerGainControl(
-    label: String,
-    gain: Double,
-    onGainChange: (Double) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Panel.copy(alpha = 0.88f))
-            .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = label,
-            color = CyanSoft,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 0.7.sp,
-        )
-        Slider(
-            value = gain.toFloat().coerceIn(0f, 3f),
-            onValueChange = { onGainChange(it.toDouble()) },
-            valueRange = 0f..3f,
-            modifier = Modifier.weight(1f),
-            colors = SliderDefaults.colors(
-                thumbColor = Cyan,
-                activeTrackColor = Cyan,
-                inactiveTrackColor = Line,
-            ),
-        )
-        Text(
-            text = String.format(Locale.US, "%.1fx", gain),
-            color = White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.width(34.dp),
-        )
-    }
-}
-
-@Composable
-private fun EngineProgramSelector(
-    selected: PrimaryEngineLayerSource,
-    canUseCoastAsPrimary: Boolean,
-    onSelected: (PrimaryEngineLayerSource) -> Unit,
+private fun MixerPerspectiveSelector(
     perspective: EngineSoundPerspective,
     onPerspectiveSelected: (EngineSoundPerspective) -> Unit,
 ) {
@@ -327,84 +241,10 @@ private fun EngineProgramSelector(
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
-        Spacer(Modifier.width(22.dp))
-        Text(
-            text = "ENGINE PROGRAM",
-            color = Muted,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp,
-        )
-        Spacer(Modifier.width(12.dp))
-        PrimaryEngineLayerSource.entries.forEach { source ->
-            val active = source == selected
-            val supported = source == PrimaryEngineLayerSource.LOAD || canUseCoastAsPrimary
-            Text(
-                text = source.displayName,
-                color = when {
-                    active -> Cyan
-                    supported -> Muted
-                    else -> Muted.copy(alpha = 0.35f)
-                },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
-                    .clickable(enabled = supported) { onSelected(source) }
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
     }
 }
 
 private val MIXER_PEDALS_OVERLAY_HEIGHT = 132.dp
-
-private data class GroupedMixerTracks(
-    val firstColumn: List<LayerMixTrackState>,
-    val load: List<LayerMixTrackState>,
-    val auxiliary: List<LayerMixTrackState>,
-)
-
-private fun groupMixerTracks(tracks: List<LayerMixTrackState>): GroupedMixerTracks {
-    val coast = tracks.filter { it.sortGroup == 1 }
-    val texture = tracks.filter { it.sortGroup == 3 }
-    val load = tracks.filter { it.isLoadLayer }
-    val auxiliary = tracks.filter { track ->
-        !track.isLoadLayer && track.sortGroup != 0 && track.sortGroup != 1 && track.sortGroup != 3
-    }
-
-    return GroupedMixerTracks(
-        firstColumn = coast,
-        load = load,
-        auxiliary = auxiliary + texture,
-    )
-}
-
-@Composable
-private fun MixerTrackColumn(
-    tracks: List<LayerMixTrackState>,
-    onLayerMuted: (String, Boolean) -> Unit,
-    onLayerSolo: (String, Boolean) -> Unit,
-    onLayerVolume: (String, Double) -> Unit,
-    modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(0.dp),
-) {
-    LazyColumn(
-        modifier = modifier.fillMaxHeight(),
-        contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(tracks, key = { it.id }) { track ->
-            LayerMixTrackControl(
-                track = track,
-                onMuted = { onLayerMuted(track.id, it) },
-                onSolo = { onLayerSolo(track.id, it) },
-                onVolume = { onLayerVolume(track.id, it) },
-            )
-        }
-    }
-}
 
 @Composable
 private fun MixerHeaderRow(
@@ -790,15 +630,15 @@ private data class LoadedCarPreview(
 )
 
 @Composable
-private fun LayerMixTrackControl(
-    track: LayerMixTrackState,
+private fun FmodSourceControl(
+    source: FmodSourceState,
     onMuted: (Boolean) -> Unit,
     onSolo: (Boolean) -> Unit,
-    onVolume: (Double) -> Unit,
+    onGain: (Double) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val level = track.outputLevel.toFloat().coerceIn(0f, 1f)
+    val level = source.audibility.toFloat().coerceIn(0f, 1f)
     val fillColor = outputMeterFillColor(level)
-    val showTrimSlider = track.showVolumeSlider
     val meterLabelPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.WHITE
@@ -807,7 +647,7 @@ private fun LayerMixTrackControl(
         }
     }
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(Panel.copy(alpha = 0.88f))
@@ -820,7 +660,7 @@ private fun LayerMixTrackControl(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = track.displayName,
+                text = source.eventName.uppercase().replace('_', ' '),
                 color = White,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -829,7 +669,44 @@ private fun LayerMixTrackControl(
                 lineHeight = 13.sp,
                 modifier = Modifier.weight(1f),
             )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = when {
+                        source.isVirtual -> "VIRTUAL"
+                        source.isActive && source.audibility <= 0.002 ->
+                            "SILENT • ${source.voiceCount} VOICE${if (source.voiceCount == 1) "" else "S"}"
+                        source.isActive ->
+                            "${source.voiceCount} VOICE${if (source.voiceCount == 1) "" else "S"}"
+                        else -> "RECENT"
+                    },
+                    color = if (source.isActive) Cyan else Muted,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = String.format(Locale.US, "ROUTE %.2fx", source.routeGain),
+                    color = Muted,
+                    fontSize = 7.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
         }
+        Text(
+            text = source.soundName,
+            color = CyanSoft,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = source.eventPath,
+            color = Muted,
+            fontSize = 8.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         Spacer(Modifier.height(6.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -858,7 +735,7 @@ private fun LayerMixTrackControl(
                 meterLabelPaint.color = fillColor.toArgb()
                 drawIntoCanvas { canvas ->
                     canvas.nativeCanvas.drawText(
-                        outputMeterLabel(track.outputDb),
+                        "${source.audibilityPercent}%",
                         size.width - 8f,
                         size.height * 0.70f,
                         meterLabelPaint,
@@ -868,64 +745,57 @@ private fun LayerMixTrackControl(
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 MixToggleChip(
                     label = "M",
-                    checked = track.muted,
+                    checked = source.muted,
                     accent = Red,
                     onCheckedChange = onMuted,
                 )
                 MixToggleChip(
                     label = "S",
-                    checked = track.solo,
+                    checked = source.solo,
                     accent = Amber,
                     onCheckedChange = onSolo,
                 )
             }
         }
-        if (showTrimSlider) {
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "GAIN",
-                    color = Muted,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp,
-                    modifier = Modifier.width(34.dp),
-                )
-                Slider(
-                    value = track.userVolume.toFloat().coerceIn(
-                        LayerMixControl.MIN_GAIN_MULTIPLIER.toFloat(),
-                        LayerMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
-                    ),
-                    onValueChange = { onVolume(it.toDouble()) },
-                    valueRange = LayerMixControl.MIN_GAIN_MULTIPLIER.toFloat()..LayerMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Cyan,
-                        activeTrackColor = Cyan,
-                        inactiveTrackColor = Line,
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(28.dp),
-                )
-                Text(
-                    String.format(Locale.US, "%.1fx", track.userVolume),
-                    color = Cyan,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.width(40.dp),
-                )
-            }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "GAIN",
+                color = Muted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.width(34.dp),
+            )
+            Slider(
+                value = source.userGain.toFloat().coerceIn(
+                    SourceMixControl.MIN_GAIN_MULTIPLIER.toFloat(),
+                    SourceMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
+                ),
+                onValueChange = { onGain(it.toDouble()) },
+                valueRange = SourceMixControl.MIN_GAIN_MULTIPLIER.toFloat()..SourceMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = Cyan,
+                    activeTrackColor = Cyan,
+                    inactiveTrackColor = Line,
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(28.dp),
+            )
+            Text(
+                String.format(Locale.US, "%.1fx", source.userGain),
+                color = Cyan,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.width(40.dp),
+            )
         }
     }
-}
-
-private fun outputMeterLabel(rmsDb: Double): String = when {
-    !rmsDb.isFinite() || rmsDb <= LayerOutputMeter.QUIET_FLOOR_DB + 0.5 -> "SILENT"
-    else -> String.format(Locale.US, "%.0f dB", rmsDb)
 }
 
 @Composable

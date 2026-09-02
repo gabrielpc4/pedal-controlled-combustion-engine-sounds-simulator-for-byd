@@ -3,13 +3,12 @@
 The active native-bank implementation must preserve these rules:
 
 1. BYD raw speed is truncated, so `N` means `[N, N + 1)` km/h.
-2. `QuantizedPresentationSpeedEstimator` reconstructs only the presentation speed. Never use it
-   to change vehicle speed display, gearbox decisions, launch control, or simulated force.
-3. `EngineSimulation` converts presentation speed into presentation RPM before the audio handoff.
-4. `EngineAudioEngine` passes that RPM through its short continuous follower and updates native
-   FMOD synchronously at 4 ms. Never set an FMOD parameter from an integer telemetry value.
-5. Direct throttle RPM response, P/N free revving, turbo response, and shift policy remain owned
-   by their existing simulation paths.
+2. `QuantizedPresentationSpeedEstimator` reconstructs the continuous road-speed constraint used by
+   the Audio Lab drivetrain. It must not change the authoritative speed display or vehicle forces.
+3. `AssettoDrivetrain` converts that constraint into continuous RPM and drivetrain angular speed.
+4. `EngineAudioEngine` transfers the exact physics frame and updates FMOD synchronously at 3 ms.
+   There is no second RPM follower and no integer telemetry value may reach an FMOD parameter.
+5. Native parameter writes preserve the bank's authored seek speed; never force an immediate seek.
 
 If a listener still reports pitch stepping, capture the presentation RPM passed to
 `NativeFmodBankBridge` and test the affected source bank in Audio Lab. First distinguish a smooth

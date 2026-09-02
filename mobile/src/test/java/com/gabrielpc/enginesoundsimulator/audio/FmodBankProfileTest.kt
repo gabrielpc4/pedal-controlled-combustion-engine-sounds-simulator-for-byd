@@ -1,7 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,9 +20,6 @@ class FmodBankProfileTest {
             assertTrue(profile.limiterRpm <= profile.maximumRpm)
             assertTrue(profile.upshiftRpm in profile.idleRpm..profile.redlineRpm)
             assertTrue(profile.gearRatios.zipWithNext().all { (left, right) -> left > right })
-            assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.LOAD))
-            assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.COAST))
-            assertTrue(profile.supportsPrimaryLayerSource(PrimaryEngineLayerSource.BOTH))
         }
     }
 
@@ -55,50 +51,47 @@ class FmodBankProfileTest {
     }
 
     @Test
-    fun nativeMixerUsesOnlyAllowedEngineAndPowertrainGroups() {
-        FmodBankProfiles.all.forEach { profile ->
-            profile.mixerTracks(EngineSoundPerspective.CABIN).forEach { track ->
-                assertTrue(track.id in ALLOWED_TRACK_IDS)
-                assertFalse(track.displayName.contains("WAV", ignoreCase = true))
-            }
-        }
+    fun nativeMixerPreservesExactEventAndSoundOwnership() {
+        val id = "event:/cars/alfa/engine_int\u001e4c_in_on_mid"
+        val source = parseNativeVoiceSnapshots(
+            arrayOf(
+                listOf(
+                    id,
+                    "event:/cars/alfa/engine_int",
+                    "engine_int",
+                    "4c_in_on_mid",
+                    "0.42",
+                    "0.5",
+                    "2",
+                    "0",
+                    "1",
+                ).joinToString("\u001f"),
+            ),
+        ).single()
+
+        assertEquals(id, source.id)
+        assertEquals("engine_int", source.eventName)
+        assertEquals("4c_in_on_mid", source.soundName)
+        assertEquals(42, source.audibilityPercent)
+        assertEquals(2, source.voiceCount)
+        assertTrue(source.isActive)
     }
 
     @Test
-    fun smoothedFmodControlNeverReceivesWholeSpeedTelemetry() {
-        val smoother = FmodControlSmoother(initialRpm = 1_000.0)
-        val input = EngineAudioFrame(rpm = 1_000.0, throttle = 0.0)
-        repeat(30) { smoother.advance(input, 0.004) }
-
-        val ramp = buildList {
-            repeat(50) { index -> add(1_000.0 + index * 4.0) }
-        }
-        val sent = ramp.map { rpm -> smoother.advance(input.copy(rpm = rpm), 0.004).rpm }
-        val maximumStep = sent.zipWithNext().maxOf { (left, right) -> right - left }
-
-        assertTrue("FMOD control must follow a continuous presentation RPM ramp", maximumStep < 4.1)
-        assertTrue(sent.zipWithNext().all { (left, right) -> right >= left })
-    }
-
-    @Test
-    fun limiterDecayPulsesOnlyWhenEnteringTheActualLimiter() {
-        val tracker = FmodLimiterDecayTracker()
-
-        assertEquals(10.0f, tracker.advance(limiterActive = false, deltaSeconds = 0.02), 0.001f)
-        assertEquals(0.0f, tracker.advance(limiterActive = true, deltaSeconds = 0.02), 0.001f)
-        assertEquals(0.25f, tracker.advance(limiterActive = true, deltaSeconds = 0.25), 0.001f)
-        assertEquals(0.75f, tracker.advance(limiterActive = false, deltaSeconds = 0.5), 0.001f)
-    }
-
-    private companion object {
-        val ALLOWED_TRACK_IDS = setOf(
-            "engine_load",
-            "engine_coast",
-            "transmission",
-            "turbo",
-            "limiter",
-            "gear",
-            "overrun",
+    fun sourceControlsKeepExactStableIdsAcrossJni() {
+        val controls = mapOf(
+            "event:/cars/alfa/engine_int\u001e4c_in_on_mid" to SourceMixControl(
+                gain = 1.75,
+                muted = true,
+                solo = false,
+            ),
         )
+
+        val fields = encodeNativeSourceControls(controls).single().split('\u001f')
+        assertEquals(4, fields.size)
+        assertEquals(controls.keys.single(), fields[0])
+        assertEquals("1.75", fields[1])
+        assertEquals("1", fields[2])
+        assertEquals("0", fields[3])
     }
 }

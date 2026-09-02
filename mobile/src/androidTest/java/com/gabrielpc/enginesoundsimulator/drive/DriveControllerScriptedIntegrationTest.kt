@@ -26,7 +26,11 @@ class DriveControllerScriptedIntegrationTest {
             controller.setUiActive(true)
             controller.start()
             controller.setSimulatedPedalThrottle(1.0)
-            SystemClock.sleep(1_500L)
+            val reachedSecondGear = waitUntil(timeoutMs = 5_000L) {
+                controller.snapshot().drivetrain.let { state ->
+                    state.speedKmh > 20.0 && state.gear > 1
+                }
+            }
 
             val fullThrottle = controller.snapshot()
             assertTrue(
@@ -38,7 +42,10 @@ class DriveControllerScriptedIntegrationTest {
                 fullThrottle.drivetrain.rpm > fullThrottle.tuning.engine.idleRpm + 600.0,
             )
             assertTrue("full simulated pedal must still reach audio", fullThrottle.drivetrain.audioThrottle > 0.99)
-            assertTrue("normal simulated propulsion should engage higher gears", fullThrottle.drivetrain.gear > 1)
+            assertTrue(
+                "the authored Alfa drivetrain did not reach second gear: ${fullThrottle.drivetrain}",
+                reachedSecondGear,
+            )
 
             val beforeLift = fullThrottle.drivetrain
             controller.setSimulatedPedalThrottle(0.0)

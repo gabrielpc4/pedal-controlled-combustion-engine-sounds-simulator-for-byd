@@ -28,7 +28,7 @@ the local source-bank folders first:
 
 ```sh
 python3 tools/build_fmod_bank_packs.py
-./gradlew :mobile:testDebugUnitTest :mobile:assembleDebug :mobile:assembleDebugAndroidTest :audio-installer:assembleDebug --no-daemon
+./gradlew :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug :mobile:assembleDebugAndroidTest :audio-installer:assembleDebug --no-daemon
 ```
 
 Assembly produces the locally numbered dashboard APK and an FMOD-bank installer APK.
@@ -44,7 +44,7 @@ adb shell am start -n com.gabrielpc.enginesoundsinstaller/.AudioInstallerActivit
 ```
 
 Tap **INSTALL ALL**, wait for the progress bar to complete, then start the dashboard. The dashboard
-contains no decoded audio fallback and remains silent until the selected native bank is installed.
+contains no alternate audio fallback and remains silent until the selected native bank is installed.
 
 Use the app only while parked or in a controlled environment. Its audio can mask navigation,
 alerts, and other safety cues.

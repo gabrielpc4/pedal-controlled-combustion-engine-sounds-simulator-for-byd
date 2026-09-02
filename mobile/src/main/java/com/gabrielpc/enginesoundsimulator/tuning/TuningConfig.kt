@@ -150,24 +150,9 @@ data class EngineTuning(
 
 data class AudioTuning(
     val masterGain: Double = 0.72,
-    /** Smooths dashboard RPM changes before they move the audio sample positions. */
-    val rpmSmoothingMs: Double = 16.0,
-    /** Smooths throttle changes before they reach the authored FMOD event. */
-    val throttleSmoothingMs: Double = 10.0,
-    /** Smooths the main program level and load-dependent output level. */
-    val programFadeMs: Double = 8.0,
-    /** Smooths enable/disable so starting or stopping playback never clicks. */
-    val enabledFadeMs: Double = 10.0,
-    /** Smooths individual loop-layer gain changes and crossfades. */
-    val layerFadeMs: Double = 12.0,
 ) {
     fun sanitized(): AudioTuning = copy(
         masterGain = masterGain.coerceIn(0.0, 1.20),
-        rpmSmoothingMs = rpmSmoothingMs.coerceIn(1.0, 300.0),
-        throttleSmoothingMs = throttleSmoothingMs.coerceIn(1.0, 300.0),
-        programFadeMs = programFadeMs.coerceIn(1.0, 300.0),
-        enabledFadeMs = enabledFadeMs.coerceIn(1.0, 500.0),
-        layerFadeMs = layerFadeMs.coerceIn(1.0, 300.0),
     )
 }
 
@@ -257,11 +242,6 @@ class TuningRepository(context: Context) {
         val engine = if (currentCalibration) storedEngine else defaults.engine
         val audio = defaults.audio.copy(
             masterGain = number(KEY_MASTER_GAIN, defaults.audio.masterGain),
-            rpmSmoothingMs = number(KEY_AUDIO_RPM_SMOOTHING, defaults.audio.rpmSmoothingMs),
-            throttleSmoothingMs = number(KEY_AUDIO_THROTTLE_SMOOTHING, defaults.audio.throttleSmoothingMs),
-            programFadeMs = number(KEY_AUDIO_PROGRAM_FADE, defaults.audio.programFadeMs),
-            enabledFadeMs = number(KEY_AUDIO_ENABLED_FADE, defaults.audio.enabledFadeMs),
-            layerFadeMs = number(KEY_AUDIO_LAYER_FADE, defaults.audio.layerFadeMs),
         )
         if (!currentCalibration) {
             preferences.edit().putInt(KEY_CALIBRATION_REVISION, CALIBRATION_REVISION).commit()
@@ -310,11 +290,6 @@ class TuningRepository(context: Context) {
             .putString(KEY_REAR_WHEEL_TORQUE_CURVE, encodeCurve(clean.engine.rearWheelTorqueCurve))
             .putString(KEY_THROTTLE_CURVE, encodeCurve(clean.engine.throttleCurve))
             .putString(KEY_MASTER_GAIN, clean.audio.masterGain.toString())
-            .putString(KEY_AUDIO_RPM_SMOOTHING, clean.audio.rpmSmoothingMs.toString())
-            .putString(KEY_AUDIO_THROTTLE_SMOOTHING, clean.audio.throttleSmoothingMs.toString())
-            .putString(KEY_AUDIO_PROGRAM_FADE, clean.audio.programFadeMs.toString())
-            .putString(KEY_AUDIO_ENABLED_FADE, clean.audio.enabledFadeMs.toString())
-            .putString(KEY_AUDIO_LAYER_FADE, clean.audio.layerFadeMs.toString())
             .commit()
     }
 
@@ -358,11 +333,6 @@ class TuningRepository(context: Context) {
         const val KEY_REAR_WHEEL_TORQUE_CURVE = "rear_wheel_torque_curve"
         const val KEY_THROTTLE_CURVE = "throttle_curve"
         const val KEY_MASTER_GAIN = "master_gain"
-        const val KEY_AUDIO_RPM_SMOOTHING = "audio_rpm_smoothing"
-        const val KEY_AUDIO_THROTTLE_SMOOTHING = "audio_throttle_smoothing"
-        const val KEY_AUDIO_PROGRAM_FADE = "audio_program_fade"
-        const val KEY_AUDIO_ENABLED_FADE = "audio_enabled_fade"
-        const val KEY_AUDIO_LAYER_FADE = "audio_layer_fade"
     }
 }
 

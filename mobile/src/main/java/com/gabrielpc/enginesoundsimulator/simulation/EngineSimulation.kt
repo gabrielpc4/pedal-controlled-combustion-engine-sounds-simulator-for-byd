@@ -60,7 +60,8 @@ data class EngineProfile(
     val secondGearEarlyShiftEnabled: Boolean = true,
 ) {
     companion object {
-        private val bank = FmodBankProfiles.default
+        /** Deterministic fallback used only before an installed v2 physics profile is loaded. */
+        private val bank = FmodBankProfiles.find("lamborghini_huracan_trofeo_evo2_cabin")
         val SAMPLE_BANK_ENGINE = EngineProfile(
             name = bank.displayName,
             idleRpm = bank.idleRpm,
@@ -89,6 +90,37 @@ data class EngineProfile(
             downshiftDurationSeconds = bank.downshiftDurationSeconds,
         )
     }
+}
+
+internal fun EngineProfile.withAssettoPhysics(physics: AssettoPhysics): EngineProfile {
+    val engine = physics.engine
+    val drivetrain = physics.drivetrain
+    val vehicle = drivetrain.vehicle
+    val maximumTorque = engine.torqueCurve.maxOfOrNull(AssettoCurvePoint::y) ?: maxTorqueNm
+    return copy(
+        idleRpm = engine.idleRpm,
+        redlineRpm = min(engine.limiterRpm - 100.0, drivetrain.automaticUpshiftRpm.toDouble())
+            .coerceAtLeast(engine.idleRpm + 500.0),
+        limiterRpm = engine.limiterRpm,
+        upshiftRpm = drivetrain.automaticUpshiftRpm.toDouble().coerceAtMost(engine.limiterRpm),
+        maxTorqueNm = maximumTorque,
+        vehicleMassKg = vehicle.massKg,
+        wheelRadiusMeters = when {
+            drivetrain.traction.equals("FWD", ignoreCase = true) -> vehicle.frontWheelRadiusMeters
+            drivetrain.traction.startsWith("AWD", ignoreCase = true) ->
+                0.5 * (vehicle.frontWheelRadiusMeters + vehicle.rearWheelRadiusMeters)
+            else -> vehicle.rearWheelRadiusMeters
+        },
+        gearRatios = drivetrain.forwardRatios.toDoubleArray(),
+        upshiftDurationSeconds = drivetrain.gearUpTimeSeconds,
+        downshiftDurationSeconds = drivetrain.gearDownTimeSeconds,
+        freeRevCalibration = FreeRevCalibration.forEngine(
+            name = name,
+            idleRpm = engine.idleRpm,
+            limiterRpm = engine.limiterRpm,
+            maxTorqueNm = maximumTorque,
+        ),
+    )
 }
 
 data class DriverInput(
@@ -128,6 +160,17 @@ data class DrivetrainState(
     /** Signed presentation-speed acceleration/deceleration rate in km/h per second. */
     val presentationAccelerationKmhPerSecond: Double,
     val rawSpeedKmh: Double,
+    /** Exact angular speed passed to Assetto's transmission event, in rad/s. */
+    val drivetrainSpeedRadiansPerSecond: Double = 0.0,
+    val boost: Double = 0.0,
+    val bov: Double = 0.0,
+    val bovDecaySeconds: Double = 10.0,
+    val limiterPulse: Boolean = false,
+    val backfireTriggered: Boolean = false,
+    val shiftStarted: Boolean = false,
+    val shiftRejected: Boolean = false,
+    val tractionLimitActive: Boolean = false,
+    val tractionLimitPulse: Boolean = false,
 )
 
 /**
@@ -180,6 +223,9 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     private var downshiftHysteresisKmhByGear = sortedDownshiftHysteresisKmhByGear(profile.gearRatios.size)
     private val externalSpeedEstimator = QuantizedSpeedEstimator()
     private val presentationSpeedEstimator = QuantizedPresentationSpeedEstimator()
+    private var assettoPhysics: AssettoPhysics? = null
+    private var assettoDrivetrain: AssettoDrivetrain? = null
+    private var assettoFrame: AssettoDrivetrainFrame? = null
 
     val state: DrivetrainState get() = snapshot()
 
@@ -222,6 +268,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         ignitionShiftCueDirection = ShiftDirection.NONE
         startupShiftCueFired = false
         resetLaunchControl()
+        assettoDrivetrain?.reset(engineRunning = true)
+        assettoFrame = assettoDrivetrain?.frame()
     }
 
     /** Engage the engine at idle with no starter rev sequence (app launch, car swap). */
@@ -236,6 +284,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         resetThrottleRpmBump()
         limiterLatched = false
         resetLaunchControl()
+        assettoDrivetrain?.engageAtIdle()
+        assettoFrame = assettoDrivetrain?.frame()
     }
 
     fun isVehicleThrottleActive(): Boolean = ignitionState == EngineIgnitionState.RUNNING
@@ -331,6 +381,22 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         simulatedPhysicalSpeedMps = simulatedPhysicalSpeedMps.coerceAtMost(maximumVehicleSpeedMps())
     }
 
+    internal fun updateAssettoPhysics(updated: AssettoPhysics) {
+        assettoPhysics = updated
+        val drivetrain = assettoDrivetrain
+        if (drivetrain == null) {
+            assettoDrivetrain = AssettoDrivetrain(updated)
+        } else {
+            drivetrain.updatePhysics(updated)
+        }
+        assettoDrivetrain?.reset(ignitionState != EngineIgnitionState.OFF)
+        assettoFrame = assettoDrivetrain?.frame()
+        engineRpm = if (ignitionState == EngineIgnitionState.OFF) 0.0 else updated.engine.idleRpm
+        currentGearIndex = 0
+        activeShift = null
+        limiterLatched = false
+    }
+
     fun reset() {
         ignitionState = EngineIgnitionState.OFF
         ignitionElapsedSeconds = 0.0
@@ -358,6 +424,8 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         externalSpeedEstimator.reset()
         presentationSpeedEstimator.reset()
         resetLaunchControl()
+        assettoDrivetrain?.reset(engineRunning = false)
+        assettoFrame = assettoDrivetrain?.frame()
     }
 
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
@@ -380,6 +448,10 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         val externalKmh = input.externalSpeedKmh
             ?.coerceAtLeast(0.0)
             ?.let(::truncateRawSpeedKmh)
+
+        if (assettoDrivetrain != null && ignitionState == EngineIgnitionState.RUNNING) {
+            return updateAssettoDrivetrain(input, rawThrottle, externalKmh, dt)
+        }
         updateLaunchControl(
             rawThrottle = rawThrottle,
             transmissionPosition = input.transmissionPosition,
@@ -444,6 +516,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (ignitionState != EngineIgnitionState.RUNNING) {
             return false
         }
+        assettoDrivetrain?.let { return it.requestShift(1) }
         if (activeShift != null) {
             return false
         }
@@ -465,6 +538,7 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         if (ignitionState != EngineIgnitionState.RUNNING) {
             return false
         }
+        assettoDrivetrain?.let { return it.requestShift(-1) }
         if (activeShift != null) {
             return false
         }
@@ -476,6 +550,57 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
         }
         beginShift(currentGearIndex - 1, ShiftDirection.DOWN)
         return true
+    }
+
+    private fun updateAssettoDrivetrain(
+        input: DriverInput,
+        rawThrottle: Double,
+        externalSpeedKmh: Double?,
+        dt: Double,
+    ): DrivetrainState {
+        val drivetrain = requireNotNull(assettoDrivetrain)
+        val externalAnchor = if (externalSpeedKmh != null) {
+            applyExternalSpeed(externalSpeedKmh, rawThrottle, input.brake, dt)
+            presentationSpeedMps
+        } else {
+            if (externalSpeedActive) {
+                simulatedPhysicalSpeedMps = vehicleSpeedMps
+                externalSpeedEstimator.reset()
+                presentationSpeedEstimator.reset()
+            }
+            externalSpeedActive = false
+            if (input.transmissionPosition == TransmissionPosition.PARK) 0.0 else null
+        }
+
+        val frame = drivetrain.step(
+            throttle = rawThrottle,
+            brake = input.brake,
+            transmissionPosition = input.transmissionPosition,
+            automaticShifting = !manualShiftEnabled,
+            externalSpeedMetersPerSecond = externalAnchor,
+            simulatedUphillGrade = if (externalSpeedKmh == null) input.simulatedUphillDragGrade else 0.0,
+            simulatedRegenStrength = if (externalSpeedKmh == null && input.simulateCoastRegen) {
+                input.simulatedCoastRegenScale
+            } else {
+                0.0
+            },
+            deltaSeconds = dt,
+        )
+        assettoFrame = frame
+
+        if (externalSpeedKmh == null) {
+            simulatedPhysicalSpeedMps = frame.speedMetersPerSecond
+            applyQuantizedSimulatorSpeed(dt, rawThrottle, input.brake)
+        }
+        engineRpm = frame.rpm
+        audioThrottle = rawThrottle
+        filteredThrottle = rawThrottle
+        filteredBrake = input.brake.coerceIn(0.0, 1.0)
+        limiterLatched = frame.limiterPulse
+        currentGearIndex = (frame.gear - 1).coerceAtLeast(0)
+        activeShift = null
+        if (frame.shiftStarted) shiftSerial += 1
+        return snapshot()
     }
 
     private fun integrateElectricVehicle(
@@ -1124,6 +1249,40 @@ class EngineSimulation(initialProfile: EngineProfile = EngineProfile.SAMPLE_BANK
     }
 
     private fun snapshot(): DrivetrainState {
+        val assetto = assettoFrame
+        if (assetto != null && ignitionState == EngineIgnitionState.RUNNING) {
+            return DrivetrainState(
+                rpm = engineRpm,
+                gear = assetto.gear,
+                speedKmh = vehicleSpeedMps * 3.6,
+                smoothedThrottle = filteredThrottle,
+                audioThrottle = audioThrottle,
+                smoothedBrake = filteredBrake,
+                engineLoad = assetto.effectiveThrottle.coerceIn(0.0, 1.0),
+                isShifting = assetto.shifting,
+                shiftDirection = when {
+                    assetto.shiftDirection > 0 -> ShiftDirection.UP
+                    assetto.shiftDirection < 0 -> ShiftDirection.DOWN
+                    else -> ShiftDirection.NONE
+                },
+                shiftProgress = assetto.shiftProgress,
+                shiftSerial = shiftSerial,
+                limiterActive = assetto.limiterPulse,
+                presentationSpeedKmh = presentationSpeedMps * 3.6,
+                presentationAccelerationKmhPerSecond = presentationSpeedEstimator.presentationVelocityKmhPerSecond,
+                rawSpeedKmh = rawExternalSpeedKmh,
+                drivetrainSpeedRadiansPerSecond = assetto.drivetrainSpeedRadiansPerSecond,
+                boost = assetto.boost,
+                bov = assetto.bov,
+                bovDecaySeconds = assetto.bovDecaySeconds,
+                limiterPulse = assetto.limiterPulse,
+                backfireTriggered = assetto.backfireTriggered,
+                shiftStarted = assetto.shiftStarted,
+                shiftRejected = assetto.shiftRejected,
+                tractionLimitActive = assetto.tractionLimitActive,
+                tractionLimitPulse = assetto.tractionLimitPulse,
+            )
+        }
         val shift = activeShift
         val axleTorque = axleWheelTorqueAtSpeed(profile, vehicleSpeedMps * 3.6)
         val peakWheelTorque = profile.frontPeakWheelTorqueNm + profile.rearPeakWheelTorqueNm

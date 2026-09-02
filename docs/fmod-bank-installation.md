@@ -18,7 +18,9 @@ The builder creates one package for every source car bank, plus the original Ass
 event-name table. A car package carries exactly one original `.bank`, plus `GUIDs.txt` when the
 source provides it. The builder validates the source selection, writes SHA-256 metadata, and uses
 stored zip entries so the installer can stream the original bank without an intermediate decode.
-The generated `fmod_bank_packs/` directory is ignored and must not be committed.
+Every car package also carries `profiles/<profile-id>/physics.json`, exported from that car's
+original Assetto data. The dashboard and Audio Lab consume the same metadata. The generated
+`fmod_bank_packs/` directory is ignored and must not be committed.
 
 ## Install on Android
 
@@ -29,9 +31,10 @@ The installer streams each package to:
 content://com.gabrielpc.enginesoundsimulator.fmodbanks/packs/<pack-id>
 ```
 
-The dashboard verifies paths, byte count, and SHA-256 into a staging directory, then atomically
-publishes the bank. A retry safely replaces only the target pack. **DELETE ALL** removes every
-published bank so a fresh installation can start from zero.
+The dashboard accepts only `byd-fmod-bank-pack-v2`, verifies paths, byte count, and SHA-256 into a
+staging directory, then atomically publishes the bank, GUID lookup, and physics metadata. A retry
+safely replaces only the target pack. **DELETE ALL** removes every published bank so a fresh
+installation can start from zero. A v1 pack reports a clear delete-and-reinstall instruction.
 
 ## Runtime behavior
 
@@ -40,4 +43,4 @@ their own source bank. The two installed common Assetto banks load before every 
 metadata and shared FMOD dependencies, never a substitute car. The app reports a load error instead
 of selecting a different car. Once installed, the native FMOD bridge opens the banks directly from
 private storage and starts only the permitted engine, transmission, turbo, limiter, shift, backfire,
-and start events.
+traction-control, gear-grind, and start events. Tires, wind, chassis, and doors remain excluded.

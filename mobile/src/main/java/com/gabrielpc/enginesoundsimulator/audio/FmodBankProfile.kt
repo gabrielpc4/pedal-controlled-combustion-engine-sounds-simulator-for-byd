@@ -22,22 +22,9 @@ internal data class FmodBankProfile(
     val gearRatios: List<Double> = DEFAULT_GEARS,
     val upshiftDurationSeconds: Double = 0.09,
     val downshiftDurationSeconds: Double = 0.16,
-    /** A documented source route is silent, so EXTERIOR must stay on engine_int. */
-    val exteriorFallsBackToCabin: Boolean = false,
 ) {
-    val hasExteriorProgram: Boolean = !exteriorFallsBackToCabin
-
-    fun resolvedPerspective(requested: EngineSoundPerspective): EngineSoundPerspective =
-        if (requested == EngineSoundPerspective.EXTERIOR && hasExteriorProgram) {
-            EngineSoundPerspective.EXTERIOR
-        } else {
-            EngineSoundPerspective.CABIN
-        }
-
-    fun supportsPrimaryLayerSource(@Suppress("UNUSED_PARAMETER") source: PrimaryEngineLayerSource): Boolean = true
-
     fun hasTurboSounds(perspective: EngineSoundPerspective): Boolean =
-        capabilitiesFor(resolvedPerspective(perspective)).any(GenericCarEffect::isTurbo)
+        capabilitiesFor(perspective).any(GenericCarEffect::isTurbo)
 
     fun capabilitiesFor(perspective: EngineSoundPerspective): Set<GenericCarEffect> {
         val generic = genericCarEffectAvailability[bankPackId]
@@ -77,7 +64,9 @@ internal object FmodBankProfiles {
     const val commonStringsPackId = "assetto-common-strings"
     const val commonPackId = "assetto-common"
 
-    val default = profile(
+    val default = profile("alfa-romeo-4c", "Alfa Romeo 4C")
+
+    private val huracanTrofeoEvo2 = profile(
         id = "lamborghini_huracan_trofeo_evo2_cabin",
         displayName = "Lamborghini Huracán Trofeo EVO2",
         preview = "car_previews/lamborghini-huracan-trofeo-evo2.jpg",
@@ -93,6 +82,7 @@ internal object FmodBankProfiles {
 
     val all = listOf(
         default,
+        huracanTrofeoEvo2,
         profile(
             id = "lamborghini_aventador_sv_cabin",
             displayName = "Lamborghini Aventador SV",
@@ -118,16 +108,15 @@ internal object FmodBankProfiles {
             upshiftSeconds = 0.095,
             downshiftSeconds = 0.220,
         ),
-        profile("alfa-romeo-4c", "Alfa Romeo 4C"),
-        profile("aston-martin-dbrs9-gt3", "Aston Martin DBS", exteriorFallsBackToCabin = true),
+        profile("aston-martin-dbrs9-gt3", "Aston Martin DBS"),
         profile("audi-r8-lms-gt2", "Audi R8"),
         profile("audi-tt-cup-2015", "Audi TT"),
         profile("bmw-m8-gtlm", "BMW M8 Competition"),
         profile("bugatti-chiron-pur-sport", "Bugatti Chiron"),
         profile("cadillac-escalade-esv", "Cadillac Escalade"),
         profile("chevrolet-camaro-concept", "Chevrolet Camaro"),
-        profile("chevrolet-corvette-c6-z06-stanced", "Chevrolet Corvette C6 Z06", exteriorFallsBackToCabin = true),
-        profile("chevrolet-corvette-c7-stingray-hellspec", "Chevrolet Corvette C7 Stingray", exteriorFallsBackToCabin = true),
+        profile("chevrolet-corvette-c6-z06-stanced", "Chevrolet Corvette C6 Z06"),
+        profile("chevrolet-corvette-c7-stingray-hellspec", "Chevrolet Corvette C7 Stingray"),
         profile("ferrari-360-challenge-stradale", "Ferrari 360"),
         profile("ferrari-458-italia-tune", "Ferrari 458 Italia"),
         profile("ferrari-458-italia-gte-ferruccio", "Ferrari 458 Spider"),
@@ -212,7 +201,6 @@ internal object FmodBankProfiles {
         gearRatios: List<Double> = FmodBankProfile.DEFAULT_GEARS,
         upshiftSeconds: Double = 0.09,
         downshiftSeconds: Double = 0.16,
-        exteriorFallsBackToCabin: Boolean = false,
     ) = FmodBankProfile(
         id = id,
         bankPackId = bankPackId,
@@ -226,7 +214,6 @@ internal object FmodBankProfiles {
         gearRatios = gearRatios,
         upshiftDurationSeconds = upshiftSeconds,
         downshiftDurationSeconds = downshiftSeconds,
-        exteriorFallsBackToCabin = exteriorFallsBackToCabin,
     )
 
     private val unavailableSpecifications = CarSpecifications("—", "—", "—", "—", "—")

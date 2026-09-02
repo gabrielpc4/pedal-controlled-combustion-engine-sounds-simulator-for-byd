@@ -148,8 +148,7 @@ tasks.named("preBuild").configure {
 
 android {
     namespace = "com.gabrielpc.enginesoundsimulator"
-    // FMOD 1.10's Android binaries require the older compatible linker behavior
-    // supplied by NDK r27; newer r28 rejects their vendor symbol table.
+    // Keep the native bridge on the verified NDK used by the FMOD 2.03.14 runtime build.
     ndkVersion = "27.1.12297006"
     compileSdk {
         version = release(37)

@@ -14,33 +14,41 @@ internal class NativeFmodBankBridge {
         commonBankPath: String,
         carBankPath: String,
         perspective: Int,
-        source: Int,
+        hasTurbo: Boolean,
+        spatial: FloatArray,
     ): String?
 
     /** Returns a human-readable error or null after synchronously applying the control frame. */
     external fun update(
+        dt: Float,
         rpm: Float,
-        throttle: Float,
+        drivetrainSpeed: Float,
         masterGain: Float,
-        loadGain: Float,
-        coastGain: Float,
-        transmissionGain: Float,
-        turboGain: Float,
-        limiterGain: Float,
-        limiterDecay: Float,
-        shiftGain: Float,
-        overrunGain: Float,
+        perspective: Int,
         boost: Float,
+        bov: Float,
         bovDecay: Float,
-        shiftSerial: Long,
+        limiterPulse: Boolean,
+        shiftStarted: Boolean,
         shiftDirection: Int,
-        triggerOverrun: Boolean,
+        shiftRejected: Boolean,
+        backfireTriggered: Boolean,
+        tractionActive: Boolean,
+        tractionPulse: Boolean,
+        shiftSoundsEnabled: Boolean,
+        shiftGain: Float,
+        popsAndBangsEnabled: Boolean,
+        popsAndBangsGain: Float,
+        transmissionEnabled: Boolean,
+        transmissionGain: Float,
+        turboEnabled: Boolean,
+        turboGain: Float,
     ): String?
 
+    external fun setSourceControls(rows: Array<String>)
+
+    /** Immutable source rows captured from FMOD's actual event/channel hierarchy. */
+    external fun voiceSnapshots(): Array<String>
+
     external fun close()
-
-    /** RMS output in [FmodNativeMeterTrackIds] order, measured after the bank graph and host gains. */
-    external fun outputMeters(): FloatArray
-
-    external fun activeEventNames(): Array<String>
 }

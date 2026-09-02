@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Process
 import android.os.SystemClock
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
-import com.gabrielpc.enginesoundsimulator.audio.AudioMixModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioEngine
 import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
@@ -13,25 +12,22 @@ import com.gabrielpc.enginesoundsimulator.audio.CarEffectGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarEffectModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspectiveRepository
-import com.gabrielpc.enginesoundsimulator.audio.FmodEngineLayerRole
-import com.gabrielpc.enginesoundsimulator.audio.LayerMixControl
-import com.gabrielpc.enginesoundsimulator.audio.LayerMixRepository
-import com.gabrielpc.enginesoundsimulator.audio.LayerMixTrackState
-import com.gabrielpc.enginesoundsimulator.audio.LayerOutputMeter
-import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSource
-import com.gabrielpc.enginesoundsimulator.audio.PrimaryEngineLayerSourceRepository
-import com.gabrielpc.enginesoundsimulator.audio.ProgramLayerGains
-import com.gabrielpc.enginesoundsimulator.audio.mixerTracks
+import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
+import com.gabrielpc.enginesoundsimulator.audio.SourceMixControl
+import com.gabrielpc.enginesoundsimulator.audio.SourceMixRepository
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineProfile
 import com.gabrielpc.enginesoundsimulator.simulation.EngineIgnitionState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
+import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysics
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
+import com.gabrielpc.enginesoundsimulator.simulation.withAssettoPhysics
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
@@ -70,21 +66,17 @@ data class DriveSnapshot(
     val selectedCarPreviewAsset: String,
     val selectedCarIndex: Int,
     val availableCarCount: Int,
-    val layerMixTracks: List<LayerMixTrackState> = emptyList(),
-    val programLayerGains: ProgramLayerGains = ProgramLayerGains(),
-    val primaryLayerSource: PrimaryEngineLayerSource = PrimaryEngineLayerSource.LOAD,
-    val canUseCoastAsPrimary: Boolean = false,
+    val fmodSources: List<FmodSourceState> = emptyList(),
     val soundPerspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
-    val hasExteriorProgram: Boolean = false,
     val appMasterVolume: Double = AppMasterVolumeRepository.DEFAULT,
     val appMuted: Boolean = false,
     val carMasterVolume: Double = CarMasterVolumeRepository.DEFAULT,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
     val engineStartLoading: Boolean = false,
-    val popsAndBangsEnabled: Boolean = true,
+    val popsAndBangsEnabled: Boolean = false,
     val popsAndBangsGain: Double = EngineAudioFrame.DEFAULT_POPS_AND_BANGS_GAIN,
-    val shiftSoundsEnabled: Boolean = true,
+    val shiftSoundsEnabled: Boolean = false,
     val shiftSoundsGain: Double = EngineAudioFrame.DEFAULT_SHIFT_SOUNDS_GAIN,
     val transmissionEnabled: Boolean = true,
     val transmissionGain: Double = EngineAudioFrame.DEFAULT_TRANSMISSION_GAIN,
@@ -104,25 +96,19 @@ class DriveController(context: Context) {
     private val appContext = context.applicationContext
     private val tuningRepository = TuningRepository(appContext)
     private val selectedCarRepository = SelectedCarRepository(appContext)
-    private val layerMixRepository = LayerMixRepository(appContext)
+    private val bankResolver = FmodBankResolver(appContext)
+    private val sourceMixRepository = SourceMixRepository(appContext)
     private val appMasterVolumeRepository = AppMasterVolumeRepository(appContext)
     private val carMasterVolumeRepository = CarMasterVolumeRepository(appContext)
     private val carEffectGainRepository = CarEffectGainRepository(appContext)
     private val carEffectModeRepository = CarEffectModeRepository(appContext)
-    private val audioMixModeRepository = AudioMixModeRepository(appContext)
+    private val shiftModeRepository = ShiftModeRepository(appContext)
     private val driveBehaviorRepository = DriveBehaviorRepository(appContext)
     private val simulatedPedalTestRepository = SimulatedPedalTestRepository(appContext)
     private val selectedSampleProfile = AtomicReference(selectedCarRepository.load())
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
     private val soundPerspective = AtomicReference(soundPerspectiveRepository.load(selectedSampleProfile.get()))
-    private val primaryLayerSourceRepository = PrimaryEngineLayerSourceRepository(appContext)
-    private val primaryLayerSource = AtomicReference(
-        primaryLayerSourceRepository.load(selectedSampleProfile.get(), soundPerspective.get()),
-    )
-    private val layerMixControls = AtomicReference(layerMixRepository.load(selectedCarRepository.load()))
-    private val programLayerGains = AtomicReference(
-        layerMixRepository.loadProgramLayerGains(selectedCarRepository.load(), soundPerspective.get()),
-    )
+    private val sourceMixControls = AtomicReference<Map<String, SourceMixControl>>(emptyMap())
     private val popsAndBangsEnabled = AtomicBoolean(
         carEffectModeRepository.popsAndBangsEnabled(selectedCarRepository.load().id),
     )
@@ -155,13 +141,16 @@ class DriveController(context: Context) {
     )
     private val simulatedCoastRegenStrength = AtomicReference(simulatedPedalTestRepository.coastRegenStrength())
     private val simulatedUphillDragGrade = AtomicReference(simulatedPedalTestRepository.uphillDragGrade())
-    private val manualShiftModeEnabled = AtomicBoolean(audioMixModeRepository.isManualShiftModeEnabled())
+    private val manualShiftModeEnabled = AtomicBoolean(shiftModeRepository.isManualEnabled())
     private val tuningConfig = AtomicReference(tuningRepository.load())
     private val appMasterVolume = AtomicReference(appMasterVolumeRepository.load())
     private val appMasterVolumeBeforeMute = AtomicReference<Double?>(null)
     private val carMasterVolume = AtomicReference(carMasterVolumeRepository.load(selectedCarRepository.load().id))
     private var appliedTuning = tuningConfig.get()
-    private var profile = appliedTuning.toEngineProfile(selectedSampleProfile.get())
+    private val activeAssettoPhysics = AtomicReference<AssettoPhysics?>(
+        runCatching { bankResolver.physics(selectedSampleProfile.get()) }.getOrNull(),
+    )
+    private var profile = calibratedProfile(appliedTuning, selectedSampleProfile.get(), activeAssettoPhysics.get())
     private val simulation = EngineSimulation(profile)
     private val vehicleReader = BydSpeedReader(appContext)
     private val audioEngine = EngineAudioEngine(appContext)
@@ -203,12 +192,7 @@ class DriveController(context: Context) {
         selectedCarPreviewAsset = selectedSampleProfile.get().previewAssetName,
         selectedCarIndex = FmodBankProfiles.all.indexOf(selectedSampleProfile.get()),
         availableCarCount = FmodBankProfiles.all.size,
-        primaryLayerSource = primaryLayerSource.get(),
-        canUseCoastAsPrimary = selectedSampleProfile.get().supportsPrimaryLayerSource(
-            PrimaryEngineLayerSource.COAST,
-        ),
         soundPerspective = soundPerspective.get(),
-        hasExteriorProgram = selectedSampleProfile.get().hasExteriorProgram,
         popsAndBangsEnabled = popsAndBangsEnabled.get(),
         popsAndBangsGain = popsAndBangsGain.get(),
         shiftSoundsEnabled = shiftSoundsEnabled.get(),
@@ -220,7 +204,6 @@ class DriveController(context: Context) {
         turboSoundsGain = turboSoundsGain.get(),
         loadResponsiveRpmEnabled = loadResponsiveRpmEnabled.get(),
         throttleRpmBumpEnabled = throttleRpmBumpEnabled.get(),
-        programLayerGains = programLayerGains.get(),
         simulatedCoastRegenStrength = simulatedCoastRegenStrength.get(),
         simulatedUphillDragGrade = simulatedUphillDragGrade.get(),
         manualShiftModeEnabled = manualShiftModeEnabled.get(),
@@ -229,8 +212,9 @@ class DriveController(context: Context) {
     )
 
     init {
+        activeAssettoPhysics.get()?.let(simulation::updateAssettoPhysics)
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
-        audioEngine.setSoundProgram(selectedSampleProfile.get(), soundPerspective.get(), primaryLayerSource.get())
+        audioEngine.setSoundProgram(selectedSampleProfile.get(), soundPerspective.get())
         simulation.manualShiftEnabled = manualShiftModeEnabled.get()
         simulation.loadResponsiveRpmEnabled = loadResponsiveRpmEnabled.get()
         simulation.throttleRpmBumpEnabled = throttleRpmBumpEnabled.get()
@@ -258,7 +242,6 @@ class DriveController(context: Context) {
                 turboSoundsGain = turboSoundsGain.get(),
                 loadResponsiveRpmEnabled = loadResponsiveRpmEnabled.get(),
                 throttleRpmBumpEnabled = throttleRpmBumpEnabled.get(),
-                programLayerGains = programLayerGains.get(),
                 simulatedCoastRegenStrength = simulatedCoastRegenStrength.get(),
                 simulatedUphillDragGrade = simulatedUphillDragGrade.get(),
                 manualShiftModeEnabled = manualShiftModeEnabled.get(),
@@ -278,17 +261,10 @@ class DriveController(context: Context) {
             turboSoundsGain = turboSoundsGain.get(),
             loadResponsiveRpmEnabled = loadResponsiveRpmEnabled.get(),
             throttleRpmBumpEnabled = throttleRpmBumpEnabled.get(),
-            programLayerGains = programLayerGains.get(),
             simulatedCoastRegenStrength = simulatedCoastRegenStrength.get(),
             simulatedUphillDragGrade = simulatedUphillDragGrade.get(),
             manualShiftModeEnabled = manualShiftModeEnabled.get(),
-            layerMixTracks = buildLayerMixTracks(
-                selectedSampleProfile.get(),
-                layerMixControls.get(),
-                audioEngine.layerOutputMeters(),
-                primaryLayerSource = primaryLayerSource.get(),
-                perspective = soundPerspective.get(),
-            ),
+            fmodSources = buildFmodSources(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedId,
             engineStartLoading = engineStartLoading.get(),
             userMessage = userVisibleMessage,
@@ -363,13 +339,13 @@ class DriveController(context: Context) {
             val allCleared = AppPreferenceStores.clearAll(appContext)
             val defaultProfile = FmodBankProfiles.default
             val defaultPerspective = EngineSoundPerspective.CABIN
-            val defaultSource = PrimaryEngineLayerSource.LOAD
             val defaultTuning = TuningConfig.DEFAULT.withSampleProfile(defaultProfile)
+            val defaultPhysics = runCatching { bankResolver.physics(defaultProfile) }.getOrNull()
 
             selectedSampleProfile.set(defaultProfile)
             soundPerspective.set(defaultPerspective)
-            primaryLayerSource.set(defaultSource)
-            layerMixControls.set(layerMixRepository.load(defaultProfile))
+            sourceMixControls.set(emptyMap())
+            audioEngine.setSourceMixControls(emptyMap())
             appMasterVolume.set(AppMasterVolumeRepository.DEFAULT)
             appMasterVolumeBeforeMute.set(null)
             carMasterVolume.set(CarMasterVolumeRepository.DEFAULT)
@@ -387,15 +363,17 @@ class DriveController(context: Context) {
             simulatedUphillDragGrade.set(SimulatedPedalTestRepository.DEFAULT_UPHILL_DRAG_GRADE)
             manualShiftModeEnabled.set(false)
             tuningConfig.set(defaultTuning)
-            profile = defaultTuning.toEngineProfile(defaultProfile)
+            activeAssettoPhysics.set(defaultPhysics)
+            profile = calibratedProfile(defaultTuning, defaultProfile, defaultPhysics)
             simulation.updateProfile(profile)
+            defaultPhysics?.let(simulation::updateAssettoPhysics)
             simulation.loadResponsiveRpmEnabled = false
             simulation.throttleRpmBumpEnabled = false
             simulation.manualShiftEnabled = false
             if (keepEngineRunning) {
                 simulation.engageAtIdle()
             }
-            audioEngine.setSoundProgram(defaultProfile, defaultPerspective, defaultSource)
+            audioEngine.setSoundProgram(defaultProfile, defaultPerspective)
             userVisibleMessage = if (allCleared) {
                 null
             } else {
@@ -417,57 +395,36 @@ class DriveController(context: Context) {
         applySelectedCar(selected)
     }
 
-    fun setLayerMixVolume(trackId: String, volume: Double) {
-        val profile = selectedSampleProfile.get()
-        layerMixControls.set(layerMixRepository.setVolume(profile, trackId, volume))
-    }
-
-    fun setLayerMixMuted(trackId: String, muted: Boolean) {
-        val profile = selectedSampleProfile.get()
-        layerMixControls.set(layerMixRepository.setMuted(profile, trackId, muted))
-    }
-
-    fun setLayerMixSolo(trackId: String, solo: Boolean) {
-        val profile = selectedSampleProfile.get()
-        layerMixControls.set(layerMixRepository.setSolo(profile, trackId, solo))
-    }
-
-    fun setLoadProgramLayerGain(gain: Double) {
-        setProgramLayerGain(FmodEngineLayerRole.LOAD, gain)
-    }
-
-    fun setCoastProgramLayerGain(gain: Double) {
-        setProgramLayerGain(FmodEngineLayerRole.COAST, gain)
-    }
-
-    private fun setProgramLayerGain(role: FmodEngineLayerRole, gain: Double) {
-        programLayerGains.set(
-            layerMixRepository.setProgramLayerGain(
-                selectedSampleProfile.get(),
-                soundPerspective.get(),
-                role,
-                gain,
-            ),
-        )
-    }
-
-    fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
-        val profile = selectedSampleProfile.get()
-        val perspective = soundPerspective.get()
-        val resolved = primaryLayerSourceRepository.save(profile, perspective, source)
-        if (primaryLayerSource.getAndSet(resolved) != resolved) {
-            audioEngine.setPrimaryLayerSource(resolved)
+    fun setSourceMixVolume(sourceId: String, volume: Double) {
+        updateSourceControl(sourceId) {
+            sourceMixRepository.setGain(selectedSampleProfile.get().id, soundPerspective.get(), sourceId, volume)
         }
+    }
+
+    fun setSourceMixMuted(sourceId: String, muted: Boolean) {
+        updateSourceControl(sourceId) {
+            sourceMixRepository.setMuted(selectedSampleProfile.get().id, soundPerspective.get(), sourceId, muted)
+        }
+    }
+
+    fun setSourceMixSolo(sourceId: String, solo: Boolean) {
+        updateSourceControl(sourceId) {
+            sourceMixRepository.setSolo(selectedSampleProfile.get().id, soundPerspective.get(), sourceId, solo)
+        }
+    }
+
+    private fun updateSourceControl(sourceId: String, update: () -> SourceMixControl) {
+        sourceMixControls.updateAndGet { it + (sourceId to update()) }
+        audioEngine.setSourceMixControls(sourceMixControls.get())
     }
 
     fun setSoundPerspective(perspective: EngineSoundPerspective) {
         val profile = selectedSampleProfile.get()
-        val resolvedPerspective = soundPerspectiveRepository.save(profile, perspective)
-        val resolvedSource = primaryLayerSourceRepository.load(profile, resolvedPerspective)
-        soundPerspective.set(resolvedPerspective)
-        programLayerGains.set(layerMixRepository.loadProgramLayerGains(profile, resolvedPerspective))
-        primaryLayerSource.set(resolvedSource)
-        audioEngine.setSoundProgram(profile, resolvedPerspective, resolvedSource)
+        val savedPerspective = soundPerspectiveRepository.save(profile, perspective)
+        soundPerspective.set(savedPerspective)
+        sourceMixControls.set(emptyMap())
+        audioEngine.setSourceMixControls(emptyMap())
+        audioEngine.setSoundProgram(profile, savedPerspective)
     }
 
     fun setPopsAndBangsEnabled(enabled: Boolean) {
@@ -559,7 +516,7 @@ class DriveController(context: Context) {
     }
 
     fun setManualShiftModeEnabled(enabled: Boolean) {
-        audioMixModeRepository.setManualShiftModeEnabled(enabled)
+        shiftModeRepository.setManualEnabled(enabled)
         manualShiftModeEnabled.set(enabled)
         simulation.manualShiftEnabled = enabled
     }
@@ -656,9 +613,8 @@ class DriveController(context: Context) {
 
             selectedSampleProfile.set(selected)
             soundPerspective.set(soundPerspectiveRepository.load(selected))
-            primaryLayerSource.set(primaryLayerSourceRepository.load(selected, soundPerspective.get()))
-            layerMixControls.set(layerMixRepository.load(selected))
-            programLayerGains.set(layerMixRepository.loadProgramLayerGains(selected, soundPerspective.get()))
+            sourceMixControls.set(emptyMap())
+            audioEngine.setSourceMixControls(emptyMap())
             carMasterVolume.set(carMasterVolumeRepository.load(selected.id))
             popsAndBangsGain.set(carEffectGainRepository.popsAndBangsGain(selected.id))
             shiftSoundsGain.set(carEffectGainRepository.shiftSoundsGain(selected.id))
@@ -672,12 +628,15 @@ class DriveController(context: Context) {
             val tuning = tuningConfig.get().withSampleProfile(selected)
             tuningConfig.set(tuning)
             tuningRepository.save(tuning)
-            profile = tuning.toEngineProfile(selected)
+            val physics = runCatching { bankResolver.physics(selected) }.getOrNull()
+            activeAssettoPhysics.set(physics)
+            profile = calibratedProfile(tuning, selected, physics)
             simulation.updateProfile(profile)
+            physics?.let(simulation::updateAssettoPhysics)
             if (keepEngineRunning) {
                 simulation.engageAtIdle()
             }
-            audioEngine.setSoundProgram(selected, soundPerspective.get(), primaryLayerSource.get())
+            audioEngine.setSoundProgram(selected, soundPerspective.get())
         }
     }
 
@@ -853,7 +812,6 @@ class DriveController(context: Context) {
             audioEngine.setSoundProgram(
                 selectedSampleProfile.get(),
                 soundPerspective.get(),
-                primaryLayerSource.get(),
             )
             audioEngine.start()
         }
@@ -900,7 +858,7 @@ class DriveController(context: Context) {
     private fun step(dt: Double) {
         val tuning = tuningConfig.get()
         if (tuning !== appliedTuning) {
-            profile = tuning.toEngineProfile(selectedSampleProfile.get())
+            profile = calibratedProfile(tuning, selectedSampleProfile.get(), activeAssettoPhysics.get())
             simulation.updateProfile(profile)
             appliedTuning = tuning
         }
@@ -960,16 +918,9 @@ class DriveController(context: Context) {
         )
         val audioEnabled = simulation.ignition == EngineIgnitionState.STOPPING ||
             simulation.isEngineAudioAudible()
-        val freeRev = transmissionControl.position != TransmissionPosition.DRIVE
-        val audioThrottle = if (simulation.ignition == EngineIgnitionState.STARTING) {
-            (drivetrain.rpm / profile.redlineRpm.coerceAtLeast(1.0)).coerceIn(0.0, 1.0) * 0.9
-        } else {
-            drivetrain.audioThrottle
-        }
         audioEngine.update(
             EngineAudioFrame(
                 rpm = drivetrain.rpm,
-                throttle = audioThrottle,
                 enabled = audioEnabled,
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
@@ -977,20 +928,20 @@ class DriveController(context: Context) {
                     ShiftDirection.DOWN -> -1
                     ShiftDirection.NONE -> 0
                 },
-                isShifting = drivetrain.isShifting,
-                limiterActive = drivetrain.limiterActive,
+                limiterPulse = drivetrain.limiterPulse,
+                backfireTriggered = drivetrain.backfireTriggered,
+                shiftRejected = drivetrain.shiftRejected,
+                tractionLimitActive = drivetrain.tractionLimitActive,
+                tractionLimitPulse = drivetrain.tractionLimitPulse,
+                drivetrainSpeedRadiansPerSecond = drivetrain.drivetrainSpeedRadiansPerSecond,
+                boost = drivetrain.boost,
+                maximumBoost = activeAssettoPhysics.get()?.engine?.turbos?.sumOf { it.maximumBoost } ?: 0.0,
+                bov = drivetrain.bov,
+                bovDecaySeconds = drivetrain.bovDecaySeconds,
+                perspective = soundPerspective.get(),
                 tuning = effectiveAudioTuning(tuning, simulation.ignitionAudioGain()),
-                layerMix = layerMixControls.get(),
-                programLayerGains = programLayerGains.get(),
-                primaryLayerSource = primaryLayerSource.get(),
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
                 popsAndBangsGain = popsAndBangsGain.get(),
-                throttleLiftEffectsEnabled = !freeRev,
-                turboSpoolAttackMultiplier = if (freeRev) {
-                    FREE_REV_TURBO_ATTACK_MULTIPLIER
-                } else {
-                    1.0
-                },
                 shiftSoundsEnabled = shiftSoundsEnabled.get(),
                 shiftSoundsGain = shiftSoundsGain.get(),
                 transmissionEnabled = transmissionEnabled.get(),
@@ -1022,13 +973,7 @@ class DriveController(context: Context) {
                 selectedCarPreviewAsset = selectedCar.previewAssetName,
                 selectedCarIndex = FmodBankProfiles.all.indexOf(selectedCar),
                 availableCarCount = FmodBankProfiles.all.size,
-                programLayerGains = programLayerGains.get(),
-                primaryLayerSource = primaryLayerSource.get(),
-                canUseCoastAsPrimary = selectedCar.supportsPrimaryLayerSource(
-                    PrimaryEngineLayerSource.COAST,
-                ),
                 soundPerspective = soundPerspective.get(),
-                hasExteriorProgram = selectedCar.hasExteriorProgram,
                 popsAndBangsEnabled = popsAndBangsEnabled.get(),
                 popsAndBangsGain = popsAndBangsGain.get(),
                 shiftSoundsEnabled = shiftSoundsEnabled.get(),
@@ -1050,6 +995,15 @@ class DriveController(context: Context) {
                 userMessage = userVisibleMessage,
             )
         }
+    }
+
+    private fun calibratedProfile(
+        tuning: TuningConfig,
+        selected: com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile,
+        physics: AssettoPhysics?,
+    ): EngineProfile {
+        val base = tuning.toEngineProfile(selected)
+        return physics?.let(base::withAssettoPhysics) ?: base
     }
 
     private fun handleAudioLoadFailures() {
@@ -1119,18 +1073,43 @@ class DriveController(context: Context) {
             ).coerceIn(CarMasterVolumeRepository.MIN, CarMasterVolumeRepository.MAX),
     )
 
+    private fun buildFmodSources(): List<FmodSourceState> {
+        val sources = audioEngine.sourceSnapshots()
+        if (sources.isEmpty()) return emptyList()
+
+        val missingIds = sources.map(FmodSourceState::id).filterNot(sourceMixControls.get()::containsKey)
+        if (missingIds.isNotEmpty()) {
+            val loaded = sourceMixRepository.load(
+                profileId = selectedSampleProfile.get().id,
+                perspective = soundPerspective.get(),
+                sourceIds = missingIds,
+            )
+            sourceMixControls.updateAndGet { it + loaded }
+            audioEngine.setSourceMixControls(sourceMixControls.get())
+        }
+
+        val controls = sourceMixControls.get()
+        return sources.map { source ->
+            val control = controls[source.id] ?: SourceMixControl.DEFAULT
+            source.copy(
+                userGain = control.gain,
+                muted = control.muted,
+                solo = control.solo,
+            )
+        }
+    }
+
     private data class SimulatedPedalInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
     private companion object {
-        const val FIXED_STEP_SECONDS = 1.0 / 200.0
-        const val FIXED_STEP_NANOS = 5_000_000L
+        const val FIXED_STEP_SECONDS = 0.003
+        const val FIXED_STEP_NANOS = 3_000_000L
         const val INTERRUPTED_IDLE_NANOS = 50_000_000L
         const val LOOP_JOIN_TIMEOUT_MS = 500L
         const val MASTER_VOLUME_STEP = 0.10
         const val INTERRUPTION_RESUME_VOLUME = 0.25
         const val AUDIO_RESTART_COOLDOWN_MS = 2_000L
         const val AUTO_START_THROTTLE_THRESHOLD = 0.10
-        const val FREE_REV_TURBO_ATTACK_MULTIPLIER = 10.0
         const val SIMULATED_PEDALS_DRIVE_FORCE_SCALE = 1.0
         const val SIMULATED_PEDALS_COAST_REGEN_SCALE = 1.0
     }
@@ -1146,34 +1125,6 @@ internal fun resolveInterruptionResumeVolume(
         AppMasterVolumeRepository.MAX,
     )
 }
-
-private fun buildLayerMixTracks(
-    profile: com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile,
-    controls: Map<String, LayerMixControl>,
-    outputLevels: List<LayerOutputMeter>,
-    primaryLayerSource: PrimaryEngineLayerSource,
-    perspective: EngineSoundPerspective,
-): List<LayerMixTrackState> = profile.mixerTracks(perspective)
-    .filterNot { track ->
-        (primaryLayerSource == PrimaryEngineLayerSource.LOAD && track.id == "engine_coast") ||
-            (primaryLayerSource == PrimaryEngineLayerSource.COAST && track.id == "engine_load")
-    }
-    .map { track ->
-        val control = controls[track.id] ?: LayerMixControl.DEFAULT
-        LayerMixTrackState(
-            id = track.id,
-            displayName = track.displayName,
-            sortGroup = track.sortGroup,
-            userVolume = control.volume,
-            muted = control.muted,
-            solo = control.solo,
-            outputLevel = outputLevels.firstOrNull { it.id == track.id }?.outputLevel ?: 0.0,
-            outputDb = outputLevels.firstOrNull { it.id == track.id }?.rmsDb ?: LayerOutputMeter.QUIET_FLOOR_DB,
-            isEffect = track.isEffect,
-            showVolumeSlider = primaryLayerSource == PrimaryEngineLayerSource.BOTH || track.isEffect,
-            isLoadLayer = track.isLoadLayer,
-        )
-    }
 
 private fun TuningConfig.toEngineProfile(bankProfile: com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile): EngineProfile {
     val engine = engine.sanitized()

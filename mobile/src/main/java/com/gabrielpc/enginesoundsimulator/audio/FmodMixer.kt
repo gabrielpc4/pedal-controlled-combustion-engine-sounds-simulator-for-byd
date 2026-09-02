@@ -1,105 +1,92 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-/** User trim applied to one native FMOD event group. */
-data class LayerMixControl(
-    val volume: Double = DEFAULT_GAIN_MULTIPLIER,
+/** User multiplier layered on top of the authored FMOD channel volume. */
+data class SourceMixControl(
+    val gain: Double = DEFAULT_GAIN_MULTIPLIER,
     val muted: Boolean = false,
     val solo: Boolean = false,
 ) {
+    fun sanitized() = copy(gain = gain.coerceIn(MIN_GAIN_MULTIPLIER, MAX_GAIN_MULTIPLIER))
+
     companion object {
         const val DEFAULT_GAIN_MULTIPLIER = 1.0
         const val MIN_GAIN_MULTIPLIER = 0.0
         const val MAX_GAIN_MULTIPLIER = 4.0
 
-        val DEFAULT = LayerMixControl()
+        val DEFAULT = SourceMixControl()
     }
 }
 
-data class LayerMixTrackState(
+/** One exact sound source owned by one authored Studio event. */
+data class FmodSourceState(
     val id: String,
-    val displayName: String,
-    val sortGroup: Int,
-    val userVolume: Double,
-    val muted: Boolean,
-    val solo: Boolean,
-    /** Normalized post-FMOD RMS output used only to draw the live level bar. */
-    val outputLevel: Double,
-    /** Post-FMOD RMS level for the actual event output, not a requested host gain. */
-    val outputDb: Double,
-    val isEffect: Boolean,
-    val showVolumeSlider: Boolean = true,
-    val isLoadLayer: Boolean = false,
-)
-
-data class LayerOutputMeter(
-    val id: String,
-    val rmsDb: Double,
+    val eventPath: String,
+    val eventName: String,
+    val soundName: String,
+    val audibility: Double,
+    val routeGain: Double,
+    val voiceCount: Int,
+    val isVirtual: Boolean,
+    val isActive: Boolean,
+    val userGain: Double = SourceMixControl.DEFAULT_GAIN_MULTIPLIER,
+    val muted: Boolean = false,
+    val solo: Boolean = false,
 ) {
-    val outputLevel: Double
-        get() = ((rmsDb - QUIET_FLOOR_DB) / (0.0 - QUIET_FLOOR_DB)).coerceIn(0.0, 1.0)
+    val audibilityPercent: Int
+        get() = (audibility.coerceIn(0.0, 1.0) * 100.0).toInt()
+
+    val section: FmodEventSection
+        get() = FmodEventSection.forEvent(eventName)
+}
+
+enum class FmodEventSection(val displayName: String, val order: Int) {
+    ENGINE("ENGINE", 0),
+    DRIVETRAIN("DRIVETRAIN", 1),
+    FORCED_INDUCTION("TURBO", 2),
+    DRIVER_EVENTS("DRIVER EVENTS", 3),
+    ENGINE_EVENTS("ENGINE EVENTS", 4),
+    OTHER("OTHER AUTHORED EVENTS", 5),
+    ;
 
     companion object {
-        const val QUIET_FLOOR_DB = -80.0
+        fun forEvent(eventName: String): FmodEventSection = when (eventName) {
+            "engine_int", "engine_ext" -> ENGINE
+            "transmission", "transmission_ext" -> DRIVETRAIN
+            "turbo" -> FORCED_INDUCTION
+            "gear_int", "gear_ext", "gear_grind", "tractioncontrol_int", "tractioncontrol_ext" ->
+                DRIVER_EVENTS
+            "limiter", "backfire_int", "backfire_ext", "start" -> ENGINE_EVENTS
+            else -> OTHER
+        }
     }
 }
 
-/** The native bridge always returns the RMS meters in exactly this order. */
-internal val FmodNativeMeterTrackIds = listOf(
-    "engine_load",
-    "engine_coast",
-    "transmission",
-    "turbo",
-    "limiter",
-    "gear",
-    "overrun",
-)
+internal fun parseNativeVoiceSnapshots(rows: Array<String>): List<FmodSourceState> = rows.mapNotNull { row ->
+    val fields = row.split(NATIVE_FIELD_SEPARATOR)
+    if (fields.size != NATIVE_SNAPSHOT_FIELD_COUNT) return@mapNotNull null
+    FmodSourceState(
+        id = fields[0],
+        eventPath = fields[1],
+        eventName = fields[2],
+        soundName = fields[3],
+        audibility = fields[4].toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.0,
+        routeGain = fields[5].toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0,
+        voiceCount = fields[6].toIntOrNull()?.coerceAtLeast(0) ?: 0,
+        isVirtual = fields[7] == "1",
+        isActive = fields[8] == "1",
+    )
+}
 
-internal fun nativeOutputMeters(values: FloatArray): List<LayerOutputMeter> =
-    FmodNativeMeterTrackIds.mapIndexed { index, id ->
-        LayerOutputMeter(
-            id = id,
-            rmsDb = values.getOrNull(index)
-                ?.toDouble()
-                ?.takeIf(Double::isFinite)
-                ?.coerceAtLeast(LayerOutputMeter.QUIET_FLOOR_DB)
-                ?: LayerOutputMeter.QUIET_FLOOR_DB,
-        )
-    }
+internal fun encodeNativeSourceControls(controls: Map<String, SourceMixControl>): Array<String> =
+    controls.map { (id, rawControl) ->
+        val control = rawControl.sanitized()
+        listOf(
+            id,
+            control.gain.toString(),
+            if (control.muted) "1" else "0",
+            if (control.solo) "1" else "0",
+        ).joinToString(NATIVE_FIELD_SEPARATOR.toString())
+    }.toTypedArray()
 
-internal data class FmodMixerTrack(
-    val id: String,
-    val displayName: String,
-    val sortGroup: Int,
-    val isEffect: Boolean,
-    val isLoadLayer: Boolean = false,
-)
-
-internal enum class FmodEngineLayerRole { LOAD, COAST }
-
-internal fun FmodBankProfile.mixerTracks(
-    perspective: EngineSoundPerspective,
-): List<FmodMixerTrack> = buildList {
-    add(FmodMixerTrack("engine_load", "ENGINE · LOAD", 0, isEffect = false, isLoadLayer = true))
-    add(FmodMixerTrack("engine_coast", "ENGINE · COAST", 1, isEffect = false))
-    val capabilities = capabilitiesFor(resolvedPerspective(perspective))
-    if (GenericCarEffect.TRANSMISSION in capabilities) {
-        add(FmodMixerTrack("transmission", "TRANSMISSION", 2, isEffect = true))
-    }
-    if (GenericCarEffect.TURBO_LOOP in capabilities || GenericCarEffect.TURBO_DUMP in capabilities) {
-        add(FmodMixerTrack("turbo", "TURBO", 3, isEffect = true))
-    }
-    if (GenericCarEffect.LIMITER in capabilities) {
-        add(FmodMixerTrack("limiter", "LIMITER", 4, isEffect = true))
-    }
-    if (GenericCarEffect.SHIFT_UP in capabilities || GenericCarEffect.SHIFT_DOWN in capabilities) {
-        add(FmodMixerTrack("gear", "GEAR SHIFTS", 5, isEffect = true))
-    }
-    if (GenericCarEffect.OVERRUN in capabilities) {
-        add(FmodMixerTrack("overrun", "POPS & BANGS", 6, isEffect = true))
-    }
-}.sortedWith(compareBy(FmodMixerTrack::sortGroup, FmodMixerTrack::id))
-
-internal fun FmodBankProfile.allMixerTrackOrder(): List<Pair<String, Int>> =
-    EngineSoundPerspective.entries
-        .flatMap { perspective -> mixerTracks(perspective).map { it.id to it.sortGroup } }
-        .distinctBy { it.first }
+private const val NATIVE_FIELD_SEPARATOR = '\u001f'
+private const val NATIVE_SNAPSHOT_FIELD_COUNT = 9

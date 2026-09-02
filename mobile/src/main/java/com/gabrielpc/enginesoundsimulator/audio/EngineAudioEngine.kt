@@ -4,11 +4,11 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Process
 import android.util.Log
+import com.gabrielpc.enginesoundsimulator.simulation.nativeFmodSpatialCoordinates
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
-import kotlin.math.exp
 
 enum class AudioFocusEvent {
     TRANSIENT_LOSS,
@@ -18,8 +18,8 @@ enum class AudioFocusEvent {
 }
 
 /**
- * Drives the original Studio events from one installed FMOD bank. The control
- * worker receives presentation RPM only, never the truncated raw vehicle speed.
+ * Runs the original Assetto Studio graph. The simulation owns every physical
+ * signal; this class only transfers the latest fixed-step frame to FMOD.
  */
 class EngineAudioEngine(context: Context) {
     private val appContext = context.applicationContext
@@ -31,13 +31,18 @@ class EngineAudioEngine(context: Context) {
     private val parameters = AtomicReference(EngineAudioFrame())
     private val selectedProfile = AtomicReference(FmodBankProfiles.default)
     private val soundPerspective = AtomicReference(EngineSoundPerspective.CABIN)
-    private val primaryLayerSource = AtomicReference(PrimaryEngineLayerSource.LOAD)
     private val loadedBankProfileId = AtomicReference<String?>(null)
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
     private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
     private val controlThread = AtomicReference<Thread?>(null)
-    private val nativeMeters = AtomicReference<List<LayerOutputMeter>>(emptyList())
+    private val sourceControls = AtomicReference<Map<String, SourceMixControl>>(emptyMap())
+    private val sourceControlRevision = AtomicLong(0L)
+    private val nativeSources = AtomicReference<List<FmodSourceState>>(emptyList())
+    private val limiterPulseSerial = AtomicLong(0L)
+    private val backfirePulseSerial = AtomicLong(0L)
+    private val rejectedShiftSerial = AtomicLong(0L)
+    private val tractionPulseSerial = AtomicLong(0L)
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -65,14 +70,12 @@ class EngineAudioEngine(context: Context) {
                 focusMultiplier.set(0.0)
                 focusHeld.set(false)
                 focusChangeListener?.invoke(AudioFocusEvent.PERMANENT_LOSS)
-                synchronized(lifecycleLock) {
-                    stopLocked()
-                }
+                synchronized(lifecycleLock) { stopLocked() }
             }
         }
     }
 
-    fun layerOutputMeters(): List<LayerOutputMeter> = nativeMeters.get()
+    fun sourceSnapshots(): List<FmodSourceState> = nativeSources.get()
 
     fun loadedBankProfileId(): String? = loadedBankProfileId.get()
 
@@ -84,6 +87,16 @@ class EngineAudioEngine(context: Context) {
 
     fun update(frame: EngineAudioFrame) {
         parameters.set(frame)
+        soundPerspective.set(frame.perspective)
+        if (frame.limiterPulse) limiterPulseSerial.incrementAndGet()
+        if (frame.backfireTriggered) backfirePulseSerial.incrementAndGet()
+        if (frame.shiftRejected) rejectedShiftSerial.incrementAndGet()
+        if (frame.tractionLimitPulse) tractionPulseSerial.incrementAndGet()
+    }
+
+    fun setSourceMixControls(controls: Map<String, SourceMixControl>) {
+        sourceControls.set(controls.mapValues { it.value.sanitized() })
+        sourceControlRevision.incrementAndGet()
     }
 
     fun setFocusChangeListener(listener: ((AudioFocusEvent) -> Unit)?) {
@@ -98,34 +111,22 @@ class EngineAudioEngine(context: Context) {
     }
 
     fun stop() {
-        synchronized(lifecycleLock) {
-            stopLocked()
-        }
+        synchronized(lifecycleLock) { stopLocked() }
     }
 
     internal fun setSoundProgram(
         profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
-        source: PrimaryEngineLayerSource,
     ) {
         synchronized(lifecycleLock) {
-            val resolvedPerspective = profile.resolvedPerspective(perspective)
-            val changed = selectedProfile.getAndSet(profile).id != profile.id ||
-                soundPerspective.getAndSet(resolvedPerspective) != resolvedPerspective ||
-                primaryLayerSource.getAndSet(source) != source
-            if (!changed) return
+            val profileChanged = selectedProfile.getAndSet(profile).id != profile.id
+            soundPerspective.set(perspective)
+            if (!profileChanged) return
 
             loadedBankProfileId.set(null)
-            if (running.get() || controlThread.get()?.isAlive == true) {
-                stopLocked()
-                startLocked()
-            }
-        }
-    }
-
-    internal fun setPrimaryLayerSource(source: PrimaryEngineLayerSource) {
-        synchronized(lifecycleLock) {
-            if (primaryLayerSource.getAndSet(source) == source) return
+            sourceControls.set(emptyMap())
+            sourceControlRevision.incrementAndGet()
+            nativeSources.set(emptyList())
             if (running.get() || controlThread.get()?.isAlive == true) {
                 stopLocked()
                 startLocked()
@@ -134,27 +135,22 @@ class EngineAudioEngine(context: Context) {
     }
 
     private fun startLocked() {
-        if (running.get() || controlThread.get() != null || focusHeld.get()) {
-            stopLocked()
-        }
+        if (running.get() || controlThread.get() != null || focusHeld.get()) stopLocked()
 
         val profile = selectedProfile.get()
-        val focusGranted = runCatching(::requestFocus).getOrDefault(false)
-        if (!focusGranted) {
+        if (!runCatching(::requestFocus).getOrDefault(false)) {
             reportLoadFailure(profile.id, "Audio focus was not granted by the system.")
             return
         }
 
         focusHeld.set(true)
         focusMultiplier.set(1.0)
-        nativeMeters.set(emptyList())
+        nativeSources.set(emptyList())
         loadFailure.set(null)
         running.set(true)
         val runId = generation.incrementAndGet()
-        val perspective = profile.resolvedPerspective(soundPerspective.get())
-        val source = primaryLayerSource.get()
         val thread = Thread(
-            { controlLoop(runId, profile, perspective, source) },
+            { controlLoop(runId, profile) },
             "fmod-bank-control",
         ).apply { isDaemon = true }
         controlThread.set(thread)
@@ -173,41 +169,37 @@ class EngineAudioEngine(context: Context) {
         generation.incrementAndGet()
         val thread = controlThread.get()
         thread?.interrupt()
-        if (thread != null && thread !== Thread.currentThread()) {
-            joinThread(thread, CONTROL_JOIN_TIMEOUT_MS)
-        }
-        if (thread == null || !thread.isAlive) {
-            controlThread.compareAndSet(thread, null)
-        }
+        if (thread != null && thread !== Thread.currentThread()) joinThread(thread, CONTROL_JOIN_TIMEOUT_MS)
+        if (thread == null || !thread.isAlive) controlThread.compareAndSet(thread, null)
         loadedBankProfileId.set(null)
-        nativeMeters.set(emptyList())
+        nativeSources.set(emptyList())
         focusMultiplier.set(0.0)
         abandonFocusIfHeld()
     }
 
-    private fun controlLoop(
-        runId: Long,
-        profile: FmodBankProfile,
-        perspective: EngineSoundPerspective,
-        source: PrimaryEngineLayerSource,
-    ) {
+    private fun controlLoop(runId: Long, profile: FmodBankProfile) {
         val bridge = NativeFmodBankBridge()
-        val smoother = FmodControlSmoother(profile.idleRpm)
-        val turbo = TurboSpoolModel()
-        val overrun = FmodOverrunTrigger()
-        val limiterDecay = FmodLimiterDecayTracker()
         var opened = false
         var lastTickNanos = System.nanoTime()
+        var nextSnapshotNanos = lastTickNanos
+        var appliedControlRevision = -1L
+        var lastShiftSerial = 0L
+        var consumedLimiterPulse = limiterPulseSerial.get()
+        var consumedBackfirePulse = backfirePulseSerial.get()
+        var consumedRejectedShift = rejectedShiftSerial.get()
+        var consumedTractionPulse = tractionPulseSerial.get()
 
         try {
             org.fmod.FMOD.init(appContext)
             val bankFiles = bankResolver.bankFiles(profile)
+            val physics = bankResolver.physics(profile)
             val startupError = bridge.open(
                 commonStringsBankPath = bankFiles.commonStrings.absolutePath,
                 commonBankPath = bankFiles.common.absolutePath,
                 carBankPath = bankFiles.car.absolutePath,
-                perspective = perspective.ordinal,
-                source = source.nativeValue,
+                perspective = soundPerspective.get().ordinal,
+                hasTurbo = physics.engine.turbos.isNotEmpty(),
+                spatial = physics.nativeFmodSpatialCoordinates(),
             )
             if (startupError != null) {
                 reportLoadFailure(profile.id, startupError)
@@ -223,39 +215,59 @@ class EngineAudioEngine(context: Context) {
                     .coerceIn(MIN_CONTROL_STEP_SECONDS, MAX_CONTROL_STEP_SECONDS)
                 lastTickNanos = now
 
+                val revision = sourceControlRevision.get()
+                if (revision != appliedControlRevision) {
+                    bridge.setSourceControls(encodeNativeSourceControls(sourceControls.get()))
+                    appliedControlRevision = revision
+                }
+
                 val frame = parameters.get()
-                val controls = smoother.advance(frame, dt)
-                turbo.update(
-                    dt = dt,
-                    rpm = controls.rpm,
-                    throttle = controls.throttle,
-                    attackMultiplier = frame.turboSpoolAttackMultiplier,
-                )
-                val triggerOverrun = overrun.update(frame, controls.throttle, dt)
-                val gains = FmodEventGains.from(frame, focusMultiplier.get())
+                val currentLimiterPulse = limiterPulseSerial.get()
+                val currentBackfirePulse = backfirePulseSerial.get()
+                val currentRejectedShift = rejectedShiftSerial.get()
+                val currentTractionPulse = tractionPulseSerial.get()
+                val maximumBoost = frame.maximumBoost.coerceAtLeast(0.001)
                 val error = bridge.update(
-                    rpm = controls.rpm.toFloat(),
-                    throttle = controls.throttle.toFloat(),
-                    masterGain = gains.master.toFloat(),
-                    loadGain = gains.load.toFloat(),
-                    coastGain = gains.coast.toFloat(),
-                    transmissionGain = gains.transmission.toFloat(),
-                    turboGain = gains.turbo.toFloat(),
-                    limiterGain = gains.limiter.toFloat(),
-                    limiterDecay = limiterDecay.advance(frame.limiterActive, dt),
-                    shiftGain = gains.shift.toFloat(),
-                    overrunGain = gains.overrun.toFloat(),
-                    boost = turbo.boost.toFloat(),
-                    bovDecay = turbo.bovDecay.toFloat(),
-                    shiftSerial = frame.shiftSerial,
+                    dt = dt.toFloat(),
+                    rpm = frame.rpm.coerceAtLeast(1.0).toFloat(),
+                    drivetrainSpeed = frame.drivetrainSpeedRadiansPerSecond.toFloat(),
+                    masterGain = (
+                        frame.tuning.masterGain * focusMultiplier.get() * if (frame.enabled) 1.0 else 0.0
+                    ).coerceIn(0.0, 1.0).toFloat(),
+                    perspective = frame.perspective.ordinal,
+                    boost = (frame.boost / maximumBoost).coerceAtLeast(0.0).toFloat(),
+                    bov = frame.bov.coerceAtLeast(0.0).toFloat(),
+                    bovDecay = frame.bovDecaySeconds.coerceAtLeast(0.0).toFloat(),
+                    limiterPulse = currentLimiterPulse != consumedLimiterPulse,
+                    shiftStarted = frame.shiftSerial != lastShiftSerial,
                     shiftDirection = frame.shiftDirection,
-                    triggerOverrun = triggerOverrun,
+                    shiftRejected = currentRejectedShift != consumedRejectedShift,
+                    backfireTriggered = currentBackfirePulse != consumedBackfirePulse,
+                    tractionActive = frame.tractionLimitActive,
+                    tractionPulse = currentTractionPulse != consumedTractionPulse,
+                    shiftSoundsEnabled = frame.shiftSoundsEnabled,
+                    shiftGain = frame.shiftSoundsGain.toFloat(),
+                    popsAndBangsEnabled = frame.popsAndBangsEnabled,
+                    popsAndBangsGain = frame.popsAndBangsGain.toFloat(),
+                    transmissionEnabled = frame.transmissionEnabled,
+                    transmissionGain = frame.transmissionGain.toFloat(),
+                    turboEnabled = frame.turboSoundsEnabled,
+                    turboGain = frame.turboSoundsGain.toFloat(),
                 )
+                lastShiftSerial = frame.shiftSerial
+                consumedLimiterPulse = currentLimiterPulse
+                consumedBackfirePulse = currentBackfirePulse
+                consumedRejectedShift = currentRejectedShift
+                consumedTractionPulse = currentTractionPulse
                 if (error != null) {
                     reportLoadFailure(profile.id, error)
                     return
                 }
-                nativeMeters.set(nativeOutputMeters(bridge.outputMeters()))
+
+                if (now >= nextSnapshotNanos) {
+                    nativeSources.set(parseNativeVoiceSnapshots(bridge.voiceSnapshots()))
+                    nextSnapshotNanos = now + SNAPSHOT_PERIOD_NANOS
+                }
                 sleepUntilNextControlTick(now)
             }
         } catch (throwable: Throwable) {
@@ -265,7 +277,7 @@ class EngineAudioEngine(context: Context) {
             loadedBankProfileId.set(null)
             if (opened) bridge.close()
             runCatching { org.fmod.FMOD.close() }
-            nativeMeters.set(emptyList())
+            nativeSources.set(emptyList())
             controlThread.compareAndSet(Thread.currentThread(), null)
             if (generation.get() == runId) {
                 running.set(false)
@@ -278,26 +290,20 @@ class EngineAudioEngine(context: Context) {
     private fun isCurrent(runId: Long): Boolean = running.get() && generation.get() == runId
 
     private fun sleepUntilNextControlTick(tickStartedNanos: Long) {
-        val elapsed = System.nanoTime() - tickStartedNanos
-        val remaining = CONTROL_PERIOD_NANOS - elapsed
-        if (remaining > 0L) {
-            LockSupport.parkNanos(remaining)
-        }
+        val remaining = CONTROL_PERIOD_NANOS - (System.nanoTime() - tickStartedNanos)
+        if (remaining > 0L) LockSupport.parkNanos(remaining)
     }
 
     @Suppress("DEPRECATION")
-    private fun requestFocus(): Boolean =
-        audioManager.requestAudioFocus(
-            focusListener,
-            AudioManager.STREAM_MUSIC,
-            AudioManager.AUDIOFOCUS_GAIN,
-        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    private fun requestFocus(): Boolean = audioManager.requestAudioFocus(
+        focusListener,
+        AudioManager.STREAM_MUSIC,
+        AudioManager.AUDIOFOCUS_GAIN,
+    ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
 
     @Suppress("DEPRECATION")
     private fun abandonFocusIfHeld() {
-        if (focusHeld.compareAndSet(true, false)) {
-            runCatching { audioManager.abandonAudioFocus(focusListener) }
-        }
+        if (focusHeld.compareAndSet(true, false)) runCatching { audioManager.abandonAudioFocus(focusListener) }
     }
 
     private fun joinThread(thread: Thread, timeoutMs: Long) {
@@ -314,110 +320,11 @@ class EngineAudioEngine(context: Context) {
 
     private companion object {
         const val TAG = "EngineAudioEngine"
-        const val CONTROL_PERIOD_NANOS = 4_000_000L
+        const val CONTROL_PERIOD_NANOS = 3_000_000L
+        const val SNAPSHOT_PERIOD_NANOS = 50_000_000L
         const val CONTROL_JOIN_TIMEOUT_MS = 1_000L
         const val MIN_CONTROL_STEP_SECONDS = 1.0 / 1_000.0
         const val MAX_CONTROL_STEP_SECONDS = 0.040
-    }
-}
-
-/**
- * Smooths only presentation values already produced by EngineSimulation. It
- * never sees raw km/h, so a whole-km/h telemetry edge cannot become an FMOD
- * parameter step.
- */
-internal class FmodControlSmoother(initialRpm: Double) {
-    private var rpm = initialRpm
-    private var throttle = 0.0
-
-    fun advance(frame: EngineAudioFrame, dt: Double): FmodControlValues {
-        val tuning = frame.tuning.sanitized()
-        rpm = follow(rpm, frame.rpm.coerceAtLeast(0.0), tuning.rpmSmoothingMs, dt)
-        throttle = follow(throttle, frame.throttle.coerceIn(0.0, 1.0), tuning.throttleSmoothingMs, dt)
-        return FmodControlValues(rpm = rpm, throttle = throttle)
-    }
-
-    private fun follow(current: Double, target: Double, timeMs: Double, dt: Double): Double {
-        val timeSeconds = (timeMs / 1_000.0).coerceAtLeast(0.001)
-        val fraction = 1.0 - exp(-dt / timeSeconds)
-        return current + (target - current) * fraction
-    }
-}
-
-internal data class FmodControlValues(
-    val rpm: Double,
-    val throttle: Double,
-)
-
-/** A native-bank backfire needs a deliberate pull, then a meaningful lift. */
-private class FmodOverrunTrigger {
-    private var accumulatedThrottleSeconds = 0.0
-    private var previousThrottle = 0.0
-
-    fun update(frame: EngineAudioFrame, throttle: Double, dt: Double): Boolean {
-        if (throttle >= MINIMUM_SERIOUS_THROTTLE) {
-            accumulatedThrottleSeconds = (accumulatedThrottleSeconds + dt).coerceAtMost(MAX_CHARGE_SECONDS)
-        } else {
-            accumulatedThrottleSeconds = (accumulatedThrottleSeconds - dt * CHARGE_DECAY_PER_SECOND).coerceAtLeast(0.0)
-        }
-
-        val triggered = frame.popsAndBangsEnabled &&
-            frame.throttleLiftEffectsEnabled &&
-            accumulatedThrottleSeconds >= REQUIRED_CHARGE_SECONDS &&
-            previousThrottle - throttle >= REQUIRED_LIFT_DROP
-        if (triggered) {
-            accumulatedThrottleSeconds = 0.0
-        }
-        previousThrottle = throttle
-        return triggered
-    }
-
-    private companion object {
-        const val MINIMUM_SERIOUS_THROTTLE = 0.40
-        const val REQUIRED_CHARGE_SECONDS = 1.0
-        const val CHARGE_DECAY_PER_SECOND = 0.30
-        const val MAX_CHARGE_SECONDS = 2.0
-        const val REQUIRED_LIFT_DROP = 0.20
-    }
-}
-
-private data class FmodEventGains(
-    val master: Double,
-    val load: Double,
-    val coast: Double,
-    val transmission: Double,
-    val turbo: Double,
-    val limiter: Double,
-    val shift: Double,
-    val overrun: Double,
-) {
-    companion object {
-        fun from(frame: EngineAudioFrame, focusGain: Double): FmodEventGains {
-            val mix = FmodMixControls(frame.layerMix)
-            val enabled = if (frame.enabled) 1.0 else 0.0
-            val master = (frame.tuning.masterGain * focusGain * enabled).coerceIn(0.0, 1.2)
-            val programGains = frame.programLayerGains.sanitized()
-            return FmodEventGains(
-                master = master,
-                load = mix.gain("engine_load") * programGains.load,
-                coast = mix.gain("engine_coast") * programGains.coast,
-                transmission = if (frame.transmissionEnabled) mix.gain("transmission") * frame.transmissionGain else 0.0,
-                turbo = if (frame.turboSoundsEnabled) mix.gain("turbo") * frame.turboSoundsGain else 0.0,
-                limiter = mix.gain("limiter"),
-                shift = if (frame.shiftSoundsEnabled) mix.gain("gear") * frame.shiftSoundsGain else 0.0,
-                overrun = if (frame.popsAndBangsEnabled) mix.gain("overrun") * frame.popsAndBangsGain else 0.0,
-            )
-        }
-    }
-}
-
-private class FmodMixControls(private val controls: Map<String, LayerMixControl>) {
-    private val hasSolo = controls.values.any(LayerMixControl::solo)
-
-    fun gain(id: String): Double {
-        val control = controls[id] ?: LayerMixControl.DEFAULT
-        if (control.muted || (hasSolo && !control.solo)) return 0.0
-        return control.volume.coerceIn(LayerMixControl.MIN_GAIN_MULTIPLIER, LayerMixControl.MAX_GAIN_MULTIPLIER)
     }
 }
 

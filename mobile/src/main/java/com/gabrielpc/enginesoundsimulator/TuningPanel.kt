@@ -54,8 +54,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
-import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
-import com.gabrielpc.enginesoundsimulator.audio.mixerTracks
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile
+import com.gabrielpc.enginesoundsimulator.audio.GenericCarEffect
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.tuning.CurvePoint
 import com.gabrielpc.enginesoundsimulator.tuning.EngineTuning
@@ -301,23 +301,6 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
                 }
             }
         }
-        PanelCard("AUDIO SMOOTHING", "Small fades that keep the native FMOD output seamless", Modifier.weight(1.15f)) {
-            ParameterSlider("RPM FOLLOW", audio.rpmSmoothingMs, 1.0..300.0, "%.0f ms") {
-                onChange(config.copy(audio = audio.copy(rpmSmoothingMs = it)))
-            }
-            ParameterSlider("THROTTLE FOLLOW", audio.throttleSmoothingMs, 1.0..300.0, "%.0f ms") {
-                onChange(config.copy(audio = audio.copy(throttleSmoothingMs = it)))
-            }
-            ParameterSlider("PROGRAM FADE", audio.programFadeMs, 1.0..300.0, "%.0f ms") {
-                onChange(config.copy(audio = audio.copy(programFadeMs = it)))
-            }
-            ParameterSlider("ENABLE FADE", audio.enabledFadeMs, 1.0..500.0, "%.0f ms") {
-                onChange(config.copy(audio = audio.copy(enabledFadeMs = it)))
-            }
-            ParameterSlider("LAYER CROSSFADE", audio.layerFadeMs, 1.0..300.0, "%.0f ms") {
-                onChange(config.copy(audio = audio.copy(layerFadeMs = it)))
-            }
-        }
     }
 }
 
@@ -325,7 +308,7 @@ private fun DelaysTab(config: TuningConfig, onChange: (TuningConfig) -> Unit) {
 private fun AudioTab(config: TuningConfig, selectedCarId: String, onChange: (TuningConfig) -> Unit) {
     val audio = config.audio
     val profile = FmodBankProfiles.find(selectedCarId)
-    val authoredEventGroups = profile.mixerTracks(EngineSoundPerspective.CABIN)
+    val authoredEventGroups = profile.expectedRuntimeEvents()
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PanelCard("FMOD OUTPUT", "The native Studio bank is the only engine source", Modifier.weight(0.72f)) {
             AudioSlider("MASTER", audio.masterGain, 0.0..1.2) { onChange(config.copy(audio = audio.copy(masterGain = it))) }
@@ -1099,7 +1082,7 @@ private fun GearDropGraph(engine: EngineTuning, modifier: Modifier = Modifier) {
 @Composable
 private fun FmodEventCoverageGraph(profileId: String, redlineRpm: Double, modifier: Modifier = Modifier) {
     val profile = FmodBankProfiles.find(profileId)
-    val eventGroups = profile.mixerTracks(EngineSoundPerspective.CABIN)
+    val eventGroups = profile.expectedRuntimeEvents()
     Canvas(modifier) {
         val left = 90f
         val right = size.width - 26f
@@ -1115,11 +1098,11 @@ private fun FmodEventCoverageGraph(profileId: String, redlineRpm: Double, modifi
         }
         eventGroups.forEachIndexed { lane, group ->
             val laneTop = top + lane * laneHeight
-            val color = when (group.id) {
-                "engine_load" -> TuneGreen
-                "engine_coast" -> TuneCyan
+            val color = when (group) {
+                "engine_int" -> TuneGreen
+                "engine_ext" -> TuneCyan
                 "turbo" -> TuneAmber
-                "limiter", "overrun" -> TuneRed
+                "limiter", "backfire" -> TuneRed
                 else -> TuneWhite
             }
             val y = laneTop + laneHeight * 0.20f
@@ -1148,7 +1131,7 @@ private fun FmodEventCoverageGraph(profileId: String, redlineRpm: Double, modifi
             paint.textAlign = Paint.Align.RIGHT
             eventGroups.forEachIndexed { lane, group ->
                 canvas.nativeCanvas.drawText(
-                    group.displayName,
+                    group.uppercase().replace('_', ' '),
                     left - 12f,
                     top + lane * laneHeight + laneHeight * 0.55f,
                     paint,
@@ -1167,6 +1150,17 @@ private fun FmodEventCoverageGraph(profileId: String, redlineRpm: Double, modifi
             canvas.nativeCanvas.drawText("FMOD BANK RPM — DIRECT 1:1", left + width / 2f, bottom + 58f, paint)
         }
     }
+}
+
+private fun FmodBankProfile.expectedRuntimeEvents(): List<String> = buildList {
+    add("engine_int")
+    add("engine_ext")
+    val capabilities = capabilitiesFor(com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.CABIN)
+    if (GenericCarEffect.TRANSMISSION in capabilities) add("transmission")
+    if (GenericCarEffect.TURBO_LOOP in capabilities || GenericCarEffect.TURBO_DUMP in capabilities) add("turbo")
+    if (GenericCarEffect.LIMITER in capabilities) add("limiter")
+    if (GenericCarEffect.SHIFT_UP in capabilities || GenericCarEffect.SHIFT_DOWN in capabilities) add("gear")
+    if (GenericCarEffect.OVERRUN in capabilities) add("backfire")
 }
 
 @Composable

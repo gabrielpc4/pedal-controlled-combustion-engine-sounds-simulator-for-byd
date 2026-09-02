@@ -47,7 +47,18 @@ class ExampleInstrumentedTest {
             val payload = "test bank payload".toByteArray()
             val path = "bank/car.bank"
             FmodBankStore(testRoot).also { store ->
-                store.install(owner.bankPackId, pack(owner.bankPackId, path, payload))
+                store.install(
+                    FmodBankProfiles.commonStringsPackId,
+                    pack(FmodBankProfiles.commonStringsPackId, "bank/common.strings.bank", payload, "shared"),
+                )
+                store.install(
+                    FmodBankProfiles.commonPackId,
+                    pack(FmodBankProfiles.commonPackId, "bank/common.bank", payload, "shared"),
+                )
+                store.install(
+                    owner.bankPackId,
+                    pack(owner.bankPackId, path, payload, sharedProfile.id),
+                )
 
                 assertTrue(store.isInstalled(sharedProfile))
                 assertArrayEquals(
@@ -60,9 +71,12 @@ class ExampleInstrumentedTest {
         }
     }
 
-    private fun pack(id: String, path: String, payload: ByteArray): ByteArrayInputStream {
+    private fun pack(id: String, path: String, payload: ByteArray, profileId: String): ByteArrayInputStream {
         val digest = MessageDigest.getInstance("SHA-256").digest(payload).joinToString("") { "%02x".format(it) }
-        val manifest = """{"schema":"byd-fmod-bank-pack-v1","id":"$id","version":1,"files":[{"path":"$path","bytes":${payload.size},"sha256":"$digest"}]}"""
+        val physics = "{}".toByteArray()
+        val physicsPath = "profiles/$profileId/physics.json"
+        val physicsDigest = MessageDigest.getInstance("SHA-256").digest(physics).joinToString("") { "%02x".format(it) }
+        val manifest = """{"schema":"byd-fmod-bank-pack-v2","id":"$id","version":1,"files":[{"path":"$path","bytes":${payload.size},"sha256":"$digest"},{"path":"$physicsPath","bytes":${physics.size},"sha256":"$physicsDigest"}]}"""
         return ByteArrayInputStream(ByteArrayOutputStream().use { bytes ->
             ZipOutputStream(bytes).use { archive ->
                 archive.putNextEntry(ZipEntry("manifest.json"))
@@ -70,6 +84,9 @@ class ExampleInstrumentedTest {
                 archive.closeEntry()
                 archive.putNextEntry(ZipEntry(path))
                 archive.write(payload)
+                archive.closeEntry()
+                archive.putNextEntry(ZipEntry(physicsPath))
+                archive.write(physics)
                 archive.closeEntry()
             }
             bytes.toByteArray()

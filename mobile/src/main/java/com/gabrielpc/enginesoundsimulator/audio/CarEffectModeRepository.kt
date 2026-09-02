@@ -10,7 +10,7 @@ internal class CarEffectModeRepository(context: Context) {
         Context.MODE_PRIVATE,
     )
     fun popsAndBangsEnabled(profileId: String): Boolean {
-        return readMode(profileId, "pops_enabled", true)
+        return readMode(profileId, "pops_enabled", false)
     }
 
     fun savePopsAndBangsEnabled(profileId: String, enabled: Boolean): Boolean {
@@ -18,7 +18,7 @@ internal class CarEffectModeRepository(context: Context) {
     }
 
     fun shiftSoundsEnabled(profileId: String): Boolean {
-        return readMode(profileId, "shift_enabled", true)
+        return readMode(profileId, "shift_enabled", false)
     }
 
     fun saveShiftSoundsEnabled(profileId: String, enabled: Boolean): Boolean {
