@@ -48,10 +48,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -103,13 +101,8 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
-import com.gabrielpc.enginesoundsimulator.audio.AppMasterVolumeRepository
-import com.gabrielpc.enginesoundsimulator.audio.CarMasterVolumeRepository
-import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
-import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
-import com.gabrielpc.enginesoundsimulator.tuning.TuningConfig
 import com.gabrielpc.enginesoundsimulator.ui.theme.EngineSoundsSimulatorTheme
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -130,13 +123,7 @@ private val Red = Color(0xFFFF394F)
 private val Amber = Color(0xFFFFC456)
 private val White = Color(0xFFF5FAFD)
 private val Muted = Color(0xFF88A2B2)
-private val StartStopRedHighlight = Color(0xFF9E1E28)
-private val StartStopRedBody = Color(0xFF6E1018)
-private val StartStopRedShadow = Color(0xFF3A070D)
-private val StartStopGreenDark = Color(0xFF0E8F42)
-private val StartStopGreenGlow = Color(0xFF34F07A)
-private val StartStopGreenHot = Color(0xFF5CFF9A)
-private val StartStopIndicatorOff = Color(0xFF2E080E)
+private val ErrorBannerBody = Color(0xFF6E1018)
 
 class MainActivity : ComponentActivity() {
     private val controller: DriveController
@@ -184,35 +171,13 @@ class MainActivity : ComponentActivity() {
                         onSelectRealPedals = controller::selectRealPedals,
                         onToggleInputSource = controller::toggleInputSource,
                         onTransmissionChange = controller::setTransmissionPosition,
-                        onToggleSound = controller::toggleSound,
-                        onTogglePopsAndBangs = controller::togglePopsAndBangs,
-                        onPopsAndBangsGainChange = controller::setPopsAndBangsGain,
-                        onToggleShiftSounds = controller::toggleShiftSounds,
-                        onShiftSoundsGainChange = controller::setShiftSoundsGain,
-                        onToggleTransmission = controller::toggleTransmission,
-                        onTransmissionGainChange = controller::setTransmissionGain,
-                        onToggleTurboSounds = controller::toggleTurboSounds,
-                        onTurboSoundsGainChange = controller::setTurboSoundsGain,
-                        onLoadResponsiveRpmEnabledChange = controller::setLoadResponsiveRpmEnabled,
-                        onThrottleRpmBumpEnabledChange = controller::setThrottleRpmBumpEnabled,
-                        onSimulatedCoastRegenStrengthChange = controller::setSimulatedCoastRegenStrength,
-                        onSimulatedUphillDragGradeChange = controller::setSimulatedUphillDragGrade,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
-                        onToggleAppMute = controller::toggleAppMute,
-                        onDecreaseMasterVolume = controller::decreaseAppMasterVolume,
-                        onIncreaseMasterVolume = controller::increaseAppMasterVolume,
-                        onConfigChange = controller::setTuning,
-                        onResetPreferences = controller::resetAllPreferences,
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSelectCar = controller::selectCar,
-                        onSourceMixMuted = controller::setSourceMixMuted,
-                        onSourceMixSolo = controller::setSourceMixSolo,
-                        onSourceMixVolume = controller::setSourceMixVolume,
                         onSoundPerspectiveChange = controller::setSoundPerspective,
-                        onCarMasterVolumeChange = controller::setCarMasterVolume,
                         onDismissUserMessage = controller::dismissUserMessage,
                     )
                 }
@@ -273,38 +238,15 @@ private fun MotorSoundDashboard(
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
-    onToggleSound: () -> Unit,
-    onTogglePopsAndBangs: () -> Unit,
-    onPopsAndBangsGainChange: (Double) -> Unit,
-    onToggleShiftSounds: () -> Unit,
-    onShiftSoundsGainChange: (Double) -> Unit,
-    onToggleTransmission: () -> Unit,
-    onTransmissionGainChange: (Double) -> Unit,
-    onToggleTurboSounds: () -> Unit,
-    onTurboSoundsGainChange: (Double) -> Unit,
-    onLoadResponsiveRpmEnabledChange: (Boolean) -> Unit,
-    onThrottleRpmBumpEnabledChange: (Boolean) -> Unit,
-    onSimulatedCoastRegenStrengthChange: (Double) -> Unit,
-    onSimulatedUphillDragGradeChange: (Double) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
-    onToggleAppMute: () -> Unit,
-    onDecreaseMasterVolume: () -> Unit,
-    onIncreaseMasterVolume: () -> Unit,
-    onConfigChange: (TuningConfig) -> Unit,
-    onResetPreferences: () -> Unit,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
-    onSourceMixMuted: (String, Boolean) -> Unit,
-    onSourceMixSolo: (String, Boolean) -> Unit,
-    onSourceMixVolume: (String, Double) -> Unit,
     onSoundPerspectiveChange: (com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective) -> Unit,
-    onCarMasterVolumeChange: (Double) -> Unit,
     onDismissUserMessage: () -> Unit,
 ) {
-    var tuningOpen by remember { mutableStateOf(false) }
     var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -314,7 +256,6 @@ private fun MotorSoundDashboard(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (tuningOpen) return@onPreviewKeyEvent false
                 val pressed = event.type == KeyEventType.KeyDown
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_W, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
@@ -379,10 +320,6 @@ private fun MotorSoundDashboard(
                         onSelectRealPedals = onSelectRealPedals,
                         onToggleInputSource = onToggleInputSource,
                         onToggleManualShiftMode = onToggleManualShiftMode,
-                        onToggleAppMute = onToggleAppMute,
-                        onDecreaseMasterVolume = onDecreaseMasterVolume,
-                        onIncreaseMasterVolume = onIncreaseMasterVolume,
-                        onOpenTuning = { tuningOpen = true },
                     )
 
                     state.userMessage?.let { message ->
@@ -417,9 +354,9 @@ private fun MotorSoundDashboard(
                                 Tachometer(
                                     drivetrain = state.drivetrain,
                                     transmissionPosition = state.transmissionPosition,
-                                    maxRpm = state.tuning.engine.maxRpm,
-                                    redlineRpm = state.tuning.engine.redlineRpm,
-                                    upshiftRpm = state.tuning.engine.upshiftRpm,
+                                    maxRpm = state.drivetrain.tachometerMaximumRpm,
+                                    redlineRpm = state.drivetrain.redlineRpm,
+                                    upshiftRpm = state.drivetrain.automaticUpshiftRpm,
                                     modifier = Modifier
                                         .weight(0.88f)
                                         .fillMaxHeight()
@@ -433,31 +370,6 @@ private fun MotorSoundDashboard(
                                     .padding(start = 4.dp, end = 4.dp),
                                 verticalAlignment = Alignment.Bottom,
                             ) {
-                                EngineStartStopButton(
-                                    running = state.engineSoundEnabled,
-                                    loading = state.engineStartLoading,
-                                    onClick = onToggleSound,
-                                )
-                                DashboardEffectControls(
-                                    popsAndBangsEnabled = state.popsAndBangsEnabled,
-                                    popsAndBangsGain = state.popsAndBangsGain,
-                                    onTogglePopsAndBangs = onTogglePopsAndBangs,
-                                    onPopsAndBangsGainChange = onPopsAndBangsGainChange,
-                                    shiftSoundsEnabled = state.shiftSoundsEnabled,
-                                    shiftSoundsGain = state.shiftSoundsGain,
-                                    onToggleShiftSounds = onToggleShiftSounds,
-                                    onShiftSoundsGainChange = onShiftSoundsGainChange,
-                                    transmissionEnabled = state.transmissionEnabled,
-                                    transmissionGain = state.transmissionGain,
-                                    onToggleTransmission = onToggleTransmission,
-                                    onTransmissionGainChange = onTransmissionGainChange,
-                                    hasTurboSounds = state.hasTurboSounds,
-                                    turboSoundsEnabled = state.turboSoundsEnabled,
-                                    turboSoundsGain = state.turboSoundsGain,
-                                    onToggleTurboSounds = onToggleTurboSounds,
-                                    onTurboSoundsGainChange = onTurboSoundsGainChange,
-                                    modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
-                                )
                                 ClassicDriveControls(
                                     state = state,
                                     onThrottle = onThrottle,
@@ -465,9 +377,7 @@ private fun MotorSoundDashboard(
                                     onTransmissionChange = onTransmissionChange,
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
-                                    onSimulatedCoastRegenStrengthChange = onSimulatedCoastRegenStrengthChange,
-                                    onSimulatedUphillDragGradeChange = onSimulatedUphillDragGradeChange,
-                                    modifier = Modifier.padding(start = 64.dp),
+                                    modifier = Modifier.padding(start = 28.dp),
                                 )
                             }
                             DashboardMixerLauncherButton(
@@ -483,10 +393,6 @@ private fun MotorSoundDashboard(
                             onBrake = onBrake,
                             onTransmissionChange = onTransmissionChange,
                             onSelectCar = onSelectCar,
-                            onCarMasterVolumeChange = onCarMasterVolumeChange,
-                            onSourceMuted = onSourceMixMuted,
-                            onSourceSolo = onSourceMixSolo,
-                            onSourceVolume = onSourceMixVolume,
                             soundPerspective = state.soundPerspective,
                             onSoundPerspectiveChange = onSoundPerspectiveChange,
                             onManualUpshift = onManualUpshift,
@@ -496,17 +402,6 @@ private fun MotorSoundDashboard(
                                 .weight(1f),
                         )
                     }
-                }
-
-                if (tuningOpen) {
-                    TuningPanel(
-                        state = state,
-                        onConfigChange = onConfigChange,
-                        onLoadResponsiveRpmEnabledChange = onLoadResponsiveRpmEnabledChange,
-                        onThrottleRpmBumpEnabledChange = onThrottleRpmBumpEnabledChange,
-                        onReset = onResetPreferences,
-                        onClose = { tuningOpen = false },
-                    )
                 }
 
             }
@@ -524,10 +419,6 @@ private fun DashboardHeader(
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
     onToggleManualShiftMode: () -> Unit,
-    onToggleAppMute: () -> Unit,
-    onDecreaseMasterVolume: () -> Unit,
-    onIncreaseMasterVolume: () -> Unit,
-    onOpenTuning: () -> Unit,
 ) {
     var memoryLabels by remember {
         mutableStateOf(MemoryHeaderLabels(usageLabel = "— MB", availableLabel = "— MB left"))
@@ -653,12 +544,6 @@ private fun DashboardHeader(
             }
         }
 
-        HeaderIconButton(
-            icon = Icons.Filled.Settings,
-            contentDescription = "Open tuning",
-            accent = White,
-            onClick = onOpenTuning,
-        )
         PedalsInputHeaderControl(
             state = state,
             onSelectSimulated = onSelectSimulatedPedals,
@@ -669,82 +554,8 @@ private fun DashboardHeader(
             manualEnabled = state.manualShiftModeEnabled,
             onToggle = onToggleManualShiftMode,
         )
-        MasterVolumeControls(
-            volume = state.appMasterVolume,
-            muted = state.appMuted,
-            onDecrease = onDecreaseMasterVolume,
-            onIncrease = onIncreaseMasterVolume,
-            onToggleMute = onToggleAppMute,
-        )
     }
 }
-
-@Composable
-private fun MasterVolumeControls(
-    volume: Double,
-    muted: Boolean,
-    onDecrease: () -> Unit,
-    onIncrease: () -> Unit,
-    onToggleMute: () -> Unit,
-) {
-    var activeFeedback by remember { mutableStateOf<VolumeStep?>(null) }
-    var feedbackPercentLabel by remember { mutableStateOf("") }
-
-    LaunchedEffect(activeFeedback) {
-        if (activeFeedback == null) {
-            return@LaunchedEffect
-        }
-        delay(1_500)
-        activeFeedback = null
-    }
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        VolumeStepButton(
-            icon = Icons.AutoMirrored.Filled.VolumeDown,
-            sign = "−",
-            showPercent = activeFeedback == VolumeStep.DOWN,
-            percentLabel = feedbackPercentLabel,
-            contentDescription = "Decrease master volume",
-            onClick = {
-                onDecrease()
-                val updatedVolume = (volume - MASTER_VOLUME_HEADER_STEP)
-                    .coerceIn(AppMasterVolumeRepository.MIN, AppMasterVolumeRepository.MAX)
-                feedbackPercentLabel = "${(updatedVolume * 100.0).roundToInt()}%"
-                activeFeedback = VolumeStep.DOWN
-            },
-        )
-        VolumeStepButton(
-            icon = Icons.AutoMirrored.Filled.VolumeUp,
-            sign = "+",
-            showPercent = activeFeedback == VolumeStep.UP,
-            percentLabel = feedbackPercentLabel,
-            contentDescription = "Increase master volume",
-            onClick = {
-                onIncrease()
-                val updatedVolume = (volume + MASTER_VOLUME_HEADER_STEP)
-                    .coerceIn(AppMasterVolumeRepository.MIN, AppMasterVolumeRepository.MAX)
-                feedbackPercentLabel = "${(updatedVolume * 100.0).roundToInt()}%"
-                activeFeedback = VolumeStep.UP
-            },
-        )
-        HeaderButton(
-            primary = if (muted) {
-                "UNMUTE"
-            } else {
-                "MUTE"
-            },
-            accent = if (muted) Green else Red,
-            onClick = onToggleMute,
-        )
-    }
-}
-
-private enum class VolumeStep {
-    DOWN,
-    UP,
-}
-
-private const val MASTER_VOLUME_HEADER_STEP = 0.10
 private const val HEADER_MEMORY_STARTUP_BURST_MS = 10_000L
 private const val HEADER_MEMORY_STARTUP_REFRESH_MS = 250L
 private const val HEADER_MEMORY_REFRESH_MS = 15_000L
@@ -909,70 +720,6 @@ private fun PedalsInputToggle(
 }
 
 @Composable
-private fun VolumeStepButton(
-    icon: ImageVector,
-    sign: String,
-    showPercent: Boolean,
-    percentLabel: String,
-    contentDescription: String,
-    accent: Color = Cyan,
-    onClick: () -> Unit,
-) {
-    Button(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = White),
-        modifier = Modifier
-            .height(52.dp)
-            .width(50.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-    ) {
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(
-                modifier = Modifier.alpha(if (showPercent) {
-                    0f
-                } else {
-                    1f
-                }),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = contentDescription,
-                    tint = accent,
-                    modifier = Modifier.size(16.dp),
-                )
-                Text(
-                    text = sign,
-                    color = accent,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            Text(
-                text = percentLabel,
-                color = accent,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .alpha(if (showPercent) {
-                        1f
-                    } else {
-                        0f
-                    })
-                    .fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
 private fun HeaderIconButton(
     icon: ImageVector,
     contentDescription: String,
@@ -992,32 +739,6 @@ private fun HeaderIconButton(
             tint = accent,
             modifier = Modifier.size(22.dp),
         )
-    }
-}
-
-@Composable
-private fun HeaderButton(
-    primary: String,
-    secondary: String? = null,
-    accent: Color = Cyan,
-    contentAlpha: Float = 1f,
-    onClick: () -> Unit,
-) {
-    Button(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Panel, contentColor = White),
-        modifier = Modifier
-            .height(52.dp)
-            .alpha(contentAlpha),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
-    ) {
-        Column(horizontalAlignment = Alignment.Start) {
-            Text(primary, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
-            if (secondary != null) {
-                Text(secondary, color = Muted, fontSize = 9.sp, letterSpacing = 0.8.sp, maxLines = 1)
-            }
-        }
     }
 }
 
@@ -1050,8 +771,6 @@ private fun ClassicDriveControls(
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
-    onSimulatedCoastRegenStrengthChange: (Double) -> Unit,
-    onSimulatedUphillDragGradeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1090,116 +809,8 @@ private fun ClassicDriveControls(
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = CLASSIC_DRIVE_CONTROL_SCALE,
         )
-        if (!state.inputSourceIsRealPedals) {
-            SimulatedUphillDragControl(
-                grade = state.simulatedUphillDragGrade,
-                onGradeChange = onSimulatedUphillDragGradeChange,
-                scale = CLASSIC_DRIVE_CONTROL_SCALE,
-            )
-            SimulatedCoastRegenControl(
-                strength = state.simulatedCoastRegenStrength,
-                onStrengthChange = onSimulatedCoastRegenStrengthChange,
-                scale = CLASSIC_DRIVE_CONTROL_SCALE,
-            )
-        }
     }
 }
-
-@Composable
-private fun SimulatedUphillDragControl(
-    grade: Double,
-    onGradeChange: (Double) -> Unit,
-    scale: Float,
-) {
-    val percent = (grade * 100).roundToInt()
-    SimulatedPedalStrengthControl(
-        label = "DRAG",
-        valueLabel = "$percent%",
-        footer = "UPHILL",
-        value = grade,
-        onValueChange = onGradeChange,
-        valueRange = 0f..0.30f,
-        scale = scale,
-    )
-}
-
-@Composable
-private fun SimulatedCoastRegenControl(
-    strength: Double,
-    onStrengthChange: (Double) -> Unit,
-    scale: Float,
-) {
-    val percent = (strength * 100).roundToInt()
-    SimulatedPedalStrengthControl(
-        label = "REGEN",
-        valueLabel = "$percent%",
-        footer = "LIFT-OFF",
-        value = strength,
-        onValueChange = onStrengthChange,
-        valueRange = 0f..1f,
-        scale = scale,
-    )
-}
-
-@Composable
-private fun SimulatedPedalStrengthControl(
-    label: String,
-    valueLabel: String,
-    footer: String,
-    value: Double,
-    onValueChange: (Double) -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>,
-    scale: Float,
-) {
-    Column(
-        modifier = Modifier
-            .width((58f * scale).dp)
-            .height((202f * scale).dp)
-            .clip(RoundedCornerShape((16f * scale).dp))
-            .background(PanelBright)
-            .border((1.5f * scale).dp, Line, RoundedCornerShape((16f * scale).dp))
-            .padding(vertical = (8f * scale).dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy((3f * scale).dp),
-    ) {
-        Text(
-            text = label,
-            color = CyanSoft,
-            fontSize = (9f * scale).sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 0.55.sp,
-        )
-        Text(
-            text = valueLabel,
-            color = if (value <= 0.001) Muted else Cyan,
-            fontSize = (15f * scale).sp,
-            fontWeight = FontWeight.Black,
-        )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .width((32f * scale).dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Slider(
-                value = value.toFloat(),
-                onValueChange = { onValueChange(it.toDouble()) },
-                valueRange = valueRange,
-                modifier = Modifier
-                    .width((138f * scale).dp)
-                    .graphicsLayer { rotationZ = -90f },
-            )
-        }
-        Text(
-            text = footer,
-            color = Muted,
-            fontSize = (7f * scale).sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.25.sp,
-        )
-    }
-}
-
 @Composable
 private fun ManualShiftButtons(
     onUpshift: () -> Unit,
@@ -1363,7 +974,7 @@ private fun CarStage(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                text = FmodBankProfiles.specificationsFor(state.selectedCarId).summary(),
+                text = "ORIGINAL ASSETTO CORSA DATA",
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -1594,7 +1205,7 @@ private fun DismissableUserMessageBanner(
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(StartStopRedBody.copy(alpha = 0.94f))
+            .background(ErrorBannerBody.copy(alpha = 0.94f))
             .border(1.dp, Red.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1622,329 +1233,6 @@ private fun DismissableUserMessageBanner(
                 contentDescription = "Dismiss message",
                 tint = White,
             )
-        }
-    }
-}
-
-@Composable
-private fun DashboardEffectControls(
-    popsAndBangsEnabled: Boolean,
-    popsAndBangsGain: Double,
-    onTogglePopsAndBangs: () -> Unit,
-    onPopsAndBangsGainChange: (Double) -> Unit,
-    shiftSoundsEnabled: Boolean,
-    shiftSoundsGain: Double,
-    onToggleShiftSounds: () -> Unit,
-    onShiftSoundsGainChange: (Double) -> Unit,
-    transmissionEnabled: Boolean,
-    transmissionGain: Double,
-    onToggleTransmission: () -> Unit,
-    onTransmissionGainChange: (Double) -> Unit,
-    hasTurboSounds: Boolean,
-    turboSoundsEnabled: Boolean,
-    turboSoundsGain: Double,
-    onToggleTurboSounds: () -> Unit,
-    onTurboSoundsGainChange: (Double) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier.width(750.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        DashboardEffectRow(
-            label = "POPS & BANGS",
-            enabled = popsAndBangsEnabled,
-            gain = popsAndBangsGain,
-            onToggle = onTogglePopsAndBangs,
-            onGainChange = onPopsAndBangsGainChange,
-        )
-        DashboardEffectRow(
-            label = "SHIFT SOUNDS",
-            enabled = shiftSoundsEnabled,
-            gain = shiftSoundsGain,
-            onToggle = onToggleShiftSounds,
-            onGainChange = onShiftSoundsGainChange,
-        )
-        DashboardEffectRow(
-            label = "TRANSMISSION",
-            enabled = transmissionEnabled,
-            gain = transmissionGain,
-            onToggle = onToggleTransmission,
-            onGainChange = onTransmissionGainChange,
-        )
-        if (hasTurboSounds) {
-            DashboardEffectRow(
-                label = "TURBO",
-                enabled = turboSoundsEnabled,
-                gain = turboSoundsGain,
-                gainPresets = TURBO_EFFECT_GAIN_PRESETS,
-                onToggle = onToggleTurboSounds,
-                onGainChange = onTurboSoundsGainChange,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DashboardEffectRow(
-    label: String,
-    enabled: Boolean,
-    gain: Double,
-    onToggle: () -> Unit,
-    onGainChange: (Double) -> Unit,
-    gainPresets: List<EffectGainPreset> = EFFECT_GAIN_PRESETS,
-) {
-    val accentColor = if (enabled) Cyan else Muted
-
-    Row(
-        modifier = Modifier.height(42.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = label,
-            color = accentColor,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.45.sp,
-            lineHeight = 14.sp,
-            modifier = Modifier.width(150.dp),
-        )
-        DashboardEffectSwitch(
-            label = label,
-            enabled = enabled,
-            onToggle = onToggle,
-        )
-        gainPresets.forEach { preset ->
-            val selected = gain == preset.gain
-            Text(
-                text = preset.label,
-                color = if (selected) Night else accentColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .width(123.dp)
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (selected) Cyan else PanelBright)
-                    .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
-                    .clickable { onGainChange(preset.gain) }
-                    .padding(top = 10.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun DashboardEffectSwitch(
-    label: String,
-    enabled: Boolean,
-    onToggle: () -> Unit,
-) {
-    val trackColor = if (enabled) Cyan.copy(alpha = 0.92f) else Line
-    val thumbProgress by animateFloatAsState(
-        targetValue = if (enabled) 1f else 0f,
-        animationSpec = tween(durationMillis = 180),
-        label = "${label}Toggle",
-    )
-    BoxWithConstraints(
-        modifier = Modifier
-            .width(64.dp)
-            .height(32.dp)
-            .clip(RoundedCornerShape(50))
-            .background(trackColor)
-            .clickable(onClick = onToggle),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        val thumbSize = 24.dp
-        val trackInset = 4.dp
-        val travel = maxWidth - thumbSize - trackInset * 2
-        Box(
-            modifier = Modifier
-                .padding(start = trackInset)
-                .offset(x = travel * thumbProgress)
-                .size(thumbSize)
-                .clip(CircleShape)
-                .background(White),
-        )
-    }
-}
-
-private data class EffectGainPreset(val label: String, val gain: Double)
-
-private val EFFECT_GAIN_PRESETS = listOf(
-    EffectGainPreset("LOWER", 0.5),
-    EffectGainPreset("NORMAL", 1.0),
-    EffectGainPreset("LOUD", 2.0),
-    EffectGainPreset("LOUDER", 3.0),
-)
-
-private val TURBO_EFFECT_GAIN_PRESETS = listOf(
-    EffectGainPreset("LOWER", 0.25),
-    EffectGainPreset("NORMAL", 0.5),
-    EffectGainPreset("LOUD", EngineAudioFrame.DEFAULT_TURBO_SOUNDS_GAIN),
-    EffectGainPreset("LOUDER", 3.0),
-)
-
-@Composable
-private fun EngineStartStopButton(
-    running: Boolean,
-    loading: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val buttonSize = 92.dp
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val pressDepth by animateFloatAsState(
-        targetValue = if (pressed && !loading) 1f else 0f,
-        animationSpec = tween(durationMillis = 140),
-        label = "startStopPressDepth",
-    )
-    val shadowLift = ((1f - pressDepth) * 3f).dp
-    val faceOffsetY = (pressDepth * 2.5f).dp
-    val faceScale = 1f - (pressDepth * 0.035f)
-    val topHighlight = StartStopRedHighlight.copy(alpha = 0.72f + (0.28f * (1f - pressDepth)))
-    val centerShineAlpha = 0.10f + (0.10f * (1f - pressDepth))
-
-    Box(
-        modifier = modifier.size(buttonSize),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset(y = shadowLift)
-                .clip(CircleShape)
-                .background(StartStopRedShadow.copy(alpha = 0.55f + (0.45f * (1f - pressDepth)))),
-        )
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset(y = faceOffsetY)
-                .scale(faceScale)
-                .clip(CircleShape)
-                .background(
-                    Brush.verticalGradient(
-                        colors = if (pressDepth > 0.01f) {
-                            listOf(
-                                StartStopRedShadow,
-                                StartStopRedBody,
-                                StartStopRedHighlight.copy(alpha = 0.85f),
-                            )
-                        } else {
-                            listOf(
-                                topHighlight,
-                                StartStopRedBody,
-                                StartStopRedShadow,
-                            )
-                        },
-                    ),
-                )
-                .border(
-                    width = (1.5f + pressDepth).dp,
-                    color = StartStopRedShadow.copy(alpha = 0.85f + (0.15f * pressDepth)),
-                    shape = CircleShape,
-                )
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (loading) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color.Black.copy(alpha = 0.42f)),
-                )
-                CircularProgressIndicator(
-                    modifier = Modifier.size(34.dp),
-                    color = Cyan,
-                    strokeWidth = 3.dp,
-                )
-            }
-            if (!loading) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = centerShineAlpha),
-                                    Color.White.copy(alpha = centerShineAlpha * 0.35f),
-                                    Color.Transparent,
-                                ),
-                            ),
-                        ),
-                )
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
-                ) {
-                Box(
-                    modifier = Modifier
-                        .width(34.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            if (running) {
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        StartStopGreenHot,
-                                        StartStopGreenGlow,
-                                        StartStopGreenDark,
-                                    ),
-                                )
-                            } else {
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        StartStopIndicatorOff,
-                                        StartStopRedShadow,
-                                    ),
-                                )
-                            },
-                        )
-                        .border(
-                            width = 0.5.dp,
-                            color = if (running) {
-                                StartStopGreenGlow.copy(alpha = 0.95f)
-                            } else {
-                                StartStopRedShadow
-                            },
-                            shape = RoundedCornerShape(50),
-                        ),
-                )
-                Spacer(modifier = Modifier.height(7.dp))
-                Text(
-                    text = "START",
-                    color = White.copy(alpha = 0.96f - (0.08f * pressDepth)),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.1.sp,
-                )
-                Spacer(modifier = Modifier.height(5.dp))
-                Box(
-                    modifier = Modifier
-                        .width(36.dp)
-                        .height(1.5.dp)
-                        .background(White.copy(alpha = 0.55f - (0.15f * pressDepth))),
-                )
-                Spacer(modifier = Modifier.height(5.dp))
-                Text(
-                    text = "STOP",
-                    color = White.copy(alpha = 0.88f - (0.10f * pressDepth)),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.1.sp,
-                )
-                }
-            }
         }
     }
 }

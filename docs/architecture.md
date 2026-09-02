@@ -1,103 +1,65 @@
 # Architecture
 
-## Purpose
-
-The application adds a presentation-only combustion-engine simulation to a BYD road-speed input.
-It owns the tachometer, presentation gears, and audio only; it never controls the vehicle.
+## Runtime flow
 
 ```text
-BYD getters or simulated pedals
-             |
-       DriveController
-             |
-  EngineSimulation / AssettoDrivetrain ---> Compose dashboard snapshot
-             |
-       EngineAudioFrame
-             |
- EngineAudioEngine -> native FMOD Studio -> authored bank events -> Android audio route
+BYD telemetry or simulated pedals
+            |
+      DriveController
+            |
+ EngineSimulation -> AssettoDrivetrain -> dashboard snapshot
+            |
+      EngineAudioFrame
+            |
+ EngineAudioEngine -> native FMOD Studio -> authored bank events
 ```
 
-Start from `DriveController`, `EngineSimulation`, `AssettoDrivetrain`, `EngineAudioEngine`, and
-`FmodBankProfile`.
+`DriveController` owns lifecycle, input selection, car selection, and the small set of persistent
+choices that remain: selected car, cabin/exterior perspective, and manual/automatic mode.
+`EngineSimulation` is an adapter around the per-car `AssettoDrivetrain` model exported from the
+original installation. FMOD is started directly at the car's authored idle state when the bank is
+loaded. Activity lifecycle stop is only resource cleanup; there is no application start/stop
+button, ignition state, ramp, fade, or synthetic shutdown.
 
-## Physics and presentation speed
+## Physics and speed
 
-`DriveController` owns lifecycle, input selection, selected-car state, persistence, and two fixed
-3 ms workers. `EngineSimulation` delegates running-engine behavior to `AssettoDrivetrain`, a Kotlin
-port of the Audio Lab's vehicle, engine, clutch, automatic gearbox, turbo, limiter, backfire, and
-traction-control ordering. Every car loads its own immutable `physics.json`; there is no unrelated
-reference-car fallback. Simulated pedals run the complete longitudinal model, with user DRAG and
-REGEN controls applied as additional forces. Park and Neutral remain mechanically disconnected and
-use the same free-rev behavior represented by the Lab trace.
+Each official profile carries its own original physics metadata: idle and limiter RPM, shift-light
+and automatic shift RPM, ratios, final drive, wheel radius, clutch, turbo, and authored timing.
+`AssettoDrivetrain` is the sole engine and transmission model. It is also used for Park/Neutral
+free revving and manual shifting. The app does not add a 190 km/h limit, equal gear intervals,
+generic RPM maximum, custom hysteresis/cooldown, launch controller, throttle-RPM boost, virtual
+drag, or virtual regenerative braking.
 
-The BYD speed is treated as truncated: a report of `N` km/h represents `[N, N + 1)`.
-`QuantizedPresentationSpeedEstimator` reconstructs continuous motion from boundary timing and
-bounded pedal direction. The speed display remains authoritative. With real pedals, reconstructed
-speed is the road-speed constraint supplied to the Assetto drivetrain, so integer telemetry never
-reaches FMOD. With simulated pedals, the Assetto model owns speed and the dashboard still exposes a
-deliberately truncated RAW value for BYD-like testing.
+BYD reports are treated as truncated `[N, N + 1)` km/h values. `QuantizedPresentationSpeedEstimator`
+uses only boundary timing and bounded pedal direction to produce a continuous presentation speed.
+Raw truncated speed remains authoritative for display and drivetrain/shift/load decisions; the
+presentation value is used only for road-coupled tachometer and pitch so FMOD never receives a
+synthetic stepped wave.
 
-## FMOD-bank audio
+## Authored FMOD
 
-`FmodBankProfile` contains display metadata for one installable FMOD bank. The bank remains
-authoritative for stereo source material, event graphs, randomisation, effects, and parameter
-automation. `FmodBankStore` verifies a package before atomically publishing its bank, optional
-`GUIDs.txt`, and physics metadata under private app storage. Original Assetto
-`common.strings.bank` and `common.bank` dependencies load before the car bank.
+FMOD 2.03.14 owns event graphs, source material, automation, randomisation, effects, and gains.
+The native bridge sends only the physical parameters and lifecycle transitions required by the
+bank. It does not write event, bus, channel-group, or source volume, and it has no app gain,
+per-car gain, LOAD/COAST mode, forced-load, mute, solo, drag, regen, or event-suppression layer.
+Engine, transmission, turbo, limiter, shift, gear-grind, backfire, traction-control, and authored
+start events are used only when present. Tires, wind, chassis, and doors remain excluded.
 
-Each `byd-fmod-bank-pack-v2` carries profile-specific Assetto physics metadata. Old packs are
-rejected instead of migrated. The Audio Lab consumes the same metadata.
+Cabin and exterior switch the authored interior/exterior engine event and listener. The switch is
+performed inside the active FMOD system without a host-side crossfade or restart.
 
-`EngineAudioEngine` has one 3 ms audio-priority control worker. It transfers the latest exact
-physics frame without a second host-side RPM smoother. The native bridge preserves authored FMOD
-parameter seek speed and runs a 48 kHz stereo mixer with a `256 x 4` DSP buffer. Its behavior
-matches the Lab:
+## Mixer
 
-- one active `engine_int` or `engine_ext`, with authored throttle fixed at full load;
-- `transmission`/`transmission_ext` driven by actual drivetrain angular speed;
-- independent `boost`, `bov`, and `bov_decay` turbo parameters;
-- authored limiter, accepted shift, gear grind, backfire, traction-control, and start lifecycles;
-- engine event gain `0.5` and effect gain `1.0` before the per-car master control;
-- cockpit or bonnet listener position and the car's authored engine/backfire emitter position.
+The mixer is read-only diagnostics. Native sound-start/stop callbacks and Core channel ownership
+associate each active voice with its exact event path and raw sound name. Cards report state,
+voice count, FMOD audibility, and route gain; identical event/source pairs may be aggregated. UI
+polling is separate from the 3 ms audio-control loop, so no mixer allocations or gain writes occur
+on the realtime path.
 
-Tires, wind, chassis, and doors are excluded. Shift override OFF prevents gear and gear-grind event
-starts; pops-and-bangs OFF prevents backfire. There is no decoded-PCM renderer, LOAD/COAST host
-model, synthetic engine, unrelated-car fallback, or alternative renderer.
+## Packaging and failure behavior
 
-## Exact FMOD mixer
-
-The mixer is a diagnostic view of the live hierarchy, not a list of guessed effects. Studio
-sound-start/stop callbacks identify each raw source name and the Core channel hierarchy identifies
-its owning `EventInstance`. A native snapshot aggregates only identical `event path + sound name`
-pairs and reports active/recent/virtual state, simultaneous voice count, Core audibility, and route
-gain. Completed one-shots remain visible for 1.5 seconds.
-
-Per-source gain, mute, and solo multiply the current authored channel gain. They never replace
-Studio automation. Controls persist by car, perspective, event path, and raw source name. Compose
-polls immutable snapshots every 50 ms; no mixer allocation occurs on the 3 ms audio-control path.
-Cards are grouped semantically and flow across the available width, so a recording genuinely
-authored inside `engine_int` remains honestly attributed to that engine event.
-
-## Native build boundary
-
-FMOD 2.03.14 is supplied outside the repository through `fmod.sdk.dir`. Gradle copies its Core and
-Studio headers and native libraries into generated build staging. The Android bridge registers
-compatible implementations of the Assetto `FMOD Distance Filter` and `FMOD Gain` plugins.
-
-## Realtime and failure rules
-
-- Bank archive I/O, checksum verification, and car switching stay outside the control loop.
-- A car switch replaces the Studio system atomically. Perspective switching changes the active
-  authored event and listener inside the existing system.
-- A missing bank or FMOD load failure fails closed and reports the selected car; it never plays a
-  different car.
-- Compose reads immutable real-voice snapshots and publishes user source controls.
-- On-device listening is required for BYD DSP routing and perceived realism; the emulator validates
-  lifecycle and event loading, not cabin acoustics.
-
-## Verification
-
-Run unit tests, build both APKs, use the installer, then run the instrumentation suite. A golden
-trace compares Kotlin against the Audio Lab frame by frame. The native sweep opens all 58 profiles
-in both perspectives, keeps shift/backfire overrides disabled, drives continuous trajectories, and
-checks event ownership and meter semantics through the same JNI bridge used by the dashboard.
+The installer publishes `byd-fmod-bank-pack-v3` packages under
+`fmod-banks/original_cars_pack/<id>`. Common Assetto banks load before the selected car bank.
+Missing or invalid packages fail closed with an install message; a modified or old pack is never
+silently substituted. The generated modded group remains inactive until a later release explicitly
+enables it.

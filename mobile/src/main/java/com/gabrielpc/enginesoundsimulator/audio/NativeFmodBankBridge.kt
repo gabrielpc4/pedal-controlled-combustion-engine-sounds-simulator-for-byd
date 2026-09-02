@@ -15,6 +15,7 @@ internal class NativeFmodBankBridge {
         carBankPath: String,
         perspective: Int,
         hasTurbo: Boolean,
+        idleRpm: Float,
         spatial: FloatArray,
     ): String?
 
@@ -23,7 +24,7 @@ internal class NativeFmodBankBridge {
         dt: Float,
         rpm: Float,
         drivetrainSpeed: Float,
-        masterGain: Float,
+        throttle: Float,
         perspective: Int,
         boost: Float,
         bov: Float,
@@ -35,17 +36,7 @@ internal class NativeFmodBankBridge {
         backfireTriggered: Boolean,
         tractionActive: Boolean,
         tractionPulse: Boolean,
-        shiftSoundsEnabled: Boolean,
-        shiftGain: Float,
-        popsAndBangsEnabled: Boolean,
-        popsAndBangsGain: Float,
-        transmissionEnabled: Boolean,
-        transmissionGain: Float,
-        turboEnabled: Boolean,
-        turboGain: Float,
     ): String?
-
-    external fun setSourceControls(rows: Array<String>)
 
     /** Immutable source rows captured from FMOD's actual event/channel hierarchy. */
     external fun voiceSnapshots(): Array<String>

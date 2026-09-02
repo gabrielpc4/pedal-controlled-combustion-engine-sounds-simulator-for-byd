@@ -30,8 +30,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,7 +63,6 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.FmodEventSection
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
-import com.gabrielpc.enginesoundsimulator.audio.SourceMixControl
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -102,10 +99,6 @@ internal fun MixerDashboardScreen(
     onBrake: (Double) -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onSelectCar: (String) -> Unit,
-    onCarMasterVolumeChange: (Double) -> Unit,
-    onSourceMuted: (String, Boolean) -> Unit,
-    onSourceSolo: (String, Boolean) -> Unit,
-    onSourceVolume: (String, Double) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     soundPerspective: EngineSoundPerspective,
@@ -134,14 +127,12 @@ internal fun MixerDashboardScreen(
         MixerHeaderRow(
             drivetrain = state.drivetrain,
             transmissionPosition = state.transmissionPosition,
-            maxRpm = state.tuning.engine.maxRpm,
-            redlineRpm = state.tuning.engine.redlineRpm,
+            maxRpm = state.drivetrain.tachometerMaximumRpm,
+            redlineRpm = state.drivetrain.redlineRpm,
             selectedCarId = state.selectedCarId,
             selectedCarName = state.selectedCarName,
             selectedCarPreviewAsset = state.selectedCarPreviewAsset,
-            carMasterVolume = state.carMasterVolume,
             onSelectCar = onSelectCar,
-            onCarMasterVolumeChange = onCarMasterVolumeChange,
         )
         Spacer(Modifier.height(6.dp))
         MixerPerspectiveSelector(
@@ -177,11 +168,8 @@ internal fun MixerDashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             row.forEach { source ->
-                                FmodSourceControl(
+                                FmodSourceMeter(
                                     source = source,
-                                    onMuted = { onSourceMuted(source.id, it) },
-                                    onSolo = { onSourceSolo(source.id, it) },
-                                    onGain = { onSourceVolume(source.id, it) },
                                     modifier = Modifier.weight(1f),
                                 )
                             }
@@ -255,9 +243,7 @@ private fun MixerHeaderRow(
     selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
-    carMasterVolume: Double,
     onSelectCar: (String) -> Unit,
-    onCarMasterVolumeChange: (Double) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -280,9 +266,7 @@ private fun MixerHeaderRow(
             selectedCarId = selectedCarId,
             selectedCarName = selectedCarName,
             selectedCarPreviewAsset = selectedCarPreviewAsset,
-            carMasterVolume = carMasterVolume,
             onSelectCar = onSelectCar,
-            onCarMasterVolumeChange = onCarMasterVolumeChange,
             modifier = Modifier.weight(0.42f).fillMaxHeight(),
         )
     }
@@ -454,9 +438,7 @@ private fun CarDropdownSelector(
     selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
-    carMasterVolume: Double,
     onSelectCar: (String) -> Unit,
-    onCarMasterVolumeChange: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -489,7 +471,7 @@ private fun CarDropdownSelector(
                     .weight(1f)
                     .fillMaxHeight()
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.Center,
             ) {
                 Column(
                     modifier = Modifier
@@ -508,37 +490,6 @@ private fun CarDropdownSelector(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "Volume:",
-                        color = Amber,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.4.sp,
-                    )
-                    Slider(
-                        value = carMasterVolume.toFloat(),
-                        onValueChange = { onCarMasterVolumeChange(it.toDouble()) },
-                        valueRange = 0f..1.2f,
-                        modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(
-                            thumbColor = Amber,
-                            activeTrackColor = Amber,
-                            inactiveTrackColor = Line.copy(alpha = 0.85f),
-                        ),
-                    )
-                    Text(
-                        text = "${(carMasterVolume * 100.0).roundToInt()}%",
-                        color = Amber,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
             }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -630,11 +581,8 @@ private data class LoadedCarPreview(
 )
 
 @Composable
-private fun FmodSourceControl(
+private fun FmodSourceMeter(
     source: FmodSourceState,
-    onMuted: (Boolean) -> Unit,
-    onSolo: (Boolean) -> Unit,
-    onGain: (Double) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val level = source.audibility.toFloat().coerceIn(0f, 1f)
@@ -742,83 +690,8 @@ private fun FmodSourceControl(
                     )
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                MixToggleChip(
-                    label = "M",
-                    checked = source.muted,
-                    accent = Red,
-                    onCheckedChange = onMuted,
-                )
-                MixToggleChip(
-                    label = "S",
-                    checked = source.solo,
-                    accent = Amber,
-                    onCheckedChange = onSolo,
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "GAIN",
-                color = Muted,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
-                modifier = Modifier.width(34.dp),
-            )
-            Slider(
-                value = source.userGain.toFloat().coerceIn(
-                    SourceMixControl.MIN_GAIN_MULTIPLIER.toFloat(),
-                    SourceMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
-                ),
-                onValueChange = { onGain(it.toDouble()) },
-                valueRange = SourceMixControl.MIN_GAIN_MULTIPLIER.toFloat()..SourceMixControl.MAX_GAIN_MULTIPLIER.toFloat(),
-                colors = SliderDefaults.colors(
-                    thumbColor = Cyan,
-                    activeTrackColor = Cyan,
-                    inactiveTrackColor = Line,
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(28.dp),
-            )
-            Text(
-                String.format(Locale.US, "%.1fx", source.userGain),
-                color = Cyan,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.width(40.dp),
-            )
         }
     }
-}
-
-@Composable
-private fun MixToggleChip(
-    label: String,
-    checked: Boolean,
-    accent: Color,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Text(
-        text = label,
-        color = if (checked) accent else Muted,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.Black,
-        modifier = Modifier
-            .width(24.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(if (checked) accent.copy(alpha = 0.18f) else Color(0xFF061018))
-            .border(1.dp, if (checked) accent.copy(alpha = 0.85f) else Line.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 3.dp),
-        textAlign = TextAlign.Center,
-    )
 }
 
 /** Green → cyan → amber → red as the live output meter fills. */

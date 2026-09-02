@@ -1,37 +1,32 @@
 # Car audio validation
 
-The native-bank route is validated in two layers:
+Validation is performed against the original Assetto installation and Audio Lab, then by a
+controlled manual drive cycle on Android. Persistent Android test sources and fixtures are not
+part of the repository; temporary probes belong outside the checkout and are deleted after use.
 
-1. Audio Lab consumes the same v2 pack physics and exports deterministic golden trajectories.
-   Android compares drivetrain, clutch, turbo, limiter, shift, backfire, and traction state frame
-   by frame.
-2. `CarAudioRuntimeValidationTest` opens each installed profile in both listener perspectives with
-   `NativeFmodBankBridge`. It sweeps continuous RPM, drivetrain-speed, boost, and perspective
-   frames through the production FMOD control path with shift and backfire overrides disabled.
-
-The runtime test requires the installer to publish every physical pack first. It asserts that each
-bank opens and every update completes. It checks exact event ownership, proves disabled shift and
-backfire events create no voices, and verifies source audibility meters are not a copy of master
-volume. It writes exact source/event activation to `CarAudioRuntimeValidation`. It does not claim
-byte-identical PCM because FMOD and the output device own final rendering.
-
-## Reproduce
+## Package and catalog checks
 
 ```sh
-python3 tools/build_fmod_bank_packs.py
-./gradlew :mobile:assembleDebug :mobile:assembleDebugAndroidTest :audio-installer:assembleDebug --no-daemon
-adb -s emulator-5554 install -r mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<number>-debug.apk
-adb -s emulator-5554 install -r audio-installer/build/outputs/apk/debug/engine-sounds-audio-installer-debug.apk
-adb -s emulator-5554 shell am start -n com.gabrielpc.enginesoundsinstaller/.AudioInstallerActivity
+python3 tools/build_fmod_bank_packs.py --force
+python3 tools/validate_car_audio.py
 ```
 
-Tap **INSTALL ALL**, wait until the installer reports completion, then run:
+The generated index must contain 22 active `original_cars_pack` entries, each with its own bank,
+preview, and physics metadata. The 33 prepared modded entries must be inactive. Confirm that the
+installer publishes only the active group and that selecting a missing pack reports an error.
 
-```sh
-./gradlew :mobile:connectedDebugAndroidTest --no-daemon
-adb -s emulator-5554 logcat -d -s CarAudioRuntimeValidation:I '*:S'
-```
+## Android manual cycle
 
-The emulator validates native library loading, package installation, event/source ownership,
-continuous parameters, meter semantics, and Audio Lab trace parity. A real-car listening pass
-remains required to judge pitch feel, cabin acoustics, and BYD DSP speaker routing.
+Install the dashboard and installer on the target emulator or head unit, install the original pack,
+and open each car in both CABIN and EXTERIOR. The former tuning and override controls are removed;
+use the natural automatic mode. For each car, accelerate until about two authored gear changes occur,
+release the throttle, and observe the RPM returning to the authored idle. Record only aggregate
+observations needed to reproduce a failure.
+
+Useful runtime evidence is available in logcat: selected profile, raw/presentation speed, RPM,
+gear, physical FMOD parameters, active event/source names, and load failures. Check that engine
+voices belong to the selected engine event, disabled events do not appear, and the mixer meters
+reflect FMOD audibility rather than car master volume.
+
+The emulator verifies loading and lifecycle. A real-car listening pass remains necessary for cabin
+acoustics, speaker routing, and perceived pitch.

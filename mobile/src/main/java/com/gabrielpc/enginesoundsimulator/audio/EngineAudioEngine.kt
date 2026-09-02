@@ -33,11 +33,8 @@ class EngineAudioEngine(context: Context) {
     private val soundPerspective = AtomicReference(EngineSoundPerspective.CABIN)
     private val loadedBankProfileId = AtomicReference<String?>(null)
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
-    private val focusMultiplier = AtomicReference(0.0)
     private val focusHeld = AtomicBoolean(false)
     private val controlThread = AtomicReference<Thread?>(null)
-    private val sourceControls = AtomicReference<Map<String, SourceMixControl>>(emptyMap())
-    private val sourceControlRevision = AtomicLong(0L)
     private val nativeSources = AtomicReference<List<FmodSourceState>>(emptyList())
     private val limiterPulseSerial = AtomicLong(0L)
     private val backfirePulseSerial = AtomicLong(0L)
@@ -51,23 +48,19 @@ class EngineAudioEngine(context: Context) {
         when (change) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 if (focusHeld.get() && running.get()) {
-                    focusMultiplier.set(1.0)
                     focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_GAIN)
                 }
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                focusMultiplier.set(0.20)
                 focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_DUCK)
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                focusMultiplier.set(0.0)
                 focusChangeListener?.invoke(AudioFocusEvent.TRANSIENT_LOSS)
             }
 
             AudioManager.AUDIOFOCUS_LOSS -> {
-                focusMultiplier.set(0.0)
                 focusHeld.set(false)
                 focusChangeListener?.invoke(AudioFocusEvent.PERMANENT_LOSS)
                 synchronized(lifecycleLock) { stopLocked() }
@@ -92,11 +85,6 @@ class EngineAudioEngine(context: Context) {
         if (frame.backfireTriggered) backfirePulseSerial.incrementAndGet()
         if (frame.shiftRejected) rejectedShiftSerial.incrementAndGet()
         if (frame.tractionLimitPulse) tractionPulseSerial.incrementAndGet()
-    }
-
-    fun setSourceMixControls(controls: Map<String, SourceMixControl>) {
-        sourceControls.set(controls.mapValues { it.value.sanitized() })
-        sourceControlRevision.incrementAndGet()
     }
 
     fun setFocusChangeListener(listener: ((AudioFocusEvent) -> Unit)?) {
@@ -124,8 +112,6 @@ class EngineAudioEngine(context: Context) {
             if (!profileChanged) return
 
             loadedBankProfileId.set(null)
-            sourceControls.set(emptyMap())
-            sourceControlRevision.incrementAndGet()
             nativeSources.set(emptyList())
             if (running.get() || controlThread.get()?.isAlive == true) {
                 stopLocked()
@@ -144,7 +130,6 @@ class EngineAudioEngine(context: Context) {
         }
 
         focusHeld.set(true)
-        focusMultiplier.set(1.0)
         nativeSources.set(emptyList())
         loadFailure.set(null)
         running.set(true)
@@ -157,7 +142,6 @@ class EngineAudioEngine(context: Context) {
         runCatching(thread::start).onFailure {
             controlThread.compareAndSet(thread, null)
             running.set(false)
-            focusMultiplier.set(0.0)
             reportLoadFailure(profile.id, "Could not start the FMOD control worker.")
             abandonFocusIfHeld()
         }
@@ -173,7 +157,6 @@ class EngineAudioEngine(context: Context) {
         if (thread == null || !thread.isAlive) controlThread.compareAndSet(thread, null)
         loadedBankProfileId.set(null)
         nativeSources.set(emptyList())
-        focusMultiplier.set(0.0)
         abandonFocusIfHeld()
     }
 
@@ -182,7 +165,6 @@ class EngineAudioEngine(context: Context) {
         var opened = false
         var lastTickNanos = System.nanoTime()
         var nextSnapshotNanos = lastTickNanos
-        var appliedControlRevision = -1L
         var lastShiftSerial = 0L
         var consumedLimiterPulse = limiterPulseSerial.get()
         var consumedBackfirePulse = backfirePulseSerial.get()
@@ -199,6 +181,7 @@ class EngineAudioEngine(context: Context) {
                 carBankPath = bankFiles.car.absolutePath,
                 perspective = soundPerspective.get().ordinal,
                 hasTurbo = physics.engine.turbos.isNotEmpty(),
+                idleRpm = physics.engine.idleRpm.toFloat(),
                 spatial = physics.nativeFmodSpatialCoordinates(),
             )
             if (startupError != null) {
@@ -215,12 +198,6 @@ class EngineAudioEngine(context: Context) {
                     .coerceIn(MIN_CONTROL_STEP_SECONDS, MAX_CONTROL_STEP_SECONDS)
                 lastTickNanos = now
 
-                val revision = sourceControlRevision.get()
-                if (revision != appliedControlRevision) {
-                    bridge.setSourceControls(encodeNativeSourceControls(sourceControls.get()))
-                    appliedControlRevision = revision
-                }
-
                 val frame = parameters.get()
                 val currentLimiterPulse = limiterPulseSerial.get()
                 val currentBackfirePulse = backfirePulseSerial.get()
@@ -231,9 +208,7 @@ class EngineAudioEngine(context: Context) {
                     dt = dt.toFloat(),
                     rpm = frame.rpm.coerceAtLeast(1.0).toFloat(),
                     drivetrainSpeed = frame.drivetrainSpeedRadiansPerSecond.toFloat(),
-                    masterGain = (
-                        frame.tuning.masterGain * focusMultiplier.get() * if (frame.enabled) 1.0 else 0.0
-                    ).coerceIn(0.0, 1.0).toFloat(),
+                    throttle = frame.throttle.coerceIn(0.0, 1.0).toFloat(),
                     perspective = frame.perspective.ordinal,
                     boost = (frame.boost / maximumBoost).coerceAtLeast(0.0).toFloat(),
                     bov = frame.bov.coerceAtLeast(0.0).toFloat(),
@@ -245,14 +220,6 @@ class EngineAudioEngine(context: Context) {
                     backfireTriggered = currentBackfirePulse != consumedBackfirePulse,
                     tractionActive = frame.tractionLimitActive,
                     tractionPulse = currentTractionPulse != consumedTractionPulse,
-                    shiftSoundsEnabled = frame.shiftSoundsEnabled,
-                    shiftGain = frame.shiftSoundsGain.toFloat(),
-                    popsAndBangsEnabled = frame.popsAndBangsEnabled,
-                    popsAndBangsGain = frame.popsAndBangsGain.toFloat(),
-                    transmissionEnabled = frame.transmissionEnabled,
-                    transmissionGain = frame.transmissionGain.toFloat(),
-                    turboEnabled = frame.turboSoundsEnabled,
-                    turboGain = frame.turboSoundsGain.toFloat(),
                 )
                 lastShiftSerial = frame.shiftSerial
                 consumedLimiterPulse = currentLimiterPulse
@@ -281,7 +248,6 @@ class EngineAudioEngine(context: Context) {
             controlThread.compareAndSet(Thread.currentThread(), null)
             if (generation.get() == runId) {
                 running.set(false)
-                focusMultiplier.set(0.0)
                 abandonFocusIfHeld()
             }
         }

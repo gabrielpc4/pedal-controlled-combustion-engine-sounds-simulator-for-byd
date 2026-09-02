@@ -1,60 +1,28 @@
-# New-car audio exceptions
+# Car and bank exceptions
 
-This file records source-bank exceptions for direct Android FMOD playback. A car is only listed when
-its own bank cannot be opened or routed faithfully through the permitted `engine_int` / `engine_ext`
-events, or when a small, car-specific correction is required.
+This file records limitations that still need a later investigation. The current release builds the
+22 official cars directly from `assetto_corsa_installation/content/cars`; it does not substitute
+a bank from a similarly named car. The `new_cars` packages remain inactive, so their historical
+observations below do not affect the original catalog.
 
-The normal recipe is deliberately per-bank: a similarly named model is never used as a substitute merely because it belongs to the same family.
+## Current official catalog
 
-## Verified shared source banks
+No official source fallback is required by the package generator. If an original bank cannot be
+opened, or its authored event is silent in a perspective, record the exact profile ID, event path,
+FMOD result, and listener perspective here instead of replacing it with decoded audio or another
+car's bank.
 
-Two pairs have byte-for-byte identical source-bank SHA-256 values. They deliberately use one
-installed payload rather than duplicate an identical bank:
+## Inactive modded observations
 
-- `nissan-350z` and `nissan-370z-widebody`: `89fd739bba3e18493af9d1a040dd830b7a67f8e5758abf54dfb991583cf09d81`
-- `lamborghini-aventador-sv` and `lexus-lfa-concept-gt500`: `b83116900c41666fedf7b7256793d3d8808930a40ab938f1b089efd13bf63e42`
+The following rows are retained as investigation notes for a future `modded_car_packs` release:
 
-| Car | Source-bank issue | Current handling | Follow-up |
-| --- | --- | --- | --- |
-| Porsche 911 GT3 RS HellSpec | Its own `engine_int` and `engine_ext` events schedule their named voices but are silent in Audio Lab. The `info.txt` names Porsche Pack 2. | Uses the verified audible `ks_porsche_911_gt3_rs.bank` from the supplied `assettocorsa_banks` DLC library. This is the exact base GT3 RS, not a name-family guess. | Test in the vehicle. If the HellSpec author exposes an audible dedicated engine route later, replace this documented fallback. |
-| Chevrolet Corvette C6 Z06 Stanced | `engine_ext` is silent at the tested listener positions; the interior route has a delayed source-bank activation. | CABIN remains `engine_int` and EXTERIOR remains the bank's genuine `engine_ext`; no cross-perspective substitution is made. | Recover an authored external route only if a later source bank supplies one. |
-| Chevrolet Corvette C7 Stingray HellSpec | Same C6-derived delayed interior activation and silent `engine_ext` behavior. | CABIN remains `engine_int` and EXTERIOR remains the bank's genuine `engine_ext`; no cross-perspective substitution is made. | Recover an authored external route only if a later source bank supplies one. |
-| Aston Martin DBS (DBRS9 GT3 bank) | `engine_ext` is silent while `engine_int` is audible. | The exterior toggle honestly selects its silent authored `engine_ext`; it never substitutes interior audio. | Recover an authored external route if the source package is updated. |
-| BMW M8 Competition (M8 GTLM bank) | `engine_ext` is silent at idle but running layers are audible. | The native event is kept unchanged; verify its authored idle response in the vehicle. | No source substitution is permitted. |
-
-## Additional official Assetto Corsa banks
-
-The bank audit also found 21 official banks with a defensible model match to a
-supplied car, or a clearly useful model-family counterpart. Each one is installed
-unchanged from its own bank; the counterpart is used only for the preview image
-and the display context. No bank is substituted solely because two names look
-similar.
-
-| App profile | Bank | Match used for preview/context |
+| Car/package | Observation | Current handling |
 | --- | --- | --- |
-| `assetto-audi-r8-lms-2016` | `ks_audi_r8_lms_2016.bank` | Audi R8 LMS GT2 |
-| `assetto-audi-r8-plus` | `ks_audi_r8_plus.bank` | Audi R8 LMS GT2 |
-| `assetto-audi-tt-cup` | `ks_audi_tt_cup.bank` | Audi TT Cup 2015 |
-| `assetto-bmw-m4` | `ks_bmw_m4.bank` | BMW M8 GTLM |
-| `assetto-corvette-c7-stingray` | `ks_corvette_c7_stingray.bank` | Corvette C7 Stingray |
-| `assetto-ferrari-458` | `ferrari_458.bank` | Ferrari 458 Italia |
-| `assetto-ferrari-458-gt2` | `ferrari_458_GT2.bank` | Ferrari 458 Italia GTE |
-| `assetto-ferrari-488-gtb` | `ks_ferrari_488_gtb.bank` | Ferrari 488 GTE |
-| `assetto-ferrari-488-gt3` | `ks_ferrari_488_gt3.bank` | Ferrari 488 GTE |
-| `assetto-ferrari-fxx-k` | `ks_ferrari_fxx_k.bank` | Ferrari LaFerrari |
-| `assetto-ferrari-laferrari` | `ferrari_LaFerrari.bank` | Ferrari LaFerrari |
-| `assetto-lamborghini-aventador-sv` | `ks_lamborghini_aventador_sv.bank` | Lamborghini Aventador SV |
-| `assetto-lamborghini-gallardo-sl` | `ks_lamborghini_gallardo_sl.bank` | Lamborghini Huracán |
-| `assetto-lamborghini-huracan-performante` | `ks_lamborghini_huracan_performante.bank` | Lamborghini Huracán |
-| `assetto-lamborghini-huracan-st` | `ks_lamborghini_huracan_st.bank` | Lamborghini Huracán |
-| `assetto-mercedes-amg-gt3` | `ks_mercedes_amg_gt3.bank` | Mercedes-AMG GT3 EVO |
-| `assetto-nissan-370z` | `ks_nissan_370z.bank` | Nissan 370Z Widebody (its own bank) |
-| `assetto-nissan-gtr` | `ks_nissan_gtr.bank` | Nissan GT-R NISMO |
-| `assetto-porsche-911-gt3-rs` | `ks_porsche_911_gt3_rs.bank` | Porsche 911 GT3 RS |
-| `assetto-porsche-991-turbo-s` | `ks_porsche_991_turbo_s.bank` | Porsche 911 Turbo S |
-| `assetto-toyota-supra-mkiv` | `ks_toyota_supra_mkiv.bank` | Toyota Supra Wangan |
+| Porsche 911 GT3 RS HellSpec | Its named engine events were silent in an earlier Audio Lab capture. | Not selectable or installable in this release. |
+| Chevrolet Corvette C6 Z06 Stanced | Exterior event was silent at an earlier listener position. | Not selectable or installable in this release. |
+| Chevrolet Corvette C7 Stingray HellSpec | Earlier capture showed delayed interior activation. | Not selectable or installable in this release. |
+| Aston Martin DBS / DBRS9 GT3 | Exterior event was silent at idle in an earlier capture. | Not selectable or installable in this release. |
+| BMW M8 Competition / M8 GTLM | Earlier capture showed a quiet exterior idle layer. | Not selectable or installable in this release. |
 
-The native validation opens both `engine_int` and `engine_ext` perspectives for these banks with
-the rapid trajectory described in [car-audio-validation](car-audio-validation.md).
-Unknown base-bank performance specifications are intentionally left blank in
-the UI rather than guessed.
+When modded work resumes, each package must use its own bank and its own physics. Similar names,
+DLC labels, or car families are not evidence that two cars share audio.

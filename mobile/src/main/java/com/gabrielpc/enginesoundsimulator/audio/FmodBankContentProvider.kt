@@ -18,13 +18,13 @@ class FmodBankContentProvider : ContentProvider() {
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
         require(mode == "w" || mode == "wt") { "FMOD banks are write-only through this provider" }
-        val packId = requirePackId(uri)
+        val (group, packId) = requirePackId(uri)
         val (readSide, writeSide) = ParcelFileDescriptor.createPipe()
         Thread({
             ParcelFileDescriptor.AutoCloseInputStream(readSide).use { source ->
-                runCatching { store.install(packId, source) }
+                runCatching { store.install(group, packId, source) }
             }
-        }, "fmod-bank-import-$packId").apply { isDaemon = true }.start()
+        }, "fmod-bank-import-$group-$packId").apply { isDaemon = true }.start()
         return writeSide
     }
 
@@ -36,8 +36,11 @@ class FmodBankContentProvider : ContentProvider() {
         sortOrder: String?,
     ): Cursor {
         require(uri.pathSegments == listOf("packs")) { "Query the /packs inventory only" }
-        return MatrixCursor(arrayOf("id", "installed")).apply {
-            store.installedPackIds().forEach { id -> addRow(arrayOf<Any>(id, 1)) }
+        return MatrixCursor(arrayOf("group", "id", "installed")).apply {
+            store.installedPackIds().forEach { composite ->
+                val parts = composite.split('/', limit = 2)
+                if (parts.size == 2) addRow(arrayOf<Any>(parts[0], parts[1], 1))
+            }
         }
     }
 
@@ -54,8 +57,8 @@ class FmodBankContentProvider : ContentProvider() {
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int =
         throw UnsupportedOperationException("Use openFile")
 
-    private fun requirePackId(uri: Uri): String {
-        require(uri.pathSegments.size == 2 && uri.pathSegments.first() == "packs") { "Invalid FMOD bank URI" }
-        return uri.pathSegments.last()
+    private fun requirePackId(uri: Uri): Pair<String, String> {
+        require(uri.pathSegments.size == 3 && uri.pathSegments.first() == "packs") { "Invalid FMOD bank URI" }
+        return uri.pathSegments[1] to uri.pathSegments[2]
     }
 }

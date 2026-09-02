@@ -31,21 +31,22 @@ internal class FmodBankStore(filesDirectory: File) {
     fun installedPackIds(): Set<String> = packsDirectory.listFiles()
         .orEmpty()
         .filter(File::isDirectory)
+        .flatMap { group -> group.listFiles().orEmpty().filter(File::isDirectory) }
         .filter { File(it, MANIFEST_NAME).isFile }
         .filter { directory ->
             runCatching {
                 val manifest = File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
-                manifest.id == directory.name
+            manifest.id == directory.name && manifest.group == directory.parentFile?.name
             }.getOrDefault(false)
         }
-        .mapTo(linkedSetOf()) { it.name }
+        .mapTo(linkedSetOf()) { "${it.parentFile?.name}/${it.name}" }
 
-    fun bankFile(profile: FmodBankProfile): File = bankFile(profile.bankPackId, profile.displayName)
+    fun bankFile(profile: FmodBankProfile): File = bankFile(profile.packGroup, profile.bankPackId, profile.displayName)
 
-    fun sharedBankFile(packId: String): File = bankFile(packId, "required shared FMOD")
+    fun sharedBankFile(packId: String): File = bankFile(FmodBankProfiles.originalCarsPackId, packId, "required shared FMOD")
 
     fun physicsFile(profile: FmodBankProfile): File {
-        val directory = requireNotNull(installedDirectory(profile.bankPackId)) {
+        val directory = requireNotNull(installedDirectory(profile.packGroup, profile.bankPackId)) {
             "Install the ${profile.displayName} bank before playing it."
         }
         val manifest = File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
@@ -58,8 +59,8 @@ internal class FmodBankStore(filesDirectory: File) {
         }
     }
 
-    private fun bankFile(packId: String, displayName: String): File {
-        val directory = requireNotNull(installedDirectory(packId)) {
+    private fun bankFile(group: String, packId: String, displayName: String): File {
+        val directory = requireNotNull(installedDirectory(group, packId)) {
             "Install the $displayName bank before playing it."
         }
         val manifest = File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
@@ -71,13 +72,14 @@ internal class FmodBankStore(filesDirectory: File) {
     }
 
     @Synchronized
-    fun install(packId: String, source: InputStream) {
-        require(SAFE_PACK_ID.matches(packId)) { "Invalid FMOD bank id" }
+    fun install(group: String, packId: String, source: InputStream) {
+        require(SAFE_PACK_ID.matches(group) && SAFE_PACK_ID.matches(packId)) { "Invalid FMOD bank id" }
         packsDirectory.mkdirs()
-        val incoming = File.createTempFile(".$packId-", ".bydbank", packsDirectory)
+        val groupDirectory = File(packsDirectory, group).apply { mkdirs() }
+        val incoming = File.createTempFile(".$packId-", ".bydbank", groupDirectory)
         try {
             FileOutputStream(incoming).use { output -> source.copyTo(output, COPY_BUFFER_BYTES) }
-            installArchive(packId, incoming)
+            installArchive(group, packId, incoming)
         } finally {
             incoming.delete()
         }
@@ -88,14 +90,16 @@ internal class FmodBankStore(filesDirectory: File) {
         packsDirectory.listFiles()?.forEach(::deleteRecursively)
     }
 
-    private fun installArchive(expectedPackId: String, archive: File) {
-        val stage = File(packsDirectory, ".staging-$expectedPackId-${System.nanoTime()}")
+    private fun installArchive(expectedGroup: String, expectedPackId: String, archive: File) {
+        val groupDirectory = File(packsDirectory, expectedGroup).apply { mkdirs() }
+        val stage = File(groupDirectory, ".staging-$expectedPackId-${System.nanoTime()}")
         check(stage.mkdirs()) { "Could not create FMOD bank staging directory" }
         try {
             ZipFile(archive).use { zip ->
                 val manifestEntry = requireNotNull(zip.getEntry(MANIFEST_NAME)) { "FMOD bank package has no manifest" }
                 val manifest = zip.getInputStream(manifestEntry).use(::readManifest)
                 require(manifest.id == expectedPackId) { "FMOD bank id does not match destination" }
+                require(manifest.group == expectedGroup) { "FMOD bank group does not match destination" }
                 manifest.files.forEach { entry ->
                     val sourceEntry = requireNotNull(zip.getEntry(entry.path)) { "FMOD bank package is missing ${entry.path}" }
                     val destination = safeDestination(stage, entry.path)
@@ -114,8 +118,8 @@ internal class FmodBankStore(filesDirectory: File) {
                 }
             }
 
-            val target = File(packsDirectory, expectedPackId)
-            val backup = File(packsDirectory, ".previous-$expectedPackId-${System.nanoTime()}")
+            val target = File(groupDirectory, expectedPackId)
+            val backup = File(groupDirectory, ".previous-$expectedPackId-${System.nanoTime()}")
             if (target.exists() && !target.renameTo(backup)) {
                 throw IllegalStateException("Could not replace the existing FMOD bank package")
             }
@@ -129,9 +133,9 @@ internal class FmodBankStore(filesDirectory: File) {
         }
     }
 
-    private fun installedDirectory(packId: String): File? {
-        if (!SAFE_PACK_ID.matches(packId)) return null
-        val directory = File(packsDirectory, packId)
+    private fun installedDirectory(group: String, packId: String): File? {
+        if (!SAFE_PACK_ID.matches(group) || !SAFE_PACK_ID.matches(packId)) return null
+        val directory = File(File(packsDirectory, group), packId)
         return directory.takeIf { File(it, MANIFEST_NAME).isFile }
     }
 
@@ -139,12 +143,14 @@ internal class FmodBankStore(filesDirectory: File) {
         reader.beginObject()
         var schema: String? = null
         var id: String? = null
+        var group: String? = null
         var version: Int? = null
         var files: List<FmodBankFile>? = null
         while (reader.hasNext()) {
             when (reader.nextName()) {
                 "schema" -> schema = reader.nextString()
                 "id" -> id = reader.nextString()
+                "group" -> group = reader.nextString()
                 "version" -> version = reader.nextInt()
                 "files" -> files = readFiles(reader)
                 else -> reader.skipValue()
@@ -152,22 +158,27 @@ internal class FmodBankStore(filesDirectory: File) {
         }
         reader.endObject()
         require(schema == SCHEMA) {
-            "This is an old or unsupported audio pack. Use DELETE ALL in the audio installer, then reinstall every v2 pack."
+            "This is an old or unsupported audio pack. Use DELETE ALL in the audio installer, then reinstall the current packs."
         }
         require(SAFE_PACK_ID.matches(requireNotNull(id))) { "Invalid FMOD bank id" }
+        require(SAFE_PACK_ID.matches(requireNotNull(group))) { "Invalid FMOD bank group" }
         require(requireNotNull(version) > 0) { "Invalid FMOD bank package version" }
         val parsedFiles = requireNotNull(files)
         require(parsedFiles.map(FmodBankFile::path).distinct().size == parsedFiles.size) {
             "FMOD bank package has duplicate files"
         }
         parsedFiles.forEach { file ->
-            require(file.path.startsWith("bank/") || file.path.startsWith("profiles/")) {
+            require(
+                file.path.startsWith("bank/") ||
+                    file.path.startsWith("profiles/") ||
+                    file.path.startsWith("preview/"),
+            ) {
                 "FMOD bank package path is outside its payload"
             }
             require(isSafeRelativePath(file.path)) { "FMOD bank package has unsafe path" }
             require(file.bytes > 0L && SHA256.matches(file.sha256)) { "FMOD bank package has invalid file metadata" }
         }
-        FmodBankManifest(requireNotNull(id), requireNotNull(version), parsedFiles)
+        FmodBankManifest(requireNotNull(id), requireNotNull(group), requireNotNull(version), parsedFiles)
     }
 
     private fun readFiles(reader: JsonReader): List<FmodBankFile> {
@@ -222,12 +233,12 @@ internal class FmodBankStore(filesDirectory: File) {
         file.delete()
     }
 
-    private data class FmodBankManifest(val id: String, val version: Int, val files: List<FmodBankFile>)
+    private data class FmodBankManifest(val id: String, val group: String, val version: Int, val files: List<FmodBankFile>)
     private data class FmodBankFile(val path: String, val bytes: Long, val sha256: String)
 
     private companion object {
         const val MANIFEST_NAME = "manifest.json"
-        const val SCHEMA = "byd-fmod-bank-pack-v2"
+        const val SCHEMA = "byd-fmod-bank-pack-v3"
         const val COPY_BUFFER_BYTES = 256 * 1024
         val SAFE_PACK_ID = Regex("^[a-z0-9][a-z0-9._-]{0,95}$")
         val SHA256 = Regex("^[0-9a-f]{64}$")

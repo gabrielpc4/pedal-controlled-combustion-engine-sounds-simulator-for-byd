@@ -1,22 +1,5 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-/** User multiplier layered on top of the authored FMOD channel volume. */
-data class SourceMixControl(
-    val gain: Double = DEFAULT_GAIN_MULTIPLIER,
-    val muted: Boolean = false,
-    val solo: Boolean = false,
-) {
-    fun sanitized() = copy(gain = gain.coerceIn(MIN_GAIN_MULTIPLIER, MAX_GAIN_MULTIPLIER))
-
-    companion object {
-        const val DEFAULT_GAIN_MULTIPLIER = 1.0
-        const val MIN_GAIN_MULTIPLIER = 0.0
-        const val MAX_GAIN_MULTIPLIER = 4.0
-
-        val DEFAULT = SourceMixControl()
-    }
-}
-
 /** One exact sound source owned by one authored Studio event. */
 data class FmodSourceState(
     val id: String,
@@ -28,9 +11,6 @@ data class FmodSourceState(
     val voiceCount: Int,
     val isVirtual: Boolean,
     val isActive: Boolean,
-    val userGain: Double = SourceMixControl.DEFAULT_GAIN_MULTIPLIER,
-    val muted: Boolean = false,
-    val solo: Boolean = false,
 ) {
     val audibilityPercent: Int
         get() = (audibility.coerceIn(0.0, 1.0) * 100.0).toInt()
@@ -76,17 +56,6 @@ internal fun parseNativeVoiceSnapshots(rows: Array<String>): List<FmodSourceStat
         isActive = fields[8] == "1",
     )
 }
-
-internal fun encodeNativeSourceControls(controls: Map<String, SourceMixControl>): Array<String> =
-    controls.map { (id, rawControl) ->
-        val control = rawControl.sanitized()
-        listOf(
-            id,
-            control.gain.toString(),
-            if (control.muted) "1" else "0",
-            if (control.solo) "1" else "0",
-        ).joinToString(NATIVE_FIELD_SEPARATOR.toString())
-    }.toTypedArray()
 
 private const val NATIVE_FIELD_SEPARATOR = '\u001f'
 private const val NATIVE_SNAPSHOT_FIELD_COUNT = 9

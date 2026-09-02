@@ -1,78 +1,59 @@
-# Project context for future work
-
-This directory deliberately contains only durable engineering context. It is not a changelog,
-release record, or duplicate specification of the Kotlin source. A future change should not make
-these documents false merely because a calibration number, car profile, UI control, or test case
-changes.
-
-## Read this first
+# Project context
 
 Engine Sounds Simulator is a private Android dashboard for a BYD Seal DiLink head unit. It turns
-**read-only** vehicle telemetry, or the built-in simulator controls, into a fictional
-combustion-engine tachometer and direct FMOD Studio-bank audio. It never controls a vehicle.
+read-only vehicle telemetry, or the built-in simulated pedals, into the authored Assetto Corsa
+engine and drivetrain sound. The app never controls the vehicle.
 
-The intended environment is a rotated BYD tablet. The observed target software is
-`13.1.33.2503250.1` (family `2503`), but each DiLink firmware must be treated as a separate
-compatibility target.
+## Current product boundary
 
-The repository's source, tests, and build configuration are the current truth. These documents
-describe boundaries and reasons, not a second implementation to keep in sync.
+The first supported catalog contains exactly 22 official cars sourced from
+`assetto_corsa_installation/content/cars`. The separate `modded_car_packs` group is generated for
+future work but is inactive and cannot be installed or selected by the dashboard. Only the
+`original_cars_pack` group is accepted at runtime.
 
-## Source-of-truth order
+The dashboard APK contains the runtime and previews. The separate `audio-installer` APK carries
+the generated bank packages and publishes them atomically into the dashboard's private storage.
+See [FMOD bank installation](fmod-bank-installation.md).
 
-When information conflicts, use this order:
+## Source of truth
 
-1. Current Kotlin source, Gradle configuration, and automated tests.
-2. Direct observation on the exact head unit and firmware being tested.
-3. Primary vendor material and locally retained reference artifacts.
-4. Community reverse engineering and older implementation notes.
+Use the current Kotlin/C++ source and the original Assetto installation data. Audio Lab is the
+reference for authored physics and FMOD event ordering. The FMOD bank, its parameters, and the
+original per-car physics are authoritative; the application adds no ignition simulation, synthetic
+torque curve, speed cap, gear table, tuning, gain, mute, solo, drag, or regenerative-braking
+override.
 
-Do not infer a permission grant, audio route, sample license, vehicle parameter, or API behavior
-from a similarly named class, a different firmware, or an old document.
+The BYD speed is truncated to an integer for the physical input. The bounded presentation-speed
+estimator is retained only to keep tachometer and pitch continuous between telemetry updates; it
+never changes the reported speed, gear decisions, vehicle load, or FMOD gains.
 
-## Non-negotiable boundaries
+## Safety and privacy
 
-- Vehicle access is read-only. Do not add setters, CAN transmission, rooting, firmware changes,
-  package spoofing, or broader permission bypasses.
-- Never expose, commit, or log vehicle identifiers, credentials, location, or complete driving
-  traces. Some supplied screenshots contain IMEI/ICCID and must be treated as sensitive.
-- The source banks and reference APKs are local, ignored inputs. They are not part of this
-  repository's redistribution rights.
-- Treat vehicle testing as parked or controlled testing. Synthetic sound can mask safety alerts.
-- The app owns audio only while its visible Activity is running. Background playback needs a
-  separate, explicitly reviewed design.
+- Vehicle access is read-only. Do not add CAN setters, rooting, firmware changes, or permission
+  bypasses.
+- Never commit vehicle identifiers, credentials, locations, complete driving traces, raw banks,
+  generated packages, or reference APKs.
+- Test while parked or in a controlled environment. The synthesized engine can mask safety alerts.
 
-## Working agreement
+## Build and release
 
-Use the checkout that contains this repository's `.git` directory; do not assume a similarly
-named folder is the active checkout. Pull `main` before work and preserve unrelated changes.
+The local FMOD 2.03.14 SDK is supplied through `fmod.sdk.dir`. Build the bank packages first, then
+assemble the dashboard and installer. The dashboard build number is incremented on an APK build.
+Generated packages and APKs are ignored by Git.
 
-For every source or documentation change, the expected delivery is:
+```sh
+python3 tools/build_fmod_bank_packs.py --force
+./gradlew :mobile:assembleDebug :audio-installer:assembleDebug --no-daemon -PcarApk=true
+```
 
-1. Run relevant tests, assemble the debug APK, and run lint.
-2. Install and foreground the generated APK on the `Simple_Automotive` emulator when available.
-3. Commit and push. Do not commit APKs, build output, raw source banks, generated bank packages, reference
-   APKs, or private reference material.
+Install the dashboard, install the installer, and use **INSTALL ORIGINAL CARS**. The installer can
+remove all published packs with **DELETE ALL**. The mixer is diagnostic and read-only.
 
-The build increments a local build number on assembly and names the artifact
-`engine-sounds-simulator-build-<number>-debug.apk`. That local counter and generated APK are
-intentionally ignored.
+## Documents
 
-## Canonical documents
-
-- [Architecture](architecture.md) explains the durable runtime boundaries, realtime rules, and
-  how to make safe changes.
-- [Vehicle integration and assets](vehicle-integration-and-assets.md) records the BYD API
-  evidence, testing discipline, and local sample-asset contract.
-- [FMOD bank calibration](fmod-bank-calibration.md) provides the reproducible process for
-  validating an authored event route without replacing it.
-- [FMOD bank installation](fmod-bank-installation.md) describes the separate installer
-  APK and its generated-pack boundary.
-- [Car audio validation](car-audio-validation.md) records the rapid trajectory measurements and
-  the latest per-car audit result.
-- [New-car exceptions](new-cars-exceptions.md) records source-bank fallbacks and the explicit
-  Assetto Corsa bank additions.
-
-If a future change would invalidate an invariant in these documents, update the relevant document
-in the same change. Do not recreate historical per-feature notes; point to the code and tests
-instead.
+- [Architecture](architecture.md): runtime boundaries and FMOD ownership.
+- [Vehicle integration and assets](vehicle-integration-and-assets.md): local input and asset rules.
+- [FMOD bank calibration](fmod-bank-calibration.md): reference-bank inspection workflow.
+- [FMOD bank installation](fmod-bank-installation.md): two-group package format and installer.
+- [Car audio validation](car-audio-validation.md): manual validation procedure and evidence.
+- [New-car exceptions](new-cars-exceptions.md): documented source or bank limitations.

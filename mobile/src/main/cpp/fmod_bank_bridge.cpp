@@ -29,10 +29,6 @@ constexpr int kFmodDspBlocks = 4;
 constexpr int kFmodLogicalChannelCap = 2048;
 constexpr int kFmodRealChannelCap = 256;
 constexpr int kPerspectiveExterior = 1;
-constexpr float kEngineHostGain = 0.5f;
-constexpr float kEffectHostGain = 1.0f;
-constexpr float kFullLoadThrottle = 1.0f;
-constexpr float kBackfireThrottle = 0.01f;
 constexpr double kRecentSourceSeconds = 1.5;
 constexpr char kFieldSeparator = '\x1f';
 constexpr char kStableIdSeparator = '\x1e';
@@ -347,12 +343,6 @@ struct EventSlot {
     FMOD::Studio::EventInstance* instance = nullptr;
 };
 
-struct SourceMixControl {
-    float gain = 1.0f;
-    bool muted = false;
-    bool solo = false;
-};
-
 struct RecentSource {
     std::string eventPath;
     std::string eventName;
@@ -373,12 +363,6 @@ struct VoiceAggregate {
     bool callbackActive = false;
 };
 
-struct ChannelBaseGain {
-    std::string sourceId;
-    float volume = 1.0f;
-    float lastAppliedVolume = 1.0f;
-};
-
 class FmodRuntime {
 public:
     std::string open(
@@ -387,6 +371,7 @@ public:
         const std::string& carBankPath,
         int perspective,
         bool hasTurbo,
+        float idleRpm,
         const std::array<float, 12>& spatial
     ) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -475,12 +460,11 @@ public:
 
         perspective_ = perspective;
         hasTurbo_ = hasTurbo;
+        idleRpm_ = std::max(1.0f, idleRpm);
         setListenerLocked();
         initializeParametersLocked();
         startSelectedContinuousEventsLocked();
         startEventLocked("start");
-        limiterRunning_ = slot("limiter") != nullptr;
-
         result = studio_->update();
         if (result != FMOD_OK) {
             return failAndCloseLocked(resultText(result, "initial Studio::System::update"));
@@ -493,7 +477,7 @@ public:
         float dt,
         float rpm,
         float drivetrainSpeed,
-        float masterGain,
+        float throttle,
         int perspective,
         float boost,
         float bov,
@@ -504,15 +488,7 @@ public:
         bool shiftRejected,
         bool backfireTriggered,
         bool tractionActive,
-        bool tractionPulse,
-        bool shiftSoundsEnabled,
-        float shiftGain,
-        bool popsAndBangsEnabled,
-        float popsAndBangsGain,
-        bool transmissionEnabled,
-        float transmissionGain,
-        bool turboEnabled,
-        float turboGain
+        bool tractionPulse
     ) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!active_ || studio_ == nullptr) {
@@ -521,21 +497,21 @@ public:
 
         const float cleanDt = std::clamp(dt, 0.0001f, 0.1f);
         const float cleanRpm = std::max(1.0f, rpm);
-        const float cleanMaster = std::clamp(masterGain, 0.0f, 1.0f);
+        const float cleanThrottle = std::clamp(throttle, 0.0f, 1.0f);
         if (perspective != perspective_) {
             switchPerspectiveLocked(perspective);
         }
 
         for (const char* name : {"engine_int", "engine_ext"}) {
             setParameterQuietly(slotInstance(name), "rpms", cleanRpm);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", cleanThrottle);
         }
         for (const char* name : {"backfire_int", "backfire_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", kBackfireThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", cleanThrottle);
         }
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", drivetrainSpeed);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", cleanThrottle);
         }
 
         EventSlot* turbo = slot("turbo");
@@ -561,32 +537,23 @@ public:
             }
         }
 
-        if (shiftSoundsEnabled) {
-            if (shiftStarted && shiftDirection != 0) {
-                const std::string selected = perspective_ == kPerspectiveExterior
-                    ? "gear_ext"
-                    : "gear_int";
-                if (slot(selected) != nullptr && !isPlayingLocked(slotInstance(selected))) {
-                    stopEventLocked(selected, FMOD_STUDIO_STOP_ALLOWFADEOUT);
-                    setParameterQuietly(slotInstance(selected), "state", shiftDirection > 0 ? 1.0f : 0.0f);
-                    startEventLocked(selected);
-                }
+        if (shiftStarted && shiftDirection != 0) {
+            const std::string selected = perspective_ == kPerspectiveExterior
+                ? "gear_ext"
+                : "gear_int";
+            if (slot(selected) != nullptr && !isPlayingLocked(slotInstance(selected))) {
+                stopEventLocked(selected, FMOD_STUDIO_STOP_ALLOWFADEOUT);
+                setParameterQuietly(slotInstance(selected), "state", shiftDirection > 0 ? 1.0f : 0.0f);
+                startEventLocked(selected);
             }
-            if (shiftRejected && !isPlayingLocked(slotInstance("gear_grind"))) {
-                startEventLocked("gear_grind");
-            }
-        } else {
-            stopEventLocked("gear_int", FMOD_STUDIO_STOP_IMMEDIATE);
-            stopEventLocked("gear_ext", FMOD_STUDIO_STOP_IMMEDIATE);
-            stopEventLocked("gear_grind", FMOD_STUDIO_STOP_IMMEDIATE);
+        }
+        if (shiftRejected && !isPlayingLocked(slotInstance("gear_grind"))) {
+            startEventLocked("gear_grind");
         }
 
-        if (popsAndBangsEnabled && backfireTriggered && !eitherBackfirePlayingLocked()) {
+        if (backfireTriggered && !eitherBackfirePlayingLocked()) {
             const std::string selected = perspectiveEventLocked("backfire_int", "backfire_ext");
             startEventLocked(selected);
-        } else if (!popsAndBangsEnabled) {
-            stopEventLocked("backfire_int", FMOD_STUDIO_STOP_IMMEDIATE);
-            stopEventLocked("backfire_ext", FMOD_STUDIO_STOP_IMMEDIATE);
         }
 
         if (tractionActive || tractionPulse) {
@@ -607,37 +574,11 @@ public:
             }
         }
 
-        applyEventGainsLocked(
-            cleanMaster,
-            shiftSoundsEnabled ? shiftGain : 0.0f,
-            popsAndBangsEnabled ? popsAndBangsGain : 0.0f,
-            transmissionEnabled ? transmissionGain : 0.0f,
-            turboEnabled ? turboGain : 0.0f
-        );
-
         const FMOD_RESULT result = studio_->update();
         if (result != FMOD_OK) {
             return resultText(result, "Studio::System::update");
         }
-        applySourceControlsLocked(nullptr);
         return {};
-    }
-
-    void setSourceControls(const std::vector<std::string>& rows) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        sourceControls_.clear();
-        for (const std::string& row : rows) {
-            std::vector<std::string> fields = split(row, kFieldSeparator);
-            if (fields.size() != 4 || fields[0].empty()) {
-                continue;
-            }
-            SourceMixControl control;
-            control.gain = std::clamp(parseFloat(fields[1], 1.0f), 0.0f, 4.0f);
-            control.muted = fields[2] == "1";
-            control.solo = fields[3] == "1";
-            sourceControls_[fields[0]] = control;
-        }
-        applySourceControlsLocked(nullptr);
     }
 
     std::vector<std::string> voiceSnapshots() {
@@ -647,7 +588,7 @@ public:
         }
 
         std::unordered_map<std::string, VoiceAggregate> aggregates;
-        applySourceControlsLocked(&aggregates);
+        collectVoiceSnapshotsLocked(&aggregates);
         mergeRecentSourcesLocked(&aggregates);
 
         std::vector<VoiceAggregate> ordered;
@@ -753,8 +694,6 @@ private:
         slots_.clear();
         events_.clear();
         eventPaths_.clear();
-        channelBaseGains_.clear();
-        sourceControls_.clear();
         {
             std::lock_guard<std::mutex> callbackLock(callbackMutex_);
             recentSources_.clear();
@@ -779,6 +718,7 @@ private:
         commonStringsBank_ = nullptr;
         active_ = false;
         hasTurbo_ = false;
+        idleRpm_ = 1000.0f;
         limiterRunning_ = false;
         limiterDecay_ = 10.0f;
         tractionDecay_ = 10.0f;
@@ -880,8 +820,8 @@ private:
 
     void initializeParametersLocked() {
         for (const char* name : {"engine_int", "engine_ext"}) {
-            setParameterQuietly(slotInstance(name), "rpms", 1000.0f);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadThrottle);
+            setParameterQuietly(slotInstance(name), "rpms", idleRpm_);
+            setParameterQuietly(slotInstance(name), "throttle", 0.0f);
         }
         for (const char* name : {"backfire_int", "backfire_ext"}) {
             setParameterQuietly(slotInstance(name), "throttle", 0.0f);
@@ -891,7 +831,7 @@ private:
         }
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", 0.0f);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadThrottle);
+            setParameterQuietly(slotInstance(name), "throttle", 0.0f);
         }
         for (const char* name : {"tractioncontrol_int", "tractioncontrol_ext"}) {
             setParameterQuietly(slotInstance(name), "decay", tractionDecay_);
@@ -905,7 +845,6 @@ private:
         if (hasTurbo_) {
             startEventLocked("turbo");
         }
-        startEventLocked("limiter");
     }
 
     void switchPerspectiveLocked(int perspective) {
@@ -937,31 +876,6 @@ private:
             ? exteriorListenerAttributes_
             : cabinListenerAttributes_;
         studio_->setListenerAttributes(0, &listener);
-    }
-
-    void applyEventGainsLocked(
-        float master,
-        float shiftGain,
-        float backfireGain,
-        float transmissionGain,
-        float turboGain
-    ) {
-        for (auto& pair : slots_) {
-            const std::string& name = pair.first;
-            float gain = name == "engine_int" || name == "engine_ext"
-                ? kEngineHostGain
-                : kEffectHostGain;
-            if (name == "gear_int" || name == "gear_ext" || name == "gear_grind") {
-                gain *= std::clamp(shiftGain, 0.0f, 6.0f);
-            } else if (name == "backfire_int" || name == "backfire_ext") {
-                gain *= std::clamp(backfireGain, 0.0f, 6.0f);
-            } else if (name == "transmission" || name == "transmission_ext") {
-                gain *= std::clamp(transmissionGain, 0.0f, 6.0f);
-            } else if (name == "turbo") {
-                gain *= std::clamp(turboGain, 0.0f, 6.0f);
-            }
-            pair.second->instance->setVolume(master * gain);
-        }
     }
 
     void startEventLocked(const std::string& name) {
@@ -1008,26 +922,13 @@ private:
         }
     }
 
-    void applySourceControlsLocked(std::unordered_map<std::string, VoiceAggregate>* aggregates) {
-        const bool hasSolo = std::any_of(
-            sourceControls_.begin(),
-            sourceControls_.end(),
-            [](const auto& entry) { return entry.second.solo; }
-        );
-        std::unordered_map<FMOD::Channel*, bool> seenChannels;
+    void collectVoiceSnapshotsLocked(std::unordered_map<std::string, VoiceAggregate>* aggregates) {
         for (auto& pair : slots_) {
             FMOD::ChannelGroup* root = nullptr;
             if (pair.second->instance->getChannelGroup(&root) != FMOD_OK || root == nullptr) {
                 continue;
             }
-            visitChannelGroupLocked(*pair.second, root, root, hasSolo, aggregates, &seenChannels);
-        }
-        for (auto iterator = channelBaseGains_.begin(); iterator != channelBaseGains_.end();) {
-            if (seenChannels.find(iterator->first) == seenChannels.end()) {
-                iterator = channelBaseGains_.erase(iterator);
-            } else {
-                ++iterator;
-            }
+            visitChannelGroupLocked(*pair.second, root, root, aggregates);
         }
     }
 
@@ -1035,9 +936,7 @@ private:
         const EventSlot& event,
         FMOD::ChannelGroup* group,
         FMOD::ChannelGroup* eventRoot,
-        bool hasSolo,
-        std::unordered_map<std::string, VoiceAggregate>* aggregates,
-        std::unordered_map<FMOD::Channel*, bool>* seenChannels
+        std::unordered_map<std::string, VoiceAggregate>* aggregates
     ) {
         int channelCount = 0;
         if (group->getNumChannels(&channelCount) == FMOD_OK) {
@@ -1046,7 +945,6 @@ private:
                 if (group->getChannel(index, &channel) != FMOD_OK || channel == nullptr) {
                     continue;
                 }
-                (*seenChannels)[channel] = true;
                 FMOD::Sound* sound = nullptr;
                 if (channel->getCurrentSound(&sound) != FMOD_OK || sound == nullptr) {
                     continue;
@@ -1056,27 +954,6 @@ private:
                     std::strncpy(soundName, "<unnamed sound>", sizeof(soundName) - 1);
                 }
                 const std::string id = stableSourceId(event.path, soundName);
-                ChannelBaseGain& base = channelBaseGains_[channel];
-                float currentVolume = 1.0f;
-                channel->getVolume(&currentVolume);
-                if (base.sourceId != id) {
-                    base = {id, currentVolume, currentVolume};
-                } else if (std::abs(currentVolume - base.lastAppliedVolume) > 0.0001f) {
-                    // Studio changed the authored channel level since the last
-                    // scan. Refresh the base instead of freezing automation.
-                    base.volume = currentVolume;
-                }
-                const auto controlIterator = sourceControls_.find(id);
-                const SourceMixControl control = controlIterator == sourceControls_.end()
-                    ? SourceMixControl{}
-                    : controlIterator->second;
-                const bool audibleByControl = !control.muted && (!hasSolo || control.solo);
-                base.lastAppliedVolume = base.volume * (audibleByControl ? control.gain : 0.0f);
-                channel->setVolume(base.lastAppliedVolume);
-
-                if (aggregates == nullptr) {
-                    continue;
-                }
                 float audibility = 0.0f;
                 channel->getAudibility(&audibility);
                 bool isVirtual = false;
@@ -1105,7 +982,7 @@ private:
         for (int index = 0; index < childCount; ++index) {
             FMOD::ChannelGroup* child = nullptr;
             if (group->getGroup(index, &child) == FMOD_OK && child != nullptr) {
-                visitChannelGroupLocked(event, child, eventRoot, hasSolo, aggregates, seenChannels);
+                visitChannelGroupLocked(event, child, eventRoot, aggregates);
             }
         }
     }
@@ -1156,28 +1033,6 @@ private:
         }
     }
 
-    static std::vector<std::string> split(const std::string& value, char separator) {
-        std::vector<std::string> fields;
-        std::size_t start = 0;
-        while (start <= value.size()) {
-            const std::size_t end = value.find(separator, start);
-            fields.push_back(value.substr(start, end == std::string::npos ? std::string::npos : end - start));
-            if (end == std::string::npos) {
-                break;
-            }
-            start = end + 1;
-        }
-        return fields;
-    }
-
-    static float parseFloat(const std::string& value, float fallback) {
-        try {
-            return std::stof(value);
-        } catch (...) {
-            return fallback;
-        }
-    }
-
     std::mutex mutex_;
     std::mutex callbackMutex_;
     FMOD::Studio::System* studio_ = nullptr;
@@ -1190,8 +1045,6 @@ private:
     std::unordered_map<std::string, FMOD::Studio::EventDescription*> events_;
     std::unordered_map<std::string, std::string> eventPaths_;
     std::unordered_map<std::string, std::unique_ptr<EventSlot>> slots_;
-    std::unordered_map<std::string, SourceMixControl> sourceControls_;
-    std::unordered_map<FMOD::Channel*, ChannelBaseGain> channelBaseGains_;
     std::unordered_map<std::string, RecentSource> recentSources_;
     FMOD_3D_ATTRIBUTES engineAttributes_{};
     FMOD_3D_ATTRIBUTES backfireAttributes_{};
@@ -1203,6 +1056,7 @@ private:
     int perspective_ = 0;
     bool active_ = false;
     bool hasTurbo_ = false;
+    float idleRpm_ = 1000.0f;
     bool limiterRunning_ = false;
 };
 
@@ -1219,21 +1073,6 @@ std::string utfString(JNIEnv* environment, jstring value) {
     std::string copied(chars);
     environment->ReleaseStringUTFChars(value, chars);
     return copied;
-}
-
-std::vector<std::string> stringArray(JNIEnv* environment, jobjectArray values) {
-    std::vector<std::string> result;
-    if (values == nullptr) {
-        return result;
-    }
-    const jsize count = environment->GetArrayLength(values);
-    result.reserve(static_cast<std::size_t>(count));
-    for (jsize index = 0; index < count; ++index) {
-        auto* value = static_cast<jstring>(environment->GetObjectArrayElement(values, index));
-        result.push_back(utfString(environment, value));
-        environment->DeleteLocalRef(value);
-    }
-    return result;
 }
 
 jobjectArray toJavaStringArray(JNIEnv* environment, const std::vector<std::string>& values) {
@@ -1279,6 +1118,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_open(
     jstring carBankPath,
     jint perspective,
     jboolean hasTurbo,
+    jfloat idleRpm,
     jfloatArray spatial
 ) {
     return resultString(
@@ -1289,6 +1129,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_open(
             utfString(environment, carBankPath),
             perspective,
             hasTurbo == JNI_TRUE,
+            idleRpm,
             spatialArray(environment, spatial)
         )
     );
@@ -1301,7 +1142,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jfloat dt,
     jfloat rpm,
     jfloat drivetrainSpeed,
-    jfloat masterGain,
+    jfloat throttle,
     jint perspective,
     jfloat boost,
     jfloat bov,
@@ -1312,15 +1153,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jboolean shiftRejected,
     jboolean backfireTriggered,
     jboolean tractionActive,
-    jboolean tractionPulse,
-    jboolean shiftSoundsEnabled,
-    jfloat shiftGain,
-    jboolean popsAndBangsEnabled,
-    jfloat popsAndBangsGain,
-    jboolean transmissionEnabled,
-    jfloat transmissionGain,
-    jboolean turboEnabled,
-    jfloat turboGain
+    jboolean tractionPulse
 ) {
     return resultString(
         environment,
@@ -1328,7 +1161,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             dt,
             rpm,
             drivetrainSpeed,
-            masterGain,
+            throttle,
             perspective,
             boost,
             bov,
@@ -1339,26 +1172,9 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             shiftRejected == JNI_TRUE,
             backfireTriggered == JNI_TRUE,
             tractionActive == JNI_TRUE,
-            tractionPulse == JNI_TRUE,
-            shiftSoundsEnabled == JNI_TRUE,
-            shiftGain,
-            popsAndBangsEnabled == JNI_TRUE,
-            popsAndBangsGain,
-            transmissionEnabled == JNI_TRUE,
-            transmissionGain,
-            turboEnabled == JNI_TRUE,
-            turboGain
+            tractionPulse == JNI_TRUE
         )
     );
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setSourceControls(
-    JNIEnv* environment,
-    jobject,
-    jobjectArray rows
-) {
-    runtime.setSourceControls(stringArray(environment, rows));
 }
 
 extern "C" JNIEXPORT jobjectArray JNICALL

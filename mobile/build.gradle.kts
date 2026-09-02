@@ -79,46 +79,43 @@ val prepareFmodSdk = tasks.register<Sync>("prepareFmodSdk") {
     into(generatedFmodSdk)
 }
 val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
-    listOf(
-        rootProject.file("../original_cars"),
-        rootProject.file("../new_cars"),
-    ).filter(File::isDirectory).forEach { sourceRoot ->
-        from(sourceRoot) {
-            include("*/preview1.jpg")
-            eachFile {
-                val normalizedCarId = file.parentFile.name.lowercase().replace("_", "-")
-                path = "car_previews/$normalizedCarId.jpg"
-            }
-            includeEmptyDirs = false
-        }
-    }
-    val bankPreviewAliases = mapOf(
-        "assetto-audi-r8-lms-2016" to rootProject.file("../car_previews/ks_audi_r8_lms_2016/preview1.jpg"),
-        "assetto-audi-r8-plus" to rootProject.file("../car_previews/ks_audi_r8_plus/preview1.jpg"),
-        "assetto-audi-tt-cup" to rootProject.file("../car_previews/ks_audi_tt_cup/preview1.jpg"),
-        "assetto-bmw-m4" to rootProject.file("../car_previews/ks_bmw_m4/preview1.jpg"),
-        "assetto-corvette-c7-stingray" to rootProject.file("../car_previews/ks_corvette_c7_stingray/preview1.jpg"),
-        "assetto-ferrari-458" to rootProject.file("../car_previews/ferrari_458/preview1.jpg"),
-        "assetto-ferrari-458-gt2" to rootProject.file("../car_previews/ferrari_458_gt2/preview1.jpg"),
-        "assetto-ferrari-488-gtb" to rootProject.file("../car_previews/ks_ferrari_488_gtb/preview1.jpg"),
-        "assetto-ferrari-488-gt3" to rootProject.file("../car_previews/ks_ferrari_488_gt3/preview1.jpg"),
-        "assetto-ferrari-fxx-k" to rootProject.file("../car_previews/ks_ferrari_fxx_k/preview1.jpg"),
-        "assetto-ferrari-laferrari" to rootProject.file("../car_previews/ferrari_laferrari/preview1.jpg"),
-        "assetto-lamborghini-aventador-sv" to rootProject.file("../car_previews/ks_lamborghini_aventador_sv/preview1.jpg"),
-        "assetto-lamborghini-gallardo-sl" to rootProject.file("../car_previews/ks_lamborghini_gallardo_sl/preview1.jpg"),
-        "assetto-lamborghini-huracan-performante" to rootProject.file("../car_previews/ks_lamborghini_huracan_performante/preview1.jpg"),
-        "assetto-lamborghini-huracan-st" to rootProject.file("../car_previews/ks_lamborghini_huracan_st/preview1.jpg"),
-        "assetto-mercedes-amg-gt3" to rootProject.file("../car_previews/ks_mercedes_amg_gt3/preview1.jpg"),
-        "assetto-nissan-370z" to rootProject.file("../car_previews/ks_nissan_370z/preview1.jpg"),
-        "assetto-nissan-gtr" to rootProject.file("../car_previews/ks_nissan_gtr/preview1.jpg"),
-        "assetto-porsche-911-gt3-rs" to rootProject.file("../car_previews/ks_porsche_911_gt3_rs/preview1.jpg"),
-        "assetto-porsche-991-turbo-s" to rootProject.file("../car_previews/ks_porsche_991_turbo_s/preview1.jpg"),
-        "assetto-toyota-supra-mkiv" to rootProject.file("../car_previews/ks_toyota_supra_mkiv/preview1.jpg"),
+    val originalCarsRoot = rootProject.file("../assetto_corsa_installation/content/cars")
+    val originalSources = mapOf(
+        "alfa-romeo-4c" to "ks_alfa_romeo_4c",
+        "assetto-audi-r8-lms-2016" to "ks_audi_r8_lms_2016",
+        "assetto-audi-r8-plus" to "ks_audi_r8_plus",
+        "assetto-audi-tt-cup" to "ks_audi_tt_cup",
+        "assetto-bmw-m4" to "ks_bmw_m4",
+        "assetto-corvette-c7-stingray" to "ks_corvette_c7_stingray",
+        "assetto-ferrari-458" to "ferrari_458",
+        "assetto-ferrari-458-gt2" to "ferrari_458_gt2",
+        "assetto-ferrari-488-gtb" to "ks_ferrari_488_gtb",
+        "assetto-ferrari-488-gt3" to "ks_ferrari_488_gt3",
+        "assetto-ferrari-fxx-k" to "ks_ferrari_fxx_k",
+        "assetto-ferrari-laferrari" to "ferrari_laferrari",
+        "assetto-lamborghini-aventador-sv" to "ks_lamborghini_aventador_sv",
+        "assetto-lamborghini-gallardo-sl" to "ks_lamborghini_gallardo_sl",
+        "assetto-lamborghini-huracan-performante" to "ks_lamborghini_huracan_performante",
+        "assetto-lamborghini-huracan-st" to "ks_lamborghini_huracan_st",
+        "assetto-mercedes-amg-gt3" to "ks_mercedes_amg_gt3",
+        "assetto-nissan-370z" to "ks_nissan_370z",
+        "assetto-nissan-gtr" to "ks_nissan_gtr",
+        "assetto-porsche-911-gt3-rs" to "ks_porsche_911_gt3_rs",
+        "assetto-porsche-991-turbo-s" to "ks_porsche_991_turbo_s",
+        "assetto-toyota-supra-mkiv" to "ks_toyota_supra_mkiv",
     )
-    bankPreviewAliases.forEach { (assetName, source) ->
-        from(source) {
-            rename { "$assetName.jpg" }
-            into("car_previews")
+    originalSources.forEach { (assetName, sourceId) ->
+        val directory = originalCarsRoot.resolve(sourceId)
+        val preview = directory.resolve("ui/dlc_preview.png").takeIf { it.isFile }
+            ?: directory.resolve("skins").walkTopDown()
+                .filter { it.isFile && (it.name == "preview.jpg" || it.name == "preview.png") }
+                .sortedBy { it.path }
+                .firstOrNull()
+        preview?.let { source ->
+            from(source) {
+                rename { "$assetName.jpg" }
+                into("car_previews")
+            }
         }
     }
     into(generatedPreviewAssets)
@@ -167,7 +164,6 @@ android {
         buildConfigField("int", "BUILD_NUMBER", stampedBuildNumber.toString())
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -226,12 +222,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    testImplementation(libs.junit)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(libs.androidx.junit)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(files(File(fmodSdkDirectory, "api/core/lib/fmod.jar")))
 }

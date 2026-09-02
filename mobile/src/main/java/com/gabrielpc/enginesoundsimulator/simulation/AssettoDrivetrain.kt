@@ -37,7 +37,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var rpm = physics.engine.idleRpm
     private var speedMetersPerSecond = 0.0
     private var gear = 1
-    private var requestedGear = 1
     private var sessionElapsedMilliseconds = 0.0
     private var clutchSignal = 0.0
     private var clutchSequence: List<AssettoCurvePoint> = emptyList()
@@ -63,29 +62,21 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var backfireTimer = 0.0
     private var limiterCounter = 0
     private var lastFrame = snapshot()
-    private val upshiftLandingRpm = mutableMapOf<Int, Double>()
-
-    init {
-        rebuildLandingRpm()
-    }
 
     fun updatePhysics(updated: AssettoPhysics) {
         physics = updated
         rpm = rpm.coerceIn(0.0, updated.engine.limiterRpm)
         gear = gear.coerceIn(0, updated.drivetrain.forwardRatios.size)
-        requestedGear = gear
         turboQs = MutableList(updated.engine.turbos.size) { 0.0 }
         boost = 0.0
         bov = 0.0
         bovDecay = 10.0
-        rebuildLandingRpm()
     }
 
     fun reset(engineRunning: Boolean) {
         rpm = if (engineRunning) physics.engine.idleRpm else 0.0
         speedMetersPerSecond = 0.0
         gear = 1
-        requestedGear = 1
         sessionElapsedMilliseconds = 0.0
         clutchSignal = 0.0
         clutchSequence = emptyList()
@@ -113,11 +104,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         lastFrame = snapshot()
     }
 
-    fun engageAtIdle() {
-        rpm = physics.engine.idleRpm
-        limiterCounter = 0
-    }
-
     fun requestShift(direction: Int): Boolean {
         if (direction !in -1..1 || direction == 0 || shifting) return false
         manualShiftRequest = direction
@@ -130,8 +116,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         transmissionPosition: TransmissionPosition,
         automaticShifting: Boolean,
         externalSpeedMetersPerSecond: Double?,
-        simulatedUphillGrade: Double,
-        simulatedRegenStrength: Double,
         deltaSeconds: Double,
     ): AssettoDrivetrainFrame {
         val dt = f32(deltaSeconds.coerceIn(0.0001, 0.020))
@@ -165,7 +149,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             }
         }
 
-        val automaticRequest = automaticShiftDecision(controlsGas, clutch, automaticShifting)
+        val automaticRequest = automaticShiftDecision(controlsGas, clutch, automaticShifting, dt)
         if (automaticGasCutoff > 0.0) {
             automaticGasCutoff = f32(automaticGasCutoff - dt)
             controlsGas = 0.0
@@ -183,7 +167,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (shifting) {
             if (shiftDuration < shiftElapsed) {
                 gear = shiftTarget
-                requestedGear = gear
                 eventDirection = shiftDirection
                 shiftDirection = 0
                 shiftCompleted = true
@@ -214,15 +197,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 (1.0 - vehicle.frontWeightFraction) * vehicle.rearGripCoefficient
             )
         serviceBrakeForce = min(serviceBrakeForce, brakeGrip)
-        val uphillForce = vehicle.massKg * GRAVITY * simulatedUphillGrade.coerceIn(0.0, 0.30)
-        val regenForce = if (
-            externalSpeedMetersPerSecond == null && rawGas <= 0.001 && speedMetersPerSecond > 0.05
-        ) {
-            vehicle.massKg * DEFAULT_REGEN_METERS_PER_SECOND_SQUARED * simulatedRegenStrength.coerceIn(0.0, 1.0)
-        } else {
-            0.0
-        }
-        val resistingForce = aeroDrag + rollingForce + serviceBrakeForce + uphillForce + regenForce
+        val resistingForce = aeroDrag + rollingForce + serviceBrakeForce
         val effectiveMass = vehicle.massKg +
             2.0 * vehicle.frontWheelInertia / frontRadius.pow(2) +
             2.0 * vehicle.rearWheelInertia / rearRadius.pow(2)
@@ -261,10 +236,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
-        if (shiftCompleted && eventDirection > 0 && gear > 1) {
-            upshiftLandingRpm[gear] = rpm
-        }
-
         lastFrame = AssettoDrivetrainFrame(
             rpm = rpm,
             speedMetersPerSecond = speedMetersPerSecond,
@@ -302,20 +273,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private fun setGearImmediately(target: Int) {
         physics.drivetrain.ratioForGear(target)
         gear = target
-        requestedGear = target
         shiftDirection = 0
         shiftTarget = target
         shiftElapsed = 0.0
         shiftDuration = 0.0
-    }
-
-    private fun rebuildLandingRpm() {
-        upshiftLandingRpm.clear()
-        for (targetGear in 2..physics.drivetrain.forwardRatios.size) {
-            upshiftLandingRpm[targetGear] = physics.drivetrain.automaticUpshiftRpm *
-                abs(physics.drivetrain.ratioForGear(targetGear)) /
-                abs(physics.drivetrain.ratioForGear(targetGear - 1)).coerceAtLeast(1e-9)
-        }
     }
 
     private fun autoclutchStep(dt: Double, gas: Double): Double {
@@ -342,8 +303,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return clutchSignal.coerceIn(0.0, 1.0)
     }
 
-    private fun automaticShiftDecision(gas: Double, clutch: Double, enabled: Boolean): Int {
-        if (!enabled || sessionElapsedMilliseconds <= 300.0 || gear == -1 || shifting) return 0
+    private fun automaticShiftDecision(gas: Double, clutch: Double, enabled: Boolean, dt: Double): Int {
+        if (!enabled || gear == -1 || shifting) return 0
         var request = 0
         if (clutch > 0.99 || gear == 0) {
             if (
@@ -353,27 +314,16 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 request = 1
                 automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
-                val downshiftRpm = automaticDownshiftRpm()
-                val learnedRelease = gear in upshiftLandingRpm && gas <= 0.2
+                val downshiftRpm = physics.drivetrain.automaticDownshiftRpm.toDouble()
                 if (
                     rpm < downshiftRpm &&
-                    (gear !in upshiftLandingRpm || learnedRelease) &&
                     gear > 1 && clutch > 0.85 &&
-                    (learnedRelease || automaticGasCutoff <= 0.0)
+                    downshiftAllowed(gear - 1, dt) &&
+                    automaticGasCutoff <= 0.0
                 ) request = -1
             }
         }
-        if (request == 0 && speedMetersPerSecond < 2.0 && gas < 0.1 && automaticGasCutoff <= 0.0 && gear > 1) {
-            request = -1
-        }
         return request
-    }
-
-    private fun automaticDownshiftRpm(): Double {
-        val learned = upshiftLandingRpm[gear]
-        if (learned != null) return max(physics.engine.idleRpm, learned)
-        val fallback = physics.drivetrain.automaticDownshiftRpm.toDouble()
-        return if (gear == 2) fallback * 0.65 else fallback
     }
 
     private fun acceptShift(direction: Int, clutch: Double, dt: Double): Boolean {
@@ -384,7 +334,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
         shiftDirection = direction
         shiftTarget = target
-        requestedGear = target
         shiftElapsed = 0.0
         shiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds else physics.drivetrain.gearDownTimeSeconds
         gear = 0
@@ -409,11 +358,15 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (!spec.downshiftProtection) return true
         if (target == 0 && spec.downshiftLocksNeutral && speedMetersPerSecond * 3.6 > 2.0) return false
         if (target <= 0) return true
+        return projectedRpmForGear(target, dt) <= physics.engine.limiterRpm + spec.downshiftOverrevRpm
+    }
+
+    private fun projectedRpmForGear(target: Int, dt: Double): Double {
+        val spec = physics.drivetrain
         val wheelSpeed = speedMetersPerSecond / drivenAxle(spec.vehicle).radius
         val wheelAcceleration = max(0.0, (wheelSpeed - previousWheelSpeed) / dt.coerceAtLeast(1e-9))
         val projected = wheelSpeed + spec.gearDownTimeSeconds * wheelAcceleration
-        val projectedRpm = projected * abs(spec.ratioForGear(target) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
-        return projectedRpm <= physics.engine.limiterRpm + spec.downshiftOverrevRpm
+        return projected * abs(spec.ratioForGear(target) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
     }
 
     private fun engineTorque(dt: Double, controlsGas: Double, engineGas: Double): EngineTorqueFrame {
@@ -551,7 +504,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
     private companion object {
         const val GRAVITY = 9.81
-        const val DEFAULT_REGEN_METERS_PER_SECOND_SQUARED = 2.50
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
