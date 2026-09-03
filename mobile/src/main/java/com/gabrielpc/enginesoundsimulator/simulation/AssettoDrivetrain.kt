@@ -69,6 +69,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
     /** Persistent diagnostic trace for validating authored shifts against the Android output. */
     private var diagnosticTraceElapsedSeconds = 0.0
+    /** Keep high-rate samples briefly after a shift so clutch re-engagement cannot be missed. */
+    private var diagnosticHighRateRemainingSeconds = 0.0
     private var previousFmodWheelSpeed = 0.0
     private var lastFrame = snapshot()
 
@@ -100,6 +102,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         manualShiftRequest = 0
         fmodDrivetrainSpeedMetersPerSecond = 0.0
         diagnosticTraceElapsedSeconds = 0.0
+        diagnosticHighRateRemainingSeconds = 0.0
         previousFmodWheelSpeed = 0.0
         previousTractionLimit = false
         turboQs.fill(0.0)
@@ -255,24 +258,31 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val ratio = abs(ratioForGear(physicsGear) * physics.drivetrain.finalDrive)
         var engineOmega = rpm * RADIAN_SECONDS_PER_RPM
         var driveForce = 0.0
+        var clutchTorqueApplied = 0.0
+        var requiredClutchTorque = 0.0
+        var clutchCapacity = 0.0
+        var gripCapacity = 0.0
         var tractionTorqueLimited = false
         if (ratio > 0.0 && clutch > 0.0) {
             val engineInertia = physics.engine.inertia + physics.drivetrain.gearboxInertia
             val slip = engineOmega - ratio * wheelSpeed
             val denominator = 1.0 / engineInertia +
                 ratio * ratio / (effectiveMass * driven.radius * driven.radius)
-            val requiredTorque = (
+            requiredClutchTorque = (
                 slip / dt + engine.torque / engineInertia +
                     resistingForce * ratio / (effectiveMass * driven.radius)
                 ) / denominator
-            val clutchCapacity = physics.drivetrain.clutchMaximumTorque * clutch.pow(1.5)
+            clutchCapacity = physics.drivetrain.clutchMaximumTorque * clutch.pow(1.5)
             val gripForce = driven.grip * totalNormal * driven.normalFraction
-            val gripCapacity = gripForce * driven.radius / ratio
+            gripCapacity = gripForce * driven.radius / ratio
             tractionTorqueLimited = engine.effectiveThrottle > 0.0 &&
-                requiredTorque > gripCapacity + 1e-6 && gripCapacity < clutchCapacity - 1e-6
-            val clutchTorque = min(clutchCapacity, min(gripCapacity, max(-clutchCapacity, requiredTorque)))
-            driveForce = clutchTorque * ratio / driven.radius
-            engineOmega += (engine.torque - clutchTorque) / engineInertia * dt
+                requiredClutchTorque > gripCapacity + 1e-6 && gripCapacity < clutchCapacity - 1e-6
+            clutchTorqueApplied = min(
+                clutchCapacity,
+                min(gripCapacity, max(-clutchCapacity, requiredClutchTorque)),
+            )
+            driveForce = clutchTorqueApplied * ratio / driven.radius
+            engineOmega += (engine.torque - clutchTorqueApplied) / engineInertia * dt
         } else {
             engineOmega += engine.torque / physics.engine.inertia.coerceAtLeast(0.001) * dt
         }
@@ -287,8 +297,17 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
+        diagnosticHighRateRemainingSeconds = max(0.0, diagnosticHighRateRemainingSeconds - dt)
+        if (shiftStarted || shiftCompleted) {
+            diagnosticHighRateRemainingSeconds = max(
+                diagnosticHighRateRemainingSeconds,
+                SHIFT_DIAGNOSTIC_TAIL_SECONDS,
+            )
+        }
         diagnosticTraceElapsedSeconds += dt
-        val traceIntervalSeconds = if (shifting || shiftStarted || shiftCompleted) 0.003 else 0.050
+        val traceIntervalSeconds = if (
+            shifting || diagnosticHighRateRemainingSeconds > 0.0
+        ) 0.003 else 0.050
         if (diagnosticTraceElapsedSeconds >= traceIntervalSeconds) {
             diagnosticTraceElapsedSeconds -= traceIntervalSeconds
             Log.d(
@@ -300,6 +319,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
                     "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
                     "autoRequest=$automaticRequest requested=$requestedDirection " +
+                    "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
+                    "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
+                    "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
+                    "autoblip=${autoblipStarted != null} " +
+                    "clutchTorque=${"%.3f".format(clutchTorqueApplied)} " +
+                    "requiredClutchTorque=${"%.3f".format(requiredClutchTorque)} " +
+                    "clutchCapacity=${"%.3f".format(clutchCapacity)} gripCapacity=${"%.3f".format(gripCapacity)} " +
                     "shiftStarted=$shiftStarted shiftCompleted=$shiftCompleted shifting=$shifting " +
                     "cutoff=${"%.3f".format(automaticGasCutoff)}",
             )
@@ -626,6 +652,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val GRAVITY = 9.81
         const val STOPPED_CLUTCH_RELEASE_BRAKE = 0.2
         const val STOPPED_CLUTCH_RELEASE_SPEED_MPS = 1.0
+        const val SHIFT_DIAGNOSTIC_TAIL_SECONDS = 0.35
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
