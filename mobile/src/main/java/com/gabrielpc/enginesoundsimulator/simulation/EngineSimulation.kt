@@ -5,13 +5,21 @@ import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 import kotlin.math.PI
 import kotlin.math.abs
 
-/** Inputs accepted by the one authoritative Assetto drivetrain model. */
+/**
+ * Inputs accepted by the one authoritative Assetto drivetrain model.
+ *
+ * Naming convention in this file is intentional: `real...` means a value reported by
+ * physical BYD telemetry, `documented...` means a value produced from the documented
+ * car-data model, and `...Extrapolated...` means a presentation value reconstructed
+ * from one of those sources. This keeps model values from being mistaken for live
+ * vehicle values.
+ */
 data class DriverInput(
     val throttle: Double = 0.0,
     val brake: Double = 0.0,
     /** True only for the app's touch-pedal scenario; real BYD speed remains authoritative. */
     val simulatedPedals: Boolean = false,
-    val externalSpeedKmh: Double? = null,
+    val realReportedRawSpeedKmh: Double? = null,
     val transmissionPosition: TransmissionPosition = TransmissionPosition.DRIVE,
 )
 
@@ -20,7 +28,7 @@ enum class ShiftDirection { NONE, UP, DOWN }
 data class DrivetrainState(
     val rpm: Double = 0.0,
     val gear: Int = 0,
-    val speedKmh: Double = 0.0,
+    /** Raw/public speed: real BYD telemetry or the documented SIM value after truncation. */
     val smoothedThrottle: Double = 0.0,
     val audioThrottle: Double = 0.0,
     val smoothedBrake: Double = 0.0,
@@ -30,8 +38,11 @@ data class DrivetrainState(
     val shiftProgress: Double = 0.0,
     val shiftSerial: Long = 0L,
     val limiterActive: Boolean = false,
+    /** Continuous presentation speed extrapolated from the raw source for audible RPM/pitch. */
     val presentationSpeedKmh: Double = 0.0,
+    /** Velocity of [presentationSpeedKmh], not a raw BYD or documented model measurement. */
     val presentationAccelerationKmhPerSecond: Double = 0.0,
+    /** Raw/public speed retained for diagnostics; it is never the continuous FMOD pitch input. */
     val rawSpeedKmh: Double = 0.0,
     val drivetrainSpeedRadiansPerSecond: Double = 0.0,
     val boost: Double = 0.0,
@@ -89,49 +100,70 @@ class EngineSimulation {
         val activePhysics = physics ?: return latestState
         val activeDrivetrain = drivetrain ?: return latestState
         val dt = deltaSeconds.coerceIn(0.001, 0.020)
-        val rawSpeed = input.externalSpeedKmh?.coerceAtLeast(0.0)?.let(::truncateRawSpeedKmh)
+        val realReportedRawSpeedKmh = input.realReportedRawSpeedKmh
+            ?.coerceAtLeast(0.0)
+            ?.let(::truncateRawSpeedKmh)
         val enteringSimulatedPedals = input.simulatedPedals && previousInputWasSimulated != true
-        val simulationSeedSpeed = if (enteringSimulatedPedals) {
+        val documentedModelSeedSpeedKmh = if (enteringSimulatedPedals) {
             // Switching input sources must not teleport the virtual car back to zero. Prefer the
             // last continuous presentation speed (the audible REAL-pedal estimate), then fall
             // back to the current raw sample. This is transition continuity only; the Seal model
             // remains the sole SIMULATED road-speed authority after this frame.
             latestState.presentationSpeedKmh
                 .takeIf { it.isFinite() && it > 0.0 }
-                ?: rawSpeed
+                ?: realReportedRawSpeedKmh
                 ?: 0.0
         } else {
             null
         }
-        val simulatedMotion = if (input.simulatedPedals) {
+        val simulatedMotionFrame = if (input.simulatedPedals) {
             bydSealSimulatedPedalsMotion.step(
                 throttle = input.throttle,
                 brake = input.brake,
                 transmissionPosition = input.transmissionPosition,
                 deltaSeconds = dt,
-                initialSpeedKmh = simulationSeedSpeed,
+                initialDocumentedContinuousSpeedKmh = documentedModelSeedSpeedKmh,
             )
         } else {
             null
         }
         previousInputWasSimulated = input.simulatedPedals
-        // Keep the Seal integrator fractional internally, but publish only its truncated whole
-        // km/h value to the shared drivetrain path. REAL receives the same shape from BYD. The
-        // presentation estimator below then reconstructs the hidden fraction for both modes.
-        val measuredSpeedKmh = rawSpeed ?: simulatedMotion?.speedKmh?.let(::truncateRawSpeedKmh)
-        val presentationSpeed = if (measuredSpeedKmh != null) {
+        // The documented Seal model keeps a continuous value internally. Only its raw/public
+        // representation is truncated, matching the real BYD telemetry contract. FMOD receives
+        // the extrapolated presentation value below, never the integer speed directly.
+        val documentedContinuousSpeedKmh = simulatedMotionFrame?.documentedContinuousSpeedKmh
+        val documentedRawSpeedKmh = documentedContinuousSpeedKmh?.let(::truncateRawSpeedKmh)
+        val realOrDocumentedRawSpeedKmh = realReportedRawSpeedKmh ?: documentedRawSpeedKmh
+        val realExtrapolatedPresentationSpeedKmh = if (realReportedRawSpeedKmh != null) {
             presentationSpeedEstimator.update(
-                measurementKmh = measuredSpeedKmh,
+                measurementKmh = realReportedRawSpeedKmh,
                 throttle = input.throttle,
                 brake = input.brake,
                 dt = dt,
                 responseSeconds = 0.120,
             )
         } else {
-            presentationSpeedEstimator.reset()
             null
         }
-        val roadSpeedKmh = measuredSpeedKmh
+        val documentedExtrapolatedPresentationSpeedKmh = if (
+            realReportedRawSpeedKmh == null && documentedRawSpeedKmh != null
+        ) {
+            presentationSpeedEstimator.update(
+                measurementKmh = documentedRawSpeedKmh,
+                throttle = input.throttle,
+                brake = input.brake,
+                dt = dt,
+                responseSeconds = 0.120,
+            )
+        } else {
+            null
+        }
+        if (realReportedRawSpeedKmh == null && documentedRawSpeedKmh == null) {
+            presentationSpeedEstimator.reset()
+        }
+        val realOrDocumentedExtrapolatedPresentationSpeedKmh = realExtrapolatedPresentationSpeedKmh
+            ?: documentedExtrapolatedPresentationSpeedKmh
+        val drivetrainRawSpeedKmh = realOrDocumentedRawSpeedKmh
         val gearCalibration = if (input.transmissionPosition == TransmissionPosition.DRIVE) {
             // Both input modes use the same presentation gearbox in D: each
             // gear spans an equal share of 0..190 km/h and reaches the authored
@@ -148,12 +180,15 @@ class EngineSimulation {
             brake = input.brake.coerceIn(0.0, 1.0),
             transmissionPosition = input.transmissionPosition,
             automaticShifting = !manualShiftEnabled,
-            externalSpeedMetersPerSecond = roadSpeedKmh?.div(3.6),
+            externalSpeedMetersPerSecond = drivetrainRawSpeedKmh?.div(3.6),
             simulatedPedalsGearCalibration = gearCalibration,
             deltaSeconds = dt,
         )
-        val present = presentationSpeed ?: frame.speedMetersPerSecond * 3.6
-        val presentAcceleration = if (presentationSpeed != null) {
+        val audiblePresentationSpeedKmh = realOrDocumentedExtrapolatedPresentationSpeedKmh
+            ?: frame.speedMetersPerSecond * 3.6
+        val audiblePresentationVelocityKmhPerSecond = if (
+            realOrDocumentedExtrapolatedPresentationSpeedKmh != null
+        ) {
             presentationSpeedEstimator.presentationVelocityKmhPerSecond
         } else {
             0.0
@@ -161,14 +196,14 @@ class EngineSimulation {
         latestState = buildState(
             activePhysics = activePhysics,
             frame = frame,
-            presentationSpeedKmh = present,
-            presentationAccelerationKmhPerSecond = presentAcceleration,
-            rawSpeedKmh = measuredSpeedKmh ?: truncateRawSpeedKmh(frame.speedMetersPerSecond * 3.6),
-            // Both sources now use the same audible road-speed reconstruction. SIM keeps a
-            // fractional Seal state only to integrate acceleration accurately; its truncated
-            // value reaches the drivetrain just like BYD telemetry, and this estimator hides the
-            // resulting integer steps from the tachometer and FMOD pitch.
-            usePresentationRoadSpeed = measuredSpeedKmh != null,
+            presentationSpeedKmh = audiblePresentationSpeedKmh,
+            presentationAccelerationKmhPerSecond = audiblePresentationVelocityKmhPerSecond,
+            rawSpeedKmh = realOrDocumentedRawSpeedKmh
+                ?: truncateRawSpeedKmh(frame.speedMetersPerSecond * 3.6),
+            // Both input sources use the same audible reconstruction. The documented SIM model
+            // keeps a fractional value only for accurate integration; its truncated raw value
+            // reaches the drivetrain just like real BYD telemetry.
+            usePresentationRoadSpeed = realOrDocumentedRawSpeedKmh != null,
             simulatedPedalsGearCalibration = gearCalibration,
         )
         return latestState
@@ -199,7 +234,6 @@ class EngineSimulation {
         return DrivetrainState(
             rpm = audibleRpm,
             gear = frame.gear,
-            speedKmh = rawSpeedKmh,
             smoothedThrottle = frame.effectiveThrottle,
             audioThrottle = frame.driverThrottle,
             smoothedBrake = frame.brake,
@@ -267,7 +301,8 @@ class EngineSimulation {
 internal data class ResolvedDriveInput(
     val throttle: Double,
     val brake: Double,
-    val externalSpeedKmh: Double?,
+    /** Non-null only when the physical BYD reported a valid raw speed sample. */
+    val realReportedRawSpeedKmh: Double?,
     val label: String,
     val usesSimulatedPedals: Boolean,
 )
@@ -283,7 +318,9 @@ internal fun resolveDriveInput(
         return ResolvedDriveInput(
             throttle = normalizeVehicleThrottlePercent(telemetry.accelerator.value!!),
             brake = (telemetry.brake.value!! / 100.0).coerceIn(0.0, 1.0),
-            externalSpeedKmh = telemetry.speed.value?.takeIf { telemetry.speed.isValid }?.let(::truncateRawSpeedKmh),
+            realReportedRawSpeedKmh = telemetry.speed.value
+                ?.takeIf { telemetry.speed.isValid }
+                ?.let(::truncateRawSpeedKmh),
             label = com.gabrielpc.enginesoundsimulator.drive.InputMode.RealPedals.displayName,
             usesSimulatedPedals = false,
         )
@@ -291,7 +328,7 @@ internal fun resolveDriveInput(
     return ResolvedDriveInput(
         throttle = simulatedPedalThrottle.coerceIn(0.0, 1.0),
         brake = simulatedPedalBrake.coerceIn(0.0, 1.0),
-        externalSpeedKmh = null,
+        realReportedRawSpeedKmh = null,
         label = com.gabrielpc.enginesoundsimulator.drive.InputMode.SimulatedPedals.displayName,
         usesSimulatedPedals = true,
     )
@@ -300,5 +337,5 @@ internal fun resolveDriveInput(
 internal fun normalizeVehicleThrottlePercent(percent: Double): Double =
     if (percent >= 99.0) 1.0 else (percent / 100.0).coerceIn(0.0, 1.0)
 
-internal fun truncateRawSpeedKmh(speedKmh: Double): Double =
-    kotlin.math.floor(speedKmh.coerceAtLeast(0.0))
+internal fun truncateRawSpeedKmh(sourceSpeedKmh: Double): Double =
+    kotlin.math.floor(sourceSpeedKmh.coerceAtLeast(0.0))

@@ -8,10 +8,12 @@ package com.gabrielpc.enginesoundsimulator.simulation
  * the FMOD bank. The bank's own drivetrain still owns RPM, clutch, turbo and event behaviour.
  */
 internal class BydSealSimulatedPedalsMotion {
-    private var speedKmh = 0.0
+    /** Continuous speed generated from the documented BYD Seal acceleration envelope. */
+    private var documentedContinuousSpeedKmh = 0.0
 
-    fun reset(initialSpeedKmh: Double = 0.0) {
-        speedKmh = initialSpeedKmh.coerceIn(0.0, TOP_SPEED_KMH)
+    fun reset(initialDocumentedContinuousSpeedKmh: Double = 0.0) {
+        documentedContinuousSpeedKmh = initialDocumentedContinuousSpeedKmh
+            .coerceIn(0.0, TOP_SPEED_KMH)
     }
 
     fun step(
@@ -19,49 +21,75 @@ internal class BydSealSimulatedPedalsMotion {
         brake: Double,
         transmissionPosition: TransmissionPosition,
         deltaSeconds: Double,
-        initialSpeedKmh: Double? = null,
+        initialDocumentedContinuousSpeedKmh: Double? = null,
     ): BydSealMotionFrame {
-        initialSpeedKmh?.let { speedKmh = it.coerceIn(0.0, TOP_SPEED_KMH) }
+        initialDocumentedContinuousSpeedKmh?.let {
+            documentedContinuousSpeedKmh = it.coerceIn(0.0, TOP_SPEED_KMH)
+        }
         if (transmissionPosition == TransmissionPosition.PARK) {
-            speedKmh = 0.0
-            return BydSealMotionFrame(speedKmh)
+            documentedContinuousSpeedKmh = 0.0
+            return BydSealMotionFrame(documentedContinuousSpeedKmh)
         }
         val dt = deltaSeconds.coerceIn(0.001, 0.020)
         val pedal = throttle.coerceIn(0.0, 1.0)
         val brakePedal = brake.coerceIn(0.0, 1.0)
         val canDrive = transmissionPosition == TransmissionPosition.DRIVE
-        val propulsion = if (canDrive) fullThrottleAccelerationKmhPerSecond(speedKmh) * pedal else 0.0
+        val propulsion = if (canDrive) {
+            fullThrottleAccelerationKmhPerSecond(documentedContinuousSpeedKmh) * pedal
+        } else {
+            0.0
+        }
         // A non-zero virtual pedal requests its direct fraction of the measured full-load curve.
         // Applying an additional hidden drag at partial pedal would break that requested rule of three.
-        val coast = if (pedal <= 0.0) coastDecelerationKmhPerSecond(speedKmh) else 0.0
+        val coast = if (pedal <= 0.0) {
+            coastDecelerationKmhPerSecond(documentedContinuousSpeedKmh)
+        } else {
+            0.0
+        }
         val serviceBrake = MAXIMUM_BRAKE_DECELERATION_KMH_PER_SECOND * brakePedal
         val accelerationKmhPerSecond = propulsion - coast - serviceBrake
-        speedKmh = (speedKmh + accelerationKmhPerSecond * dt).coerceIn(0.0, TOP_SPEED_KMH)
-        return BydSealMotionFrame(speedKmh)
+        documentedContinuousSpeedKmh = (
+            documentedContinuousSpeedKmh + accelerationKmhPerSecond * dt
+            ).coerceIn(0.0, TOP_SPEED_KMH)
+        return BydSealMotionFrame(documentedContinuousSpeedKmh)
     }
 
     /** Linear interpolation keeps acceleration continuous as speed crosses a curve sample. */
-    private fun fullThrottleAccelerationKmhPerSecond(speed: Double): Double = interpolate(
+    private fun fullThrottleAccelerationKmhPerSecond(documentedContinuousSpeedKmh: Double): Double = interpolate(
         FULL_THROTTLE_ACCELERATION_KMH_PER_SECOND,
-        speed,
+        documentedContinuousSpeedKmh,
     )
 
-    private fun coastDecelerationKmhPerSecond(speed: Double): Double = interpolate(
+    private fun coastDecelerationKmhPerSecond(documentedContinuousSpeedKmh: Double): Double = interpolate(
         COAST_DECELERATION_KMH_PER_SECOND,
-        speed,
+        documentedContinuousSpeedKmh,
     )
 
-    private fun interpolate(points: List<CurvePoint>, x: Double): Double {
-        if (x <= points.first().speedKmh) return points.first().value
-        if (x >= points.last().speedKmh) return points.last().value
-        val upperIndex = points.indexOfFirst { x <= it.speedKmh }.coerceAtLeast(1)
+    private fun interpolate(
+        points: List<CurvePoint>,
+        documentedContinuousSpeedKmh: Double,
+    ): Double {
+        if (documentedContinuousSpeedKmh <= points.first().documentedSpeedKmh) {
+            return points.first().documentedCurveValue
+        }
+        if (documentedContinuousSpeedKmh >= points.last().documentedSpeedKmh) {
+            return points.last().documentedCurveValue
+        }
+        val upperIndex = points.indexOfFirst {
+            documentedContinuousSpeedKmh <= it.documentedSpeedKmh
+        }.coerceAtLeast(1)
         val lower = points[upperIndex - 1]
         val upper = points[upperIndex]
-        val fraction = (x - lower.speedKmh) / (upper.speedKmh - lower.speedKmh)
-        return lower.value + (upper.value - lower.value) * fraction
+        val fraction = (documentedContinuousSpeedKmh - lower.documentedSpeedKmh) /
+            (upper.documentedSpeedKmh - lower.documentedSpeedKmh)
+        return lower.documentedCurveValue +
+            (upper.documentedCurveValue - lower.documentedCurveValue) * fraction
     }
 
-    internal data class CurvePoint(val speedKmh: Double, val value: Double)
+    internal data class CurvePoint(
+        val documentedSpeedKmh: Double,
+        val documentedCurveValue: Double,
+    )
 
     private companion object {
         const val TOP_SPEED_KMH = 190.0
@@ -98,5 +126,5 @@ internal class BydSealSimulatedPedalsMotion {
 }
 
 internal data class BydSealMotionFrame(
-    val speedKmh: Double,
+    val documentedContinuousSpeedKmh: Double,
 )

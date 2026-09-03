@@ -323,7 +323,7 @@ class DriveController(context: Context) {
                 throttle = input.throttle,
                 brake = input.brake,
                 simulatedPedals = input.usesSimulatedPedals,
-                externalSpeedKmh = input.externalSpeedKmh,
+                realReportedRawSpeedKmh = input.realReportedRawSpeedKmh,
                 transmissionPosition = transmission.position,
             ),
             dt,
