@@ -170,13 +170,19 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val clutch = autoclutchStep(dt, rawGas, cleanBrake)
         var controlsGas = rawGas
         val autoblipStarted = autoblipStartMilliseconds
-        if (autoblipStarted != null && physics.drivetrain.autoblipProfileMilliseconds.isNotEmpty()) {
+        var autoblipApplied = false
+        if (
+            !DISABLE_AUTOBLIP_FOR_COMPARISON &&
+            autoblipStarted != null &&
+            physics.drivetrain.autoblipProfileMilliseconds.isNotEmpty()
+        ) {
             val elapsed = sessionElapsedMilliseconds - autoblipStarted
             if (elapsed >= 0.0 && elapsed < physics.drivetrain.autoblipProfileMilliseconds.last().x) {
                 controlsGas = max(
                     controlsGas,
                     interpolateAssettoCurve(physics.drivetrain.autoblipProfileMilliseconds, elapsed),
                 )
+                autoblipApplied = true
             }
         }
 
@@ -322,7 +328,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
                     "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
                     "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
-                    "autoblip=${autoblipStarted != null} " +
+                    "autoblipStarted=${autoblipStarted != null} autoblipApplied=$autoblipApplied " +
                     "clutchTorque=${"%.3f".format(clutchTorqueApplied)} " +
                     "requiredClutchTorque=${"%.3f".format(requiredClutchTorque)} " +
                     "clutchCapacity=${"%.3f".format(clutchCapacity)} gripCapacity=${"%.3f".format(gripCapacity)} " +
@@ -653,6 +659,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val STOPPED_CLUTCH_RELEASE_BRAKE = 0.2
         const val STOPPED_CLUTCH_RELEASE_SPEED_MPS = 1.0
         const val SHIFT_DIAGNOSTIC_TAIL_SECONDS = 0.35
+        // Comparison switch: disable only the bank's AutoBlip contribution while diagnosing
+        // downshift RPM pulses. The authored profile remains loaded so the test is reversible.
+        const val DISABLE_AUTOBLIP_FOR_COMPARISON = true
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
