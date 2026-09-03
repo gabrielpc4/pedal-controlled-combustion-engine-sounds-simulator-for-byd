@@ -538,7 +538,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private fun upshiftTriggerRpmForGear(currentGear: Int, gas: Double): Double {
         val authored = physics.drivetrain.automaticUpshiftRpm.toDouble()
         return if (currentGear == 1 && gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD) {
-            MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM
+            (MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM - customShiftAdvanceRpm())
                 .coerceAtMost(authored)
                 .coerceAtLeast(physics.engine.idleRpm + 500.0)
         } else {
@@ -557,7 +557,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private fun downshiftRpmForCurrentGear(): Double {
         if (gear == 2) {
             // This is the explicit main-branch 2→1 exception, retained as a fixed RPM rule.
-            return MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM
+            return (MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM - customShiftAdvanceRpm())
+                .coerceAtLeast(physics.engine.idleRpm + 100.0)
         }
         return landingRpmByGear.getOrNull(gear)
             ?.takeIf { it > 0.0 }
@@ -565,6 +566,18 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 fromGear = gear - 1,
                 upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble(),
             )
+    }
+
+    /**
+     * The requested early-shift behavior is limited to 8,000-RPM cars. It moves only the two
+     * legacy 1↔2 thresholds; authored thresholds and all other gears remain untouched.
+     */
+    private fun customShiftAdvanceRpm(): Double {
+        return if (abs(physics.engine.limiterRpm - EIGHT_THOUSAND_RPM) <= RPM_MATCH_TOLERANCE) {
+            TWO_THOUSAND_RPM
+        } else {
+            0.0
+        }
     }
 
     private fun downshiftAllowed(target: Int, dt: Double): Boolean {
@@ -738,6 +751,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         /** Main-branch 2→1 rule: return to 1st below 4,000 RPM. */
         const val MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
         const val MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
+        const val EIGHT_THOUSAND_RPM = 8_000.0
+        const val TWO_THOUSAND_RPM = 2_000.0
+        const val RPM_MATCH_TOLERANCE = 25.0
         // A brief automatic-only gap keeps hard braking audible as separate shifts instead of
         // chaining two downshifts immediately after one another. Authored shift duration is kept.
         const val AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS = 0.12
