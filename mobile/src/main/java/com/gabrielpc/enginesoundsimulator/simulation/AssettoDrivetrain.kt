@@ -28,6 +28,10 @@ internal data class AssettoDrivetrainFrame(
     val shifting: Boolean,
     val shiftDirection: Int,
     val shiftProgress: Double,
+    val authoredShiftDurationSeconds: Double = 0.0,
+    val effectiveShiftDurationSeconds: Double = 0.0,
+    val authoredClutchDurationSeconds: Double = 0.0,
+    val effectiveClutchDurationSeconds: Double = 0.0,
     val tractionLimitActive: Boolean,
     val tractionLimitPulse: Boolean,
 )
@@ -55,6 +59,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var shiftTarget = 1
     private var shiftElapsed = 0.0
     private var shiftDuration = 0.0
+    private var authoredShiftDuration = 0.0
+    private var authoredClutchDuration = 0.0
+    private var effectiveClutchDuration = 0.0
     /** Prevents hard braking from chaining automatic downshifts back-to-back. */
     private var automaticDownshiftCooldownSeconds = 0.0
     private var shiftWasAutomatic = false
@@ -112,6 +119,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftTarget = 1
         shiftElapsed = 0.0
         shiftDuration = 0.0
+        authoredShiftDuration = 0.0
+        authoredClutchDuration = 0.0
+        effectiveClutchDuration = 0.0
         automaticDownshiftCooldownSeconds = 0.0
         shiftWasAutomatic = false
         manualShiftRequest = 0
@@ -344,6 +354,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     "rpm=${rpm.toInt()} internalGear=$gear exposedGear=${if (shifting) shiftTarget else gear} " +
                         "physicsGear=$physicsGear target=$shiftTarget shiftDir=$shiftDirection " +
                         "shiftElapsed=${"%.4f".format(shiftElapsed)} shiftDuration=${"%.4f".format(shiftDuration)} " +
+                        "authoredShiftDuration=${"%.4f".format(authoredShiftDuration)} " +
+                        "authoredClutchDuration=${"%.4f".format(authoredClutchDuration)} " +
+                        "effectiveClutchDuration=${"%.4f".format(effectiveClutchDuration)} " +
                         "clutch=${"%.3f".format(clutch)} vehicleSpeed=${"%.2f".format(speedMetersPerSecond * 3.6)} " +
                         "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
                         "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
@@ -392,6 +405,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 shiftCompleted -> 1.0
                 else -> 0.0
             },
+            authoredShiftDurationSeconds = authoredShiftDuration,
+            effectiveShiftDurationSeconds = shiftDuration,
+            authoredClutchDurationSeconds = authoredClutchDuration,
+            effectiveClutchDurationSeconds = effectiveClutchDuration,
             tractionLimitActive = tractionActive,
             tractionLimitPulse = tractionPulse,
         )
@@ -413,6 +430,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftTarget = target
         shiftElapsed = 0.0
         shiftDuration = 0.0
+        authoredShiftDuration = 0.0
+        authoredClutchDuration = 0.0
+        effectiveClutchDuration = 0.0
     }
 
     private fun autoclutchStep(dt: Double, gas: Double, brake: Double): Double {
@@ -507,8 +527,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftDirection = direction
         shiftTarget = target
         shiftElapsed = 0.0
-        shiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds
+        authoredShiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds
         else physics.drivetrain.gearDownTimeSeconds
+        // Deliberate app-level divergence: fixed short timings make the controls feel
+        // responsive, while FMOD still receives the same authored event triggers and
+        // continuous parameters. The bank timing is retained above for diagnostics.
+        shiftDuration = if (direction > 0) FIXED_UPSHIFT_SECONDS else FIXED_DOWNSHIFT_SECONDS
         if (direction > 0) {
             landingRpmByGear[target] = landingRpmAfterUpshift(
                 fromGear = gear,
@@ -518,13 +542,18 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
             engineCutoff = physics.drivetrain.autoCutoffTimeSeconds
         }
-        val profile = if (direction > 0) {
+        val authoredProfile = if (direction > 0) {
             physics.drivetrain.autoclutchUpshiftProfile
         } else {
             physics.drivetrain.autoclutchDownshiftProfile
         }
-        if (physics.drivetrain.autoclutchOnChanges && clutch > 0.01 && profile.isNotEmpty()) {
-            clutchSequence = profile
+        authoredClutchDuration = authoredProfile.maxOfOrNull { it.x } ?: 0.0
+        if (physics.drivetrain.autoclutchOnChanges && clutch > 0.01) {
+            // The authored downshift curve can keep the clutch open for ~1.5 s. Use a
+            // compact equivalent curve so the drivetrain catches the new gear promptly;
+            // this changes only host clutch timing, not FMOD gear/lift-off/turbo events.
+            effectiveClutchDuration = shiftDuration
+            clutchSequence = fixedClutchSequence(effectiveClutchDuration)
             clutchSequenceElapsed = 0.0
         }
         if (direction < 0 && clutch > 1.0 / PI) autoblipStartMilliseconds = sessionElapsedMilliseconds
@@ -595,7 +624,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val spec = physics.drivetrain
         val wheelSpeed = fmodDrivetrainSpeedMetersPerSecond / drivenAxle(spec.vehicle).radius
         val wheelAcceleration = max(0.0, (wheelSpeed - previousFmodWheelSpeed) / dt.coerceAtLeast(1e-9))
-        val shiftTime = spec.gearDownTimeSeconds
+        // Match downshift protection to the effective fixed transition, otherwise the
+        // protection calculation would still predict using the bank's slower timing.
+        val shiftTime = FIXED_DOWNSHIFT_SECONDS
         val projected = wheelSpeed + shiftTime * wheelAcceleration
         return projected * abs(ratioForGear(target) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
     }
@@ -757,9 +788,21 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // A brief automatic-only gap keeps hard braking audible as separate shifts instead of
         // chaining two downshifts immediately after one another. Authored shift duration is kept.
         const val AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS = 0.12
+        const val FIXED_UPSHIFT_SECONDS = 0.10
+        const val FIXED_DOWNSHIFT_SECONDS = 0.15
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
+}
+
+private fun fixedClutchSequence(durationSeconds: Double): List<AssettoCurvePoint> {
+    val duration = durationSeconds.coerceAtLeast(0.003)
+    return listOf(
+        AssettoCurvePoint(0.0, 1.0),
+        AssettoCurvePoint((duration * 0.10).coerceAtLeast(0.003), 0.0),
+        AssettoCurvePoint(duration * 0.60, 0.0),
+        AssettoCurvePoint(duration, 1.0),
+    )
 }
 
 private fun f32(value: Double): Double = value.toFloat().toDouble()
