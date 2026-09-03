@@ -1,0 +1,485 @@
+{
+  "schema": "byd-fmod-bank-index-v2",
+  "version": 2,
+  "groups": [
+    {
+      "id": "original_cars_pack",
+      "name": "Original Assetto Corsa cars",
+      "active": true
+    },
+    {
+      "id": "modded_car_packs",
+      "name": "Modded cars",
+      "active": true
+    }
+  ],
+  "packs": [
+    {
+      "id": "modded-aston-martin-dbrs9-gt3",
+      "name": "Aston Martin DBS",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-aston-martin-dbrs9-gt3.bydbank",
+      "bytes": 36238930
+    },
+    {
+      "id": "modded-audi-r8-lms-gt2",
+      "name": "Audi R8",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-audi-r8-lms-gt2.bydbank",
+      "bytes": 36233616
+    },
+    {
+      "id": "modded-audi-tt-cup-2015",
+      "name": "Audi TT",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-audi-tt-cup-2015.bydbank",
+      "bytes": 44873783
+    },
+    {
+      "id": "modded-bmw-m8-gtlm",
+      "name": "BMW M8 Competition",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-bmw-m8-gtlm.bydbank",
+      "bytes": 50704429
+    },
+    {
+      "id": "modded-bugatti-chiron-pur-sport",
+      "name": "Bugatti Chiron",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-bugatti-chiron-pur-sport.bydbank",
+      "bytes": 58656431
+    },
+    {
+      "id": "modded-cadillac-escalade-esv",
+      "name": "Cadillac Escalade",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-cadillac-escalade-esv.bydbank",
+      "bytes": 17342668
+    },
+    {
+      "id": "modded-chevrolet-camaro-concept",
+      "name": "Chevrolet Camaro",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-chevrolet-camaro-concept.bydbank",
+      "bytes": 16227003
+    },
+    {
+      "id": "modded-chevrolet-corvette-c6-z06-stanced",
+      "name": "Chevrolet Corvete C6 ZO6",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-chevrolet-corvette-c6-z06-stanced.bydbank",
+      "bytes": 60058226
+    },
+    {
+      "id": "modded-chevrolet-corvette-c7-stingray-hellspec",
+      "name": "Chevrolet Corvette Singray",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-chevrolet-corvette-c7-stingray-hellspec.bydbank",
+      "bytes": 60215657
+    },
+    {
+      "id": "modded-ferrari-360-challenge-stradale",
+      "name": "Ferrari 360",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-360-challenge-stradale.bydbank",
+      "bytes": 83041940
+    },
+    {
+      "id": "modded-ferrari-458-italia-gte-ferruccio",
+      "name": "Ferrari 458 Spider",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-458-italia-gte-ferruccio.bydbank",
+      "bytes": 63373061
+    },
+    {
+      "id": "modded-ferrari-458-italia-tune",
+      "name": "Ferrari 458 Italia",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-458-italia-tune.bydbank",
+      "bytes": 73899221
+    },
+    {
+      "id": "modded-ferrari-488-gte-evo-michelotto",
+      "name": "Ferrari 488 Pista",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-488-gte-evo-michelotto.bydbank",
+      "bytes": 74697057
+    },
+    {
+      "id": "modded-ferrari-f1-2000",
+      "name": "Ferrari F1 2000",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-f1-2000.bydbank",
+      "bytes": 26209864
+    },
+    {
+      "id": "modded-ferrari-f430-gt2-2007",
+      "name": "Ferrari 430",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-f430-gt2-2007.bydbank",
+      "bytes": 63371616
+    },
+    {
+      "id": "modded-ferrari-laferrari-trio",
+      "name": "Ferrari LaFerrari",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-laferrari-trio.bydbank",
+      "bytes": 54809085
+    },
+    {
+      "id": "modded-ferrari-sf90-xx-stradale-2024",
+      "name": "Ferrari SF90 Stradale",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-ferrari-sf90-xx-stradale-2024.bydbank",
+      "bytes": 23868490
+    },
+    {
+      "id": "modded-lexus-lfa",
+      "name": "Lexus LFA",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-lexus-lfa.bydbank",
+      "bytes": 17320514
+    },
+    {
+      "id": "modded-lexus-lfa-concept-gt500",
+      "name": "Lexus LFA Concept GT500",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-lexus-lfa-concept-gt500.bydbank",
+      "bytes": 62078094
+    },
+    {
+      "id": "modded-lexus-lfa-no-hesi-spec",
+      "name": "Lexus LFA No Hesi Spec",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-lexus-lfa-no-hesi-spec.bydbank",
+      "bytes": 9839374
+    },
+    {
+      "id": "modded-lexus-lfa-nurburgring-edition",
+      "name": "Lexus LFA Nurburgring Edition",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-lexus-lfa-nurburgring-edition.bydbank",
+      "bytes": 23466641
+    },
+    {
+      "id": "modded-mercedes-amg-project-one-hypercar",
+      "name": "Mercedes-AMG Project One Hypercar",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-mercedes-amg-project-one-hypercar.bydbank",
+      "bytes": 11373759
+    },
+    {
+      "id": "modded-mercedes-benz-amg-gt3-evo-2020-sprint",
+      "name": "Mercedes-Benz AMG GT3 EVO 2020",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-mercedes-benz-amg-gt3-evo-2020-sprint.bydbank",
+      "bytes": 19666346
+    },
+    {
+      "id": "modded-mitsubishi-eclipse-gsx-r",
+      "name": "Mitsubishi Eclipse",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-mitsubishi-eclipse-gsx-r.bydbank",
+      "bytes": 67717444
+    },
+    {
+      "id": "modded-mitsubishi-lancer-evolution-viii-gsr",
+      "name": "Mitsubishi Lance Evolution VII",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-mitsubishi-lancer-evolution-viii-gsr.bydbank",
+      "bytes": 24174403
+    },
+    {
+      "id": "modded-nissan-350z",
+      "name": "Nissan 350z",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-nissan-350z.bydbank",
+      "bytes": 14183324
+    },
+    {
+      "id": "modded-nissan-370z-widebody",
+      "name": "Nissan 370Z Widebody",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-nissan-370z-widebody.bydbank",
+      "bytes": 14186815
+    },
+    {
+      "id": "modded-nissan-gt-r-nismo-godzilla",
+      "name": "Nissan GT-R NISMO Godzilla",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-nissan-gt-r-nismo-godzilla.bydbank",
+      "bytes": 25000433
+    },
+    {
+      "id": "modded-porsche-911-992-turbo-s-pdk",
+      "name": "Porsche 911 Turbo S PDK",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-porsche-911-992-turbo-s-pdk.bydbank",
+      "bytes": 55196499
+    },
+    {
+      "id": "modded-porsche-911-gt3-rs-hellspec",
+      "name": "Porsche 911 GT3 RS",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-porsche-911-gt3-rs-hellspec.bydbank",
+      "bytes": 92373873
+    },
+    {
+      "id": "modded-porsche-911-turbo-s",
+      "name": "Porsche 911 Turbo S",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-porsche-911-turbo-s.bydbank",
+      "bytes": 98142232
+    },
+    {
+      "id": "modded-porsche-carrera-gt-rs",
+      "name": "Porsche Carrera GT",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-porsche-carrera-gt-rs.bydbank",
+      "bytes": 190306217
+    },
+    {
+      "id": "modded-toyota-supra-wangan",
+      "name": "Toyota Supra",
+      "group": "modded_car_packs",
+      "active": true,
+      "asset": "modded-toyota-supra-wangan.bydbank",
+      "bytes": 97012597
+    },
+    {
+      "id": "alfa-romeo-4c",
+      "name": "Alfa Romeo 4C",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "alfa-romeo-4c.bydbank",
+      "bytes": 59888862
+    },
+    {
+      "id": "assetto-audi-r8-lms-2016",
+      "name": "Audi R8 LMS 2016",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-audi-r8-lms-2016.bydbank",
+      "bytes": 25810661
+    },
+    {
+      "id": "assetto-audi-r8-plus",
+      "name": "Audi R8 Plus",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-audi-r8-plus.bydbank",
+      "bytes": 38214304
+    },
+    {
+      "id": "assetto-audi-tt-cup",
+      "name": "Audi TT Cup",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-audi-tt-cup.bydbank",
+      "bytes": 39886825
+    },
+    {
+      "id": "assetto-bmw-m4",
+      "name": "BMW M4",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-bmw-m4.bydbank",
+      "bytes": 26592031
+    },
+    {
+      "id": "assetto-common",
+      "name": "Assetto Corsa shared audio",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-common.bydbank",
+      "bytes": 43810329,
+      "dependency": true
+    },
+    {
+      "id": "assetto-common-strings",
+      "name": "Assetto Corsa event strings",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-common-strings.bydbank",
+      "bytes": 128345,
+      "dependency": true
+    },
+    {
+      "id": "assetto-corvette-c7-stingray",
+      "name": "Chevrolet Corvette C7 Stingray",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-corvette-c7-stingray.bydbank",
+      "bytes": 24925977
+    },
+    {
+      "id": "assetto-ferrari-458",
+      "name": "Ferrari 458 Italia",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-ferrari-458.bydbank",
+      "bytes": 52702848
+    },
+    {
+      "id": "assetto-ferrari-458-gt2",
+      "name": "Ferrari 458 GT2",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-ferrari-458-gt2.bydbank",
+      "bytes": 26255056
+    },
+    {
+      "id": "assetto-ferrari-488-gt3",
+      "name": "Ferrari 488 GT3",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-ferrari-488-gt3.bydbank",
+      "bytes": 28633864
+    },
+    {
+      "id": "assetto-ferrari-488-gtb",
+      "name": "Ferrari 488 GTB",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-ferrari-488-gtb.bydbank",
+      "bytes": 24099387
+    },
+    {
+      "id": "assetto-ferrari-fxx-k",
+      "name": "Ferrari FXX K",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-ferrari-fxx-k.bydbank",
+      "bytes": 33319174
+    },
+    {
+      "id": "assetto-ferrari-laferrari",
+      "name": "Ferrari LaFerrari",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-ferrari-laferrari.bydbank",
+      "bytes": 31299349
+    },
+    {
+      "id": "assetto-lamborghini-aventador-sv",
+      "name": "Lamborghini Aventador SV",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-lamborghini-aventador-sv.bydbank",
+      "bytes": 54543830
+    },
+    {
+      "id": "assetto-lamborghini-gallardo-sl",
+      "name": "Lamborghini Gallardo Superleggera",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-lamborghini-gallardo-sl.bydbank",
+      "bytes": 44226105
+    },
+    {
+      "id": "assetto-lamborghini-huracan-performante",
+      "name": "Lamborghini Hurac\u00e1n Performante",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-lamborghini-huracan-performante.bydbank",
+      "bytes": 45137310
+    },
+    {
+      "id": "assetto-lamborghini-huracan-st",
+      "name": "Lamborghini Hurac\u00e1n ST",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-lamborghini-huracan-st.bydbank",
+      "bytes": 45265937
+    },
+    {
+      "id": "assetto-mercedes-amg-gt3",
+      "name": "Mercedes-AMG GT3",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-mercedes-amg-gt3.bydbank",
+      "bytes": 28246442
+    },
+    {
+      "id": "assetto-nissan-370z",
+      "name": "Nissan 370Z",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-nissan-370z.bydbank",
+      "bytes": 28405375
+    },
+    {
+      "id": "assetto-nissan-gtr",
+      "name": "Nissan GT-R",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-nissan-gtr.bydbank",
+      "bytes": 23213798
+    },
+    {
+      "id": "assetto-nissan-skyline-r34",
+      "name": "Nissan Skyline GT-R R34",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-nissan-skyline-r34.bydbank",
+      "bytes": 20690809
+    },
+    {
+      "id": "assetto-porsche-911-gt3-rs",
+      "name": "Porsche 911 GT3 RS",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-porsche-911-gt3-rs.bydbank",
+      "bytes": 40078369
+    },
+    {
+      "id": "assetto-porsche-991-turbo-s",
+      "name": "Porsche 911 Turbo S (991)",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-porsche-991-turbo-s.bydbank",
+      "bytes": 31481706
+    },
+    {
+      "id": "assetto-toyota-supra-mkiv",
+      "name": "Toyota Supra Mk IV",
+      "group": "original_cars_pack",
+      "active": true,
+      "asset": "assetto-toyota-supra-mkiv.bydbank",
+      "bytes": 25158101
+    }
+  ],
+  "exceptions": []
+}

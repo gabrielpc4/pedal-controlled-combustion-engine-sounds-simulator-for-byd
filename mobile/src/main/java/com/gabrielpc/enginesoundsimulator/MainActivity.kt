@@ -48,6 +48,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -173,11 +174,13 @@ class MainActivity : ComponentActivity() {
                         onSelectRealPedals = controller::selectRealPedals,
                         onToggleInputSource = controller::toggleInputSource,
                         onToggleAudioMute = controller::toggleAudioMute,
+                        onResetAllPreferences = controller::resetAllPreferences,
                         onTransmissionChange = controller::setTransmissionPosition,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
+                        onCategoryGains = controller::setFmodCategoryGains,
                         onEventMute = controller::setFmodEventMute,
                         onEventSolo = controller::setFmodEventSolo,
                         onPreviousCar = controller::selectPreviousCar,
@@ -244,11 +247,13 @@ private fun MotorSoundDashboard(
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
+    onResetAllPreferences: () -> Unit,
     onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
+    onCategoryGains: (Float, Float, Float) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     onPreviousCar: () -> Unit,
@@ -339,6 +344,7 @@ private fun MotorSoundDashboard(
                         onToggleInputSource = onToggleInputSource,
                         onToggleAudioMute = onToggleAudioMute,
                         onToggleManualShiftMode = onToggleManualShiftMode,
+                        onOpenSettings = { mainScreen = DashboardMainScreen.SETTINGS },
                     )
 
                     state.userMessage?.let { message ->
@@ -418,11 +424,16 @@ private fun MotorSoundDashboard(
                             onManualUpshift = onManualUpshift,
                             onManualDownshift = onManualDownshift,
                             onHostGains = onHostGains,
+                            onCategoryGains = onCategoryGains,
                             onEventMute = onEventMute,
                             onEventSolo = onEventSolo,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
+                        )
+                        DashboardMainScreen.SETTINGS -> SettingsScreen(
+                            onBack = { mainScreen = DashboardMainScreen.CLASSIC },
+                            onResetAll = onResetAllPreferences,
                         )
                     }
                 }
@@ -443,6 +454,7 @@ private fun DashboardHeader(
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
     onToggleManualShiftMode: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var memoryLabels by remember {
         mutableStateOf(MemoryHeaderLabels(usageLabel = "— MB", availableLabel = "— MB left"))
@@ -582,6 +594,9 @@ private fun DashboardHeader(
             muted = state.audioMuted,
             onToggle = onToggleAudioMute,
         )
+        IconButton(onClick = onOpenSettings) {
+            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Cyan)
+        }
     }
 }
 
@@ -986,8 +1001,6 @@ internal fun MixerDriveControls(
             maxRpm = state.drivetrain.tachometerMaximumRpm,
             redlineRpm = state.drivetrain.redlineRpm,
             upshiftRpm = state.drivetrain.automaticUpshiftRpm,
-            // The tach is intentionally twice the original throttle pedal height, while the
-            // pedals themselves retain their established mixer dimensions.
             modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(808)),
         )
         if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {

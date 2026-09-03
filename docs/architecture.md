@@ -84,6 +84,16 @@ event path and raw sound name. Cards report state, voice count, FMOD audibility,
 identical event/source pairs may be aggregated. UI polling is separate from the 3 ms audio-control
 loop, so no mixer allocations occur on the realtime path.
 
+### Debug voice trace
+
+`RuntimeFeatureFlags.ENABLE_FMOD_VOICE_TELEMETRY` enables a debug-only native trace tagged
+`FmodBankRuntime`. It records monotonic timestamps, event/path, raw source, a runtime-stable voice
+serial, `VOICE_PLAYED`/`VOICE_STOPPED`, audibility, virtual voices, callback voice counts, and the
+RPM/gear/boost/BOV/shift context. The flag is derived from `BuildConfig.DEBUG`, so release APKs do
+not format or emit this high-rate diagnostic stream. A source card is intentionally keyed by
+`event path + raw sound name`: it may contain multiple simultaneous Core voices and remains a
+separate source from an identically named sound owned by another event.
+
 ## Packaging and failure behavior
 
 The installer publishes `byd-fmod-bank-pack-v3` packages under

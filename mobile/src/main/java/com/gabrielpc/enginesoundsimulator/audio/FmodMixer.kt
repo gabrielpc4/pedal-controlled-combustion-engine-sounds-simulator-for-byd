@@ -1,6 +1,12 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
-/** One exact sound source owned by one authored Studio event. */
+/**
+ * One diagnostic source aggregate owned by one authored Studio event.
+ *
+ * The ID is the event path plus raw FMOD sound name. It is deliberately not a single exclusive
+ * channel: several Core voices from the same source can coexist, and a source can remain active
+ * with zero audibility while Studio automation or virtualization makes it silent.
+ */
 data class FmodSourceState(
     val id: String,
     val eventPath: String,

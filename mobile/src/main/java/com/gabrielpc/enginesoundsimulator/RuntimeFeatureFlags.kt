@@ -15,4 +15,11 @@ internal object RuntimeFeatureFlags {
 
     /** Detailed 3 ms shift telemetry is a diagnostic aid, not a production feature. */
     val ENABLE_DETAILED_DRIVETRAIN_TELEMETRY: Boolean = BuildConfig.DEBUG
+
+    /**
+     * Native FMOD voice/callback tracing is intentionally debug-only. It records enough timing
+     * context to distinguish a stopped voice from an authored silent/virtual voice, but release
+     * builds must not format or emit this high-rate diagnostic stream on the audio worker.
+     */
+    val ENABLE_FMOD_VOICE_TELEMETRY: Boolean = BuildConfig.DEBUG
 }

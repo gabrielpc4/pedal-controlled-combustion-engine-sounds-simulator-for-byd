@@ -4,6 +4,9 @@ package com.gabrielpc.enginesoundsimulator.audio
 data class EngineAudioFrame(
     val rpm: Double = 0.0,
     val throttle: Double = 0.0,
+    val gear: Int = 0,
+    val isShifting: Boolean = false,
+    val shiftProgress: Double = 0.0,
     val shiftSerial: Long = 0L,
     val shiftDirection: Int = 0,
     val shiftRejected: Boolean = false,

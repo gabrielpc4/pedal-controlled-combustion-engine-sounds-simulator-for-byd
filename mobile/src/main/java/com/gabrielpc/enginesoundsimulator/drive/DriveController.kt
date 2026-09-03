@@ -12,6 +12,9 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
+import com.gabrielpc.enginesoundsimulator.audio.AudioMixGainRepository
+import com.gabrielpc.enginesoundsimulator.audio.AudioMixGains
+import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysics
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
@@ -55,6 +58,9 @@ data class DriveSnapshot(
     val selectedCarIndex: Int,
     val availableCarCount: Int,
     val fmodSources: List<FmodSourceState> = emptyList(),
+    val transmissionGain: Float = 1.0f,
+    val gearShiftGain: Float = 1.0f,
+    val turboGain: Float = 1.0f,
     val soundPerspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
@@ -75,6 +81,7 @@ class DriveController(context: Context) {
     )
     private val shiftModeRepository = ShiftModeRepository(appContext)
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
+    private val audioMixGainRepository = AudioMixGainRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
@@ -97,6 +104,7 @@ class DriveController(context: Context) {
     private val uiActive = AtomicBoolean(false)
     private val audioInterrupted = AtomicBoolean(false)
     private val audioMuted = AtomicBoolean(false)
+    private val audioMixGains = AtomicReference(AudioMixGains())
 
     @Volatile private var loopThread: Thread? = null
     @Volatile private var userMessage: UserVisibleMessage? = null
@@ -123,6 +131,8 @@ class DriveController(context: Context) {
         simulation.manualShiftEnabled = manualShiftEnabled.get()
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
+        audioMixGains.set(audioMixGainRepository.load(selectedProfile.get()))
+        audioEngine.setCategoryGains(audioMixGains.get())
     }
 
     fun isRunning(): Boolean = running.get()
@@ -136,6 +146,9 @@ class DriveController(context: Context) {
             audioMuted = audioMuted.get(),
             manualShiftModeEnabled = manualShiftEnabled.get(),
             fmodSources = if (uiActive.get()) audioEngine.sourceSnapshots() else emptyList(),
+            transmissionGain = audioMixGains.get().transmission,
+            gearShiftGain = audioMixGains.get().gearShift,
+            turboGain = audioMixGains.get().turbo,
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
         )
@@ -184,6 +197,27 @@ class DriveController(context: Context) {
     fun setSimulatedPedalBrake(value: Double) { simulatedPedals.updateAndGet { it.copy(brake = value.coerceIn(0.0, 1.0)) } }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
+    fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float) {
+        // These trims are intentionally per-car and survive normal APK updates. Reset All is the
+        // explicit opt-in that clears them, so selecting another car never carries a hidden mix.
+        val gains = AudioMixGains(transmission, gearShift, turbo)
+        audioMixGains.set(gains)
+        audioMixGainRepository.save(selectedProfile.get(), gains)
+        audioEngine.setCategoryGains(gains)
+    }
+
+    fun resetAllPreferences() {
+        audioMixGainRepository.resetAll()
+        appContext.getSharedPreferences(AppPreferenceStores.SELECTED_CAR, Context.MODE_PRIVATE).edit().clear().apply()
+        appContext.getSharedPreferences(AppPreferenceStores.SHIFT_MODE, Context.MODE_PRIVATE).edit().clear().apply()
+        appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
+        audioMixGains.set(AudioMixGains())
+        selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)
+        selectedPerspective.set(EngineSoundPerspective.CABIN)
+        audioEngine.setCategoryGains(AudioMixGains())
+        simulation.reset()
+        audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
+    }
     fun setFmodEventMute(eventName: String, muted: Boolean) = audioEngine.setEventMute(eventName, muted)
     fun setFmodEventSolo(eventName: String, solo: Boolean) = audioEngine.setEventSolo(eventName, solo)
     fun setInputMode(mode: InputMode) { inputMode.set(mode) }
@@ -264,6 +298,8 @@ class DriveController(context: Context) {
             selectedProfile.set(profile)
             selectedCarRepository.save(profile)
             selectedPerspective.set(soundPerspectiveRepository.load(profile))
+            audioMixGains.set(audioMixGainRepository.load(profile))
+            audioEngine.setCategoryGains(audioMixGains.get())
             loadPhysics(profile)
             simulation.reset()
             audioEngine.setSoundProgram(profile, selectedPerspective.get())
@@ -332,6 +368,9 @@ class DriveController(context: Context) {
             EngineAudioFrame(
                 rpm = drivetrain.rpm,
                 throttle = drivetrain.audioThrottle,
+                gear = drivetrain.gear,
+                isShifting = drivetrain.isShifting,
+                shiftProgress = drivetrain.shiftProgress,
                 shiftSerial = drivetrain.shiftSerial,
                 shiftDirection = when (drivetrain.shiftDirection) {
                     ShiftDirection.UP -> 1

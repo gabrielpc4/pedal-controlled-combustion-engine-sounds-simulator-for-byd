@@ -17,6 +17,7 @@ internal class NativeFmodBankBridge {
         hasTurbo: Boolean,
         idleRpm: Float,
         spatial: FloatArray,
+        diagnosticsEnabled: Boolean,
     ): String?
 
     /** Returns a human-readable error or null after synchronously applying the control frame. */
@@ -27,8 +28,13 @@ internal class NativeFmodBankBridge {
         throttle: Float,
         perspective: Int,
         boost: Float,
+        boostAbsolute: Float,
         bov: Float,
         bovDecay: Float,
+        gear: Int,
+        isShifting: Boolean,
+        shiftProgress: Float,
+        shiftSerial: Long,
         limiterPulse: Boolean,
         shiftStarted: Boolean,
         shiftDirection: Int,
@@ -42,6 +48,8 @@ internal class NativeFmodBankBridge {
     external fun voiceSnapshots(): Array<String>
 
     external fun setHostGains(engine: Float, effects: Float)
+
+    external fun setCategoryGains(transmission: Float, gearShift: Float, turbo: Float)
 
     external fun setEventMute(eventName: String, muted: Boolean)
     external fun setEventSolo(eventName: String, solo: Boolean)

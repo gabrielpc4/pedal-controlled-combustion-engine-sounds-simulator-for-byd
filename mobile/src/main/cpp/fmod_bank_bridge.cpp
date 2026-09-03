@@ -10,8 +10,11 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
+#include <deque>
 #include <fstream>
+#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -357,6 +360,11 @@ struct RecentSource {
     std::string soundName;
     double lastSeenSeconds = 0.0;
     int callbackVoiceCount = 0;
+    // FMOD's sound callbacks expose the source, not a Core channel handle. A monotonically
+    // assigned serial lets debug traces follow each callback-created voice without changing the
+    // production source aggregation used by the mixer.
+    std::deque<std::uint64_t> activeVoiceSerials;
+    std::uint64_t latestVoiceSerial = 0;
 };
 
 struct VoiceAggregate {
@@ -380,10 +388,12 @@ public:
         int perspective,
         bool hasTurbo,
         float idleRpm,
-        const std::array<float, 12>& spatial
+        const std::array<float, 12>& spatial,
+        bool diagnosticsEnabled
     ) {
         std::lock_guard<std::mutex> lock(mutex_);
         closeLocked();
+        diagnosticsEnabled_ = diagnosticsEnabled;
 
         FMOD_RESULT result = FMOD::Studio::System::create(&studio_);
         if (result != FMOD_OK) {
@@ -488,8 +498,13 @@ public:
         float throttle,
         int perspective,
         float boost,
+        float boostAbsolute,
         float bov,
         float bovDecay,
+        int gear,
+        bool isShifting,
+        float shiftProgress,
+        std::uint64_t shiftSerial,
         bool limiterPulse,
         bool shiftStarted,
         int shiftDirection,
@@ -506,6 +521,22 @@ public:
         const float cleanDt = std::clamp(dt, 0.0001f, 0.1f);
         const float cleanRpm = std::max(1.0f, rpm);
         const float cleanThrottle = std::clamp(throttle, 0.0f, 1.0f);
+        updateTraceContextLocked(
+            cleanDt,
+            cleanRpm,
+            drivetrainSpeed,
+            cleanThrottle,
+            boost,
+            boostAbsolute,
+            bov,
+            bovDecay,
+            gear,
+            isShifting,
+            shiftProgress,
+            shiftSerial,
+            shiftStarted,
+            shiftDirection
+        );
         // Intentional lift-off policy: the authored engine event keeps its full-load
         // input while the drivetrain RPM falls naturally. This preserves the same
         // LOAD/COAST layer balance on deceleration as on acceleration; the pedal
@@ -596,10 +627,16 @@ public:
         const float effects = std::max(0.0f, effectsGain);
         hostEngineGain_ = engine;
         hostEffectsGain_ = effects;
-        for (auto& pair : slots_) {
-            const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
-            pair.second->instance->setVolume(isEngine ? engine : effects);
-        }
+        applyEventOverridesLocked();
+    }
+
+    void setCategoryGains(float transmissionGain, float gearShiftGain, float turboGain) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!active_) return;
+        transmissionGain_ = std::max(0.0f, transmissionGain);
+        gearShiftGain_ = std::max(0.0f, gearShiftGain);
+        turboGain_ = std::max(0.0f, turboGain);
+        applyEventOverridesLocked();
     }
 
     void setEventMute(const std::string& name, bool muted) {
@@ -647,6 +684,22 @@ public:
             const float audibility = std::clamp(std::sqrt(source.audibilitySquared), 0.0f, 1.0f);
             const bool active = source.voiceCount > 0 || source.callbackActive;
             const bool virtualOnly = source.voiceCount > 0 && source.virtualVoiceCount == source.voiceCount;
+            if (diagnosticsEnabled_) {
+                std::ostringstream fields;
+                fields << std::fixed << std::setprecision(4)
+                       << "event=" << source.eventName
+                       << "|path=" << source.eventPath
+                       << "|source=" << source.soundName
+                       << "|id=" << source.id
+                       << "|audibility=" << audibility
+                       << "|routeGain=" << source.routeGain
+                       << "|voiceCount=" << source.voiceCount
+                       << "|virtualVoices=" << source.virtualVoiceCount
+                       << "|callbackActive=" << (source.callbackActive ? 1 : 0)
+                       << "|active=" << (active ? 1 : 0)
+                       << "|" << traceContextFields();
+                logTrace("VOICE_STATE", fields.str());
+            }
             std::ostringstream row;
             row << source.id << kFieldSeparator
                 << source.eventPath << kFieldSeparator
@@ -681,15 +734,175 @@ public:
         recent.eventPath = event.path;
         recent.eventName = event.name;
         recent.soundName = name;
-        recent.lastSeenSeconds = monotonicSeconds();
+        const double callbackTime = monotonicSeconds();
+        recent.lastSeenSeconds = callbackTime;
+        std::uint64_t voiceSerial = 0;
+        double voiceDuration = -1.0;
         if (type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_PLAYED) {
-            ++recent.callbackVoiceCount;
+            recent.callbackVoiceCount = std::min(recent.callbackVoiceCount + 1, 32767);
+            if (diagnosticsEnabled_) {
+                voiceSerial = nextVoiceSerial_++;
+                recent.activeVoiceSerials.push_back(voiceSerial);
+                recent.latestVoiceSerial = voiceSerial;
+                voiceStartTimes_[voiceSerial] = callbackTime;
+            }
         } else if (type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_STOPPED) {
             recent.callbackVoiceCount = std::max(0, recent.callbackVoiceCount - 1);
+            if (diagnosticsEnabled_ && !recent.activeVoiceSerials.empty()) {
+                voiceSerial = recent.activeVoiceSerials.front();
+                recent.activeVoiceSerials.pop_front();
+                const auto start = voiceStartTimes_.find(voiceSerial);
+                if (start != voiceStartTimes_.end()) {
+                    voiceDuration = std::max(0.0, callbackTime - start->second);
+                    voiceStartTimes_.erase(start);
+                }
+                if (recent.activeVoiceSerials.empty()) {
+                    recent.latestVoiceSerial = 0;
+                }
+            } else if (diagnosticsEnabled_ && recent.latestVoiceSerial != 0) {
+                // Some FMOD backends can deliver a stop callback after the source aggregate has
+                // been refreshed without exposing the matching play in the same callback batch.
+                // Keep the diagnostic link useful without changing FMOD's lifecycle: fall back
+                // to the most recently observed serial and report an unknown duration if needed.
+                voiceSerial = recent.latestVoiceSerial;
+                const auto start = voiceStartTimes_.find(voiceSerial);
+                if (start != voiceStartTimes_.end()) {
+                    voiceDuration = std::max(0.0, callbackTime - start->second);
+                    voiceStartTimes_.erase(start);
+                }
+                recent.latestVoiceSerial = 0;
+            }
+        }
+        if (diagnosticsEnabled_) {
+            const std::size_t trackedVoices = recent.activeVoiceSerials.size();
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "FMOD_TRACE|VOICE_%s|t=%.6f|event=%s|path=%s|source=%s|id=%s|voice=%llu|duration=%.6f|callbackVoices=%d|trackedVoices=%zu|%s",
+                type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_PLAYED ? "PLAYED" : "STOPPED",
+                callbackTime,
+                event.name.c_str(),
+                event.path.c_str(),
+                name,
+                id.c_str(),
+                static_cast<unsigned long long>(voiceSerial),
+                voiceDuration,
+                recent.callbackVoiceCount,
+                trackedVoices,
+                traceContextFields().c_str()
+            );
         }
     }
 
 private:
+    void updateTraceContextLocked(
+        float dt,
+        float rpm,
+        float drivetrainSpeed,
+        float throttle,
+        float boost,
+        float boostAbsolute,
+        float bov,
+        float bovDecay,
+        int gear,
+        bool isShifting,
+        float shiftProgress,
+        std::uint64_t shiftSerial,
+        bool shiftStarted,
+        int shiftDirection
+    ) {
+        if (!diagnosticsEnabled_) {
+            return;
+        }
+
+        traceRpm_ = rpm;
+        traceDrivetrainSpeed_ = drivetrainSpeed;
+        traceThrottle_ = throttle;
+        traceBoostNormalized_ = std::max(0.0f, boost);
+        traceBoostAbsolute_ = std::max(0.0f, boostAbsolute);
+        traceBov_ = std::max(0.0f, bov);
+        traceBovDecay_ = std::max(0.0f, bovDecay);
+        traceGear_ = gear;
+        traceIsShifting_ = isShifting;
+        traceShiftProgress_ = std::clamp(shiftProgress, 0.0f, 1.0f);
+        traceShiftSerial_ = shiftSerial;
+
+        if (shiftStarted || (shiftSerial != 0 && shiftSerial != traceLastShiftSerial_)) {
+            std::ostringstream fields;
+            fields << "serial=" << shiftSerial
+                   << "|direction=" << shiftDirection
+                   << "|gear=" << gear
+                   << "|progress=" << traceShiftProgress_
+                   << "|" << traceContextFields();
+            logTrace("SHIFT_START", fields.str());
+            traceLastShiftSerial_ = shiftSerial;
+        }
+        if (traceWasShifting_ && !isShifting) {
+            std::ostringstream fields;
+            fields << "serial=" << traceLastShiftSerial_
+                   << "|gear=" << gear
+                   << "|progress=" << traceShiftProgress_
+                   << "|" << traceContextFields();
+            logTrace("SHIFT_COMPLETE", fields.str());
+        }
+        traceWasShifting_ = isShifting;
+
+        traceElapsedSeconds_ += dt;
+        const double interval = isShifting || traceWasShifting_ ? 0.003 : 0.050;
+        if (traceElapsedSeconds_ >= interval) {
+            traceElapsedSeconds_ -= interval;
+            logTrace("FRAME", traceContextFields());
+        }
+    }
+
+    std::string traceContextFields() const {
+        std::ostringstream fields;
+        fields << std::fixed << std::setprecision(4)
+               << "rpm=" << traceRpm_
+               << "|gear=" << traceGear_
+               << "|shifting=" << (traceIsShifting_ ? 1 : 0)
+               << "|shiftProgress=" << traceShiftProgress_
+               << "|shiftSerial=" << traceShiftSerial_
+               << "|drivetrainSpeed=" << traceDrivetrainSpeed_
+               << "|throttle=" << traceThrottle_
+               << "|boostNormalized=" << traceBoostNormalized_
+               << "|boostAbsolute=" << traceBoostAbsolute_
+               << "|bov=" << traceBov_
+               << "|bovDecay=" << traceBovDecay_;
+        return fields.str();
+    }
+
+    void logTrace(const char* kind, const std::string& fields) const {
+        if (!diagnosticsEnabled_) {
+            return;
+        }
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "FMOD_TRACE|%s|t=%.6f|%s",
+            kind,
+            monotonicSeconds(),
+            fields.c_str()
+        );
+    }
+
+    void logEventLifecycle(const char* action, const EventSlot& event, FMOD_RESULT result) const {
+        if (!diagnosticsEnabled_) {
+            return;
+        }
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "FMOD_TRACE|EVENT_%s|t=%.6f|event=%s|path=%s|result=%d|%s",
+            action,
+            monotonicSeconds(),
+            event.name.c_str(),
+            event.path.c_str(),
+            static_cast<int>(result),
+            traceContextFields().c_str()
+        );
+    }
+
     void applyEventOverridesLocked() {
         bool anySolo = false;
         for (const auto& entry : soloEvents_) anySolo = anySolo || entry.second;
@@ -698,8 +911,18 @@ private:
             const bool soloed = anySolo && !soloEvents_[pair.first];
             const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
             const float baseGain = isEngine ? hostEngineGain_ : hostEffectsGain_;
-            pair.second->instance->setVolume((muted || soloed) ? 0.0f : baseGain);
+            const float categoryGain = eventCategoryGain(pair.first);
+            pair.second->instance->setVolume((muted || soloed) ? 0.0f : baseGain * categoryGain);
         }
+    }
+
+    float eventCategoryGain(const std::string& name) const {
+        // These are user trims layered after the authored FMOD event mix. They are deliberately
+        // keyed by event identity, so changing one family never attenuates engine or other effects.
+        if (name == "transmission" || name == "transmission_ext") return transmissionGain_;
+        if (name == "gear_int" || name == "gear_ext" || name == "gear_grind") return gearShiftGain_;
+        if (name == "turbo") return turboGain_;
+        return 1.0f;
     }
 
     static FMOD_RESULT F_CALL eventCallback(
@@ -742,6 +965,7 @@ private:
         {
             std::lock_guard<std::mutex> callbackLock(callbackMutex_);
             recentSources_.clear();
+            voiceStartTimes_.clear();
         }
         if (bank_ != nullptr) {
             bank_->unload();
@@ -767,6 +991,22 @@ private:
         limiterRunning_ = false;
         limiterDecay_ = 10.0f;
         tractionDecay_ = 10.0f;
+        diagnosticsEnabled_ = false;
+        nextVoiceSerial_ = 1;
+        traceElapsedSeconds_ = 0.0;
+        traceRpm_ = 0.0f;
+        traceDrivetrainSpeed_ = 0.0f;
+        traceThrottle_ = 0.0f;
+        traceBoostNormalized_ = 0.0f;
+        traceBoostAbsolute_ = 0.0f;
+        traceBov_ = 0.0f;
+        traceBovDecay_ = 0.0f;
+        traceGear_ = 0;
+        traceIsShifting_ = false;
+        traceWasShifting_ = false;
+        traceShiftProgress_ = 0.0f;
+        traceShiftSerial_ = 0;
+        traceLastShiftSerial_ = 0;
     }
 
     void discoverEventsLocked(const std::string& bankPath) {
@@ -835,7 +1075,8 @@ private:
         }
         // Match the requested host mix: engine at unity, ancillary events at +6 dB.
         // This multiplies the authored Studio mix without replacing its automation.
-        event->instance->setVolume(name == "engine_int" || name == "engine_ext" ? 1.0f : 2.0f);
+        const bool isEngine = name == "engine_int" || name == "engine_ext";
+        event->instance->setVolume((isEngine ? hostEngineGain_ : hostEffectsGain_) * eventCategoryGain(name));
         EventSlot* stable = event.get();
         event->instance->setUserData(stable);
         event->instance->setCallback(
@@ -925,13 +1166,19 @@ private:
             return;
         }
         instance->setTimelinePosition(0);
-        instance->start();
+        const FMOD_RESULT result = instance->start();
+        if (const EventSlot* event = slot(name); event != nullptr) {
+            logEventLifecycle("START", *event, result);
+        }
     }
 
     void stopEventLocked(const std::string& name, FMOD_STUDIO_STOP_MODE mode) {
         FMOD::Studio::EventInstance* instance = slotInstance(name);
         if (instance != nullptr) {
-            instance->stop(mode);
+            const FMOD_RESULT result = instance->stop(mode);
+            if (const EventSlot* event = slot(name); event != nullptr) {
+                logEventLifecycle("STOP", *event, result);
+            }
         }
     }
 
@@ -1090,7 +1337,13 @@ private:
     std::unordered_map<std::string, bool> soloEvents_;
     float hostEngineGain_ = 1.0f;
     float hostEffectsGain_ = 2.0f;
+    float transmissionGain_ = 1.0f;
+    float gearShiftGain_ = 1.0f;
+    float turboGain_ = 1.0f;
     std::unordered_map<std::string, RecentSource> recentSources_;
+    // Debug-only start times make STOPPED records report the observed one-shot duration. The map
+    // is untouched when diagnostics are disabled, keeping release callbacks on the existing path.
+    std::unordered_map<std::uint64_t, double> voiceStartTimes_;
     FMOD_3D_ATTRIBUTES engineAttributes_{};
     FMOD_3D_ATTRIBUTES backfireAttributes_{};
     FMOD_3D_ATTRIBUTES cabinListenerAttributes_{};
@@ -1103,6 +1356,22 @@ private:
     bool hasTurbo_ = false;
     float idleRpm_ = 1000.0f;
     bool limiterRunning_ = false;
+    bool diagnosticsEnabled_ = false;
+    std::uint64_t nextVoiceSerial_ = 1;
+    double traceElapsedSeconds_ = 0.0;
+    float traceRpm_ = 0.0f;
+    float traceDrivetrainSpeed_ = 0.0f;
+    float traceThrottle_ = 0.0f;
+    float traceBoostNormalized_ = 0.0f;
+    float traceBoostAbsolute_ = 0.0f;
+    float traceBov_ = 0.0f;
+    float traceBovDecay_ = 0.0f;
+    int traceGear_ = 0;
+    bool traceIsShifting_ = false;
+    bool traceWasShifting_ = false;
+    float traceShiftProgress_ = 0.0f;
+    std::uint64_t traceShiftSerial_ = 0;
+    std::uint64_t traceLastShiftSerial_ = 0;
 };
 
 FmodRuntime runtime;
@@ -1164,7 +1433,8 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_open(
     jint perspective,
     jboolean hasTurbo,
     jfloat idleRpm,
-    jfloatArray spatial
+    jfloatArray spatial,
+    jboolean diagnosticsEnabled
 ) {
     return resultString(
         environment,
@@ -1175,7 +1445,8 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_open(
             perspective,
             hasTurbo == JNI_TRUE,
             idleRpm,
-            spatialArray(environment, spatial)
+            spatialArray(environment, spatial),
+            diagnosticsEnabled == JNI_TRUE
         )
     );
 }
@@ -1190,8 +1461,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jfloat throttle,
     jint perspective,
     jfloat boost,
+    jfloat boostAbsolute,
     jfloat bov,
     jfloat bovDecay,
+    jint gear,
+    jboolean isShifting,
+    jfloat shiftProgress,
+    jlong shiftSerial,
     jboolean limiterPulse,
     jboolean shiftStarted,
     jint shiftDirection,
@@ -1209,8 +1485,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             throttle,
             perspective,
             boost,
+            boostAbsolute,
             bov,
             bovDecay,
+            gear,
+            isShifting == JNI_TRUE,
+            shiftProgress,
+            static_cast<std::uint64_t>(std::max<jlong>(0, shiftSerial)),
             limiterPulse == JNI_TRUE,
             shiftStarted == JNI_TRUE,
             shiftDirection,
@@ -1249,6 +1530,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setHostGains(
     JNIEnv*, jobject, jfloat engine, jfloat effects
 ) {
     runtime.setHostGains(engine, effects);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setCategoryGains(
+    JNIEnv*, jobject, jfloat transmission, jfloat gearShift, jfloat turbo
+) {
+    runtime.setCategoryGains(transmission, gearShift, turbo);
 }
 
 extern "C" JNIEXPORT void JNICALL

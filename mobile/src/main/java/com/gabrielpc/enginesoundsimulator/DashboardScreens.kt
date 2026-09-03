@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,11 +78,11 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
-import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
     MIXER("MIXER", "HUD + LAYERS"),
+    SETTINGS("SETTINGS", "PREFERENCES"),
 }
 
 @Composable
@@ -111,6 +113,7 @@ internal fun MixerDashboardScreen(
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
+    onCategoryGains: (Float, Float, Float) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     soundPerspective: EngineSoundPerspective,
@@ -173,10 +176,10 @@ internal fun MixerDashboardScreen(
             })
             .mapValues { (_, sources) ->
                 sources.sortedWith(
-                    compareByDescending<FmodSourceState> { it.isActive }
-                        .thenByDescending { it.audibility }
-                        .thenBy(FmodSourceState::eventPath)
-                        .thenBy(FmodSourceState::soundName),
+                    // Keep each source in a deterministic slot. Activity and audibility are
+                    // diagnostic values only; sorting by them made a newly audible voice appear
+                    // to replace another card even though both FMOD voices were still alive.
+                    compareBy(FmodSourceState::id),
                 )
             }
     }
@@ -209,6 +212,12 @@ internal fun MixerDashboardScreen(
             Text("EFFECTS ${String.format(Locale.US, "%.1fx", effectsGain)}", color = CyanSoft, fontSize = 11.sp)
             Slider(effectsGain, { effectsGain = it; onHostGains(engineGain, it) }, valueRange = 0f..4f, modifier = Modifier.weight(1f))
         }
+        CategoryGainControls(
+            transmissionGain = state.transmissionGain,
+            gearShiftGain = state.gearShiftGain,
+            turboGain = state.turboGain,
+            onChange = onCategoryGains,
+        )
         Spacer(Modifier.height(10.dp))
         BoxWithConstraints(
             modifier = Modifier
@@ -313,6 +322,66 @@ private fun MixerPerspectiveSelector(
     }
 }
 
+@Composable
+private fun CategoryGainControls(
+    transmissionGain: Float,
+    gearShiftGain: Float,
+    turboGain: Float,
+    onChange: (Float, Float, Float) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel)
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        GainControl("TRANSMISSION", transmissionGain) { onChange(it, gearShiftGain, turboGain) }
+        GainControl("GEAR SHIFT", gearShiftGain) { onChange(transmissionGain, it, turboGain) }
+        GainControl("TURBO", turboGain) { onChange(transmissionGain, gearShiftGain, it) }
+    }
+}
+
+@Composable
+private fun GainControl(label: String, value: Float, onValueChange: (Float) -> Unit) {
+    Column(modifier = Modifier.width(300.dp)) {
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text(label, color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(String.format(Locale.US, "%.0f%%", value * 100f), color = White, fontSize = 10.sp)
+        }
+        Slider(value = value, onValueChange = onValueChange, valueRange = 0f..2f)
+    }
+}
+
+@Composable
+internal fun SettingsScreen(onBack: () -> Unit, onResetAll: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("SETTINGS", color = White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.weight(1f))
+            Text("BACK", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.clickable(onClick = onBack).padding(12.dp))
+        }
+        Text(
+            "Mixer gains are saved independently for each car. Reset All clears saved car, perspective, shift mode, and audio gain preferences.",
+            color = Muted,
+            fontSize = 15.sp,
+        )
+        Button(
+            onClick = onResetAll,
+            colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
+        ) {
+            Text("RESET ALL", color = White, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
 // The enlarged mixer pedals and adjacent tach need a protected bottom area so cards never slide
 // underneath the controls while the diagnostics list is scrolled.
 private val MIXER_PEDALS_OVERLAY_HEIGHT = 500.dp
@@ -365,121 +434,29 @@ private fun BarTachometerHud(
 ) {
     val rpmFraction = (drivetrain.rpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
     val redlineFraction = (redlineRpm / maxRpm.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
-    val shakeIntensity = redlineShakeIntensity(
-        rpm = drivetrain.rpm,
-        redlineRpm = redlineRpm,
-        maxRpm = maxRpm,
-        limiterActive = drivetrain.limiterActive,
-    )
-    val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
-    val rpm = drivetrain.rpm.toInt().coerceAtLeast(0)
-    val gearLabel = if (transmissionPosition == TransmissionPosition.DRIVE) {
-        drivetrain.gear.toString()
-    } else {
-        transmissionPosition.displayName
-    }
+    val gear = if (transmissionPosition == TransmissionPosition.DRIVE) drivetrain.gear.toString() else transmissionPosition.displayName
     Column(modifier = modifier, verticalArrangement = Arrangement.SpaceBetween) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom,
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = rpm.toString(),
-                        color = White,
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(
-                        text = "RPM",
-                        color = Muted,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.4.sp,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 7.dp),
-                    )
-                }
-                Spacer(Modifier.width(22.dp))
-                MixerTelemetryReadout(
-                    label = "SPEED",
-                    value = drivetrain.realOrDocumentedRawSpeedKmh.toInt().toString(),
-                    unit = "km/h",
-                )
-                Spacer(Modifier.width(16.dp))
-                MixerTelemetryReadout(
-                    label = "PRED SPEED",
-                    value = String.format(Locale.US, "%.2f", drivetrain.presentationSpeedKmh),
-                    unit = "km/h",
-                )
-                Spacer(Modifier.width(16.dp))
-                MixerTelemetryReadout(
-                    label = "PRED ACCEL",
-                    value = String.format(Locale.US, "%+.2f", drivetrain.presentationAccelerationKmhPerSecond),
-                    unit = "km/h/s",
-                )
+                Text(drivetrain.rpm.toInt().toString(), color = White, fontSize = 42.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                Text(" RPM", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(18.dp))
+                MixerTelemetryReadout("SPEED", drivetrain.realOrDocumentedRawSpeedKmh.toInt().toString(), "km/h")
+                Spacer(Modifier.width(12.dp))
+                MixerTelemetryReadout("PRED SPEED", String.format(Locale.US, "%.2f", drivetrain.presentationSpeedKmh), "km/h")
             }
-            Column(
-                horizontalAlignment = Alignment.End,
-                modifier = Modifier.padding(end = 10.dp),
-            ) {
-                Text(
-                    "GEAR",
-                    color = Muted,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                )
-                Text(
-                    text = gearLabel,
-                    color = Cyan,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.End,
-                )
-            }
+            Text(gear, color = Cyan, fontSize = 22.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(22.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF061018))
-                .border(1.dp, Line, RoundedCornerShape(4.dp)),
-        ) {
+        Box(modifier = Modifier.fillMaxWidth().height(22.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF061018)).border(1.dp, Line, RoundedCornerShape(4.dp))) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                val redlineX = width * redlineFraction
-                val shakeOffset = redlineShake.interiorTranslation
-
-                clipRect(0f, 0f, width, height) {
-                    translate(shakeOffset.x, shakeOffset.y) {
-                        drawRect(
-                            color = Red.copy(alpha = 0.18f),
-                            topLeft = Offset(redlineX, 0f),
-                            size = androidx.compose.ui.geometry.Size(width - redlineX, height),
-                        )
-                        drawRect(
-                            brush = Brush.horizontalGradient(listOf(Cyan.copy(alpha = 0.35f), Amber, Red)),
-                            size = androidx.compose.ui.geometry.Size(width * rpmFraction, height),
-                        )
-                    }
-                }
-
-                drawLine(
-                    color = Red,
-                    start = Offset(redlineX, 0f),
-                    end = Offset(redlineX, height),
-                    strokeWidth = 2f,
-                )
+                drawRect(brush = Brush.horizontalGradient(listOf(Cyan.copy(alpha = 0.35f), Amber, Red)), size = androidx.compose.ui.geometry.Size(size.width * rpmFraction, size.height))
+                drawRect(color = Red.copy(alpha = 0.18f), topLeft = Offset(size.width * redlineFraction, 0f), size = androidx.compose.ui.geometry.Size(size.width * (1f - redlineFraction), size.height))
+                drawLine(Red, Offset(size.width * redlineFraction, 0f), Offset(size.width * redlineFraction, size.height), 2f)
             }
         }
     }
 }
+
 
 @Composable
 private fun MixerTelemetryReadout(

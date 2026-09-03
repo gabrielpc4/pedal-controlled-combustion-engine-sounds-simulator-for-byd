@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Process
 import android.util.Log
+import com.gabrielpc.enginesoundsimulator.RuntimeFeatureFlags
 import com.gabrielpc.enginesoundsimulator.simulation.nativeFmodSpatialCoordinates
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -42,6 +43,7 @@ class EngineAudioEngine(context: Context) {
     private val tractionPulseSerial = AtomicLong(0L)
     private val hostEngineGain = AtomicReference(1.0f)
     private val hostEffectsGain = AtomicReference(2.0f)
+    private val categoryGains = AtomicReference(AudioMixGains())
     private val nativeEventMutes = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private val nativeEventSolos = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
@@ -77,6 +79,10 @@ class EngineAudioEngine(context: Context) {
     fun setHostGains(engine: Float, effects: Float) {
         hostEngineGain.set(engine.coerceAtLeast(0f))
         hostEffectsGain.set(effects.coerceAtLeast(0f))
+    }
+
+    internal fun setCategoryGains(gains: AudioMixGains) {
+        categoryGains.set(gains)
     }
 
     fun setEventMute(eventName: String, muted: Boolean) { nativeEventMutes[eventName] = muted }
@@ -187,6 +193,7 @@ class EngineAudioEngine(context: Context) {
         var consumedBackfirePulse = backfirePulseSerial.get()
         var consumedRejectedShift = rejectedShiftSerial.get()
         var consumedTractionPulse = tractionPulseSerial.get()
+        var sentCategoryGains: AudioMixGains? = null
 
         try {
             org.fmod.FMOD.init(appContext)
@@ -200,6 +207,7 @@ class EngineAudioEngine(context: Context) {
                 hasTurbo = physics.engine.turbos.isNotEmpty(),
                 idleRpm = physics.engine.idleRpm.toFloat(),
                 spatial = physics.nativeFmodSpatialCoordinates(),
+                diagnosticsEnabled = RuntimeFeatureFlags.ENABLE_FMOD_VOICE_TELEMETRY,
             )
             if (startupError != null) {
                 reportLoadFailure(profile.id, startupError)
@@ -217,6 +225,11 @@ class EngineAudioEngine(context: Context) {
 
                 val frame = parameters.get()
                 bridge.setHostGains(hostEngineGain.get(), hostEffectsGain.get())
+                val gains = categoryGains.get()
+                if (gains != sentCategoryGains) {
+                    bridge.setCategoryGains(gains.transmission, gains.gearShift, gains.turbo)
+                    sentCategoryGains = gains
+                }
                 nativeEventMutes.forEach { (name, value) -> bridge.setEventMute(name, value) }
                 nativeEventSolos.forEach { (name, value) -> bridge.setEventSolo(name, value) }
                 val currentLimiterPulse = limiterPulseSerial.get()
@@ -231,8 +244,13 @@ class EngineAudioEngine(context: Context) {
                     throttle = frame.throttle.coerceIn(0.0, 1.0).toFloat(),
                     perspective = frame.perspective.ordinal,
                     boost = (frame.boost / maximumBoost).coerceAtLeast(0.0).toFloat(),
+                    boostAbsolute = frame.boost.coerceAtLeast(0.0).toFloat(),
                     bov = frame.bov.coerceAtLeast(0.0).toFloat(),
                     bovDecay = frame.bovDecaySeconds.coerceAtLeast(0.0).toFloat(),
+                    gear = frame.gear,
+                    isShifting = frame.isShifting,
+                    shiftProgress = frame.shiftProgress.coerceIn(0.0, 1.0).toFloat(),
+                    shiftSerial = frame.shiftSerial,
                     limiterPulse = currentLimiterPulse != consumedLimiterPulse,
                     shiftStarted = frame.shiftSerial != lastShiftSerial,
                     shiftDirection = frame.shiftDirection,
