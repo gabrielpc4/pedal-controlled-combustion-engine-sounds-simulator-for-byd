@@ -32,6 +32,10 @@ internal data class AssettoDrivetrainFrame(
 /**
  * Straight-line Assetto drivetrain used by the Audio Lab, ported with the same
  * control ordering, three-millisecond timing and authored car parameters.
+ *
+ * Vehicle speed and FMOD drivetrain speed are intentionally separate. Vehicle speed is the
+ * physical/documented road speed, while the FMOD speed is a derived internal value used to make
+ * equal-speed gear mapping possible without changing the bank's authored RPM thresholds.
  */
 internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var rpm = physics.engine.idleRpm
@@ -49,7 +53,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var shiftElapsed = 0.0
     private var shiftDuration = 0.0
     private var manualShiftRequest = 0
-    private var previousWheelSpeed = 0.0
     private var previousTractionLimit = false
     private var turboQs = MutableList(physics.engine.turbos.size) { 0.0 }
     private var boost = 0.0
@@ -61,6 +64,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var backfireArmed = false
     private var backfireTimer = 0.0
     private var limiterCounter = 0
+    private var fmodDrivetrainSpeedMetersPerSecond = 0.0
+    private var previousFmodWheelSpeed = 0.0
     private var lastFrame = snapshot()
 
     fun updatePhysics(updated: AssettoPhysics) {
@@ -89,7 +94,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftElapsed = 0.0
         shiftDuration = 0.0
         manualShiftRequest = 0
-        previousWheelSpeed = 0.0
+        fmodDrivetrainSpeedMetersPerSecond = 0.0
+        previousFmodWheelSpeed = 0.0
         previousTractionLimit = false
         turboQs.fill(0.0)
         boost = 0.0
@@ -115,16 +121,25 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         brake: Double,
         transmissionPosition: TransmissionPosition,
         automaticShifting: Boolean,
-        externalSpeedMetersPerSecond: Double?,
-        simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration?,
+        externalVehicleSpeedMetersPerSecond: Double?,
+        fmodDrivetrainSpeedMetersPerSecond: Double?,
         deltaSeconds: Double,
     ): AssettoDrivetrainFrame {
         val dt = f32(deltaSeconds.coerceIn(0.0001, 0.020))
         sessionElapsedMilliseconds += dt * 1_000.0
-        externalSpeedMetersPerSecond?.let(::anchorSpeed)
+        externalVehicleSpeedMetersPerSecond?.let(::anchorVehicleSpeed)
+        // In P/N the engine must remain a free-revving authored event. D is the only position
+        // allowed to receive the derived FMOD drivetrain speed from the mapping layer.
+        this.fmodDrivetrainSpeedMetersPerSecond = if (
+            transmissionPosition == TransmissionPosition.DRIVE
+        ) {
+            (fmodDrivetrainSpeedMetersPerSecond ?: speedMetersPerSecond).coerceAtLeast(0.0)
+        } else {
+            0.0
+        }
 
         if (transmissionPosition != TransmissionPosition.DRIVE) {
-            if (gear != 0 || shifting) setGearImmediately(0, simulatedPedalsGearCalibration)
+            if (gear != 0 || shifting) setGearImmediately(0)
             // A selector change to P/N cancels any D-only shift cut or clutch
             // profile immediately, so a free rev cannot inherit a prior shift.
             automaticGasCutoff = 0.0
@@ -133,7 +148,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             clutchSequenceElapsed = 0.0
             autoblipStartMilliseconds = null
         } else if (gear == 0 && !shifting) {
-            setGearImmediately(1, simulatedPedalsGearCalibration)
+            setGearImmediately(1)
         }
 
         var shiftStarted = false
@@ -165,7 +180,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 controlsGas,
                 clutch,
                 automaticShifting,
-                simulatedPedalsGearCalibration,
                 dt,
             )
         } else {
@@ -184,7 +198,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             0
         }
         manualShiftRequest = 0
-        if (acceptShift(requestedDirection, clutch, simulatedPedalsGearCalibration, dt)) {
+        if (acceptShift(requestedDirection, clutch, dt)) {
             shiftStarted = true
             eventDirection = requestedDirection
         } else if (requestedDirection != 0) {
@@ -209,7 +223,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val frontRadius = vehicle.frontWheelRadiusMeters.coerceAtLeast(1e-6)
         val rearRadius = vehicle.rearWheelRadiusMeters.coerceAtLeast(1e-6)
         val driven = drivenAxle(vehicle)
-        val wheelSpeed = speedMetersPerSecond / driven.radius
+        // Road forces use the physical speed, but engine-to-wheel coupling uses the FMOD speed.
+        // This lets 19 km/h of vehicle motion reach an authored 8,000 RPM shift point when the
+        // equal-speed mapping says that first gear should occupy 0..19 km/h.
+        val wheelSpeed = this.fmodDrivetrainSpeedMetersPerSecond / driven.radius
         val rollingForce = 2.0 * (
             vehicle.frontRollingResistance0 + vehicle.rearRollingResistance0 +
                 (vehicle.frontRollingResistance1 + vehicle.rearRollingResistance1) *
@@ -230,7 +247,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             2.0 * vehicle.rearWheelInertia / rearRadius.pow(2)
         // Keep the selected gear visible during a shift, but briefly uncouple
         // the drivetrain exactly as the Lab does while the clutch changes.
-        val ratio = abs(ratioForGear(physicsGear, simulatedPedalsGearCalibration) * physics.drivetrain.finalDrive)
+        val ratio = abs(ratioForGear(physicsGear) * physics.drivetrain.finalDrive)
         var engineOmega = rpm * RADIAN_SECONDS_PER_RPM
         var driveForce = 0.0
         var tractionTorqueLimited = false
@@ -255,13 +272,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             engineOmega += engine.torque / physics.engine.inertia.coerceAtLeast(0.001) * dt
         }
 
-        if (externalSpeedMetersPerSecond == null) {
+        if (externalVehicleSpeedMetersPerSecond == null) {
             val oldSpeed = speedMetersPerSecond
             speedMetersPerSecond = max(0.0, speedMetersPerSecond + (driveForce - resistingForce) / effectiveMass * dt)
             if (oldSpeed <= 0.0 && driveForce <= resistingForce) speedMetersPerSecond = 0.0
         }
         rpm = max(0.0, engineOmega * RPM_PER_RADIAN_SECOND)
-        previousWheelSpeed = wheelSpeed
+        previousFmodWheelSpeed = wheelSpeed
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
@@ -271,7 +288,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             // Do not expose the internal neutral interval as gear 0 during a
             // normal shift; effects still use shiftStarted below.
             gear = if (shifting) shiftTarget else gear,
-            drivetrainSpeedRadiansPerSecond = speedMetersPerSecond / driven.radius,
+            // Native FMOD receives this internal angular speed. The public vehicle speed remains
+            // available separately through DrivetrainState.fmodDrivetrainSpeedKmh.
+            drivetrainSpeedRadiansPerSecond = this.fmodDrivetrainSpeedMetersPerSecond / driven.radius,
             driverThrottle = rawGas,
             effectiveThrottle = engine.effectiveThrottle,
             brake = cleanBrake,
@@ -302,13 +321,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
     private val shifting: Boolean get() = shiftDirection != 0
 
-    private fun anchorSpeed(speed: Double) {
+    private fun anchorVehicleSpeed(speed: Double) {
         speedMetersPerSecond = speed.coerceAtLeast(0.0)
-        previousWheelSpeed = speedMetersPerSecond / drivenAxle(physics.drivetrain.vehicle).radius
     }
 
-    private fun setGearImmediately(target: Int, calibration: SimulatedPedalsGearCalibration?) {
-        ratioForGear(target, calibration)
+    private fun setGearImmediately(target: Int) {
+        ratioForGear(target)
         gear = target
         shiftDirection = 0
         shiftTarget = target
@@ -345,28 +363,28 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         gas: Double,
         clutch: Double,
         enabled: Boolean,
-        calibration: SimulatedPedalsGearCalibration?,
         dt: Double,
     ): Int {
         if (!enabled || gear == -1 || shifting) return 0
         var request = 0
         if (clutch > 0.99 || gear == 0) {
-            val shiftRpm = calibration?.let { roadCoupledRpm(gear, it) } ?: rpm
-            val upshiftRpm = calibration?.limiterRpm ?: physics.drivetrain.automaticUpshiftRpm.toDouble()
+            // The bank's RPM threshold is the only automatic-shift authority. The equal-speed
+            // layer changes the speed-to-RPM conversion, never this authored value.
+            val shiftRpm = rpm
+            val upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble()
             if (
                 shiftRpm >= upshiftRpm &&
-                gear < (calibration?.forwardGearCount ?: physics.drivetrain.forwardRatios.size) &&
+                gear < physics.drivetrain.forwardRatios.size &&
                 gas > 0.2 && automaticGasCutoff <= 0.0
             ) {
                 request = 1
                 automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
-                val downshiftRpm = calibration?.automaticDownshiftRpm(gear)
-                    ?: physics.drivetrain.automaticDownshiftRpm.toDouble()
+                val downshiftRpm = physics.drivetrain.automaticDownshiftRpm.toDouble()
                 if (
                     shiftRpm < downshiftRpm &&
                     gear > 1 && clutch > 0.85 &&
-                    downshiftAllowed(gear - 1, calibration, dt) &&
+                    downshiftAllowed(gear - 1, dt) &&
                     automaticGasCutoff <= 0.0
                 ) request = -1
             }
@@ -377,23 +395,19 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private fun acceptShift(
         direction: Int,
         clutch: Double,
-        calibration: SimulatedPedalsGearCalibration?,
         dt: Double,
     ): Boolean {
         if (direction == 0 || shifting) return false
         val target = gear + direction
-        val forwardGearCount = calibration?.forwardGearCount ?: physics.drivetrain.forwardRatios.size
+        val forwardGearCount = physics.drivetrain.forwardRatios.size
         if (target !in -1..forwardGearCount) return false
-        if (direction < 0 && !downshiftAllowed(target, calibration, dt)) return false
+        if (direction < 0 && !downshiftAllowed(target, dt)) return false
 
         shiftDirection = direction
         shiftTarget = target
         shiftElapsed = 0.0
-        shiftDuration = if (direction > 0) {
-            calibration?.gearUpTimeSeconds ?: physics.drivetrain.gearUpTimeSeconds
-        } else {
-            calibration?.gearDownTimeSeconds ?: physics.drivetrain.gearDownTimeSeconds
-        }
+        shiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds
+        else physics.drivetrain.gearDownTimeSeconds
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
             engineCutoff = physics.drivetrain.autoCutoffTimeSeconds
         }
@@ -410,37 +424,27 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return true
     }
 
-    private fun downshiftAllowed(target: Int, calibration: SimulatedPedalsGearCalibration?, dt: Double): Boolean {
+    private fun downshiftAllowed(target: Int, dt: Double): Boolean {
         val spec = physics.drivetrain
         if (!spec.downshiftProtection) return true
         if (target == 0 && spec.downshiftLocksNeutral && speedMetersPerSecond * 3.6 > 2.0) return false
         if (target <= 0) return true
-        return projectedRpmForGear(target, calibration, dt) <= physics.engine.limiterRpm + spec.downshiftOverrevRpm
+        return projectedRpmForGear(target, dt) <= physics.engine.limiterRpm + spec.downshiftOverrevRpm
     }
 
     private fun projectedRpmForGear(
         target: Int,
-        calibration: SimulatedPedalsGearCalibration?,
         dt: Double,
     ): Double {
         val spec = physics.drivetrain
-        val wheelSpeed = speedMetersPerSecond / drivenAxle(spec.vehicle).radius
-        val wheelAcceleration = max(0.0, (wheelSpeed - previousWheelSpeed) / dt.coerceAtLeast(1e-9))
-        val shiftTime = calibration?.gearDownTimeSeconds ?: spec.gearDownTimeSeconds
+        val wheelSpeed = fmodDrivetrainSpeedMetersPerSecond / drivenAxle(spec.vehicle).radius
+        val wheelAcceleration = max(0.0, (wheelSpeed - previousFmodWheelSpeed) / dt.coerceAtLeast(1e-9))
+        val shiftTime = spec.gearDownTimeSeconds
         val projected = wheelSpeed + shiftTime * wheelAcceleration
-        return projected * abs(ratioForGear(target, calibration) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
+        return projected * abs(ratioForGear(target) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
     }
 
-    private fun roadCoupledRpm(gear: Int, calibration: SimulatedPedalsGearCalibration): Double {
-        if (gear <= 0) return rpm
-        val wheelSpeed = speedMetersPerSecond / drivenAxle(physics.drivetrain.vehicle).radius
-        return wheelSpeed *
-            abs(ratioForGear(gear, calibration) * physics.drivetrain.finalDrive) *
-            RPM_PER_RADIAN_SECOND
-    }
-
-    private fun ratioForGear(gear: Int, calibration: SimulatedPedalsGearCalibration?): Double =
-        calibration?.ratioForGear(gear, physics.drivetrain) ?: physics.drivetrain.ratioForGear(gear)
+    private fun ratioForGear(gear: Int): Double = physics.drivetrain.ratioForGear(gear)
 
     private val physicsGear: Int
         get() = if (shifting) 0 else gear

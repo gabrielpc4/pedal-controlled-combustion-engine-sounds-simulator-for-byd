@@ -14,8 +14,11 @@ compatibility and presentation-drive task, not an export or loop-calibration tas
    `engine_int` exists. `engine_ext`, transmission, turbo, limiter, gear, backfire, and start are
    used only if that same car bank exposes the matching event. The inactive modded catalog is not
    selectable in this release.
-4. Keep the direct presentation RPM route. Whole-km/h BYD values must first pass through
-   `QuantizedPresentationSpeedEstimator`; do not set an FMOD `rpms` parameter from raw telemetry.
+4. Keep the separated speed routes. Whole-km/h BYD values must first pass through
+   `QuantizedPresentationSpeedEstimator`; the resulting vehicle speed is converted to the named
+   internal `fmodDrivetrainSpeed` by `EqualSpeedGearMapping`; intermediate bands use the bank's
+   authored upshift RPM and the final band uses its limiter RPM. Do not set an FMOD `rpms`
+   parameter from raw telemetry or from an artificial speed boundary.
 5. Build the packages, install the active original group, and perform a controlled manual drive
    cycle in both perspectives through the production JNI bridge. Persistent Android test sources
    are intentionally not shipped; short-lived probes belong outside the repository.

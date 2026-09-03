@@ -31,10 +31,13 @@ revving, and manual shifting.
 SIMULATED PEDALS intentionally uses a BYD Seal AWD road-speed model. Its full-throttle curve is
 digitized from the supplied Seal trace and reaches 100 km/h in approximately 3.97 seconds; partial
 throttle scales that acceleration linearly. It coasts with passive speed-dependent resistance,
-uses a 190 km/h cap, and stops immediately in Park. For every selected bank, presentation forward
-ratios split 0–190 km/h into equal bands and put that bank's limiter at each band end in D for both
-pedal modes. Automatic upshifts and downshifts use the short 95 ms/220 ms presentation timing. P/N
-bypasses this mapping and remains a free-rev path using engine inertia alone.
+uses a 190 km/h cap, and stops immediately in Park. For every selected bank, an independent
+`EqualSpeedGearMapping` derives an internal `fmodDrivetrainSpeed` so each bank's authored upshift
+RPM lands at the end of every intermediate equal 0–190 km/h band, while the authored limiter lands
+at 190 km/h in the final gear. This mapping is not a speed-triggered shift table: automatic
+upshifts/downshifts still compare the live FMOD RPM with each bank's authored RPM thresholds and
+use its authored durations. P/N bypasses the mapping and remains a free-rev path using engine
+inertia alone.
 
 The input resolver normalizes both sources to the same 0..1 throttle/brake signals before they
 reach the drivetrain. REAL PEDALS is selected only when a single telemetry poll contains a valid
@@ -47,12 +50,11 @@ path.
 
 BYD reports are treated as truncated `[N, N + 1)` km/h values. `QuantizedPresentationSpeedEstimator`
 uses only boundary timing and bounded pedal direction to produce a continuous presentation speed.
-Raw truncated speed remains authoritative for display and drivetrain/shift/load decisions; the
-presentation value is used only for road-coupled tachometer and pitch so FMOD never receives a
+Raw truncated speed remains authoritative for the physical vehicle path and display. The continuous
+value is converted into `fmodDrivetrainSpeed` for the engine/RPM/audio path so FMOD never receives a
 synthetic stepped wave. SIMULATED PEDALS integrates a fractional Seal-model speed internally, then
-truncates it before the shared drivetrain and feeds that same integer stream through the estimator.
-This deliberately reproduces the REAL telemetry limitation instead of giving SIM a privileged
-continuous speed input.
+truncates its public/raw representation while using the same presentation reconstruction policy as
+REAL.
 
 ## Authored FMOD
 

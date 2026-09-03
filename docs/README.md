@@ -33,7 +33,7 @@ before the shared drivetrain, and uses the same estimator as REAL so both modes 
 same integer-speed limitation.
 
 Both modes pass the same normalized throttle/brake values, transmission position, authored gear
-calibration, and FMOD frame. REAL PEDALS is used only when a telemetry poll has all three required
+physics, equal-speed `fmodDrivetrainSpeed` mapping, and FMOD frame. REAL PEDALS is used only when a telemetry poll has all three required
 signals (speed, accelerator, and brake); this avoids mixing live pedals with an invented fallback
 speed. If the operator switches to SIMULATED while moving, its Seal speed model starts at the last
 continuous presentation speed instead of resetting the dashboard to zero.

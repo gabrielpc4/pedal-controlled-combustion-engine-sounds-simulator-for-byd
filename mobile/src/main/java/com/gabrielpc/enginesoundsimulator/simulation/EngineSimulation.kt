@@ -2,9 +2,6 @@ package com.gabrielpc.enginesoundsimulator.simulation
 
 import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 
-import kotlin.math.PI
-import kotlin.math.abs
-
 /**
  * Inputs accepted by the one authoritative Assetto drivetrain model.
  *
@@ -44,6 +41,11 @@ data class DrivetrainState(
     val presentationAccelerationKmhPerSecond: Double = 0.0,
     /** Real BYD raw speed or documented SIM raw speed; never the continuous FMOD pitch input. */
     val realOrDocumentedRawSpeedKmh: Double = 0.0,
+    /**
+     * Internal speed sent to the FMOD drivetrain conversion. It is derived from the vehicle
+     * speed and equal-speed mapping; it is not a second vehicle-speed measurement.
+     */
+    val fmodDrivetrainSpeedKmh: Double = 0.0,
     val drivetrainSpeedRadiansPerSecond: Double = 0.0,
     val boost: Double = 0.0,
     val bov: Double = 0.0,
@@ -73,7 +75,7 @@ class EngineSimulation {
     private var latestState = DrivetrainState()
     private val presentationSpeedEstimator = QuantizedPresentationSpeedEstimator()
     private val bydSealSimulatedPedalsMotion = BydSealSimulatedPedalsMotion()
-    private var simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration? = null
+    private var equalSpeedGearMapping: EqualSpeedGearMapping? = null
     private var previousInputWasSimulated: Boolean? = null
 
     val state: DrivetrainState get() = latestState
@@ -83,9 +85,9 @@ class EngineSimulation {
         drivetrain = AssettoDrivetrain(updated).also { it.reset(engineRunning = true) }
         presentationSpeedEstimator.reset()
         bydSealSimulatedPedalsMotion.reset()
-        simulatedPedalsGearCalibration = SimulatedPedalsGearCalibration.from(updated)
+        equalSpeedGearMapping = EqualSpeedGearMapping.from(updated)
         previousInputWasSimulated = null
-        latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0, false)
+        latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0)
     }
 
     fun reset() {
@@ -93,7 +95,7 @@ class EngineSimulation {
         presentationSpeedEstimator.reset()
         bydSealSimulatedPedalsMotion.reset()
         previousInputWasSimulated = null
-        physics?.let { latestState = buildState(it, drivetrain!!.frame(), 0.0, 0.0, 0.0, false) }
+        physics?.let { latestState = buildState(it, drivetrain!!.frame(), 0.0, 0.0, 0.0) }
     }
 
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
@@ -164,24 +166,37 @@ class EngineSimulation {
         val realOrDocumentedExtrapolatedPresentationSpeedKmh = realExtrapolatedPresentationSpeedKmh
             ?: documentedExtrapolatedPresentationSpeedKmh
         val drivetrainRawSpeedKmh = realOrDocumentedRawSpeedKmh
-        val gearCalibration = if (input.transmissionPosition == TransmissionPosition.DRIVE) {
-            // Both input modes use the same presentation gearbox in D: each
-            // gear spans an equal share of 0..190 km/h and reaches the authored
-            // limiter at its upper boundary. P/N remains a pure free-rev path.
-            simulatedPedalsGearCalibration
+        val fmodMapping = if (input.transmissionPosition == TransmissionPosition.DRIVE) {
+            // Both input modes use the same internal FMOD speed mapping in D. It changes only
+            // the road-speed-to-RPM conversion; the drivetrain still reads every shift and RPM
+            // limit from the selected bank. P/N remains a pure free-rev path.
+            equalSpeedGearMapping
         } else {
-            // P/N must remain a true free-rev path: the Lab uses zero gear ratio and
-            // engine inertia alone here. Never let the SIM road-speed gear calibration
-            // alter neutral or park, even if the selector changes while still moving.
+            // P/N must remain a true free-rev path. Never derive road-coupled FMOD speed while
+            // the selector is outside D, even if the selector changes while still moving.
             null
         }
+        val fmodMappingGear = when {
+            latestState.isShifting && latestState.shiftDirection == ShiftDirection.UP ->
+                (latestState.gear - 1).coerceAtLeast(1)
+            latestState.isShifting && latestState.shiftDirection == ShiftDirection.DOWN ->
+                latestState.gear + 1
+            else -> latestState.gear
+        }
+        val fmodDrivetrainSpeedKmh = fmodMapping?.fmodDrivetrainSpeedKmh(
+            vehicleSpeedKmh = realOrDocumentedExtrapolatedPresentationSpeedKmh
+                ?: drivetrainRawSpeedKmh
+                ?: 0.0,
+            gear = fmodMappingGear,
+            authored = activePhysics.drivetrain,
+        ) ?: 0.0
         val frame = activeDrivetrain.step(
             throttle = input.throttle.coerceIn(0.0, 1.0),
             brake = input.brake.coerceIn(0.0, 1.0),
             transmissionPosition = input.transmissionPosition,
             automaticShifting = !manualShiftEnabled,
-            externalSpeedMetersPerSecond = drivetrainRawSpeedKmh?.div(3.6),
-            simulatedPedalsGearCalibration = gearCalibration,
+            externalVehicleSpeedMetersPerSecond = drivetrainRawSpeedKmh?.div(3.6),
+            fmodDrivetrainSpeedMetersPerSecond = fmodDrivetrainSpeedKmh.div(3.6),
             deltaSeconds = dt,
         )
         val audiblePresentationSpeedKmh = realOrDocumentedExtrapolatedPresentationSpeedKmh
@@ -200,11 +215,10 @@ class EngineSimulation {
             presentationAccelerationKmhPerSecond = audiblePresentationVelocityKmhPerSecond,
             realOrDocumentedRawSpeedKmh = realOrDocumentedRawSpeedKmh
                 ?: truncateRawSpeedKmh(frame.speedMetersPerSecond * 3.6),
+            fmodDrivetrainSpeedKmh = fmodDrivetrainSpeedKmh,
             // Both input sources use the same audible reconstruction. The documented SIM model
             // keeps a fractional value only for accurate integration; its truncated raw value
             // reaches the drivetrain just like real BYD telemetry.
-            usePresentationRoadSpeed = realOrDocumentedRawSpeedKmh != null,
-            simulatedPedalsGearCalibration = gearCalibration,
         )
         return latestState
     }
@@ -219,20 +233,13 @@ class EngineSimulation {
         presentationSpeedKmh: Double,
         presentationAccelerationKmhPerSecond: Double,
         realOrDocumentedRawSpeedKmh: Double,
-        usePresentationRoadSpeed: Boolean,
-        simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration? = null,
+        fmodDrivetrainSpeedKmh: Double = 0.0,
     ): DrivetrainState {
-        val audibleRpm = if (usePresentationRoadSpeed && frame.gear != 0 && presentationSpeedKmh > 0.01) {
-            val wheelOmega = presentationSpeedKmh / 3.6 / drivenWheelRadius(activePhysics)
-            val ratio = audibleRatioDuringShift(frame, activePhysics, simulatedPedalsGearCalibration)
-            (wheelOmega * ratio * 60.0 / (2.0 * PI)).coerceIn(activePhysics.engine.idleRpm, activePhysics.engine.limiterRpm)
-        } else {
-            frame.rpm.coerceAtLeast(activePhysics.engine.idleRpm)
-        }
-        val redline = activePhysics.engine.shiftLightsRpm.maxOrNull()
-            ?: activePhysics.engine.limiterRpm
         return DrivetrainState(
-            rpm = audibleRpm,
+            // AssettoDrivetrain already consumed fmodDrivetrainSpeed and produced the authored
+            // RPM. Recomputing RPM from the public presentation speed here would create a second,
+            // conflicting authority and could reintroduce pitch steps during a shift.
+            rpm = frame.rpm.coerceAtLeast(activePhysics.engine.idleRpm),
             gear = frame.gear,
             smoothedThrottle = frame.effectiveThrottle,
             audioThrottle = frame.driverThrottle,
@@ -250,6 +257,7 @@ class EngineSimulation {
             presentationSpeedKmh = presentationSpeedKmh,
             presentationAccelerationKmhPerSecond = presentationAccelerationKmhPerSecond,
             realOrDocumentedRawSpeedKmh = realOrDocumentedRawSpeedKmh,
+            fmodDrivetrainSpeedKmh = fmodDrivetrainSpeedKmh,
             drivetrainSpeedRadiansPerSecond = frame.drivetrainSpeedRadiansPerSecond,
             boost = frame.boost,
             bov = frame.bov,
@@ -261,40 +269,12 @@ class EngineSimulation {
             tractionLimitActive = frame.tractionLimitActive,
             tractionLimitPulse = frame.tractionLimitPulse,
             tachometerMaximumRpm = activePhysics.engine.tachometerMaximumRpm,
-            redlineRpm = redline,
+            // Shift lights are indicators only. The red zone starts at the authored limiter.
+            redlineRpm = activePhysics.engine.limiterRpm,
             limiterRpm = activePhysics.engine.limiterRpm,
-            automaticUpshiftRpm = simulatedPedalsGearCalibration?.limiterRpm
-                ?: activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
-            automaticDownshiftRpm = simulatedPedalsGearCalibration?.automaticDownshiftRpm(frame.gear)
-                ?: activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
+            automaticUpshiftRpm = activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
+            automaticDownshiftRpm = activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
         )
-    }
-
-    /**
-     * The drivetrain is uncoupled while a shift clutch profile runs, but the selected target gear
-     * remains visible so shift events never expose an artificial gear 0. Blend its road-coupled
-     * ratios over the authored shift interval for the audible path; this does not alter torque,
-     * shift timing, or automatic decisions, it only prevents a synthetic pitch cliff.
-     */
-    private fun audibleRatioDuringShift(
-        frame: AssettoDrivetrainFrame,
-        activePhysics: AssettoPhysics,
-        calibration: SimulatedPedalsGearCalibration?,
-    ): Double {
-        val target = frame.gear
-        val targetRatio = abs(
-            (calibration?.ratioForGear(target, activePhysics.drivetrain)
-                ?: activePhysics.drivetrain.ratioForGear(target)) * activePhysics.drivetrain.finalDrive,
-        )
-        if (frame.shiftDirection == 0) return targetRatio
-
-        val source = if (frame.shiftDirection > 0) target - 1 else target + 1
-        if (source == 0) return targetRatio
-        val sourceRatio = abs(
-            (calibration?.ratioForGear(source, activePhysics.drivetrain)
-                ?: activePhysics.drivetrain.ratioForGear(source)) * activePhysics.drivetrain.finalDrive,
-        )
-        return sourceRatio + (targetRatio - sourceRatio) * frame.shiftProgress.coerceIn(0.0, 1.0)
     }
 }
 
