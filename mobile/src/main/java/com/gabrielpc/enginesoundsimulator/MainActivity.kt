@@ -985,7 +985,9 @@ internal fun MixerDriveControls(
             maxRpm = state.drivetrain.tachometerMaximumRpm,
             redlineRpm = state.drivetrain.redlineRpm,
             upshiftRpm = state.drivetrain.automaticUpshiftRpm,
-            modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(300)),
+            // The tach is intentionally twice the original throttle pedal height, while the
+            // pedals themselves retain their established mixer dimensions.
+            modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(404)),
         )
         if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
             ManualShiftButtons(
@@ -999,7 +1001,7 @@ internal fun MixerDriveControls(
             value = state.brake,
             accent = Red,
             width = MIXER_DRIVE_CONTROL_SCALE.scaledDp(92),
-            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(308),
+            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(154),
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
@@ -1008,7 +1010,7 @@ internal fun MixerDriveControls(
             value = state.throttle,
             accent = Green,
             width = MIXER_DRIVE_CONTROL_SCALE.scaledDp(84),
-            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(404),
+            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(202),
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onThrottle,
         )
