@@ -176,19 +176,10 @@ class EngineSimulation {
             // the selector is outside D, even if the selector changes while still moving.
             null
         }
-        val fmodMappingGear = when {
-            latestState.isShifting && latestState.shiftDirection == ShiftDirection.UP ->
-                (latestState.gear - 1).coerceAtLeast(1)
-            latestState.isShifting && latestState.shiftDirection == ShiftDirection.DOWN ->
-                latestState.gear + 1
-            else -> latestState.gear
-        }
         val fmodDrivetrainSpeedKmh = fmodMapping?.fmodDrivetrainSpeedKmh(
             vehicleSpeedKmh = realOrDocumentedExtrapolatedPresentationSpeedKmh
                 ?: drivetrainRawSpeedKmh
                 ?: 0.0,
-            gear = fmodMappingGear,
-            authored = activePhysics.drivetrain,
         ) ?: 0.0
         val frame = activeDrivetrain.step(
             throttle = input.throttle.coerceIn(0.0, 1.0),

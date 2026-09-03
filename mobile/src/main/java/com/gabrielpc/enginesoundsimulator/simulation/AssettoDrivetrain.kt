@@ -1,5 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
+import android.util.Log
+
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -65,6 +67,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var backfireTimer = 0.0
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
+    /** Persistent diagnostic trace for validating authored shifts against the Android output. */
+    private var diagnosticTraceElapsedSeconds = 0.0
     private var previousFmodWheelSpeed = 0.0
     private var lastFrame = snapshot()
 
@@ -95,6 +99,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftDuration = 0.0
         manualShiftRequest = 0
         fmodDrivetrainSpeedMetersPerSecond = 0.0
+        diagnosticTraceElapsedSeconds = 0.0
         previousFmodWheelSpeed = 0.0
         previousTractionLimit = false
         turboQs.fill(0.0)
@@ -159,7 +164,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val cleanBrake = brake.coerceIn(0.0, 1.0)
         val (aeroDrag, downforce) = aeroForSpeed(speedMetersPerSecond)
 
-        val clutch = autoclutchStep(dt, rawGas)
+        val clutch = autoclutchStep(dt, rawGas, cleanBrake)
         var controlsGas = rawGas
         val autoblipStarted = autoblipStartMilliseconds
         if (autoblipStarted != null && physics.drivetrain.autoblipProfileMilliseconds.isNotEmpty()) {
@@ -282,6 +287,23 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
+        diagnosticTraceElapsedSeconds += dt
+        val traceIntervalSeconds = if (shifting || shiftStarted || shiftCompleted) 0.003 else 0.050
+        if (diagnosticTraceElapsedSeconds >= traceIntervalSeconds) {
+            diagnosticTraceElapsedSeconds -= traceIntervalSeconds
+            Log.d(
+                "AssettoDrivetrainTrace",
+                "rpm=${rpm.toInt()} internalGear=$gear exposedGear=${if (shifting) shiftTarget else gear} " +
+                    "physicsGear=$physicsGear target=$shiftTarget shiftDir=$shiftDirection " +
+                    "shiftElapsed=${"%.4f".format(shiftElapsed)} shiftDuration=${"%.4f".format(shiftDuration)} " +
+                    "clutch=${"%.3f".format(clutch)} vehicleSpeed=${"%.2f".format(speedMetersPerSecond * 3.6)} " +
+                    "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
+                    "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
+                    "autoRequest=$automaticRequest requested=$requestedDirection " +
+                    "shiftStarted=$shiftStarted shiftCompleted=$shiftCompleted shifting=$shifting " +
+                    "cutoff=${"%.3f".format(automaticGasCutoff)}",
+            )
+        }
         lastFrame = AssettoDrivetrainFrame(
             rpm = rpm,
             speedMetersPerSecond = speedMetersPerSecond,
@@ -334,7 +356,25 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftDuration = 0.0
     }
 
-    private fun autoclutchStep(dt: Double, gas: Double): Double {
+    private fun autoclutchStep(dt: Double, gas: Double, brake: Double): Double {
+        // In automatic D, a firm brake at walking speed means the driver is holding the car
+        // stopped. The authored autoclutch rate is intentionally gentle for normal launches, but
+        // letting that rate continue all the way to zero would keep the engine mechanically tied
+        // to a stationary wheel while the presentation-speed estimate decays. Release immediately
+        // in this one physical condition so the engine settles at its authored idle instead of
+        // being dragged through zero RPM. This is a stop-protection invariant, not a new shift
+        // threshold or a replacement for any bank clutch profile.
+        if (
+            gear == 1 &&
+            !shifting &&
+            brake >= STOPPED_CLUTCH_RELEASE_BRAKE &&
+            speedMetersPerSecond <= STOPPED_CLUTCH_RELEASE_SPEED_MPS
+        ) {
+            clutchSequence = emptyList()
+            clutchSequenceElapsed = 0.0
+            clutchSignal = 0.0
+            return 0.0
+        }
         if (clutchSequence.isNotEmpty()) {
             clutchSignal = interpolateAssettoCurve(clutchSequence, clutchSequenceElapsed)
             clutchSequenceElapsed = f32(clutchSequenceElapsed + dt)
@@ -584,6 +624,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
     private companion object {
         const val GRAVITY = 9.81
+        const val STOPPED_CLUTCH_RELEASE_BRAKE = 0.2
+        const val STOPPED_CLUTCH_RELEASE_SPEED_MPS = 1.0
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
