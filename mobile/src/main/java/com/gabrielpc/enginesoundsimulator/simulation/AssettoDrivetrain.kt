@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
 import android.util.Log
+import com.gabrielpc.enginesoundsimulator.RuntimeFeatureFlags
 
 import kotlin.math.PI
 import kotlin.math.abs
@@ -303,38 +304,40 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
-        diagnosticHighRateRemainingSeconds = max(0.0, diagnosticHighRateRemainingSeconds - dt)
-        if (shiftStarted || shiftCompleted) {
-            diagnosticHighRateRemainingSeconds = max(
-                diagnosticHighRateRemainingSeconds,
-                SHIFT_DIAGNOSTIC_TAIL_SECONDS,
-            )
-        }
-        diagnosticTraceElapsedSeconds += dt
-        val traceIntervalSeconds = if (
-            shifting || diagnosticHighRateRemainingSeconds > 0.0
-        ) 0.003 else 0.050
-        if (diagnosticTraceElapsedSeconds >= traceIntervalSeconds) {
-            diagnosticTraceElapsedSeconds -= traceIntervalSeconds
-            Log.d(
-                "AssettoDrivetrainTrace",
-                "rpm=${rpm.toInt()} internalGear=$gear exposedGear=${if (shifting) shiftTarget else gear} " +
-                    "physicsGear=$physicsGear target=$shiftTarget shiftDir=$shiftDirection " +
-                    "shiftElapsed=${"%.4f".format(shiftElapsed)} shiftDuration=${"%.4f".format(shiftDuration)} " +
-                    "clutch=${"%.3f".format(clutch)} vehicleSpeed=${"%.2f".format(speedMetersPerSecond * 3.6)} " +
-                    "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
-                    "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
-                    "autoRequest=$automaticRequest requested=$requestedDirection " +
-                    "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
-                    "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
-                    "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
-                    "autoblipStarted=${autoblipStarted != null} autoblipApplied=$autoblipApplied " +
-                    "clutchTorque=${"%.3f".format(clutchTorqueApplied)} " +
-                    "requiredClutchTorque=${"%.3f".format(requiredClutchTorque)} " +
-                    "clutchCapacity=${"%.3f".format(clutchCapacity)} gripCapacity=${"%.3f".format(gripCapacity)} " +
-                    "shiftStarted=$shiftStarted shiftCompleted=$shiftCompleted shifting=$shifting " +
-                    "cutoff=${"%.3f".format(automaticGasCutoff)}",
-            )
+        if (RuntimeFeatureFlags.ENABLE_DETAILED_DRIVETRAIN_TELEMETRY) {
+            diagnosticHighRateRemainingSeconds = max(0.0, diagnosticHighRateRemainingSeconds - dt)
+            if (shiftStarted || shiftCompleted) {
+                diagnosticHighRateRemainingSeconds = max(
+                    diagnosticHighRateRemainingSeconds,
+                    SHIFT_DIAGNOSTIC_TAIL_SECONDS,
+                )
+            }
+            diagnosticTraceElapsedSeconds += dt
+            val traceIntervalSeconds = if (
+                shifting || diagnosticHighRateRemainingSeconds > 0.0
+            ) 0.003 else 0.050
+            if (diagnosticTraceElapsedSeconds >= traceIntervalSeconds) {
+                diagnosticTraceElapsedSeconds -= traceIntervalSeconds
+                Log.d(
+                    "AssettoDrivetrainTrace",
+                    "rpm=${rpm.toInt()} internalGear=$gear exposedGear=${if (shifting) shiftTarget else gear} " +
+                        "physicsGear=$physicsGear target=$shiftTarget shiftDir=$shiftDirection " +
+                        "shiftElapsed=${"%.4f".format(shiftElapsed)} shiftDuration=${"%.4f".format(shiftDuration)} " +
+                        "clutch=${"%.3f".format(clutch)} vehicleSpeed=${"%.2f".format(speedMetersPerSecond * 3.6)} " +
+                        "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
+                        "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
+                        "autoRequest=$automaticRequest requested=$requestedDirection " +
+                        "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
+                        "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
+                        "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
+                        "autoblipStarted=${autoblipStarted != null} autoblipApplied=$autoblipApplied " +
+                        "clutchTorque=${"%.3f".format(clutchTorqueApplied)} " +
+                        "requiredClutchTorque=${"%.3f".format(requiredClutchTorque)} " +
+                        "clutchCapacity=${"%.3f".format(clutchCapacity)} gripCapacity=${"%.3f".format(gripCapacity)} " +
+                        "shiftStarted=$shiftStarted shiftCompleted=$shiftCompleted shifting=$shifting " +
+                        "cutoff=${"%.3f".format(automaticGasCutoff)}",
+                )
+            }
         }
         lastFrame = AssettoDrivetrainFrame(
             rpm = rpm,

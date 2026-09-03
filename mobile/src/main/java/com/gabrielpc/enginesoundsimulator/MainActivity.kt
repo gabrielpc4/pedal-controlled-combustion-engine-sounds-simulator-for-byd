@@ -258,7 +258,15 @@ private fun MotorSoundDashboard(
     onSoundPerspectiveChange: (com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective) -> Unit,
     onDismissUserMessage: () -> Unit,
 ) {
-    var mainScreen by remember { mutableStateOf(DashboardMainScreen.CLASSIC) }
+    var mainScreen by remember {
+        mutableStateOf(
+            if (RuntimeFeatureFlags.START_ON_MIXER) {
+                DashboardMainScreen.MIXER
+            } else {
+                DashboardMainScreen.CLASSIC
+            },
+        )
+    }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(
