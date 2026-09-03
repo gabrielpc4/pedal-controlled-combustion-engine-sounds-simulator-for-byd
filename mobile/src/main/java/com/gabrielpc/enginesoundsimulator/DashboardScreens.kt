@@ -312,7 +312,7 @@ private fun MixerPerspectiveSelector(
 
 // The enlarged mixer pedals and adjacent tach need a protected bottom area so cards never slide
 // underneath the controls while the diagnostics list is scrolled.
-private val MIXER_PEDALS_OVERLAY_HEIGHT = 260.dp
+private val MIXER_PEDALS_OVERLAY_HEIGHT = 500.dp
 
 @Composable
 private fun MixerHeaderRow(

@@ -987,7 +987,7 @@ internal fun MixerDriveControls(
             upshiftRpm = state.drivetrain.automaticUpshiftRpm,
             // The tach is intentionally twice the original throttle pedal height, while the
             // pedals themselves retain their established mixer dimensions.
-            modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(404)),
+            modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(808)),
         )
         if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
             ManualShiftButtons(
