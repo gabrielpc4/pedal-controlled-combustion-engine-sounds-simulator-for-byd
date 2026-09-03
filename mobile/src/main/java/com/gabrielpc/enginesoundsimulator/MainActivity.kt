@@ -974,9 +974,19 @@ internal fun MixerDriveControls(
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(12)),
+        horizontalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(16)),
         verticalAlignment = Alignment.Bottom,
     ) {
+        // Keep the mixer diagnostics paired with the same live tachometer shown on the classic
+        // dashboard, so the pedal test has an immediate RPM reference without leaving the mixer.
+        Tachometer(
+            drivetrain = state.drivetrain,
+            transmissionPosition = state.transmissionPosition,
+            maxRpm = state.drivetrain.tachometerMaximumRpm,
+            redlineRpm = state.drivetrain.redlineRpm,
+            upshiftRpm = state.drivetrain.automaticUpshiftRpm,
+            modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(300)),
+        )
         if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
             ManualShiftButtons(
                 onUpshift = onManualUpshift,
@@ -989,7 +999,7 @@ internal fun MixerDriveControls(
             value = state.brake,
             accent = Red,
             width = MIXER_DRIVE_CONTROL_SCALE.scaledDp(92),
-            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(154),
+            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(308),
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
@@ -998,7 +1008,7 @@ internal fun MixerDriveControls(
             value = state.throttle,
             accent = Green,
             width = MIXER_DRIVE_CONTROL_SCALE.scaledDp(84),
-            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(202),
+            height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(404),
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onThrottle,
         )
