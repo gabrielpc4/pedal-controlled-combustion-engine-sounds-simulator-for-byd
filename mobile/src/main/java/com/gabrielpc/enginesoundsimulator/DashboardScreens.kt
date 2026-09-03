@@ -602,17 +602,15 @@ private fun CarDropdownSelector(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
                         )
-                        // Mixer selection stays a compact, vertically scrolling list. The
-                        // spacious grid is reserved for the main-screen car picker.
-                        LazyColumn(
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             items(installedProfiles, key = { it.id }) { profile ->
-                                Row(
+                                Column(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(78.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(if (profile.id == selectedCarId) Cyan.copy(alpha = 0.18f) else Panel)
                                         .border(
@@ -625,15 +623,14 @@ private fun CarDropdownSelector(
                                             onSelectCar(profile.id)
                                         }
                                         .padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     CarPreviewThumbnail(
                                         profile = profile,
                                         audioAssetResolver = audioAssetResolver,
                                         contentDescription = profile.displayName,
                                         modifier = Modifier
-                                            .width(108.dp)
-                                            .fillMaxHeight()
+                                            .fillMaxWidth()
+                                            .height(112.dp)
                                             .clip(RoundedCornerShape(6.dp)),
                                     )
                                     Text(
@@ -644,7 +641,7 @@ private fun CarDropdownSelector(
                                         fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Bold,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(start = 10.dp),
+                                        modifier = Modifier.padding(top = 7.dp),
                                     )
                                 }
                             }
@@ -686,7 +683,7 @@ internal fun CarGridSelectionDialog(
                     modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
                 )
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 250.dp),
+                    columns = GridCells.Fixed(3),
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
