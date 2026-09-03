@@ -144,7 +144,11 @@ class EngineSimulation {
             presentationSpeedKmh = present,
             presentationAccelerationKmhPerSecond = presentAcceleration,
             rawSpeedKmh = rawSpeed ?: truncateRawSpeedKmh(roadSpeedKmh ?: frame.speedMetersPerSecond * 3.6),
-            usePresentationRoadSpeed = roadSpeedKmh != null,
+            // SIMULATED PEDALS already has a continuous virtual road speed. Keep its audible RPM
+            // on the authored engine inertia/clutch model so throttle can raise RPM before speed
+            // catches up; only REAL telemetry needs the presentation-speed road coupling to hide
+            // BYD's truncated integer readings.
+            usePresentationRoadSpeed = rawSpeed != null,
             simulatedPedalsGearCalibration = gearCalibration,
         )
         return latestState
@@ -165,10 +169,7 @@ class EngineSimulation {
     ): DrivetrainState {
         val audibleRpm = if (usePresentationRoadSpeed && frame.gear != 0 && presentationSpeedKmh > 0.01) {
             val wheelOmega = presentationSpeedKmh / 3.6 / drivenWheelRadius(activePhysics)
-            val ratio = abs(
-                (simulatedPedalsGearCalibration?.ratioForGear(frame.gear, activePhysics.drivetrain)
-                    ?: activePhysics.drivetrain.ratioForGear(frame.gear)) * activePhysics.drivetrain.finalDrive,
-            )
+            val ratio = audibleRatioDuringShift(frame, activePhysics, simulatedPedalsGearCalibration)
             (wheelOmega * ratio * 60.0 / (2.0 * PI)).coerceIn(activePhysics.engine.idleRpm, activePhysics.engine.limiterRpm)
         } else {
             frame.rpm.coerceAtLeast(activePhysics.engine.idleRpm)
@@ -213,6 +214,33 @@ class EngineSimulation {
             automaticDownshiftRpm = simulatedPedalsGearCalibration?.automaticDownshiftRpm(frame.gear)
                 ?: activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
         )
+    }
+
+    /**
+     * The drivetrain is uncoupled while a shift clutch profile runs, but the selected target gear
+     * remains visible so shift events never expose an artificial gear 0. Blend its road-coupled
+     * ratios over the authored shift interval for the audible path; this does not alter torque,
+     * shift timing, or automatic decisions, it only prevents a synthetic pitch cliff.
+     */
+    private fun audibleRatioDuringShift(
+        frame: AssettoDrivetrainFrame,
+        activePhysics: AssettoPhysics,
+        calibration: SimulatedPedalsGearCalibration?,
+    ): Double {
+        val target = frame.gear
+        val targetRatio = abs(
+            (calibration?.ratioForGear(target, activePhysics.drivetrain)
+                ?: activePhysics.drivetrain.ratioForGear(target)) * activePhysics.drivetrain.finalDrive,
+        )
+        if (frame.shiftDirection == 0) return targetRatio
+
+        val source = if (frame.shiftDirection > 0) target - 1 else target + 1
+        if (source == 0) return targetRatio
+        val sourceRatio = abs(
+            (calibration?.ratioForGear(source, activePhysics.drivetrain)
+                ?: activePhysics.drivetrain.ratioForGear(source)) * activePhysics.drivetrain.finalDrive,
+        )
+        return sourceRatio + (targetRatio - sourceRatio) * frame.shiftProgress.coerceIn(0.0, 1.0)
     }
 }
 

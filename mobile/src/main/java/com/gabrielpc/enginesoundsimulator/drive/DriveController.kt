@@ -67,11 +67,19 @@ class DriveController(context: Context) {
     private val appContext = context.applicationContext
     private val selectedCarRepository = SelectedCarRepository(appContext)
     private val bankResolver = FmodBankResolver(appContext)
+    // Package manifests are immutable while this controller is running. Keeping the installed
+    // catalog out of the 3 ms simulation step prevents dozens of disk reads and JSON parses per
+    // frame, which otherwise makes simulated acceleration run behind wall-clock time.
+    private val installedProfileCache = AtomicReference(
+        FmodBankProfiles.all.filter(bankResolver::isInstalled),
+    )
     private val shiftModeRepository = ShiftModeRepository(appContext)
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
     private val selectedProfile = AtomicReference(
-        selectedCarRepository.load().takeIf(bankResolver::isInstalled)
-            ?: FmodBankProfiles.all.firstOrNull(bankResolver::isInstalled)
+        selectedCarRepository.load().takeIf { candidate ->
+            installedProfileCache.get().any { it.id == candidate.id }
+        }
+            ?: installedProfileCache.get().firstOrNull()
             ?: FmodBankProfiles.default,
     )
     private val selectedPerspective = AtomicReference(soundPerspectiveRepository.load(selectedProfile.get()))
@@ -136,6 +144,7 @@ class DriveController(context: Context) {
     fun start() {
         synchronized(lifecycleLock) {
             if (running.get() && loopThread?.isAlive == true) return
+            refreshInstalledProfileCache()
             loopThread?.let { thread ->
                 thread.interrupt()
                 joinLoop(thread)
@@ -273,7 +282,11 @@ class DriveController(context: Context) {
     }
 
     private fun installedProfiles(): List<FmodBankProfile> =
-        FmodBankProfiles.all.filter(bankResolver::isInstalled)
+        installedProfileCache.get()
+
+    private fun refreshInstalledProfileCache() {
+        installedProfileCache.set(FmodBankProfiles.all.filter(bankResolver::isInstalled))
+    }
 
     private fun runLoop(runId: Long) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)

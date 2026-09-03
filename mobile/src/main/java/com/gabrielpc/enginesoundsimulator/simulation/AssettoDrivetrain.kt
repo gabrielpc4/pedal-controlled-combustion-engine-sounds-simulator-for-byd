@@ -285,7 +285,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             shiftRejected = shiftRejected,
             shifting = shifting,
             shiftDirection = if (shiftStarted || shiftCompleted || shifting) eventDirection else 0,
-            shiftProgress = if (shifting) (shiftElapsed / shiftDuration.coerceAtLeast(dt)).coerceIn(0.0, 1.0) else 0.0,
+            // Preserve a final 1.0 sample so presentation code can finish a gear-ratio
+            // crossfade without reintroducing an audible one-frame pitch step.
+            shiftProgress = when {
+                shifting -> (shiftElapsed / shiftDuration.coerceAtLeast(dt)).coerceIn(0.0, 1.0)
+                shiftCompleted -> 1.0
+                else -> 0.0
+            },
             tractionLimitActive = tractionActive,
             tractionLimitPulse = tractionPulse,
         )
