@@ -366,6 +366,7 @@ private fun MotorSoundDashboard(
                                     state = state,
                                     onPreviousCar = onPreviousCar,
                                     onNextCar = onNextCar,
+                                    onSelectCar = onSelectCar,
                                     modifier = Modifier
                                         .weight(1.12f)
                                         .fillMaxHeight(),
@@ -1028,8 +1029,10 @@ private fun CarStage(
     state: DriveSnapshot,
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
+    onSelectCar: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var carPickerExpanded by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         Column(
             modifier = Modifier
@@ -1073,7 +1076,8 @@ private fun CarStage(
                     .fillMaxWidth(0.88f)
                     .fillMaxHeight(0.65f)
                     .align(Alignment.Center)
-                    .offset(y = (-46).dp),
+                    .offset(y = (-46).dp)
+                    .clickable { carPickerExpanded = true },
             )
         } else {
             Image(
@@ -1084,7 +1088,16 @@ private fun CarStage(
                     .fillMaxWidth(0.84f)
                     .fillMaxHeight(0.62f)
                     .align(Alignment.Center)
-                    .offset(y = (-46).dp),
+                    .offset(y = (-46).dp)
+                    .clickable { carPickerExpanded = true },
+            )
+        }
+
+        if (carPickerExpanded) {
+            CarGridSelectionDialog(
+                selectedCarId = state.selectedCarId,
+                onSelectCar = onSelectCar,
+                onDismiss = { carPickerExpanded = false },
             )
         }
 

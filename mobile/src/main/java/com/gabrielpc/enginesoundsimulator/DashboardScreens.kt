@@ -51,7 +51,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -600,15 +602,17 @@ private fun CarDropdownSelector(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
                         )
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
+                        // Mixer selection stays a compact, vertically scrolling list. The
+                        // spacious grid is reserved for the main-screen car picker.
+                        LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             items(installedProfiles, key = { it.id }) { profile ->
-                                Column(
+                                Row(
                                     modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(78.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(if (profile.id == selectedCarId) Cyan.copy(alpha = 0.18f) else Panel)
                                         .border(
@@ -621,14 +625,15 @@ private fun CarDropdownSelector(
                                             onSelectCar(profile.id)
                                         }
                                         .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     CarPreviewThumbnail(
                                         profile = profile,
                                         audioAssetResolver = audioAssetResolver,
                                         contentDescription = profile.displayName,
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(72.dp)
+                                            .width(108.dp)
+                                            .fillMaxHeight()
                                             .clip(RoundedCornerShape(6.dp)),
                                     )
                                     Text(
@@ -639,10 +644,84 @@ private fun CarDropdownSelector(
                                         fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Bold,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 7.dp),
+                                        modifier = Modifier.padding(start = 10.dp),
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Spacious main-screen picker; thumbnails are capped by their decoded native dimensions. */
+@Composable
+internal fun CarGridSelectionDialog(
+    selectedCarId: String,
+    onSelectCar: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val resolver = remember(context) { FmodBankResolver(context.applicationContext) }
+    val installedProfiles = FmodBankProfiles.all.filter(resolver::isInstalled)
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.84f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(PanelBright)
+                .border(1.dp, Line, RoundedCornerShape(14.dp))
+                .padding(18.dp),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Text("SELECT CAR", color = CyanSoft, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+                Text(
+                    text = "${installedProfiles.size} INSTALLED",
+                    color = Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                )
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 250.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    items(installedProfiles, key = { it.id }) { profile ->
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (profile.id == selectedCarId) Cyan.copy(alpha = 0.18f) else Panel)
+                                .border(1.dp, if (profile.id == selectedCarId) Cyan else Line, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onDismiss()
+                                    onSelectCar(profile.id)
+                                }
+                                .padding(10.dp),
+                        ) {
+                            CarPreviewThumbnail(
+                                profile = profile,
+                                audioAssetResolver = resolver,
+                                contentDescription = profile.displayName,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(128.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                            )
+                            Text(
+                                text = profile.displayName,
+                                color = White,
+                                fontSize = 15.sp,
+                                lineHeight = 18.sp,
+                                fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 9.dp),
+                            )
                         }
                     }
                 }
@@ -672,6 +751,7 @@ private fun CarPreviewThumbnail(
     }
 
     val aspectRatio = preview?.aspectRatio ?: (16f / 9f)
+    val density = LocalDensity.current
 
     Box(
         modifier = modifier
@@ -684,7 +764,13 @@ private fun CarPreviewThumbnail(
                 bitmap = preview.image,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
+                // Do not enlarge a small native preview just to fill a larger picker card.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .sizeIn(
+                        maxWidth = with(density) { preview.image.width.toDp() },
+                        maxHeight = with(density) { preview.image.height.toDp() },
+                    ),
             )
         } else {
             Image(
