@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
@@ -577,7 +578,12 @@ private fun CarDropdownSelector(
         }
         if (expanded) {
             val installedProfiles = FmodBankProfiles.all.filter(audioAssetResolver::isInstalled)
-            Dialog(onDismissRequest = { expanded = false }) {
+            // Use the full available window width; the platform's default dialog width would
+            // collapse the adaptive grid to one narrow column on larger displays.
+            Dialog(
+                onDismissRequest = { expanded = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(0.92f)
@@ -603,7 +609,9 @@ private fun CarDropdownSelector(
                             modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
                         )
                         LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
+                            // Card count adapts to the actual dialog width instead of assuming
+                            // three columns, so every available horizontal pixel is useful.
+                            columns = GridCells.Adaptive(minSize = 260.dp),
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -663,7 +671,11 @@ internal fun CarGridSelectionDialog(
     val context = LocalContext.current
     val resolver = remember(context) { FmodBankResolver(context.applicationContext) }
     val installedProfiles = FmodBankProfiles.all.filter(resolver::isInstalled)
-    Dialog(onDismissRequest = onDismiss) {
+    // Disable the platform's narrow default dialog width so the picker can span the display.
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
@@ -683,7 +695,9 @@ internal fun CarGridSelectionDialog(
                     modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
                 )
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                    // Choose as many cards as fit at runtime; this remains usable on both the
+                    // 1920x1080 emulator and narrower vehicle displays.
+                    columns = GridCells.Adaptive(minSize = 260.dp),
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
