@@ -115,9 +115,13 @@ class EngineSimulation {
             null
         }
         previousInputWasSimulated = input.simulatedPedals
-        val presentationSpeed = if (rawSpeed != null) {
+        // Keep the Seal integrator fractional internally, but publish only its truncated whole
+        // km/h value to the shared drivetrain path. REAL receives the same shape from BYD. The
+        // presentation estimator below then reconstructs the hidden fraction for both modes.
+        val measuredSpeedKmh = rawSpeed ?: simulatedMotion?.speedKmh?.let(::truncateRawSpeedKmh)
+        val presentationSpeed = if (measuredSpeedKmh != null) {
             presentationSpeedEstimator.update(
-                measurementKmh = rawSpeed,
+                measurementKmh = measuredSpeedKmh,
                 throttle = input.throttle,
                 brake = input.brake,
                 dt = dt,
@@ -125,9 +129,9 @@ class EngineSimulation {
             )
         } else {
             presentationSpeedEstimator.reset()
-            simulatedMotion?.speedKmh
+            null
         }
-        val roadSpeedKmh = rawSpeed ?: simulatedMotion?.speedKmh
+        val roadSpeedKmh = measuredSpeedKmh
         val gearCalibration = if (input.transmissionPosition == TransmissionPosition.DRIVE) {
             // Both input modes use the same presentation gearbox in D: each
             // gear spans an equal share of 0..190 km/h and reaches the authored
@@ -150,8 +154,7 @@ class EngineSimulation {
         )
         val present = presentationSpeed ?: frame.speedMetersPerSecond * 3.6
         val presentAcceleration = if (presentationSpeed != null) {
-            if (rawSpeed != null) presentationSpeedEstimator.presentationVelocityKmhPerSecond
-            else simulatedMotion?.accelerationKmhPerSecond ?: 0.0
+            presentationSpeedEstimator.presentationVelocityKmhPerSecond
         } else {
             0.0
         }
@@ -160,12 +163,12 @@ class EngineSimulation {
             frame = frame,
             presentationSpeedKmh = present,
             presentationAccelerationKmhPerSecond = presentAcceleration,
-            rawSpeedKmh = rawSpeed ?: truncateRawSpeedKmh(roadSpeedKmh ?: frame.speedMetersPerSecond * 3.6),
-            // SIMULATED PEDALS already has a continuous virtual road speed. Keep its audible RPM
-            // on the authored engine inertia/clutch model so throttle can raise RPM before speed
-            // catches up; only REAL telemetry needs the presentation-speed road coupling to hide
-            // BYD's truncated integer readings.
-            usePresentationRoadSpeed = rawSpeed != null,
+            rawSpeedKmh = measuredSpeedKmh ?: truncateRawSpeedKmh(frame.speedMetersPerSecond * 3.6),
+            // Both sources now use the same audible road-speed reconstruction. SIM keeps a
+            // fractional Seal state only to integrate acceleration accurately; its truncated
+            // value reaches the drivetrain just like BYD telemetry, and this estimator hides the
+            // resulting integer steps from the tachometer and FMOD pitch.
+            usePresentationRoadSpeed = measuredSpeedKmh != null,
             simulatedPedalsGearCalibration = gearCalibration,
         )
         return latestState

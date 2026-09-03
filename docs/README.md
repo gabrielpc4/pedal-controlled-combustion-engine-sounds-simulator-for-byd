@@ -28,7 +28,9 @@ remains a pure free-rev path.
 The real BYD speed is truncated to an integer for the physical input. The bounded
 presentation-speed estimator is retained only to keep tachometer and pitch continuous between
 telemetry updates; it never changes the reported speed, gear decisions, vehicle load, or FMOD
-gains. Simulated speed is already continuous and therefore bypasses that estimator.
+gains. SIMULATED PEDALS keeps fractional speed only inside its Seal integrator, truncates the value
+before the shared drivetrain, and uses the same estimator as REAL so both modes experience the
+same integer-speed limitation.
 
 Both modes pass the same normalized throttle/brake values, transmission position, authored gear
 calibration, and FMOD frame. REAL PEDALS is used only when a telemetry poll has all three required

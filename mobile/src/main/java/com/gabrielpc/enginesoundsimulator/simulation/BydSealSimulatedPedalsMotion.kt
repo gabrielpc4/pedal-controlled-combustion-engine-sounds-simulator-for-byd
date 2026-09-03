@@ -9,11 +9,9 @@ package com.gabrielpc.enginesoundsimulator.simulation
  */
 internal class BydSealSimulatedPedalsMotion {
     private var speedKmh = 0.0
-    private var accelerationKmhPerSecond = 0.0
 
     fun reset(initialSpeedKmh: Double = 0.0) {
         speedKmh = initialSpeedKmh.coerceIn(0.0, TOP_SPEED_KMH)
-        accelerationKmhPerSecond = 0.0
     }
 
     fun step(
@@ -26,8 +24,7 @@ internal class BydSealSimulatedPedalsMotion {
         initialSpeedKmh?.let { speedKmh = it.coerceIn(0.0, TOP_SPEED_KMH) }
         if (transmissionPosition == TransmissionPosition.PARK) {
             speedKmh = 0.0
-            accelerationKmhPerSecond = 0.0
-            return BydSealMotionFrame(speedKmh, accelerationKmhPerSecond)
+            return BydSealMotionFrame(speedKmh)
         }
         val dt = deltaSeconds.coerceIn(0.001, 0.020)
         val pedal = throttle.coerceIn(0.0, 1.0)
@@ -38,11 +35,9 @@ internal class BydSealSimulatedPedalsMotion {
         // Applying an additional hidden drag at partial pedal would break that requested rule of three.
         val coast = if (pedal <= 0.0) coastDecelerationKmhPerSecond(speedKmh) else 0.0
         val serviceBrake = MAXIMUM_BRAKE_DECELERATION_KMH_PER_SECOND * brakePedal
-        accelerationKmhPerSecond = propulsion - coast - serviceBrake
+        val accelerationKmhPerSecond = propulsion - coast - serviceBrake
         speedKmh = (speedKmh + accelerationKmhPerSecond * dt).coerceIn(0.0, TOP_SPEED_KMH)
-        if (speedKmh <= 0.0 && accelerationKmhPerSecond < 0.0) accelerationKmhPerSecond = 0.0
-        if (speedKmh >= TOP_SPEED_KMH && accelerationKmhPerSecond > 0.0) accelerationKmhPerSecond = 0.0
-        return BydSealMotionFrame(speedKmh, accelerationKmhPerSecond)
+        return BydSealMotionFrame(speedKmh)
     }
 
     /** Linear interpolation keeps acceleration continuous as speed crosses a curve sample. */
@@ -104,5 +99,4 @@ internal class BydSealSimulatedPedalsMotion {
 
 internal data class BydSealMotionFrame(
     val speedKmh: Double,
-    val accelerationKmhPerSecond: Double,
 )

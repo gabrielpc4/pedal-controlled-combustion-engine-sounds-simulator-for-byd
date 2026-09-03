@@ -49,8 +49,10 @@ BYD reports are treated as truncated `[N, N + 1)` km/h values. `QuantizedPresent
 uses only boundary timing and bounded pedal direction to produce a continuous presentation speed.
 Raw truncated speed remains authoritative for display and drivetrain/shift/load decisions; the
 presentation value is used only for road-coupled tachometer and pitch so FMOD never receives a
-synthetic stepped wave. SIMULATED PEDALS supplies continuous Seal-model speed directly and does
-not quantize it first.
+synthetic stepped wave. SIMULATED PEDALS integrates a fractional Seal-model speed internally, then
+truncates it before the shared drivetrain and feeds that same integer stream through the estimator.
+This deliberately reproduces the REAL telemetry limitation instead of giving SIM a privileged
+continuous speed input.
 
 ## Authored FMOD
 
