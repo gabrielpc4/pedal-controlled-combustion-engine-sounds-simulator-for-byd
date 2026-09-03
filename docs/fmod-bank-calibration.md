@@ -19,7 +19,11 @@ compatibility and presentation-drive task, not an export or loop-calibration tas
    internal `fmodDrivetrainSpeed` by `EqualSpeedGearMapping`; intermediate bands use the bank's
    authored upshift RPM and the final band uses its limiter RPM. Do not set an FMOD `rpms`
    parameter from raw telemetry or from an artificial speed boundary.
-5. Build the packages, install the active original group, and perform a controlled manual drive
+5. Automatic D-mode downshifts use the landing RPM recorded by the preceding upshift rather than
+the bank's generic automatic downshift RPM. The only exceptions are the restored main-branch
+1→2 partial-throttle threshold (6,400 RPM) and 2→1 threshold (4,000 RPM). This is a deliberate
+presentation decision; the bank remains authoritative for all other shift and clutch behavior.
+6. Build the packages, install the active original group, and perform a controlled manual drive
    cycle in both perspectives through the production JNI bridge. Persistent Android test sources
    are intentionally not shipped; short-lived probes belong outside the repository.
 

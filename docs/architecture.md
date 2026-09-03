@@ -28,6 +28,13 @@ and automatic shift RPM, ratios, final drive, wheel radius, clutch, turbo, and a
 `AssettoDrivetrain` remains the engine and transmission model for real pedals, Park/Neutral free
 revving, and manual shifting.
 
+Automatic D-mode shifting intentionally has one presentation policy layered over the authored
+bank. After an upshift, the RPM at which the next gear landed is remembered and becomes that
+gear's automatic downshift threshold. This keeps the gear until it has fallen below its own
+landing point instead of using the bank's generic `auto_down_rpm`. The historical main-branch
+exceptions remain only for 1→2 at partial throttle (6,400 RPM) and 2→1 (4,000 RPM); all other
+upshifts, clutch profiles, shift times, and over-rev protection still come from the bank.
+
 SIMULATED PEDALS intentionally uses a BYD Seal AWD road-speed model. Its full-throttle curve is
 digitized from the supplied Seal trace and reaches 100 km/h in approximately 3.97 seconds; partial
 throttle scales that acceleration linearly. It coasts with passive speed-dependent resistance,

@@ -56,6 +56,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var shiftElapsed = 0.0
     private var shiftDuration = 0.0
     private var manualShiftRequest = 0
+    /**
+     * Landing RPM recorded when each gear is selected by an upshift. Downshifts use this
+     * remembered result instead of the bank's broad automatic downshift threshold so a gear is
+     * held until it reaches the RPM where the preceding upshift originally landed it.
+     */
+    private var landingRpmByGear = DoubleArray(physics.drivetrain.forwardRatios.size + 1)
     private var previousTractionLimit = false
     private var turboQs = MutableList(physics.engine.turbos.size) { 0.0 }
     private var boost = 0.0
@@ -79,6 +85,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         physics = updated
         rpm = rpm.coerceIn(0.0, updated.engine.limiterRpm)
         gear = gear.coerceIn(0, updated.drivetrain.forwardRatios.size)
+        landingRpmByGear = DoubleArray(updated.drivetrain.forwardRatios.size + 1)
         turboQs = MutableList(updated.engine.turbos.size) { 0.0 }
         boost = 0.0
         bov = 0.0
@@ -101,6 +108,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftElapsed = 0.0
         shiftDuration = 0.0
         manualShiftRequest = 0
+        landingRpmByGear.fill(0.0)
         fmodDrivetrainSpeedMetersPerSecond = 0.0
         diagnosticTraceElapsedSeconds = 0.0
         diagnosticHighRateRemainingSeconds = 0.0
@@ -213,7 +221,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             0
         }
         manualShiftRequest = 0
-        if (acceptShift(requestedDirection, clutch, dt)) {
+        if (acceptShift(requestedDirection, clutch, dt, controlsGas)) {
             shiftStarted = true
             eventDirection = requestedDirection
         } else if (requestedDirection != 0) {
@@ -327,6 +335,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                         "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
                         "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
                         "autoRequest=$automaticRequest requested=$requestedDirection " +
+                        "upshiftRpm=${"%.0f".format(upshiftTriggerRpmForGear(gear, rawGas))} " +
+                        "downshiftRpm=${"%.0f".format(downshiftRpmForCurrentGear())} " +
                         "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
                         "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
                         "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
@@ -443,10 +453,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (!enabled || gear == -1 || shifting) return 0
         var request = 0
         if (clutch > 0.99 || gear == 0) {
-            // The bank's RPM threshold is the only automatic-shift authority. The equal-speed
-            // layer changes the speed-to-RPM conversion, never this authored value.
+            // Upshifts remain bank-authored except for the explicitly restored main-branch 1→2
+            // partial-throttle rule. The equal-speed layer changes only speed-to-RPM conversion.
             val shiftRpm = rpm
-            val upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble()
+            val upshiftRpm = upshiftTriggerRpmForGear(gear, gas)
             if (
                 shiftRpm >= upshiftRpm &&
                 gear < physics.drivetrain.forwardRatios.size &&
@@ -455,7 +465,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 request = 1
                 automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
-                val downshiftRpm = physics.drivetrain.automaticDownshiftRpm.toDouble()
+                val downshiftRpm = downshiftRpmForCurrentGear()
                 if (
                     shiftRpm < downshiftRpm &&
                     gear > 1 && clutch > 0.85 &&
@@ -471,6 +481,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         direction: Int,
         clutch: Double,
         dt: Double,
+        gas: Double,
     ): Boolean {
         if (direction == 0 || shifting) return false
         val target = gear + direction
@@ -483,6 +494,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftElapsed = 0.0
         shiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds
         else physics.drivetrain.gearDownTimeSeconds
+        if (direction > 0) {
+            landingRpmByGear[target] = landingRpmAfterUpshift(
+                fromGear = gear,
+                upshiftRpm = upshiftTriggerRpmForGear(gear, gas),
+            )
+        }
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
             engineCutoff = physics.drivetrain.autoCutoffTimeSeconds
         }
@@ -497,6 +514,42 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         }
         if (direction < 0 && clutch > 1.0 / PI) autoblipStartMilliseconds = sessionElapsedMilliseconds
         return true
+    }
+
+    /**
+     * The old main-branch behavior intentionally made 1→2 happen earlier at partial throttle.
+     * Keep that one exception while every other upshift remains at the bank-authored threshold.
+     */
+    private fun upshiftTriggerRpmForGear(currentGear: Int, gas: Double): Double {
+        val authored = physics.drivetrain.automaticUpshiftRpm.toDouble()
+        return if (currentGear == 1 && gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD) {
+            MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM
+                .coerceAtMost(authored)
+                .coerceAtLeast(physics.engine.idleRpm + 500.0)
+        } else {
+            authored
+        }
+    }
+
+    /** RPM that resulted from the preceding upshift at a shared wheel speed. */
+    private fun landingRpmAfterUpshift(fromGear: Int, upshiftRpm: Double): Double {
+        val fromRatio = abs(ratioForGear(fromGear))
+        val targetRatio = abs(ratioForGear(fromGear + 1))
+        if (fromRatio <= 1e-9 || targetRatio <= 1e-9) return upshiftRpm
+        return (upshiftRpm * targetRatio / fromRatio).coerceAtLeast(physics.engine.idleRpm)
+    }
+
+    private fun downshiftRpmForCurrentGear(): Double {
+        if (gear == 2) {
+            // This is the explicit main-branch 2→1 exception, retained as a fixed RPM rule.
+            return MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM
+        }
+        return landingRpmByGear.getOrNull(gear)
+            ?.takeIf { it > 0.0 }
+            ?: landingRpmAfterUpshift(
+                fromGear = gear - 1,
+                upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble(),
+            )
     }
 
     private fun downshiftAllowed(target: Int, dt: Double): Boolean {
@@ -665,6 +718,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // Comparison switch: disable only the bank's AutoBlip contribution while diagnosing
         // downshift RPM pulses. The authored profile remains loaded so the test is reversible.
         const val DISABLE_AUTOBLIP_FOR_COMPARISON = true
+        /** Main-branch 1→2 rule: partial throttle shifted at 6,400 RPM. */
+        const val MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM = 6_400.0
+        /** Main-branch 2→1 rule: return to 1st below 4,000 RPM. */
+        const val MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
+        const val MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
