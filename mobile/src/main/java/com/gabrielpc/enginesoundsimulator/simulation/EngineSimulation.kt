@@ -42,8 +42,8 @@ data class DrivetrainState(
     val presentationSpeedKmh: Double = 0.0,
     /** Velocity of [presentationSpeedKmh], not a raw BYD or documented model measurement. */
     val presentationAccelerationKmhPerSecond: Double = 0.0,
-    /** Raw/public speed retained for diagnostics; it is never the continuous FMOD pitch input. */
-    val rawSpeedKmh: Double = 0.0,
+    /** Real BYD raw speed or documented SIM raw speed; never the continuous FMOD pitch input. */
+    val realOrDocumentedRawSpeedKmh: Double = 0.0,
     val drivetrainSpeedRadiansPerSecond: Double = 0.0,
     val boost: Double = 0.0,
     val bov: Double = 0.0,
@@ -198,7 +198,7 @@ class EngineSimulation {
             frame = frame,
             presentationSpeedKmh = audiblePresentationSpeedKmh,
             presentationAccelerationKmhPerSecond = audiblePresentationVelocityKmhPerSecond,
-            rawSpeedKmh = realOrDocumentedRawSpeedKmh
+            realOrDocumentedRawSpeedKmh = realOrDocumentedRawSpeedKmh
                 ?: truncateRawSpeedKmh(frame.speedMetersPerSecond * 3.6),
             // Both input sources use the same audible reconstruction. The documented SIM model
             // keeps a fractional value only for accurate integration; its truncated raw value
@@ -218,7 +218,7 @@ class EngineSimulation {
         frame: AssettoDrivetrainFrame,
         presentationSpeedKmh: Double,
         presentationAccelerationKmhPerSecond: Double,
-        rawSpeedKmh: Double,
+        realOrDocumentedRawSpeedKmh: Double,
         usePresentationRoadSpeed: Boolean,
         simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration? = null,
     ): DrivetrainState {
@@ -249,7 +249,7 @@ class EngineSimulation {
             limiterActive = frame.limiterPulse,
             presentationSpeedKmh = presentationSpeedKmh,
             presentationAccelerationKmhPerSecond = presentationAccelerationKmhPerSecond,
-            rawSpeedKmh = rawSpeedKmh,
+            realOrDocumentedRawSpeedKmh = realOrDocumentedRawSpeedKmh,
             drivetrainSpeedRadiansPerSecond = frame.drivetrainSpeedRadiansPerSecond,
             boost = frame.boost,
             bov = frame.bov,

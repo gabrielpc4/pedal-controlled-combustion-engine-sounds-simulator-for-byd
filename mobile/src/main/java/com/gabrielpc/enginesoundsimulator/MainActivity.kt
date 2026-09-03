@@ -1469,7 +1469,7 @@ private fun TachometerGauge(
                     .padding(bottom = gaugeSize * 0.12f),
             ) {
                 Text(
-                    text = formatWhole(drivetrain.rawSpeedKmh),
+                    text = formatWhole(drivetrain.realOrDocumentedRawSpeedKmh),
                     color = if (drivetrain.limiterActive) Red else Cyan,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 46.sp,

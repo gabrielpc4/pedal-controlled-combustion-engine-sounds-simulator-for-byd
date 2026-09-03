@@ -401,7 +401,7 @@ private fun BarTachometerHud(
                 Spacer(Modifier.width(22.dp))
                 MixerTelemetryReadout(
                     label = "SPEED",
-                    value = drivetrain.rawSpeedKmh.toInt().toString(),
+                    value = drivetrain.realOrDocumentedRawSpeedKmh.toInt().toString(),
                     unit = "km/h",
                 )
                 Spacer(Modifier.width(16.dp))
