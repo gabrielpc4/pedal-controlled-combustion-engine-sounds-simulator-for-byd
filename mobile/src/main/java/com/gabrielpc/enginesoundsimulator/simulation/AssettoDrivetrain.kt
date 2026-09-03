@@ -55,6 +55,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var shiftTarget = 1
     private var shiftElapsed = 0.0
     private var shiftDuration = 0.0
+    /** Prevents hard braking from chaining automatic downshifts back-to-back. */
+    private var automaticDownshiftCooldownSeconds = 0.0
+    private var shiftWasAutomatic = false
     private var manualShiftRequest = 0
     /**
      * Landing RPM recorded when each gear is selected by an upshift. Downshifts use this
@@ -86,6 +89,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         rpm = rpm.coerceIn(0.0, updated.engine.limiterRpm)
         gear = gear.coerceIn(0, updated.drivetrain.forwardRatios.size)
         landingRpmByGear = DoubleArray(updated.drivetrain.forwardRatios.size + 1)
+        automaticDownshiftCooldownSeconds = 0.0
+        shiftWasAutomatic = false
         turboQs = MutableList(updated.engine.turbos.size) { 0.0 }
         boost = 0.0
         bov = 0.0
@@ -107,6 +112,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftTarget = 1
         shiftElapsed = 0.0
         shiftDuration = 0.0
+        automaticDownshiftCooldownSeconds = 0.0
+        shiftWasAutomatic = false
         manualShiftRequest = 0
         landingRpmByGear.fill(0.0)
         fmodDrivetrainSpeedMetersPerSecond = 0.0
@@ -171,6 +178,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         var shiftStarted = false
         var shiftRejected = false
         var shiftCompleted = false
+        automaticDownshiftCooldownSeconds = max(0.0, automaticDownshiftCooldownSeconds - dt)
         var eventDirection = if (shifting) shiftDirection else 0
         val rawGas = throttle.coerceIn(0.0, 1.0)
         val cleanBrake = brake.coerceIn(0.0, 1.0)
@@ -220,10 +228,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             // frame was in flight; P/N must not enter a synthetic shift cycle.
             0
         }
+        val requestedManualShift = manualShiftRequest != 0
         manualShiftRequest = 0
         if (acceptShift(requestedDirection, clutch, dt, controlsGas)) {
             shiftStarted = true
             eventDirection = requestedDirection
+            shiftWasAutomatic = !requestedManualShift
         } else if (requestedDirection != 0) {
             shiftRejected = true
         }
@@ -234,6 +244,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 eventDirection = shiftDirection
                 shiftDirection = 0
                 shiftCompleted = true
+                if (eventDirection < 0 && shiftWasAutomatic) {
+                    automaticDownshiftCooldownSeconds = AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS
+                }
             } else {
                 shiftElapsed += dt
             }
@@ -337,6 +350,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                         "autoRequest=$automaticRequest requested=$requestedDirection " +
                         "upshiftRpm=${"%.0f".format(upshiftTriggerRpmForGear(gear, rawGas))} " +
                         "downshiftRpm=${"%.0f".format(downshiftRpmForCurrentGear())} " +
+                        "downshiftCooldown=${"%.3f".format(automaticDownshiftCooldownSeconds)} " +
                         "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
                         "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
                         "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
@@ -470,7 +484,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     shiftRpm < downshiftRpm &&
                     gear > 1 && clutch > 0.85 &&
                     downshiftAllowed(gear - 1, dt) &&
-                    automaticGasCutoff <= 0.0
+                    automaticGasCutoff <= 0.0 &&
+                    automaticDownshiftCooldownSeconds <= 0.0
                 ) request = -1
             }
         }
@@ -723,6 +738,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         /** Main-branch 2→1 rule: return to 1st below 4,000 RPM. */
         const val MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
         const val MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
+        // A brief automatic-only gap keeps hard braking audible as separate shifts instead of
+        // chaining two downshifts immediately after one another. Authored shift duration is kept.
+        const val AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS = 0.12
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
     }
