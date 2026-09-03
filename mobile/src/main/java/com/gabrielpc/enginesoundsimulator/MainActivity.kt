@@ -111,7 +111,6 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import java.io.FileInputStream
 
 private val Night = Color(0xFF060606)
 private val Navy = Color(0xFF071321)
@@ -1044,12 +1043,12 @@ private fun CarStage(
 
         val context = LocalContext.current
         val audioResolver = remember(context) { FmodBankResolver(context.applicationContext) }
-        val previewFile = audioResolver.previewFile(FmodBankProfiles.find(state.selectedCarId))
-        val preview = remember(state.selectedCarPreviewAsset, previewFile?.path) {
+        val selectedProfile = remember(state.selectedCarId) { FmodBankProfiles.find(state.selectedCarId) }
+        val installedPreviewPath = audioResolver.previewFile(selectedProfile)?.path
+        val preview = remember(state.selectedCarId, installedPreviewPath) {
             runCatching {
-                val input = previewFile?.let(::FileInputStream) ?: context.assets.open(state.selectedCarPreviewAsset)
-                input.use {
-                    requireNotNull(BitmapFactory.decodeStream(it)).asImageBitmap()
+                audioResolver.openCarPreviewInput(selectedProfile)?.use { input ->
+                    requireNotNull(BitmapFactory.decodeStream(input)).asImageBitmap()
                 }
             }.getOrNull()
         }

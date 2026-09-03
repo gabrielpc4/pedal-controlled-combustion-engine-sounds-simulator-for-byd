@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
@@ -72,8 +73,6 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
-import java.io.File
-import java.io.FileInputStream
 import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
@@ -539,8 +538,8 @@ private fun CarDropdownSelector(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CarPreviewThumbnail(
-                previewAsset = selectedCarPreviewAsset,
-                previewFile = audioAssetResolver.previewFile(FmodBankProfiles.find(selectedCarId)),
+                profile = FmodBankProfiles.find(selectedCarId),
+                audioAssetResolver = audioAssetResolver,
                 contentDescription = selectedCarName,
                 modifier = Modifier
                     .fillMaxHeight()
@@ -622,8 +621,8 @@ private fun CarDropdownSelector(
                                         .padding(8.dp),
                                 ) {
                                     CarPreviewThumbnail(
-                                        previewAsset = profile.previewAssetName,
-                                        previewFile = audioAssetResolver.previewFile(profile),
+                                        profile = profile,
+                                        audioAssetResolver = audioAssetResolver,
                                         contentDescription = profile.displayName,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -652,17 +651,16 @@ private fun CarDropdownSelector(
 
 @Composable
 private fun CarPreviewThumbnail(
-    previewAsset: String,
-    previewFile: File? = null,
+    profile: FmodBankProfile,
+    audioAssetResolver: FmodBankResolver,
     contentDescription: String,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val preview = remember(previewAsset, previewFile?.path) {
+    val installedPreviewPath = audioAssetResolver.previewFile(profile)?.path
+    val preview = remember(profile.id, installedPreviewPath) {
         runCatching {
-            val input = previewFile?.let(::FileInputStream) ?: context.assets.open(previewAsset)
-            input.use {
-                val bitmap = requireNotNull(BitmapFactory.decodeStream(it))
+            audioAssetResolver.openCarPreviewInput(profile)?.use { input ->
+                val bitmap = requireNotNull(BitmapFactory.decodeStream(input))
                 LoadedCarPreview(
                     image = bitmap.asImageBitmap(),
                     aspectRatio = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1).toFloat(),

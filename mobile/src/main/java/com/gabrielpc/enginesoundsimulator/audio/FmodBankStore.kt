@@ -253,7 +253,8 @@ internal class FmodBankStore(filesDirectory: File) {
 }
 
 internal class FmodBankResolver(context: Context) {
-    private val store = FmodBankStore(context.applicationContext.filesDir)
+    private val appContext = context.applicationContext
+    private val store = FmodBankStore(appContext.filesDir)
 
     fun bankFiles(profile: FmodBankProfile): FmodBankFiles = FmodBankFiles(
         commonStrings = store.sharedBankFile(FmodBankProfiles.commonStringsPackId),
@@ -267,6 +268,15 @@ internal class FmodBankResolver(context: Context) {
     fun physics(profile: FmodBankProfile): AssettoPhysics = AssettoPhysicsLoader.load(store.physicsFile(profile))
 
     fun previewFile(profile: FmodBankProfile): File? = store.previewFile(profile)
+
+    /** Installed bank previews win. Only official cars may fall back to APK-bundled artwork. */
+    fun openCarPreviewInput(profile: FmodBankProfile): InputStream? {
+        previewFile(profile)?.let { return FileInputStream(it) }
+        if (profile.packGroup != FmodBankProfiles.originalCarsPackId) {
+            return null
+        }
+        return runCatching { appContext.assets.open(profile.previewAssetName) }.getOrNull()
+    }
 }
 
 internal data class FmodBankFiles(

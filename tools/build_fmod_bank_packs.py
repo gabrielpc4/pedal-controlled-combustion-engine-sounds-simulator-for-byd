@@ -100,11 +100,21 @@ def read_display_name(directory: Path) -> str:
     return directory.name.replace("_", " ").replace("-", " ").title()
 
 
-def preview_for(directory: Path) -> Path | None:
+def preview_for_original(directory: Path) -> Path | None:
     preferred = [directory / "ui" / "dlc_preview.png"]
     preferred.extend(sorted((directory / "skins").glob("*/preview.jpg")))
     preferred.extend(sorted((directory / "skins").glob("*/preview.png")))
     preferred.extend([directory / "preview1.jpg", directory / "preview1.png"])
+    return next((path for path in preferred if path.is_file()), None)
+
+
+def preview_for_modded(directory: Path) -> Path | None:
+    # Modded intake folders ship a user-facing preview1 image at the car root.
+    # Skin previews are in-game liveries and must not replace that artwork.
+    preferred = [directory / "preview1.jpg", directory / "preview1.png"]
+    preferred.extend([directory / "ui" / "dlc_preview.png"])
+    preferred.extend(sorted((directory / "skins").glob("*/preview.jpg")))
+    preferred.extend(sorted((directory / "skins").glob("*/preview.png")))
     return next((path for path in preferred if path.is_file()), None)
 
 
@@ -130,7 +140,7 @@ def discover_original_sources() -> list[CarSource]:
             group=ORIGINAL_GROUP,
             source_directory=directory,
             bank_path=bank_for(directory),
-            preview_path=preview_for(directory),
+            preview_path=preview_for_original(directory),
             active=True,
         ))
     return sources
@@ -152,7 +162,7 @@ def discover_modded_sources() -> list[CarSource]:
             group=MODDED_GROUP,
             source_directory=directory,
             bank_path=bank,
-            preview_path=preview_for(directory),
+            preview_path=preview_for_modded(directory),
             active=True,
         ))
     return sources
