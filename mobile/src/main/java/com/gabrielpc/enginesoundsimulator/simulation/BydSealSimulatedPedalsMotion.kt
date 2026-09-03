@@ -11,8 +11,8 @@ internal class BydSealSimulatedPedalsMotion {
     private var speedKmh = 0.0
     private var accelerationKmhPerSecond = 0.0
 
-    fun reset() {
-        speedKmh = 0.0
+    fun reset(initialSpeedKmh: Double = 0.0) {
+        speedKmh = initialSpeedKmh.coerceIn(0.0, TOP_SPEED_KMH)
         accelerationKmhPerSecond = 0.0
     }
 
@@ -21,7 +21,9 @@ internal class BydSealSimulatedPedalsMotion {
         brake: Double,
         transmissionPosition: TransmissionPosition,
         deltaSeconds: Double,
+        initialSpeedKmh: Double? = null,
     ): BydSealMotionFrame {
+        initialSpeedKmh?.let { speedKmh = it.coerceIn(0.0, TOP_SPEED_KMH) }
         if (transmissionPosition == TransmissionPosition.PARK) {
             speedKmh = 0.0
             accelerationKmhPerSecond = 0.0

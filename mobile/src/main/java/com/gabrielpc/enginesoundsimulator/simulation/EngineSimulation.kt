@@ -1,6 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
-import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
+import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 
 import kotlin.math.PI
 import kotlin.math.abs
@@ -63,6 +63,7 @@ class EngineSimulation {
     private val presentationSpeedEstimator = QuantizedPresentationSpeedEstimator()
     private val bydSealSimulatedPedalsMotion = BydSealSimulatedPedalsMotion()
     private var simulatedPedalsGearCalibration: SimulatedPedalsGearCalibration? = null
+    private var previousInputWasSimulated: Boolean? = null
 
     val state: DrivetrainState get() = latestState
 
@@ -72,6 +73,7 @@ class EngineSimulation {
         presentationSpeedEstimator.reset()
         bydSealSimulatedPedalsMotion.reset()
         simulatedPedalsGearCalibration = SimulatedPedalsGearCalibration.from(updated)
+        previousInputWasSimulated = null
         latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0, false)
     }
 
@@ -79,6 +81,7 @@ class EngineSimulation {
         drivetrain?.reset(engineRunning = true)
         presentationSpeedEstimator.reset()
         bydSealSimulatedPedalsMotion.reset()
+        previousInputWasSimulated = null
         physics?.let { latestState = buildState(it, drivetrain!!.frame(), 0.0, 0.0, 0.0, false) }
     }
 
@@ -87,17 +90,31 @@ class EngineSimulation {
         val activeDrivetrain = drivetrain ?: return latestState
         val dt = deltaSeconds.coerceIn(0.001, 0.020)
         val rawSpeed = input.externalSpeedKmh?.coerceAtLeast(0.0)?.let(::truncateRawSpeedKmh)
+        val enteringSimulatedPedals = input.simulatedPedals && previousInputWasSimulated != true
+        val simulationSeedSpeed = if (enteringSimulatedPedals) {
+            // Switching input sources must not teleport the virtual car back to zero. Prefer the
+            // last continuous presentation speed (the audible REAL-pedal estimate), then fall
+            // back to the current raw sample. This is transition continuity only; the Seal model
+            // remains the sole SIMULATED road-speed authority after this frame.
+            latestState.presentationSpeedKmh
+                .takeIf { it.isFinite() && it > 0.0 }
+                ?: rawSpeed
+                ?: 0.0
+        } else {
+            null
+        }
         val simulatedMotion = if (input.simulatedPedals) {
             bydSealSimulatedPedalsMotion.step(
                 throttle = input.throttle,
                 brake = input.brake,
                 transmissionPosition = input.transmissionPosition,
                 deltaSeconds = dt,
+                initialSpeedKmh = simulationSeedSpeed,
             )
         } else {
-            bydSealSimulatedPedalsMotion.reset()
             null
         }
+        previousInputWasSimulated = input.simulatedPedals
         val presentationSpeed = if (rawSpeed != null) {
             presentationSpeedEstimator.update(
                 measurementKmh = rawSpeed,
@@ -258,7 +275,7 @@ internal fun resolveDriveInput(
     simulatedPedalThrottle: Double,
     simulatedPedalBrake: Double,
 ): ResolvedDriveInput {
-    val vehicleAvailable = telemetry.vehiclePedalsAvailable()
+    val vehicleAvailable = telemetry.vehicleDriveSignalsAvailable()
     if (vehicleAvailable && mode == com.gabrielpc.enginesoundsimulator.drive.InputMode.RealPedals) {
         return ResolvedDriveInput(
             throttle = normalizeVehicleThrottlePercent(telemetry.accelerator.value!!),

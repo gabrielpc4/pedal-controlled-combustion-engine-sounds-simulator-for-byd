@@ -36,6 +36,15 @@ ratios split 0–190 km/h into equal bands and put that bank's limiter at each b
 pedal modes. Automatic upshifts and downshifts use the short 95 ms/220 ms presentation timing. P/N
 bypasses this mapping and remains a free-rev path using engine inertia alone.
 
+The input resolver normalizes both sources to the same 0..1 throttle/brake signals before they
+reach the drivetrain. REAL PEDALS is selected only when a single telemetry poll contains a valid
+speed, accelerator, and brake value; a partial or unavailable poll falls back to SIMULATED rather
+than allowing the Assetto model to invent a second speed source. Switching from REAL to SIMULATED
+seeds the Seal model from the last continuous presentation speed, so changing controls cannot
+teleport the virtual car back to zero. These are source-boundary safeguards, not extra vehicle
+forces: after selection, both modes share the same drivetrain, gear, clutch, turbo, and FMOD frame
+path.
+
 BYD reports are treated as truncated `[N, N + 1)` km/h values. `QuantizedPresentationSpeedEstimator`
 uses only boundary timing and bounded pedal direction to produce a continuous presentation speed.
 Raw truncated speed remains authoritative for display and drivetrain/shift/load decisions; the

@@ -24,7 +24,7 @@ import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
 import com.gabrielpc.enginesoundsimulator.telemetry.transmissionFollowsVehicle
-import com.gabrielpc.enginesoundsimulator.telemetry.vehiclePedalsAvailable
+import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -204,10 +204,10 @@ class DriveController(context: Context) {
         shouldMute
     }
     fun selectSimulatedPedals() { inputMode.set(InputMode.SimulatedPedals) }
-    fun selectRealPedals() { if (vehicleReader.snapshot().vehiclePedalsAvailable()) inputMode.set(InputMode.RealPedals) }
+    fun selectRealPedals() { if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) inputMode.set(InputMode.RealPedals) }
     fun toggleInputSource() {
         if (inputMode.get() == InputMode.RealPedals) inputMode.set(InputMode.SimulatedPedals)
-        else if (vehicleReader.snapshot().vehiclePedalsAvailable()) inputMode.set(InputMode.RealPedals)
+        else if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) inputMode.set(InputMode.RealPedals)
     }
 
     fun setTransmissionPosition(position: TransmissionPosition) {
@@ -352,7 +352,7 @@ class DriveController(context: Context) {
             ),
         )
         val selected = selectedProfile.get()
-        val sourceUi = resolveInputSourceUi(mode, telemetry.vehiclePedalsAvailable())
+        val sourceUi = resolveInputSourceUi(mode, telemetry.vehicleDriveSignalsAvailable())
         if (uiActive.get()) {
             latest = DriveSnapshot(
                 drivetrain = drivetrain,

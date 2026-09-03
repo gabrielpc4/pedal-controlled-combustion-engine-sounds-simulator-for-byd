@@ -30,6 +30,12 @@ presentation-speed estimator is retained only to keep tachometer and pitch conti
 telemetry updates; it never changes the reported speed, gear decisions, vehicle load, or FMOD
 gains. Simulated speed is already continuous and therefore bypasses that estimator.
 
+Both modes pass the same normalized throttle/brake values, transmission position, authored gear
+calibration, and FMOD frame. REAL PEDALS is used only when a telemetry poll has all three required
+signals (speed, accelerator, and brake); this avoids mixing live pedals with an invented fallback
+speed. If the operator switches to SIMULATED while moving, its Seal speed model starts at the last
+continuous presentation speed instead of resetting the dashboard to zero.
+
 ## Safety and privacy
 
 - Vehicle access is read-only. Do not add CAN setters, rooting, firmware changes, or permission
