@@ -24,7 +24,10 @@ internal enum class LaunchControlPhase {
  */
 internal object LaunchControl {
     const val HOLD_RPM = 5_000.0
-    const val FULL_THROTTLE_THRESHOLD = 0.98
+    // The touch pedal's drawable track has insets, so its displayed 99% maximum is normalized
+    // to about 0.9787 by the pointer handler. Keep a small margin below that value; otherwise a
+    // visually full pedal can never arm the sequence copied from the main branch.
+    const val FULL_THROTTLE_THRESHOLD = 0.975
     const val ARM_BRAKE_THRESHOLD = 0.05
     const val RELEASE_BRAKE_THRESHOLD = 0.04
     const val STANDSTILL_SPEED_MPS = 0.08

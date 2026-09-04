@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import android.util.Log
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -736,6 +737,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             speedMps = speedMetersPerSecond,
             enabled = enabled,
         )
+        if (previousPhase != launchControlPhase) {
+            Log.d(
+                "LaunchControl",
+                "phase=$previousPhase->$launchControlPhase throttle=$rawThrottle brake=$brake " +
+                    "speedMps=$speedMetersPerSecond rpm=$rpm enabled=$enabled",
+            )
+        }
         if (launchControlPhase == LaunchControlPhase.ARMED && previousPhase != LaunchControlPhase.ARMED) {
             launchControlJitterPhase = 0.0
             launchControlArmedElapsedSeconds = 0.0
@@ -762,7 +770,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     startRpm = launchControlDisarmStartRpm,
                     endRpm = launchControlArmedStartRpm,
                 )
-                rpm = approachRpm(target, LaunchControl.ARMED_RAMP_FOLLOW_SECONDS, dt)
+                // The legacy main-branch path replaced the natural free-rev integration while
+                // disarming. Assign the target directly so the engine torque step cannot add RPM
+                // again before the next launch-control sample.
+                rpm = target.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
                 if (launchControlDisarmElapsedSeconds >= LaunchControl.ARMED_RAMP_SECONDS) {
                     launchControlPhase = LaunchControlPhase.INACTIVE
                     rpm = launchControlArmedStartRpm.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
@@ -777,15 +788,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     jitterPhaseRadians = launchControlJitterPhase,
                     startRpm = launchControlArmedStartRpm,
                 )
-                val response = if (
-                    launchControlArmedElapsedSeconds <
-                    LaunchControl.ARMED_RAMP_SECONDS + LaunchControl.ARMED_SETTLE_SECONDS
-                ) {
-                    LaunchControl.ARMED_RAMP_FOLLOW_SECONDS
-                } else {
-                    LaunchControl.ARMED_JITTER_FOLLOW_SECONDS
-                }
-                rpm = approachRpm(target, response, dt)
+                // Launch control owns the RPM in this phase. Applying the target after the
+                // authored torque integration mirrors the old replacement path and prevents the
+                // natural torque from immediately undoing the staging clamp.
+                rpm = target.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
             }
 
             LaunchControlPhase.LAUNCHED -> {
@@ -806,12 +812,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                         redlineRpm = physics.engine.limiterRpm,
                         launchStartRpm = launchControlTachCycleStartRpm,
                     )
-                    val response = if (target >= rpm) {
-                        LaunchControl.LAUNCHED_TACH_REV_UP_FOLLOW_SECONDS
-                    } else {
-                        LaunchControl.LAUNCHED_TACH_BOUNCE_FOLLOW_SECONDS
-                    }
-                    rpm = approachRpm(target, response, dt)
+                    rpm = target.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
                 } else {
                     val target = rpm.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
                     rpm = approachRpm(target, LaunchControl.LAUNCHED_ENGINE_BRAKE_RESPONSE_SECONDS, dt)
