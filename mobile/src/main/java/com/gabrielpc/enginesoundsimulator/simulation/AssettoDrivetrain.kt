@@ -610,7 +610,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             backfireFireBelow = backfire.maximumGas * controlsGas
         }
         if (controlsGas > backfireArmLevel) backfireArmed = true
-        val triggerBackfire = backfireArmed && controlsGas > 0.0 && controlsGas < backfireFireBelow &&
+        // Once a sufficiently loaded run has armed the authored backfire logic, FMOD should be
+        // allowed to fire on the first fully closed-throttle sample as well. Requiring gas > 0
+        // made the event effectively impossible to trigger when the driver lifted completely.
+        val triggerBackfire = backfireArmed && controlsGas <= backfireFireBelow &&
             rpm > backfire.minimumRpm && rpm <= backfire.maximumRpm && backfireTimer > 1.0
         if (triggerBackfire) {
             backfireArmed = false
