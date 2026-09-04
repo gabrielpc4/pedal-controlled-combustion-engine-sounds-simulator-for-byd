@@ -1012,7 +1012,7 @@ private fun DashboardEffectControls(
         Color(0xFFC58AFF),
     )
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(150.dp).border(1.dp, labelColumnBorder, RoundedCornerShape(8.dp)).padding(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, labelColumnBorder, RoundedCornerShape(8.dp)).padding(4.dp)) {
             rows.forEachIndexed { index, row ->
                 val enabled = if (index == 0) external else when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
@@ -1020,7 +1020,7 @@ private fun DashboardEffectControls(
                     EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
                     EffectSoundKind.TURBO -> state.turboEnabled
                 }
-                Box(Modifier.width(150.dp).height(rowHeight), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.height(rowHeight), contentAlignment = Alignment.CenterStart) {
                     Text(row.first, color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -1029,7 +1029,7 @@ private fun DashboardEffectControls(
             DashboardColumnTextCell("EXTERNAL", external, rowHeight)
             rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, firstSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, firstSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, external, firstSwitchBorder) { onEngineExternalChange(!external) }
             rows.drop(1).forEach { row ->
                 val enabled = when (row.second) {
@@ -1048,7 +1048,7 @@ private fun DashboardEffectControls(
             DashboardEmptyControlCell(rowHeight)
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, secondSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, secondSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, state.exteriorPureAudio, secondSwitchBorder) { onEnginePureChange(!state.exteriorPureAudio) }
             rows.drop(1).forEach { row ->
                 val original = when (row.second) {
@@ -1062,7 +1062,7 @@ private fun DashboardEffectControls(
             }
         }
         DASHBOARD_EFFECT_GAIN_PRESETS.forEachIndexed { columnIndex, preset ->
-            Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, gainColumnBorders[columnIndex], RoundedCornerShape(8.dp)).padding(3.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(120.dp).border(1.dp, gainColumnBorders[columnIndex], RoundedCornerShape(8.dp)).padding(3.dp)) {
                 rows.forEach { row ->
                     val selected = kotlin.math.abs(row.third - preset.gain) < 0.001f
                     DashboardGainButton(preset, selected, if (selected) Night else Cyan, gainColumnBorders[columnIndex]) {
@@ -1086,7 +1086,7 @@ private fun DashboardEmptyControlCell(height: Dp) {
 
 @Composable
 private fun DashboardColumnTextCell(label: String, active: Boolean, height: Dp) {
-    Box(Modifier.width(95.dp).height(height), contentAlignment = Alignment.CenterEnd) {
+    Box(Modifier.width(78.dp).height(height), contentAlignment = Alignment.CenterEnd) {
         Text(label, color = if (active) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
     }
 }
