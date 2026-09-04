@@ -82,6 +82,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var previousBackfireThrottle = 0.0
     private var backfireSuppressedAfterShift = false
     private var backfireSettings = BackfireSettings()
+    private var currentTransmissionPosition = TransmissionPosition.DRIVE
     private var nextBackfireSampleCursor = 0
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
@@ -192,6 +193,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         deltaSeconds: Double,
     ): AssettoDrivetrainFrame {
         val dt = f32(deltaSeconds.coerceIn(0.0001, 0.050))
+        currentTransmissionPosition = transmissionPosition
         sessionElapsedMilliseconds += dt * 1_000.0
         externalVehicleSpeedMetersPerSecond?.let(::anchorVehicleSpeed)
         // In P/N the engine must remain a free-revving authored event. D is the only position
@@ -654,6 +656,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // Automatic shifting briefly cuts engine gas. That cut is not a driver lift-off and must
         // never arm or trigger the global backfire policy.
         val shiftThrottleCut = shifting || automaticGasCutoff > 0.0 || engineCutoff > 0.0
+        // The app override is intentionally limited to moving D above first gear. Neutral, P,
+        // and first gear must remain free of override backfire pulses.
+        val overrideBackfireAllowed = currentTransmissionPosition == TransmissionPosition.DRIVE && gear >= 2
+        if (!overrideBackfireAllowed) {
+            backfireArmed = false
+            backfireReleaseTimer = 0.0
+        }
         if (shiftThrottleCut) {
             // A transmission cut is not a driver release. Require a fresh throttle run after the
             // shift before the global override can arm again.
@@ -665,7 +674,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             backfireSuppressedAfterShift = false
         }
         val naturalBankBackfire = false
-        if (controlsGas >= backfire.armThrottle) {
+        if (overrideBackfireAllowed && controlsGas >= backfire.armThrottle) {
             backfireArmed = true
             backfireReleaseTimer = 0.0
             backfireSuppressedAfterShift = false
@@ -678,7 +687,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // This intentionally replaces the bank's per-car RPM/gas gates with one global policy:
         // a clear attempted run followed by a configurable lift-off delay is the user-facing
         // definition of backfire, independent of how a particular bank authored its thresholds.
-        val triggerBackfire = !shiftThrottleCut && !backfireSuppressedAfterShift && backfireArmed &&
+        val triggerBackfire = overrideBackfireAllowed && !shiftThrottleCut && !backfireSuppressedAfterShift && backfireArmed &&
             controlsGas <= backfire.releaseThrottle &&
             rpm >= backfire.minimumRpm && rpm <= backfire.maximumRpm &&
             backfireReleaseTimer >= backfire.releaseDelaySeconds
