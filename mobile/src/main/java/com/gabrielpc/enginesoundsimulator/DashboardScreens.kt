@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -556,14 +557,14 @@ private fun FmodUpdateRateControl(
 }
 
 @Composable
-private fun SettingsTab(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.SettingsTab(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text = label,
         color = if (selected) Cyan else Muted,
         fontSize = 13.sp,
         fontWeight = FontWeight.Black,
         modifier = Modifier
-            .fillMaxWidth(0.5f)
+            .weight(1f)
             .clickable(onClick = onClick)
             .background(if (selected) Cyan.copy(alpha = 0.14f) else Color.Transparent)
             .padding(vertical = 12.dp),
