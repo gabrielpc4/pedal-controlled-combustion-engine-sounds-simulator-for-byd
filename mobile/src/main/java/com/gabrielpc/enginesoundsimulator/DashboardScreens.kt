@@ -595,9 +595,6 @@ private fun BackfireSettingsPanel(
         SettingsToggle("OVERRIDE SOUNDS ONLY", value.soundOnlyOverrideEnabled) {
             onChange(value.copy(soundOnlyOverrideEnabled = !value.soundOnlyOverrideEnabled))
         }
-        SettingsToggle("BACKFIRE AUDIO ENABLED", value.backfireAudioEnabled) {
-            onChange(value.copy(backfireAudioEnabled = !value.backfireAudioEnabled))
-        }
         BackfireSlider("BACKFIRE GAIN", value.backfireGain.toDouble(), 1.0f..10.0f, suffix = "x", steps = 17) {
             onChange(value.copy(backfireGain = it))
         }

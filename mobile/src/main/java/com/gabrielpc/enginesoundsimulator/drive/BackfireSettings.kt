@@ -45,7 +45,6 @@ internal class BackfireSettingsRepository(context: Context) {
     fun load(): BackfireSettings {
         val defaults = BackfireSettings()
         return BackfireSettings(
-            backfireAudioEnabled = preferences.getBoolean("audio_enabled", defaults.backfireAudioEnabled),
             overrideLogicEnabled = preferences.getBoolean("override_logic_enabled", defaults.overrideLogicEnabled),
             soundOnlyOverrideEnabled = preferences.getBoolean("sound_only_override", defaults.soundOnlyOverrideEnabled),
             armThrottle = preferences.getFloat("arm_throttle", defaults.armThrottle.toFloat()).toDouble(),
@@ -65,7 +64,6 @@ internal class BackfireSettingsRepository(context: Context) {
         preferences.edit()
             .putBoolean("override_logic_enabled", value.overrideLogicEnabled)
             .putBoolean("sound_only_override", value.soundOnlyOverrideEnabled)
-            .putBoolean("audio_enabled", value.backfireAudioEnabled)
             .putFloat("arm_throttle", value.armThrottle.toFloat())
             .putFloat("release_throttle", value.releaseThrottle.toFloat())
             .putFloat("release_delay", value.releaseDelaySeconds.toFloat())
