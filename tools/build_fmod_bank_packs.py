@@ -74,6 +74,31 @@ ORIGINAL_CARS = (
 )
 LEGACY_ORIGINAL_IDS = {source_id: (pack_id, display_name) for pack_id, display_name, source_id in ORIGINAL_CARS}
 
+# Compact official-pack scope. These are intentional catalog exclusions: the
+# source installation remains untouched, while the app omits all Lotus cars,
+# keeps only RX-7 variants from Mazda, and omits clearly pre-2000 models. The
+# Supra and Skyline remain explicit user-requested exceptions.
+EXCLUDED_OFFICIAL_CAR_DIRECTORIES = {
+    "bmw_m3_e30", "bmw_m3_e30_drift", "bmw_m3_e30_dtm", "bmw_m3_e30_gra", "bmw_m3_e30_s1",
+    "ks_alfa_33_stradale", "ks_alfa_romeo_155_v6",
+    "ks_audi_sport_quattro", "ks_audi_sport_quattro_rally", "ks_audi_sport_quattro_s1",
+    "ks_ferrari_250_gto", "ks_ferrari_288_gto", "ks_ferrari_312_67", "ks_ferrari_330_p4",
+    "ferrari_f40", "ferrari_f40_s3", "ks_ford_escort_mk1", "ks_ford_gt40",
+    "ks_lamborghini_countach", "ks_lamborghini_countach_s1", "ks_lamborghini_miura_sv",
+    "ks_maserati_250f_12cyl", "ks_maserati_250f_6cyl", "ks_mercedes_c9",
+    "ks_porsche_908_lh", "ks_porsche_917_30", "ks_porsche_917_k",
+    "ks_porsche_935_78_moby_dick", "ks_porsche_962c_longtail", "ks_porsche_962c_shorttail",
+    "ruf_yellowbird", "shelby_cobra_427sc", "ferrari_312t", "ks_alfa_romeo_gta",
+    "ks_mclaren_f1_gtr", "ks_porsche_911_carrera_rsr", "ks_porsche_911_gt1",
+    "ks_toyota_ae86", "ks_toyota_ae86_drift", "ks_toyota_ae86_tuned", "ks_toyota_celica_st185",
+    "ks_mazda_787b", "ks_mazda_miata", "ks_mazda_mx5_cup", "ks_mazda_mx5_nd",
+    # Exact-bank duplicates: keep the highest-trim representative only.
+    "bmw_1m", "bmw_z4", "bmw_z4_drift", "bmw_z4_s1",
+    "bmw_m3_e92", "bmw_m3_e92_drift", "abarth500",
+    "ferrari_f40", "ferrari_458", "ks_ruf_rt12r",
+    "ks_audi_sport_quattro", "ks_audi_sport_quattro_rally",
+}
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -143,6 +168,8 @@ def discover_original_sources() -> list[CarSource]:
         raise RuntimeError(f"Assetto Corsa installation is missing: {cars_root}")
     sources: list[CarSource] = []
     for directory in sorted(path for path in cars_root.iterdir() if path.is_dir()):
+        if directory.name in EXCLUDED_OFFICIAL_CAR_DIRECTORIES or directory.name.startswith(("lotus_", "ks_lotus_")):
+            continue
         # The installation contains two empty DLC placeholders. They are not car
         # sources because they have neither an FMOD bank nor physics payload.
         if not (directory / "sfx").is_dir() or not list((directory / "sfx").glob("*.bank")):

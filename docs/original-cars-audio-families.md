@@ -18,6 +18,13 @@ different.
   `ks_ferrari_488_challenge_evo` and `ks_ferrari_488_gt3_2020`; they are not
   usable audio profiles and were excluded from the pack.
 
+The current compact pack applies the requested product filter: all Lotus
+profiles are omitted, Mazda keeps only RX-7 variants, clearly pre-2000 models
+are omitted except Supra and Skyline, and duplicate-bank families retain only
+one highest-trim representative. This leaves 100 official profiles in the
+generated pack. The source installation and this analysis remain complete;
+only the installable catalog is reduced.
+
 ## Exact duplicate families
 
 The suggested representative is only a conservative catalog suggestion. It

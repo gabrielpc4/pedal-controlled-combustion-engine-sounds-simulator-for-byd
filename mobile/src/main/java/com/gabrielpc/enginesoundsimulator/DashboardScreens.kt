@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,11 +40,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -958,6 +961,7 @@ internal fun CarGridSelectionDialog(
     val context = LocalContext.current
     val resolver = remember(context) { FmodBankResolver(context.applicationContext) }
     val installedProfiles = FmodBankProfiles.all.filter(resolver::isInstalled)
+    var selectedGroup by rememberSaveable { mutableStateOf(FmodBankProfiles.moddedCarsPackId) }
     // Disable the platform's narrow default dialog width so the picker can span the display.
     Dialog(
         onDismissRequest = onDismiss,
@@ -974,8 +978,27 @@ internal fun CarGridSelectionDialog(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Text("SELECT CAR", color = CyanSoft, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
+                ) {
+                    listOf(
+                        FmodBankProfiles.moddedCarsPackId to "MODDED CARS",
+                        FmodBankProfiles.originalCarsPackId to "ORIGINAL CARS",
+                    ).forEach { (group, label) ->
+                        Surface(
+                            color = if (selectedGroup == group) Cyan.copy(alpha = 0.24f) else Panel,
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, if (selectedGroup == group) Cyan else Line),
+                            modifier = Modifier.clickable { selectedGroup = group },
+                        ) {
+                            Text(label, color = if (selectedGroup == group) Cyan else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                        }
+                    }
+                }
+                val visibleProfiles = installedProfiles.filter { it.packGroup == selectedGroup }
                 Text(
-                    text = "${installedProfiles.size} INSTALLED",
+                    text = "${visibleProfiles.size} INSTALLED",
                     color = Muted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -989,7 +1012,7 @@ internal fun CarGridSelectionDialog(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(installedProfiles, key = { it.id }) { profile ->
+                    items(visibleProfiles, key = { it.id }) { profile ->
                         Column(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
