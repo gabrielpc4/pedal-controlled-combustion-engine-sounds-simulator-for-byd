@@ -9,6 +9,8 @@ data class BackfireSettings(
     val backfireAudioEnabled: Boolean = true,
     /** Replace only the bank's selected source while keeping its trigger path. */
     val soundOnlyOverrideEnabled: Boolean = false,
+    /** Optional P/N override; off keeps neutral and park silent by default. */
+    val allowParkNeutralOverride: Boolean = false,
     val armThrottle: Double = 0.40,
     val releaseThrottle: Double = 0.10,
     val releaseDelaySeconds: Double = 0.0,
@@ -44,6 +46,7 @@ internal class BackfireSettingsRepository(context: Context) {
         val defaults = BackfireSettings()
         return BackfireSettings(
             soundOnlyOverrideEnabled = preferences.getBoolean("sound_only_override", defaults.soundOnlyOverrideEnabled),
+            allowParkNeutralOverride = preferences.getBoolean("allow_park_neutral", defaults.allowParkNeutralOverride),
             armThrottle = preferences.getFloat("arm_throttle", defaults.armThrottle.toFloat()).toDouble(),
             releaseThrottle = preferences.getFloat("release_throttle", defaults.releaseThrottle.toFloat()).toDouble(),
             releaseDelaySeconds = preferences.getFloat("release_delay", defaults.releaseDelaySeconds.toFloat()).toDouble(),
@@ -60,6 +63,7 @@ internal class BackfireSettingsRepository(context: Context) {
         val value = settings.normalized()
         preferences.edit()
             .putBoolean("sound_only_override", value.soundOnlyOverrideEnabled)
+            .putBoolean("allow_park_neutral", value.allowParkNeutralOverride)
             .putFloat("arm_throttle", value.armThrottle.toFloat())
             .putFloat("release_throttle", value.releaseThrottle.toFloat())
             .putFloat("release_delay", value.releaseDelaySeconds.toFloat())

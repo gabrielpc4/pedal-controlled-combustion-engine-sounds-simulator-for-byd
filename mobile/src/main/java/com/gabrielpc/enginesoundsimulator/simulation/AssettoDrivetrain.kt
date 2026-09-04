@@ -658,7 +658,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val shiftThrottleCut = shifting || automaticGasCutoff > 0.0 || engineCutoff > 0.0
         // The app override is intentionally limited to moving D above first gear. Neutral, P,
         // and first gear must remain free of override backfire pulses.
-        val overrideBackfireAllowed = currentTransmissionPosition == TransmissionPosition.DRIVE && gear >= 2
+        val overrideBackfireAllowed = gear >= 2 ||
+            (backfire.allowParkNeutralOverride && currentTransmissionPosition != TransmissionPosition.DRIVE)
         if (!overrideBackfireAllowed) {
             backfireArmed = false
             backfireReleaseTimer = 0.0
