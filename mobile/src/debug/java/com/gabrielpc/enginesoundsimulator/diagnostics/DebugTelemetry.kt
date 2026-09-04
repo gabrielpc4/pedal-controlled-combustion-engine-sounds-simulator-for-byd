@@ -167,6 +167,24 @@ internal object DebugTelemetry {
                 }
             }
 
+            "BACKFIRE" -> {
+                val profileId = extras?.getString(EXTRA_PROFILE_ID)?.trim().orEmpty()
+                if (profileId.isEmpty()) {
+                    "backfire scenario requires --es profile <installed-profile-id>"
+                } else {
+                    if (session.get() == null) session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY))
+                    scenario.set(
+                        DeterministicScenario(
+                            id = exportSerial.incrementAndGet(),
+                            profileId = profileId,
+                            startedElapsedNanos = SystemClock.elapsedRealtimeNanos(),
+                            kind = ScenarioKind.BACKFIRE,
+                        ),
+                    )
+                    "backfire scenario started for $profileId"
+                }
+            }
+
             "CANCEL_SCENARIO" -> {
                 scenario.set(null)
                 "scenario cancelled"
@@ -181,7 +199,7 @@ internal object DebugTelemetry {
             }
 
             "STATUS" -> session.get()?.status() ?: "capture off"
-            else -> "unknown command '$command'; use START, CLEAR, SCENARIO, CANCEL_SCENARIO, DUMP, STOP, or STATUS"
+            else -> "unknown command '$command'; use START, CLEAR, SCENARIO, BACKFIRE, CANCEL_SCENARIO, DUMP, STOP, or STATUS"
         }
         writeStatus(context, result)
         return result
@@ -591,9 +609,11 @@ internal object DebugTelemetry {
         val id: Long,
         val profileId: String,
         val startedElapsedNanos: Long,
+        val kind: ScenarioKind = ScenarioKind.GENERAL,
     ) {
         fun overrideAt(nowNanos: Long): DebugScenarioOverride {
             val seconds = ((nowNanos - startedElapsedNanos).coerceAtLeast(0L) / 1_000_000_000.0)
+            if (kind == ScenarioKind.BACKFIRE) return backfireOverride(seconds)
             val phase = when {
                 seconds < 2.0 -> Phase(throttle = 0.0, brake = 0.0, transmissionPositionOrdinal = 2, exterior = false)
                 seconds < 6.0 -> Phase(throttle = 0.35, brake = 0.0, transmissionPositionOrdinal = 2, exterior = false)
@@ -630,6 +650,29 @@ internal object DebugTelemetry {
             )
         }
 
+        private fun backfireOverride(seconds: Double): DebugScenarioOverride {
+            // Repeated neutral cycles deliberately arm the bank's backfire conditions at full
+            // load, then leave the throttle closed long enough to measure trigger/rearm timing.
+            // This exists only in the debug ADB harness and never changes normal driving.
+            val cycleSeconds = seconds % 7.5
+            val phase = when {
+                cycleSeconds < 3.0 -> Phase(throttle = 1.0, brake = 0.0, transmissionPositionOrdinal = 0, exterior = false)
+                cycleSeconds < 5.0 -> Phase(throttle = 0.0, brake = 0.0, transmissionPositionOrdinal = 0, exterior = false)
+                cycleSeconds < 6.0 -> Phase(throttle = 0.10, brake = 0.0, transmissionPositionOrdinal = 0, exterior = false)
+                else -> Phase(throttle = 0.0, brake = 0.0, transmissionPositionOrdinal = 0, exterior = false)
+            }
+            return DebugScenarioOverride(
+                scenarioId = id,
+                profileId = profileId,
+                perspectiveOrdinal = 0,
+                inputModeOrdinal = 1,
+                transmissionPositionOrdinal = phase.transmissionPositionOrdinal,
+                throttle = phase.throttle,
+                brake = phase.brake,
+                manualModeEnabled = false,
+            )
+        }
+
         private data class Phase(
             val throttle: Double,
             val brake: Double,
@@ -638,6 +681,8 @@ internal object DebugTelemetry {
             val manual: Boolean = false,
         )
     }
+
+    private enum class ScenarioKind { GENERAL, BACKFIRE }
 
     private fun bitFlags(
         isShifting: Boolean,
