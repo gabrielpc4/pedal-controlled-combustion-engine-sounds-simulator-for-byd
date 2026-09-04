@@ -37,10 +37,11 @@ constexpr int kPerspectiveExterior = 1;
 // full load. The physical pedal still controls drivetrain simulation, but it
 // must not attenuate or swap the bank's load layers.
 constexpr float kFullLoadAudioThrottle = 1.0f;
-// Intentional behavior decision: backfire uses the same full-load endpoint
-// here so its authored event remains audible; this is not the physical
-// throttle value and must not be changed to follow the pedal.
-constexpr float kBackfireAudioThrottle = 1.0f;
+// Backfire is authored as a lift-off one-shot: its throttle automation fades it to roughly
+// -38 dB above the 0.75 point. Keep the continuous engine at full-load, but feed this event the
+// low-throttle endpoint so a triggered backfire is actually audible instead of merely appearing
+// as a virtual 0% card. This is an event-specific FMOD parameter, not a change to pedal physics.
+constexpr float kBackfireAudioThrottle = 0.0f;
 constexpr double kRecentSourceSeconds = 1.5;
 constexpr char kFieldSeparator = '\x1f';
 constexpr char kStableIdSeparator = '\x1e';
