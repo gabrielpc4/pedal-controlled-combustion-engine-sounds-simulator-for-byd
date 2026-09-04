@@ -633,10 +633,19 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     /**
      * The old main-branch behavior intentionally made 1→2 happen earlier at partial throttle.
      * Keep that one exception while every other upshift remains at the bank-authored threshold.
+     * During a launch, or with a strong first-gear throttle request, the authored threshold wins;
+     * the partial-throttle shortcut must not cut staging or acceleration short.
      */
     private fun upshiftTriggerRpmForGear(currentGear: Int, gas: Double): Double {
         val authored = physics.drivetrain.automaticUpshiftRpm.toDouble()
-        val requested = if (currentGear == 1 && gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD) {
+        val launchActive = launchControlPhase != LaunchControlPhase.INACTIVE
+        val strongFirstGearThrottle = gas >= STRONG_FIRST_GEAR_THROTTLE_THRESHOLD
+        val requested = if (
+            currentGear == 1 &&
+            !launchActive &&
+            !strongFirstGearThrottle &&
+            gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD
+        ) {
             (MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM - customShiftAdvanceRpm())
                 .coerceAtMost(authored)
                 .coerceAtLeast(physics.engine.idleRpm + 500.0)
@@ -1039,6 +1048,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
         const val EIGHT_THOUSAND_RPM = 8_000.0
         const val TWO_THOUSAND_RPM = 2_000.0
+        const val STRONG_FIRST_GEAR_THROTTLE_THRESHOLD = 0.80
         const val RPM_MATCH_TOLERANCE = 25.0
         // A brief automatic-only gap keeps hard braking audible as separate shifts instead of
         // chaining two downshifts immediately after one another. Authored shift duration is kept.
