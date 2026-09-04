@@ -7,7 +7,7 @@ import kotlin.math.sin
 /** Phases of the optional SIMULATED PEDALS launch sequence. */
 internal enum class LaunchControlPhase {
     INACTIVE,
-    /** Full throttle plus brake held at a standstill; stage near 5,000 RPM. */
+    /** Throttle intent plus brake held at a standstill; stage near 5,000 RPM. */
     ARMED,
     /** Throttle was lifted while the brake remained held; smoothly return to the prior RPM. */
     DISARMING,
@@ -28,6 +28,8 @@ internal object LaunchControl {
     // to about 0.9787 by the pointer handler. Keep a small margin below that value; otherwise a
     // visually full pedal can never arm the sequence copied from the main branch.
     const val FULL_THROTTLE_THRESHOLD = 0.975
+    /** Any deliberate pedal pressure while braking is enough to express launch intent. */
+    const val THROTTLE_INTENT_THRESHOLD = 0.05
     const val ARM_BRAKE_THRESHOLD = 0.05
     const val RELEASE_BRAKE_THRESHOLD = 0.04
     const val STANDSTILL_SPEED_MPS = 0.08
@@ -111,12 +113,15 @@ internal object LaunchControl {
     ): LaunchControlPhase {
         if (!enabled) return LaunchControlPhase.INACTIVE
 
-        val fullThrottle = rawThrottle >= FULL_THROTTLE_THRESHOLD
+        // A simultaneous brake and deliberate throttle press is treated as launch intent. The
+        // app deliberately does not wait for pedal travel to reach the near-full value used by
+        // the tach animation, because touch travel can top out below that value intermittently.
+        val throttlePressed = rawThrottle >= THROTTLE_INTENT_THRESHOLD
         val brakeHeld = brake >= ARM_BRAKE_THRESHOLD
         val brakeReleased = brake < RELEASE_BRAKE_THRESHOLD
         val canArm = speedMps <= STANDSTILL_SPEED_MPS
         return when (phase) {
-            LaunchControlPhase.INACTIVE -> if (fullThrottle && brakeHeld && canArm) {
+            LaunchControlPhase.INACTIVE -> if (throttlePressed && brakeHeld && canArm) {
                 LaunchControlPhase.ARMED
             } else {
                 LaunchControlPhase.INACTIVE
@@ -124,11 +129,11 @@ internal object LaunchControl {
 
             LaunchControlPhase.ARMED -> when {
                 brakeReleased -> LaunchControlPhase.LAUNCHED
-                !fullThrottle -> LaunchControlPhase.DISARMING
+                !throttlePressed -> LaunchControlPhase.DISARMING
                 else -> LaunchControlPhase.ARMED
             }
 
-            LaunchControlPhase.DISARMING -> if (fullThrottle && brakeHeld && canArm) {
+            LaunchControlPhase.DISARMING -> if (throttlePressed && brakeHeld && canArm) {
                 LaunchControlPhase.ARMED
             } else {
                 LaunchControlPhase.DISARMING
