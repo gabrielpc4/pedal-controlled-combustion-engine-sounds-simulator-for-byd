@@ -147,6 +147,12 @@ class DriveController(context: Context) {
     )
 
     init {
+        // Gain semantics changed from percentage-like 0..2 values to 1..10x. Deliberately discard
+        // the old preference namespace rather than migrating values into the new scale.
+        appContext.getSharedPreferences(AppPreferenceStores.AUDIO_MIX_GAINS_LEGACY, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .apply()
         loadPhysics(selectedProfile.get())
         simulation.manualShiftEnabled = manualShiftEnabled.get()
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
@@ -239,7 +245,12 @@ class DriveController(context: Context) {
     fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float) {
         // These trims are intentionally per-car and survive normal APK updates. Reset All is the
         // explicit opt-in that clears them, so selecting another car never carries a hidden mix.
-        val gains = AudioMixGains(transmission, gearShift, turbo, backfire)
+        val gains = AudioMixGains(
+            transmission.coerceIn(1.0f, 10.0f),
+            gearShift.coerceIn(1.0f, 10.0f),
+            turbo.coerceIn(1.0f, 10.0f),
+            backfire.coerceIn(1.0f, 10.0f),
+        )
         audioMixGains.set(gains)
         audioMixGainRepository.save(selectedProfile.get(), gains)
         audioEngine.setCategoryGains(gains)

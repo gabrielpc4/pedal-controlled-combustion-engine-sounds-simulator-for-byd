@@ -39,7 +39,7 @@ internal class AudioMixGainRepository(context: Context) {
 
     private fun read(profile: FmodBankProfile, category: String): Float = preferences
         .getFloat(key(profile, category), 1.0f)
-        .coerceAtLeast(0f)
+        .coerceIn(1.0f, 10.0f)
 
     private fun key(profile: FmodBankProfile, category: String): String = "${profile.id}.$category"
 }

@@ -1277,7 +1277,7 @@ internal fun TransmissionShifter(
                     .clickable(
                         enabled = onPositionSelected != null,
                         onClick = { onPositionSelected?.invoke(option) },
-                    )
+                    ),
 
                 contentAlignment = Alignment.Center,
             ) {

@@ -357,9 +357,9 @@ private fun GainControl(label: String, value: Float, onValueChange: (Float) -> U
     Column(modifier = Modifier.width(300.dp)) {
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text(label, color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Black)
-            Text(String.format(Locale.US, "%.0f%%", value * 100f), color = White, fontSize = 10.sp)
+            Text(String.format(Locale.US, "%.1fx", value), color = White, fontSize = 10.sp)
         }
-        Slider(value = value, onValueChange = onValueChange, valueRange = 0f..2f)
+        Slider(value = value, onValueChange = onValueChange, valueRange = 1f..10f)
     }
 }
 
