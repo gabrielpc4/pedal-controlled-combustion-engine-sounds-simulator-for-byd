@@ -65,6 +65,12 @@ android {
         }
     }
 
+    lint {
+        // These installers target the same BYD DiLink Android compatibility level as the
+        // sideloaded simulator APK and are not distributed through Google Play.
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
