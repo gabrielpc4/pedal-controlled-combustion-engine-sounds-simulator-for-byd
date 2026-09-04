@@ -111,6 +111,7 @@ internal fun MixerDashboardScreen(
     onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: () -> Unit,
     onSelectCar: (String) -> Unit,
+    onTransmissionPositionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
@@ -276,6 +277,7 @@ internal fun MixerDashboardScreen(
                 onBrake = onBrake,
                 onSimulatedRegen = onSimulatedRegen,
                 onToggleSimulatedPedalLatch = onToggleSimulatedPedalLatch,
+                onTransmissionPositionChange = onTransmissionPositionChange,
                 onManualUpshift = onManualUpshift,
                 onManualDownshift = onManualDownshift,
                 modifier = Modifier

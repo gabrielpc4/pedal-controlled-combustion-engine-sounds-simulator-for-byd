@@ -277,6 +277,7 @@ class DriveController(context: Context) {
         shouldMute
     }
     fun selectSimulatedPedals() { inputMode.set(InputMode.SimulatedPedals) }
+    fun setTransmissionPosition(position: TransmissionPosition) { transmissionPosition.set(position) }
     fun selectRealPedals() { if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) inputMode.set(InputMode.RealPedals) }
     fun toggleInputSource() {
         if (inputMode.get() == InputMode.RealPedals) inputMode.set(InputMode.SimulatedPedals)

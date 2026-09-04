@@ -173,6 +173,7 @@ class MainActivity : ComponentActivity() {
                         onBrake = controller::setSimulatedPedalBrake,
                         onSimulatedRegen = controller::setSimulatedRegen,
                         onToggleSimulatedPedalLatch = controller::setSimulatedPedalsLatched,
+                        onTransmissionPositionChange = controller::setTransmissionPosition,
                         onSelectSimulatedPedals = controller::selectSimulatedPedals,
                         onSelectRealPedals = controller::selectRealPedals,
                         onToggleInputSource = controller::toggleInputSource,
@@ -247,6 +248,7 @@ private fun MotorSoundDashboard(
     onBrake: (Double) -> Unit,
     onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: (Boolean) -> Unit,
+    onTransmissionPositionChange: (TransmissionPosition) -> Unit,
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
@@ -405,6 +407,7 @@ private fun MotorSoundDashboard(
                                     onBrake = onBrake,
                                     onSimulatedRegen = onSimulatedRegen,
                                     onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
+                                    onTransmissionPositionChange = onTransmissionPositionChange,
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
                                     modifier = Modifier.padding(start = 28.dp),
@@ -423,6 +426,7 @@ private fun MotorSoundDashboard(
                             onBrake = onBrake,
                             onSimulatedRegen = onSimulatedRegen,
                             onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
+                            onTransmissionPositionChange = onTransmissionPositionChange,
                             onSelectCar = onSelectCar,
                             soundPerspective = state.soundPerspective,
                             onSoundPerspectiveChange = onSoundPerspectiveChange,
@@ -919,6 +923,7 @@ private fun ClassicDriveControls(
     onBrake: (Double) -> Unit,
     onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: () -> Unit,
+    onTransmissionPositionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
@@ -967,6 +972,7 @@ private fun ClassicDriveControls(
             position = state.transmissionPosition,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            onPositionSelected = if (state.inputSourceIsRealPedals) null else onTransmissionPositionChange,
         )
     }
 }
@@ -1069,6 +1075,7 @@ internal fun MixerDriveControls(
     onBrake: (Double) -> Unit,
     onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: () -> Unit,
+    onTransmissionPositionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1127,6 +1134,7 @@ internal fun MixerDriveControls(
             position = state.transmissionPosition,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = MIXER_DRIVE_CONTROL_SCALE,
+            onPositionSelected = if (state.inputSourceIsRealPedals) null else onTransmissionPositionChange,
         )
     }
 }
@@ -1217,6 +1225,7 @@ private fun CarStage(
 internal fun TransmissionShifter(
     position: TransmissionPosition,
     lockedToVehicle: Boolean = false,
+    onPositionSelected: ((TransmissionPosition) -> Unit)? = null,
     scale: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
@@ -1248,9 +1257,6 @@ internal fun TransmissionShifter(
 
         TransmissionPosition.entries.forEach { option ->
             val selected = option == position
-            // P/N/D is intentionally display-only. A touch target here made it too easy to
-            // engage Neutral while driving; real-pedal mode still follows the vehicle telemetry
-            // and debug scenarios can set the selector independently of this dashboard.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1267,7 +1273,12 @@ internal fun TransmissionShifter(
                         width = if (selected) (2f * scale).dp else (1f * scale).dp,
                         color = if (selected) Cyan else Color(0xFF4A5A66),
                         shape = RoundedCornerShape((10f * scale).dp),
+                    )
+                    .clickable(
+                        enabled = onPositionSelected != null,
+                        onClick = { onPositionSelected?.invoke(option) },
                     ),
+                
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
