@@ -386,7 +386,7 @@ def main() -> int:
     static = read_json(args.static_inventory)
     cars = static.get("cars")
     if not isinstance(cars, list) or len(cars) != 33:
-        raise ValueError("static inventory must contain exactly 33 modded cars")
+        raise ValueError("static inventory must contain at least one modded car")
     audits = [audit_car(car, args.trace_root) for car in sorted(cars, key=lambda car: car["id"])]
     document = {
         "schema": "byd-modded-cars-runtime-audit-v1",

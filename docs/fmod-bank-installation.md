@@ -1,6 +1,6 @@
 # FMOD bank installation
 
-The dashboard APK contains runtime code and the 23 official-car previews. The separate
+The dashboard APK contains runtime code and the official-car previews. The separate
 `audio-installer` APK carries the generated bank packages and publishes them through the
 dashboard's exported provider.
 
@@ -10,11 +10,11 @@ dashboard's exported provider.
 `assetto_corsa_installation/content/cars`. It creates:
 
 - `original_cars_pack`: official cars sourced from the Assetto Corsa installation.
-- `modded_car_packs`: profiles discovered under `new_cars`.
+- `modded_car_packs`: profiles discovered under `modded_cars`.
 
 Both groups are installable independently. The installer can publish the original group, the
 modded group, or both; shared FMOD dependencies are installed automatically in all cases. The
-current original-bank audit covers only the 23 official profiles, not the modded group.
+current original-bank audit covers the usable official profiles, not the modded group.
 
 Each active car package contains one source `.bank`, an optional preview selected from
 `ui/dlc_preview.png` or an official skin preview, and that car's exported

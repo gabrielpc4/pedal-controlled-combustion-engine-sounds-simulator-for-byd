@@ -1,8 +1,8 @@
 # Car and bank exceptions
 
 This file records modded-car limitations that still need a later investigation. The current release
-builds 23 official cars directly from `assetto_corsa_installation/content/cars`; it does not
-substitute a bank from a similarly named car. The `new_cars` packages are independently
+builds all usable official cars directly from `assetto_corsa_installation/content/cars`; it does not
+substitute a bank from a similarly named car. The `modded_cars` packages are independently
 installable, but their historical observations below do not affect the separate original-bank
 inventory.
 
@@ -17,7 +17,7 @@ car's bank.
 
 The generated static inventory is [`modded-cars-audio-inventory.md`](modded-cars-audio-inventory.md)
 and the Android evidence is [`modded-cars-runtime-audit.md`](modded-cars-runtime-audit.md). Both
-cover all 33 modded profiles. The runtime audit uses a controlled sequence of cabin and exterior
+cover all currently discovered modded profiles. The runtime audit uses a controlled sequence of cabin and exterior
 idle, partial and full acceleration, lift-off, braking/downshifts, manual operation, limiter, and
 P/N. It records immutable bank identity, FMOD event lifecycle, Core voices, audibility, route,
 and the physical parameters delivered by the app. Raw captures stay outside Git.

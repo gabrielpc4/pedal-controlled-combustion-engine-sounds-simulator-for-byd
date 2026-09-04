@@ -274,7 +274,7 @@ def markdown(cars: Sequence[Mapping[str, Any]]) -> str:
     lines = [
         "# Modded Cars Audio Inventory",
         "",
-        "This generated inventory is the phase-2 counterpart to `original-cars-audio-inventory.md`. It covers the 33 supplied `new_cars` banks only. Each event and source is recorded from the bank graph, the car-local `sfx/GUIDs.txt`, and matching exported physics; it does not claim that a source was heard until the Android runtime audit adds evidence.",
+        f"This generated inventory is the modded-car counterpart to `original-cars-audio-inventory.md`. It covers all {len(cars)} supplied `modded_cars` banks. Each event and source is recorded from the bank graph, the car-local `sfx/GUIDs.txt`, and matching exported physics; it does not claim that a source was heard until the Android runtime audit adds evidence.",
         "",
         "## Evidence rules",
         "",
@@ -329,8 +329,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     inventory.validate_clean_audit_inputs(args.parser_root.resolve())
     inventory.build_auditor(args.parser_root.resolve())
     cars = sorted((static_car(source) for source in packs.discover_modded_sources()), key=lambda car: car["id"])
-    if len(cars) != 33:
-        raise inventory.InventoryError(f"expected 33 modded profiles, got {len(cars)}")
+    if not cars:
+        raise inventory.InventoryError("no modded profiles were discovered")
     document = {
         "schema": "byd-modded-cars-audio-inventory-v1",
         "scope": {"includedGroup": packs.MODDED_GROUP, "includedProfileCount": len(cars)},

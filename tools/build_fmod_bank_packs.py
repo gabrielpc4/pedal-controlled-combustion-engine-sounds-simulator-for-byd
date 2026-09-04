@@ -2,7 +2,7 @@
 """Build the two-group native FMOD bank catalog.
 
 The original group is sourced only from the installed Assetto Corsa content;
-the modded group is sourced from ``new_cars``. Both groups are packaged so the
+the modded group is sourced from ``modded_cars``. Both groups are packaged so the
 installer can publish either one or both independently.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLATION = ROOT.parent / "assetto_corsa_installation"
-NEW_CARS = ROOT.parent / "new_cars"
+MODDED_CARS = ROOT.parent / "modded_cars"
 AUDIO_LAB = ROOT.parent / "assetto_corsa_audio_lab"
 OUTPUT = ROOT / "fmod_bank_packs"
 SCHEMA = "byd-fmod-bank-pack-v3"
@@ -44,8 +44,9 @@ class CarSource:
     requires_physics: bool = True
 
 
-# The current product catalog is intentionally explicit. Similar names are
-# never treated as the same car or sound family.
+# These aliases preserve the IDs already used by the app for the original cars
+# that were present before the catalog became installation-complete. Every
+# additional usable car directory is discovered below with a deterministic ID.
 ORIGINAL_CARS = (
     ("alfa-romeo-4c", "Alfa Romeo 4C", "ks_alfa_romeo_4c"),
     ("assetto-audi-r8-lms-2016", "Audi R8 LMS 2016", "ks_audi_r8_lms_2016"),
@@ -71,6 +72,7 @@ ORIGINAL_CARS = (
     ("assetto-porsche-991-turbo-s", "Porsche 911 Turbo S (991)", "ks_porsche_991_turbo_s"),
     ("assetto-toyota-supra-mkiv", "Toyota Supra Mk IV", "ks_toyota_supra_mkiv"),
 )
+LEGACY_ORIGINAL_IDS = {source_id: (pack_id, display_name) for pack_id, display_name, source_id in ORIGINAL_CARS}
 
 
 def sha256(path: Path) -> str:
@@ -98,6 +100,15 @@ def read_display_name(directory: Path) -> str:
                 if ":" in text:
                     return text.split(":", 1)[1].strip()
                 return text
+    for ui_name in ("ui_car.json", "dlc_ui_car.json"):
+        ui_path = directory / "ui" / ui_name
+        if ui_path.is_file():
+            try:
+                value = json.loads(ui_path.read_text(encoding="utf-8", errors="replace"))
+                if isinstance(value, dict) and isinstance(value.get("name"), str) and value["name"].strip():
+                    return value["name"].strip()
+            except (OSError, json.JSONDecodeError):
+                pass
     return directory.name.replace("_", " ").replace("-", " ").title()
 
 
@@ -131,13 +142,16 @@ def discover_original_sources() -> list[CarSource]:
     if not cars_root.is_dir():
         raise RuntimeError(f"Assetto Corsa installation is missing: {cars_root}")
     sources: list[CarSource] = []
-    for pack_id, display_name, source_id in ORIGINAL_CARS:
-        directory = cars_root / source_id
-        if not directory.is_dir():
-            raise RuntimeError(f"{pack_id}: original car directory is missing: {directory}")
+    for directory in sorted(path for path in cars_root.iterdir() if path.is_dir()):
+        # The installation contains two empty DLC placeholders. They are not car
+        # sources because they have neither an FMOD bank nor physics payload.
+        if not (directory / "sfx").is_dir() or not list((directory / "sfx").glob("*.bank")):
+            continue
+        legacy = LEGACY_ORIGINAL_IDS.get(directory.name)
+        pack_id, display_name = legacy or (f"assetto-{slug(directory.name)}", read_display_name(directory))
         preview = preview_for_original(directory)
         if preview is None:
-            raise RuntimeError(f"{pack_id}: original car has no official preview image")
+            raise RuntimeError(f"{pack_id}: original car has no official preview image: {directory}")
         sources.append(CarSource(
             pack_id=pack_id,
             display_name=display_name,
@@ -151,10 +165,10 @@ def discover_original_sources() -> list[CarSource]:
 
 
 def discover_modded_sources() -> list[CarSource]:
-    if not NEW_CARS.is_dir():
+    if not MODDED_CARS.is_dir():
         return []
     sources: list[CarSource] = []
-    for directory in sorted(path for path in NEW_CARS.iterdir() if path.is_dir()):
+    for directory in sorted(path for path in MODDED_CARS.iterdir() if path.is_dir()):
         try:
             bank = bank_for(directory)
         except RuntimeError as error:

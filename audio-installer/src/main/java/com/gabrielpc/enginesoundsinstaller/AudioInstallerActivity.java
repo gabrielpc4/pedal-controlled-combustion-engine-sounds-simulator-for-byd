@@ -93,6 +93,13 @@ public final class AudioInstallerActivity extends Activity {
         deleteAll = new Button(this);
         deleteAll.setText("DELETE ALL");
         deleteAll.setOnClickListener(view -> deleteAll());
+        if (MODDED_GROUP.equals(BuildConfig.PAYLOAD_GROUP)) {
+            installOriginal.setVisibility(View.GONE);
+            installBoth.setVisibility(View.GONE);
+        } else {
+            installModded.setVisibility(View.GONE);
+            installBoth.setVisibility(View.GONE);
+        }
         LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(-2, -2);
         deleteParams.leftMargin = 24;
         actions.addView(deleteAll, deleteParams);
@@ -102,11 +109,12 @@ public final class AudioInstallerActivity extends Activity {
 
     private void refreshIdleState() {
         Set<String> installed = installedIds();
+        String payloadGroup = BuildConfig.PAYLOAD_GROUP;
         long originalCount = packs.stream().filter(pack -> ORIGINAL_GROUP.equals(pack.group) && !pack.dependency).count();
         long moddedCount = packs.stream().filter(pack -> MODDED_GROUP.equals(pack.group) && !pack.dependency).count();
         long installedOriginal = packs.stream().filter(pack -> ORIGINAL_GROUP.equals(pack.group) && !pack.dependency && installed.contains(pack.group + "/" + pack.id)).count();
         long installedModded = packs.stream().filter(pack -> MODDED_GROUP.equals(pack.group) && !pack.dependency && installed.contains(pack.group + "/" + pack.id)).count();
-        status.setText("Original: " + installedOriginal + "/" + originalCount + " · Modded: " + installedModded + "/" + moddedCount +
+        status.setText((MODDED_GROUP.equals(payloadGroup) ? "Modded installer · " : "Original installer · ") + "Original: " + installedOriginal + "/" + originalCount + " · Modded: " + installedModded + "/" + moddedCount +
                 " (" + installed.size() + " packages including shared dependencies)");
         progress.setProgress(packs.isEmpty() ? 0 : installed.size() * 1000 / packs.size());
     }

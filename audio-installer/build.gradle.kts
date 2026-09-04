@@ -4,18 +4,25 @@ plugins {
 
 import org.gradle.api.tasks.Sync
 
-val generatedPackAssets = file("build/generated/packAssets")
-val preparePackAssets = tasks.register<Sync>("preparePackAssets") {
+val generatedModdedPackAssets = file("build/generated/packAssets/modded")
+val generatedOriginalPackAssets = file("build/generated/packAssets/original")
+val prepareModdedPackAssets = tasks.register<Sync>("prepareModdedPackAssets") {
     from(rootProject.file("fmod_bank_packs")) {
-        // Ship both groups; the installer lets the user choose which payloads to publish.
-        include("*.bydbank", "index.json")
+        include("modded-*.bydbank", "assetto-common*.bydbank", "index.json")
         into("packs")
     }
-    into(generatedPackAssets)
+    into(generatedModdedPackAssets)
+}
+val prepareOriginalPackAssets = tasks.register<Sync>("prepareOriginalPackAssets") {
+    from(rootProject.file("fmod_bank_packs")) {
+        include("assetto-*.bydbank", "alfa-romeo-4c.bydbank", "index.json")
+        into("packs")
+    }
+    into(generatedOriginalPackAssets)
 }
 
 tasks.named("preBuild").configure {
-    dependsOn(preparePackAssets)
+    dependsOn(prepareModdedPackAssets, prepareOriginalPackAssets)
 }
 
 android {
@@ -32,6 +39,24 @@ android {
         versionName = "1.0"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
+    flavorDimensions += "payload"
+    productFlavors {
+        create("modded") {
+            dimension = "payload"
+            applicationIdSuffix = ".modded"
+            buildConfigField("String", "PAYLOAD_GROUP", "\"modded_car_packs\"")
+        }
+        create("original") {
+            dimension = "payload"
+            applicationIdSuffix = ".original"
+            buildConfigField("String", "PAYLOAD_GROUP", "\"original_cars_pack\"")
+        }
+    }
+
     buildTypes {
         release {
             optimization {
@@ -45,7 +70,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    sourceSets.getByName("main").assets.srcDir(generatedPackAssets)
+    sourceSets.getByName("modded").assets.srcDir(generatedModdedPackAssets)
+    sourceSets.getByName("original").assets.srcDir(generatedOriginalPackAssets)
 }
 
 androidComponents {
