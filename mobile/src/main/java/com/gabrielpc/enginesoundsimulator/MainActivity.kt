@@ -992,145 +992,139 @@ private fun DashboardEffectControls(
     onEnginePureChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier.width(950.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        DashboardEngineRow(
-            external = state.soundPerspective == com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR,
-            pure = state.exteriorPureAudio,
-            onExternalChange = onEngineExternalChange,
-            onPureChange = onEnginePureChange,
-            onGainChange = { gain -> onHostGains(gain, 2.0f) },
-        )
-        DashboardEffectRow(
-            kind = EffectSoundKind.POPS_AND_BANGS,
-            label = "POPS & BANGS",
-            enabled = state.popsAndBangsEnabled,
-            original = state.popsAndBangsOriginal,
-            gain = state.backfireGain,
-            overrideAvailable = true,
-            onEnabledChange = onEnabledChange,
-            onOriginalChange = onOriginalChange,
-            onGainChange = { value -> onCategoryGains(state.transmissionGain, state.gearShiftGain, state.turboGain, value) },
-        )
-        DashboardEffectRow(
-            kind = EffectSoundKind.SHIFT,
-            label = "SHIFT SOUNDS",
-            enabled = state.shiftSoundsEnabled,
-            original = state.shiftSoundsOriginal,
-            gain = state.gearShiftGain,
-            overrideAvailable = true,
-            onEnabledChange = onEnabledChange,
-            onOriginalChange = onOriginalChange,
-            onGainChange = { value -> onCategoryGains(state.transmissionGain, value, state.turboGain, state.backfireGain) },
-        )
-        DashboardEffectRow(
-            kind = EffectSoundKind.TRANSMISSION,
-            label = "TRANSMISSION",
-            enabled = state.transmissionEnabled,
-            original = false,
-            gain = state.transmissionGain,
-            overrideAvailable = false,
-            onEnabledChange = onEnabledChange,
-            onOriginalChange = onOriginalChange,
-            onGainChange = { value -> onCategoryGains(value, state.gearShiftGain, state.turboGain, state.backfireGain) },
-        )
-        if (state.hasTurbo) {
-            DashboardEffectRow(
-                kind = EffectSoundKind.TURBO,
-                label = "TURBO",
-                enabled = state.turboEnabled,
-                original = false,
-                gain = state.turboGain,
-                overrideAvailable = false,
-                onEnabledChange = onEnabledChange,
-                onOriginalChange = onOriginalChange,
-                onGainChange = { value -> onCategoryGains(state.transmissionGain, state.gearShiftGain, value, state.backfireGain) },
-            )
+    val external = state.soundPerspective == com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR
+    val rows = listOf(
+        Triple("ENGINE", EffectSoundKind.TRANSMISSION, state.transmissionGain),
+        Triple("POPS & BANGS", EffectSoundKind.POPS_AND_BANGS, state.backfireGain),
+        Triple("SHIFT SOUNDS", EffectSoundKind.SHIFT, state.gearShiftGain),
+        Triple("TRANSMISSION", EffectSoundKind.TRANSMISSION, state.transmissionGain),
+    ) + if (state.hasTurbo) listOf(Triple("TURBO", EffectSoundKind.TURBO, state.turboGain)) else emptyList()
+    val rowHeight = 42.dp
+    val rowGap = 7.dp
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(150.dp)) {
+            rows.forEachIndexed { index, row ->
+                val enabled = if (index == 0) external else when (row.second) {
+                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
+                    EffectSoundKind.SHIFT -> state.shiftSoundsEnabled
+                    EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
+                    EffectSoundKind.TURBO -> state.turboEnabled
+                }
+                Text(row.first, color = if (enabled) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.height(rowHeight))
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
+            DashboardEngineLabelSwitch("EXTERNAL", external, onEngineExternalChange, rowHeight)
+            rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
+            DashboardEmptyControlCell(rowHeight)
+            rows.drop(1).forEach { row ->
+                val enabled = when (row.second) {
+                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
+                    EffectSoundKind.SHIFT -> state.shiftSoundsEnabled
+                    EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
+                    EffectSoundKind.TURBO -> state.turboEnabled
+                }
+                DashboardEffectSwitch(enabled) { onEnabledChange(row.second, !enabled) }
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
+            DashboardEngineLabelSwitch("PURE", state.exteriorPureAudio, onEnginePureChange, rowHeight)
+            DashboardOriginalColumnCell(state.popsAndBangsOriginal, true, { onOriginalChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOriginal) }, rowHeight)
+            DashboardOriginalColumnCell(state.shiftSoundsOriginal, true, { onOriginalChange(EffectSoundKind.SHIFT, !state.shiftSoundsOriginal) }, rowHeight)
+            DashboardEmptyControlCell(rowHeight)
+            if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
+            DashboardEffectSwitch(state.exteriorPureAudio) { onEnginePureChange(!state.exteriorPureAudio) }
+            rows.drop(1).forEach { row ->
+                val original = when (row.second) {
+                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOriginal
+                    EffectSoundKind.SHIFT -> state.shiftSoundsOriginal
+                    else -> false
+                }
+                if (row.second == EffectSoundKind.POPS_AND_BANGS || row.second == EffectSoundKind.SHIFT) {
+                    DashboardEffectSwitch(original) { onOriginalChange(row.second, !original) }
+                } else DashboardEmptyControlCell(rowHeight)
+            }
+        }
+        DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
+            Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
+                rows.forEach { row ->
+                    val selected = kotlin.math.abs(row.third - preset.gain) < 0.001f
+                    DashboardGainButton(preset, selected, if (selected) Night else Cyan) {
+                        when (row.second) {
+                            EffectSoundKind.TRANSMISSION -> if (row.first == "ENGINE") onHostGains(preset.gain, 2.0f) else onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
+                            EffectSoundKind.POPS_AND_BANGS -> onCategoryGains(state.transmissionGain, state.gearShiftGain, state.turboGain, preset.gain)
+                            EffectSoundKind.SHIFT -> onCategoryGains(state.transmissionGain, preset.gain, state.turboGain, state.backfireGain)
+                            EffectSoundKind.TURBO -> onCategoryGains(state.transmissionGain, state.gearShiftGain, preset.gain, state.backfireGain)
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun DashboardEngineRow(
-    external: Boolean,
-    pure: Boolean,
-    onExternalChange: (Boolean) -> Unit,
-    onPureChange: (Boolean) -> Unit,
-    onGainChange: (Float) -> Unit,
+private fun DashboardEmptyControlCell(height: Dp) {
+    Spacer(Modifier.width(64.dp).height(height))
+}
+
+@Composable
+private fun DashboardEngineLabelSwitch(
+    label: String,
+    checked: Boolean,
+    onToggle: (Boolean) -> Unit,
+    height: Dp,
 ) {
     Row(
-        modifier = Modifier.height(42.dp),
+        modifier = Modifier.height(height),
         verticalAlignment = Alignment.CenterVertically,
-        // Keep the same control spacing as the effect rows. The engine label itself is narrower
-        // below, which removes only the extra red-marked gap without collapsing the green gaps.
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("ENGINE", color = if (external) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(115.dp))
-        DashboardLabeledSwitch("EXTERNAL", external, onExternalChange)
-        DashboardLabeledSwitch("PURE", pure, onPureChange)
-        DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
-            Text(preset.label, color = if (preset.gain == 1.0f) Night else Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                modifier = Modifier.width(105.dp).height(38.dp).clip(RoundedCornerShape(6.dp)).background(if (preset.gain == 1.0f) Cyan else PanelBright).border(1.dp, Line, RoundedCornerShape(6.dp)).clickable { onGainChange(preset.gain) }.padding(top = 10.dp))
-        }
-    }
-}
-
-@Composable
-private fun DashboardLabeledSwitch(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = if (checked) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
         DashboardEffectSwitch(checked) { onToggle(!checked) }
     }
 }
 
 @Composable
-private fun DashboardEffectRow(
-    kind: EffectSoundKind,
-    label: String,
-    enabled: Boolean,
+private fun DashboardOriginalColumnCell(
     original: Boolean,
-    gain: Float,
-    overrideAvailable: Boolean,
-    onEnabledChange: (EffectSoundKind, Boolean) -> Unit,
-    onOriginalChange: (EffectSoundKind, Boolean) -> Unit,
-    onGainChange: (Float) -> Unit,
+    available: Boolean,
+    onToggle: () -> Unit,
+    height: Dp,
 ) {
-    val accent = if (enabled) Cyan else Muted
-    Row(
-        modifier = Modifier.height(42.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(label, color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(150.dp))
-        DashboardEffectSwitch(enabled) { onEnabledChange(kind, !enabled) }
-        if (overrideAvailable) {
-            DashboardOriginalSwitch(original) { onOriginalChange(kind, !original) }
-        } else {
-            // Keep the row geometry identical even when a category has no replacement source.
-            Spacer(Modifier.width(123.dp))
-        }
-        DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
-            val selected = kotlin.math.abs(gain - preset.gain) < 0.001f
-            Text(
-                text = preset.label,
-                color = if (selected) Night else accent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .width(105.dp)
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (selected) Cyan else PanelBright)
-                    .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
-                    .clickable { onGainChange(preset.gain) }
-                    .padding(top = 10.dp),
-            )
-        }
+    if (available) {
+        Text("ORIGINAL", color = if (original) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.height(height))
+    } else {
+        DashboardEmptyControlCell(height)
     }
+}
+
+@Composable
+private fun DashboardGainButton(
+    preset: DashboardEffectGainPreset,
+    selected: Boolean,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = preset.label,
+        color = textColor,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .width(105.dp)
+            .height(38.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) Cyan else PanelBright)
+            .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(top = 10.dp),
+    )
 }
 
 @Composable
