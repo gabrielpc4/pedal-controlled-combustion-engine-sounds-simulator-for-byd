@@ -186,12 +186,15 @@ class MainActivity : ComponentActivity() {
                         onToggleAudioMute = controller::toggleAudioMute,
                         onEffectEnabledChange = controller::setEffectEnabled,
                         onEffectOriginalChange = controller::setEffectOriginal,
+                        onEngineExternalChange = { enabled -> controller.setSoundPerspective(if (enabled) com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR else com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.CABIN) },
+                        onEnginePureChange = controller::setExteriorPureAudio,
                         onResetAllPreferences = controller::resetAllPreferences,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
                         onFmodUpdateRateChange = controller::setFmodUpdateRateHz,
+                        onAutoblipEnabledChange = controller::setAutoblipEnabled,
                         onExteriorPureAudioChange = controller::setExteriorPureAudio,
                         onMixerDiagnosticsActive = controller::setMixerDiagnosticsActive,
                         onCategoryGains = controller::setFmodCategoryGains,
@@ -273,12 +276,15 @@ private fun MotorSoundDashboard(
     onToggleAudioMute: () -> Boolean,
     onEffectEnabledChange: (EffectSoundKind, Boolean) -> Unit,
     onEffectOriginalChange: (EffectSoundKind, Boolean) -> Unit,
+    onEngineExternalChange: (Boolean) -> Unit,
+    onEnginePureChange: (Boolean) -> Unit,
     onResetAllPreferences: () -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
     onFmodUpdateRateChange: (Int) -> Unit,
+    onAutoblipEnabledChange: (Boolean) -> Unit,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     onMixerDiagnosticsActive: (Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
@@ -437,6 +443,9 @@ private fun MotorSoundDashboard(
                                     onEnabledChange = onEffectEnabledChange,
                                     onOriginalChange = onEffectOriginalChange,
                                     onCategoryGains = onCategoryGains,
+                                    onHostGains = onHostGains,
+                                    onEngineExternalChange = onEngineExternalChange,
+                                    onEnginePureChange = onEnginePureChange,
                                     modifier = Modifier.padding(start = 8.dp, bottom = 2.dp),
                                 )
                                 ClassicDriveControls(
@@ -484,6 +493,8 @@ private fun MotorSoundDashboard(
                             onResetAll = onResetAllPreferences,
                             fmodUpdateRateHz = state.fmodUpdateRateHz,
                             onFmodUpdateRateChange = onFmodUpdateRateChange,
+                            autoblipEnabled = state.autoblipEnabled,
+                            onAutoblipEnabledChange = onAutoblipEnabledChange,
                             exteriorPureAudio = state.exteriorPureAudio,
                             onExteriorPureAudioChange = onExteriorPureAudioChange,
                             backfireSettings = state.backfireSettings,
@@ -976,12 +987,22 @@ private fun DashboardEffectControls(
     onEnabledChange: (EffectSoundKind, Boolean) -> Unit,
     onOriginalChange: (EffectSoundKind, Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
+    onHostGains: (Float, Float) -> Unit,
+    onEngineExternalChange: (Boolean) -> Unit,
+    onEnginePureChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.width(950.dp),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
+        DashboardEngineRow(
+            external = state.soundPerspective == com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR,
+            pure = state.exteriorPureAudio,
+            onExternalChange = onEngineExternalChange,
+            onPureChange = onEnginePureChange,
+            onGainChange = { gain -> onHostGains(gain, 2.0f) },
+        )
         DashboardEffectRow(
             kind = EffectSoundKind.POPS_AND_BANGS,
             label = "POPS & BANGS",
@@ -1028,6 +1049,37 @@ private fun DashboardEffectControls(
                 onGainChange = { value -> onCategoryGains(state.transmissionGain, state.gearShiftGain, value, state.backfireGain) },
             )
         }
+    }
+}
+
+@Composable
+private fun DashboardEngineRow(
+    external: Boolean,
+    pure: Boolean,
+    onExternalChange: (Boolean) -> Unit,
+    onPureChange: (Boolean) -> Unit,
+    onGainChange: (Float) -> Unit,
+) {
+    Row(
+        modifier = Modifier.height(42.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("ENGINE", color = if (external) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(150.dp))
+        DashboardLabeledSwitch("EXTERNAL", external, onExternalChange)
+        DashboardLabeledSwitch("PURE", pure, onPureChange)
+        DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
+            Text(preset.label, color = if (preset.gain == 1.0f) Night else Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                modifier = Modifier.width(105.dp).height(38.dp).clip(RoundedCornerShape(6.dp)).background(if (preset.gain == 1.0f) Cyan else PanelBright).border(1.dp, Line, RoundedCornerShape(6.dp)).clickable { onGainChange(preset.gain) }.padding(top = 10.dp))
+        }
+    }
+}
+
+@Composable
+private fun DashboardLabeledSwitch(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = if (checked) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        DashboardEffectSwitch(checked) { onToggle(!checked) }
     }
 }
 

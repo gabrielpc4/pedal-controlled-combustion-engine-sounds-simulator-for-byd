@@ -408,6 +408,8 @@ internal fun SettingsScreen(
     onResetAll: () -> Unit,
     fmodUpdateRateHz: Int,
     onFmodUpdateRateChange: (Int) -> Unit,
+    autoblipEnabled: Boolean,
+    onAutoblipEnabledChange: (Boolean) -> Unit,
     exteriorPureAudio: Boolean,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
@@ -446,10 +448,7 @@ internal fun SettingsScreen(
                 rateHz = fmodUpdateRateHz,
                 onRateChange = onFmodUpdateRateChange,
             )
-            ExteriorPureAudioControl(
-                enabled = exteriorPureAudio,
-                onEnabledChange = onExteriorPureAudioChange,
-            )
+            AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
             Text("SHIFT OVERRIDE GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
@@ -483,6 +482,30 @@ internal fun SettingsScreen(
                 onPreview = onPreviewBackfireSample,
             )
         }
+    }
+}
+
+@Composable
+private fun AutoblipControl(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("AUTOBLIP", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text(
+                "Automatically blip the throttle during downshifts using the car's authored profile.",
+                color = Muted,
+                fontSize = 12.sp,
+            )
+        }
+        Switch(checked = enabled, onCheckedChange = onEnabledChange)
     }
 }
 
@@ -867,86 +890,13 @@ private fun CarDropdownSelector(
             }
         }
         if (expanded) {
-            val installedProfiles = FmodBankProfiles.all.filter(audioAssetResolver::isInstalled)
-            // Use the full available window width; the platform's default dialog width would
-            // collapse the adaptive grid to one narrow column on larger displays.
-            Dialog(
-                onDismissRequest = { expanded = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.92f)
-                        .fillMaxHeight(0.84f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(PanelBright)
-                        .border(1.dp, Line, RoundedCornerShape(14.dp))
-                        .padding(18.dp),
-                ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        Text(
-                            text = "SELECT CAR",
-                            color = CyanSoft,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.2.sp,
-                        )
-                        Text(
-                            text = "${installedProfiles.size} INSTALLED",
-                            color = Muted,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
-                        )
-                        LazyVerticalGrid(
-                            // Card count adapts to the actual dialog width instead of assuming
-                            // three columns, so every available horizontal pixel is useful.
-                            columns = GridCells.Adaptive(minSize = 260.dp),
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            items(installedProfiles, key = { it.id }) { profile ->
-                                Column(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (profile.id == selectedCarId) Cyan.copy(alpha = 0.18f) else Panel)
-                                        .border(
-                                            1.dp,
-                                            if (profile.id == selectedCarId) Cyan else Line,
-                                            RoundedCornerShape(10.dp),
-                                        )
-                                        .clickable {
-                                            expanded = false
-                                            onSelectCar(profile.id)
-                                        }
-                                        .padding(8.dp),
-                                ) {
-                                    CarPreviewThumbnail(
-                                        profile = profile,
-                                        audioAssetResolver = audioAssetResolver,
-                                        contentDescription = profile.displayName,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(112.dp)
-                                            .clip(RoundedCornerShape(6.dp)),
-                                    )
-                                    Text(
-                                        text = profile.displayName,
-                                        color = White,
-                                        fontSize = 11.sp,
-                                        lineHeight = 13.sp,
-                                        fontWeight = if (profile.id == selectedCarId) FontWeight.Black else FontWeight.Bold,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 7.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Reuse the dashboard picker verbatim so Mixer and Classic expose the same
+            // installed-car groups, adaptive grid, previews, and selection behavior.
+            CarGridSelectionDialog(
+                selectedCarId = selectedCarId,
+                onSelectCar = onSelectCar,
+                onDismiss = { expanded = false },
+            )
         }
     }
 }

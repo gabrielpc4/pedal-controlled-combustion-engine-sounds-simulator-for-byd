@@ -91,6 +91,7 @@ data class DriveSnapshot(
     val carAudioReady: Boolean = false,
     val manualShiftModeEnabled: Boolean = false,
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
+    val autoblipEnabled: Boolean = false,
     val exteriorPureAudio: Boolean = false,
     val userMessage: UserVisibleMessage? = null,
 )
@@ -121,6 +122,7 @@ class DriveController(context: Context) {
     private val shiftSoundSettingsRepository = ShiftSoundSettingsRepository(appContext)
     private val transmissionSoundSettingsRepository = TransmissionSoundSettingsRepository(appContext)
     private val carEffectModesRepository = CarEffectModesRepository(appContext)
+    private val autoblipRepository = AutoblipRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
@@ -153,6 +155,7 @@ class DriveController(context: Context) {
     private val carEffectModes = AtomicReference(CarEffectModes())
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
+    private val autoblipEnabled = AtomicBoolean(autoblipRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
@@ -203,6 +206,7 @@ class DriveController(context: Context) {
         transmissionSoundSettings.set(transmissionSoundSettingsRepository.load())
         carEffectModes.set(carEffectModesRepository.load(selectedProfile.get()))
         simulation.updateBackfireSettings(backfireSettings.get())
+        simulation.updateAutoblipEnabled(autoblipEnabled.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
         audioEngine.setBackfireAudioEnabled(carEffectModes.get().popsAndBangsEnabled)
         audioEngine.setBackfireUseOriginal(carEffectModes.get().popsAndBangsOriginal)
@@ -249,6 +253,7 @@ class DriveController(context: Context) {
             turboEnabled = carEffectModes.get().turboEnabled,
             hasTurbo = activePhysics.get()?.engine?.turbos?.isNotEmpty() == true,
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
+            autoblipEnabled = autoblipEnabled.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
@@ -322,6 +327,12 @@ class DriveController(context: Context) {
         fmodUpdateRateHz.set(normalized)
         fmodUpdateRateRepository.save(normalized)
         audioEngine.setFmodUpdateRateHz(normalized)
+    }
+
+    fun setAutoblipEnabled(enabled: Boolean) {
+        autoblipEnabled.set(enabled)
+        autoblipRepository.save(enabled)
+        simulation.updateAutoblipEnabled(enabled)
     }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
@@ -415,6 +426,7 @@ class DriveController(context: Context) {
         backfireSettingsRepository.reset()
         shiftSoundSettingsRepository.reset()
         transmissionSoundSettingsRepository.reset()
+        autoblipRepository.reset()
         carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
@@ -424,6 +436,8 @@ class DriveController(context: Context) {
         backfireSettings.set(BackfireSettings())
         shiftSoundSettings.set(ShiftSoundSettings())
         transmissionSoundSettings.set(TransmissionSoundSettings())
+        autoblipEnabled.set(false)
+        simulation.updateAutoblipEnabled(false)
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
@@ -725,6 +739,7 @@ class DriveController(context: Context) {
                 selectedCarIndex = installedProfiles().indexOf(selected),
                 availableCarCount = installedProfiles().size,
                 soundPerspective = selectedPerspective.get(),
+                autoblipEnabled = autoblipEnabled.get(),
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = audioEngine.loadedBankProfileId() == selected.id,
                 userMessage = userMessage,

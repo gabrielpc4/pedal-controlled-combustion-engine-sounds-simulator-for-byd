@@ -9,6 +9,6 @@ package com.gabrielpc.enginesoundsimulator
  * navigation logic.
  */
 internal object RuntimeFeatureFlags {
-    /** Keep the mixer/dashboard visible first while the FMOD voice behavior is being reviewed. */
-    const val START_ON_MIXER = true
+    /** The classic dashboard is the normal entry point; Mixer remains available from its button. */
+    const val START_ON_MIXER = false
 }

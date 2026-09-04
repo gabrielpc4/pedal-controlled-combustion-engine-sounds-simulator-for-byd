@@ -45,6 +45,8 @@ internal class AssettoDrivetrainFrame(
  * equal-speed gear mapping possible without changing the bank's authored RPM thresholds.
  */
 internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
+    // Explicit app preference; off by default to preserve the current no-autoblip behavior.
+    private var autoblipEnabled = false
     private var rpm = physics.engine.idleRpm
     private var speedMetersPerSecond = 0.0
     private var gear = 1
@@ -114,6 +116,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         previousBackfireThrottle = 0.0
         backfireSuppressedAfterShift = false
         nextBackfireSampleCursor = 0
+    }
+
+    fun updateAutoblipEnabled(enabled: Boolean) {
+        autoblipEnabled = enabled
+        autoblipStartMilliseconds = null
     }
 
     fun reset(engineRunning: Boolean) {
@@ -233,7 +240,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val autoblipStarted = autoblipStartMilliseconds
         var autoblipApplied = false
         if (
-            !DISABLE_AUTOBLIP_FOR_COMPARISON &&
+            autoblipEnabled &&
             autoblipStarted != null &&
             physics.drivetrain.autoblipProfileMilliseconds.isNotEmpty()
         ) {
@@ -844,9 +851,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val GRAVITY = 9.81
         const val STOPPED_CLUTCH_RELEASE_BRAKE = 0.2
         const val STOPPED_CLUTCH_RELEASE_SPEED_MPS = 1.0
-        // Comparison switch: disable only the bank's AutoBlip contribution while diagnosing
-        // downshift RPM pulses. The authored profile remains loaded so the test is reversible.
-        const val DISABLE_AUTOBLIP_FOR_COMPARISON = true
         /** Main-branch 1→2 rule: partial throttle shifted at 6,400 RPM. */
         const val MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM = 6_400.0
         /** Main-branch 2→1 rule: return to 1st below 4,000 RPM. */
