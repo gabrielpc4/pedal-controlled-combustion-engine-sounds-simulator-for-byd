@@ -356,12 +356,14 @@ private fun MixerPerspectiveSelector(
 
 @Composable
 private fun BackfireOnlyToggle(enabled: Boolean, onToggle: () -> Unit) {
-    Column(
-        modifier = Modifier.width(150.dp).clickable(onClick = onToggle),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Row(
+        modifier = Modifier
+            .width(170.dp)
+            .clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("ONLY BACKFIRE", color = if (enabled) Cyan else CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(8.dp))
         Box(
             modifier = Modifier
                 .width(64.dp)
