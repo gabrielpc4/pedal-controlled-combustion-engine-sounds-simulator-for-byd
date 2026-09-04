@@ -1001,18 +1001,8 @@ private fun DashboardEffectControls(
     ) + if (state.hasTurbo) listOf(Triple("TURBO", EffectSoundKind.TURBO, state.turboGain)) else emptyList()
     val rowHeight = 42.dp
     val rowGap = 7.dp
-    val firstSwitchBorder = Color(0xFF35E8F2)
-    val secondSwitchBorder = Color(0xFFFFC456)
-    val labelColumnBorder = Color(0xFF4B7185)
-    val textColumnBorder = Color(0xFF5C7A91)
-    val gainColumnBorders = listOf(
-        Color(0xFF6FCF97),
-        Color(0xFF7DB7FF),
-        Color(0xFFFF9F68),
-        Color(0xFFC58AFF),
-    )
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, labelColumnBorder, RoundedCornerShape(8.dp)).padding(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(4.dp)) {
             rows.forEachIndexed { index, row ->
                 val enabled = if (index == 0) external else when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
@@ -1025,12 +1015,12 @@ private fun DashboardEffectControls(
                 }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, textColumnBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardColumnTextCell("EXTERNAL", external, rowHeight)
             rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
         }
-        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, firstSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
-            DashboardSwitchCell(rowHeight, external, firstSwitchBorder) { onEngineExternalChange(!external) }
+        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+            DashboardSwitchCell(rowHeight, external, Line) { onEngineExternalChange(!external) }
             rows.drop(1).forEach { row ->
                 val enabled = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
@@ -1038,18 +1028,18 @@ private fun DashboardEffectControls(
                     EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
                     EffectSoundKind.TURBO -> state.turboEnabled
                 }
-                DashboardSwitchCell(rowHeight, enabled, firstSwitchBorder) { onEnabledChange(row.second, !enabled) }
+                DashboardSwitchCell(rowHeight, enabled, Line) { onEnabledChange(row.second, !enabled) }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, textColumnBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
             DashboardOriginalColumnCell(state.popsAndBangsOriginal, true, { onOriginalChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOriginal) }, rowHeight)
             DashboardOriginalColumnCell(state.shiftSoundsOriginal, true, { onOriginalChange(EffectSoundKind.SHIFT, !state.shiftSoundsOriginal) }, rowHeight)
             DashboardEmptyControlCell(rowHeight)
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
-        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, secondSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
-            DashboardSwitchCell(rowHeight, state.exteriorPureAudio, secondSwitchBorder) { onEnginePureChange(!state.exteriorPureAudio) }
+        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+            DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) { onEnginePureChange(!state.exteriorPureAudio) }
             rows.drop(1).forEach { row ->
                 val original = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOriginal
@@ -1057,15 +1047,15 @@ private fun DashboardEffectControls(
                     else -> false
                 }
                 if (row.second == EffectSoundKind.POPS_AND_BANGS || row.second == EffectSoundKind.SHIFT) {
-                    DashboardSwitchCell(rowHeight, original, secondSwitchBorder) { onOriginalChange(row.second, !original) }
+                    DashboardSwitchCell(rowHeight, original, Line) { onOriginalChange(row.second, !original) }
                 } else DashboardEmptyControlCell(rowHeight)
             }
         }
         DASHBOARD_EFFECT_GAIN_PRESETS.forEachIndexed { columnIndex, preset ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, gainColumnBorders[columnIndex], RoundedCornerShape(8.dp)).padding(3.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
                 rows.forEach { row ->
                     val selected = kotlin.math.abs(row.third - preset.gain) < 0.001f
-                    DashboardGainButton(preset, selected, if (selected) Night else Cyan, gainColumnBorders[columnIndex]) {
+                    DashboardGainButton(preset, selected, if (selected) Night else Cyan, Line) {
                         when (row.second) {
                             EffectSoundKind.TRANSMISSION -> if (row.first == "ENGINE") onHostGains(preset.gain, 2.0f) else onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
                             EffectSoundKind.POPS_AND_BANGS -> onCategoryGains(state.transmissionGain, state.gearShiftGain, state.turboGain, preset.gain)
