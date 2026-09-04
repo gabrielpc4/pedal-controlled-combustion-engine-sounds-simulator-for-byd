@@ -83,19 +83,18 @@ EXCLUDED_OFFICIAL_CAR_DIRECTORIES = {
     "ks_alfa_33_stradale", "ks_alfa_romeo_155_v6",
     "ks_audi_sport_quattro", "ks_audi_sport_quattro_rally", "ks_audi_sport_quattro_s1",
     "ks_ferrari_250_gto", "ks_ferrari_288_gto", "ks_ferrari_312_67", "ks_ferrari_330_p4",
-    "ferrari_f40", "ferrari_f40_s3", "ks_ford_escort_mk1", "ks_ford_gt40",
+    "ferrari_f40_s3", "ks_ford_escort_mk1", "ks_ford_gt40",
     "ks_lamborghini_countach", "ks_lamborghini_countach_s1", "ks_lamborghini_miura_sv",
-    "ks_maserati_250f_12cyl", "ks_maserati_250f_6cyl", "ks_mercedes_c9",
-    "ks_porsche_908_lh", "ks_porsche_917_30", "ks_porsche_917_k",
+    "ks_maserati_250f_12cyl", "ks_maserati_250f_6cyl",
+    "ks_porsche_908_lh", "ks_porsche_917_30",
     "ks_porsche_935_78_moby_dick", "ks_porsche_962c_longtail", "ks_porsche_962c_shorttail",
     "ruf_yellowbird", "shelby_cobra_427sc", "ferrari_312t", "ks_alfa_romeo_gta",
-    "ks_mclaren_f1_gtr", "ks_porsche_911_carrera_rsr", "ks_porsche_911_gt1",
-    "ks_toyota_ae86", "ks_toyota_ae86_drift", "ks_toyota_ae86_tuned", "ks_toyota_celica_st185",
-    "ks_mazda_787b", "ks_mazda_miata", "ks_mazda_mx5_cup", "ks_mazda_mx5_nd",
+    "ks_porsche_911_carrera_rsr", "ks_porsche_911_gt1",
+    "ks_toyota_ae86_tuned", "ks_mazda_mx5_cup", "ks_mazda_mx5_nd",
     # Exact-bank duplicates: keep the highest-trim representative only.
     "bmw_1m", "bmw_z4", "bmw_z4_drift", "bmw_z4_s1",
     "bmw_m3_e92", "bmw_m3_e92_drift", "abarth500",
-    "ferrari_f40", "ferrari_458", "ks_ruf_rt12r",
+    "ferrari_458", "ks_ruf_rt12r",
     "ks_audi_sport_quattro", "ks_audi_sport_quattro_rally",
 }
 
@@ -168,7 +167,12 @@ def discover_original_sources() -> list[CarSource]:
         raise RuntimeError(f"Assetto Corsa installation is missing: {cars_root}")
     sources: list[CarSource] = []
     for directory in sorted(path for path in cars_root.iterdir() if path.is_dir()):
-        if directory.name in EXCLUDED_OFFICIAL_CAR_DIRECTORIES or directory.name.startswith(("lotus_", "ks_lotus_")):
+        requested_exceptions = {
+            "ferrari_f40", "ks_mercedes_c9", "ks_mclaren_f1_gtr", "ks_porsche_917_k",
+            "ks_mazda_787b", "ks_mazda_miata", "ks_toyota_ae86", "ks_toyota_ae86_drift",
+            "ks_toyota_celica_st185", "lotus_evora_gte_carbon", "lotus_evora_gx",
+        }
+        if directory.name in EXCLUDED_OFFICIAL_CAR_DIRECTORIES or (directory.name.startswith(("lotus_", "ks_lotus_")) and directory.name not in requested_exceptions):
             continue
         # The installation contains two empty DLC placeholders. They are not car
         # sources because they have neither an FMOD bank nor physics payload.
