@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
                         onCategoryGains = controller::setFmodCategoryGains,
+                        onToggleBackfireOnly = controller::setBackfireOnly,
                         onEventMute = controller::setFmodEventMute,
                         onEventSolo = controller::setFmodEventSolo,
                         onPreviousCar = controller::selectPreviousCar,
@@ -259,6 +260,7 @@ private fun MotorSoundDashboard(
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
+    onToggleBackfireOnly: (Boolean) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     onPreviousCar: () -> Unit,
@@ -434,6 +436,7 @@ private fun MotorSoundDashboard(
                             onManualDownshift = onManualDownshift,
                             onHostGains = onHostGains,
                             onCategoryGains = onCategoryGains,
+                            onBackfireOnlyChange = onToggleBackfireOnly,
                             onEventMute = onEventMute,
                             onEventSolo = onEventSolo,
                             modifier = Modifier

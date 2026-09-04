@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -116,6 +118,7 @@ internal fun MixerDashboardScreen(
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
+    onBackfireOnlyChange: (Boolean) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     soundPerspective: EngineSoundPerspective,
@@ -219,7 +222,9 @@ internal fun MixerDashboardScreen(
             gearShiftGain = state.gearShiftGain,
             turboGain = state.turboGain,
             backfireGain = state.backfireGain,
+            backfireOnly = state.backfireOnly,
             onChange = onCategoryGains,
+            onBackfireOnly = onBackfireOnlyChange,
         )
         Spacer(Modifier.height(10.dp))
         BoxWithConstraints(
@@ -333,7 +338,9 @@ private fun CategoryGainControls(
     gearShiftGain: Float,
     turboGain: Float,
     backfireGain: Float,
+    backfireOnly: Boolean,
     onChange: (Float, Float, Float, Float) -> Unit,
+    onBackfireOnly: (Boolean) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -349,6 +356,35 @@ private fun CategoryGainControls(
         GainControl("GEAR SHIFT", gearShiftGain) { onChange(transmissionGain, it, turboGain, backfireGain) }
         GainControl("TURBO", turboGain) { onChange(transmissionGain, gearShiftGain, it, backfireGain) }
         GainControl("BACKFIRE", backfireGain) { onChange(transmissionGain, gearShiftGain, turboGain, it) }
+        BackfireOnlyToggle(backfireOnly) { onBackfireOnly(!backfireOnly) }
+    }
+}
+
+@Composable
+private fun BackfireOnlyToggle(enabled: Boolean, onToggle: () -> Unit) {
+    Column(
+        modifier = Modifier.width(150.dp).clickable(onClick = onToggle),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("ONLY BACKFIRE", color = if (enabled) Cyan else CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .width(64.dp)
+                .height(30.dp)
+                .clip(RoundedCornerShape(50))
+                .background(if (enabled) Cyan else Line)
+                .padding(4.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .offset(x = if (enabled) 34.dp else 0.dp)
+                    .clip(CircleShape)
+                    .background(White),
+            )
+        }
     }
 }
 
