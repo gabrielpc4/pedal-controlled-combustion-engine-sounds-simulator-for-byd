@@ -1124,11 +1124,17 @@ private fun ClassicDriveControls(
             )
         }
         if (!state.inputSourceIsRealPedals) {
-            SimulatedPedalLatchToggle(
-                enabled = state.simulatedPedalsLatched,
-                onToggle = onToggleSimulatedPedalLatch,
-                scale = CLASSIC_DRIVE_CONTROL_SCALE,
-            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(CLASSIC_DRIVE_CONTROL_SCALE.scaledDp(6)),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                SimulatedPedalLatchToggle(
+                    enabled = state.simulatedPedalsLatched,
+                    onToggle = onToggleSimulatedPedalLatch,
+                    scale = CLASSIC_DRIVE_CONTROL_SCALE,
+                )
+                SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, CLASSIC_DRIVE_CONTROL_SCALE)
+            }
         }
         PedalControl(
             label = "BRAKE",
@@ -1139,9 +1145,6 @@ private fun ClassicDriveControls(
             contentScale = CLASSIC_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
-        if (!state.inputSourceIsRealPedals) {
-            SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, CLASSIC_DRIVE_CONTROL_SCALE)
-        }
         PedalControl(
             label = "THROTTLE",
             value = state.throttle,
@@ -1286,11 +1289,17 @@ internal fun MixerDriveControls(
             )
         }
         if (!state.inputSourceIsRealPedals) {
-            SimulatedPedalLatchToggle(
-                enabled = state.simulatedPedalsLatched,
-                onToggle = onToggleSimulatedPedalLatch,
-                scale = MIXER_DRIVE_CONTROL_SCALE,
-            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(6)),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                SimulatedPedalLatchToggle(
+                    enabled = state.simulatedPedalsLatched,
+                    onToggle = onToggleSimulatedPedalLatch,
+                    scale = MIXER_DRIVE_CONTROL_SCALE,
+                )
+                SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, MIXER_DRIVE_CONTROL_SCALE)
+            }
         }
         PedalControl(
             label = "BRAKE",
@@ -1301,9 +1310,6 @@ internal fun MixerDriveControls(
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
-        if (!state.inputSourceIsRealPedals) {
-            SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, MIXER_DRIVE_CONTROL_SCALE)
-        }
         PedalControl(
             label = "THROTTLE",
             value = state.throttle,
