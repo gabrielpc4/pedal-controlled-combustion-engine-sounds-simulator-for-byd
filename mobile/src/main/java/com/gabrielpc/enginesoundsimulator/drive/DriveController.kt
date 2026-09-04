@@ -423,6 +423,7 @@ class DriveController(context: Context) {
         appContext.getSharedPreferences(AppPreferenceStores.SELECTED_CAR, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.SHIFT_MODE, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
+        appContext.getSharedPreferences(AppPreferenceStores.CAR_PICKER_GROUP, Context.MODE_PRIVATE).edit().clear().apply()
         backfireSettingsRepository.reset()
         shiftSoundSettingsRepository.reset()
         transmissionSoundSettingsRepository.reset()

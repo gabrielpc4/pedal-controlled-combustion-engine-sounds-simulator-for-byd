@@ -910,8 +910,19 @@ internal fun CarGridSelectionDialog(
 ) {
     val context = LocalContext.current
     val resolver = remember(context) { FmodBankResolver(context.applicationContext) }
+    val pickerPreferences = remember(context) {
+        context.getSharedPreferences(AppPreferenceStores.CAR_PICKER_GROUP, android.content.Context.MODE_PRIVATE)
+    }
     val installedProfiles = FmodBankProfiles.all.filter(resolver::isInstalled)
-    var selectedGroup by rememberSaveable { mutableStateOf(FmodBankProfiles.moddedCarsPackId) }
+    var selectedGroup by remember {
+        mutableStateOf(
+            pickerPreferences.getString(
+                "selected",
+                FmodBankProfiles.moddedCarsPackId,
+            )?.takeIf { it == FmodBankProfiles.moddedCarsPackId || it == FmodBankProfiles.originalCarsPackId }
+                ?: FmodBankProfiles.moddedCarsPackId,
+        )
+    }
     // Disable the platform's narrow default dialog width so the picker can span the display.
     Dialog(
         onDismissRequest = onDismiss,
@@ -940,7 +951,10 @@ internal fun CarGridSelectionDialog(
                             color = if (selectedGroup == group) Cyan.copy(alpha = 0.24f) else Panel,
                             shape = RoundedCornerShape(6.dp),
                             border = BorderStroke(1.dp, if (selectedGroup == group) Cyan else Line),
-                            modifier = Modifier.clickable { selectedGroup = group },
+                                modifier = Modifier.clickable {
+                                    selectedGroup = group
+                                    pickerPreferences.edit().putString("selected", group).apply()
+                                },
                         ) {
                             Text(label, color = if (selectedGroup == group) Cyan else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                         }
