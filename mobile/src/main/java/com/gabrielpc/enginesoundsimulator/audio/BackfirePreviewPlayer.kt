@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
 import android.media.MediaPlayer
+import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
 
 /** Small settings-only preview player for the shared Alfa Romeo backfire sample set. */
 internal class BackfirePreviewPlayer(context: Context) {
@@ -10,12 +11,13 @@ internal class BackfirePreviewPlayer(context: Context) {
 
     @Synchronized
     fun play(sample: Int) {
-        if (sample !in 1..4) return
+        if (sample !in AlfaBackfireSources.indices) return
 
         player?.runCatching { stop() }
         player?.release()
         player = runCatching {
-            appContext.assets.openFd("backfire/alfa/backfire_$sample.wav").let { descriptor ->
+            val sourceName = AlfaBackfireSources.names[sample - 1]
+            appContext.assets.openFd("backfire/alfa/$sourceName.wav").let { descriptor ->
                 MediaPlayer().apply {
                     setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
                     descriptor.close()
