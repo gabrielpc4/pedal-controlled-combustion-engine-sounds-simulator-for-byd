@@ -2162,7 +2162,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftSound
     runtime.setShiftSoundEnabled(enabled == JNI_TRUE);
 }
 
-JNIEXPORT void JNICALL
+extern "C" JNIEXPORT void JNICALL
 Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftOverrideGain(
         JNIEnv*, jobject, jfloat gain) {
     runtime.setShiftOverrideGain(gain);
