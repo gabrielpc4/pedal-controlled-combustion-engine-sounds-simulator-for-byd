@@ -459,6 +459,9 @@ class DriveController(context: Context) {
             tractionLimitActive = drivetrain.tractionLimitActive,
             tractionLimitPulse = drivetrain.tractionLimitPulse,
         )
+        // Debug-only listening mode is controlled by ADB and mutes continuous/limiter events in
+        // native FMOD while preserving backfire instances for audibility measurements.
+        audioEngine.setBackfireOnly(DebugTelemetry.backfireOnly())
         audioEngine.update(
             EngineAudioFrame(
                 simulationFrameId = simulationFrameId,

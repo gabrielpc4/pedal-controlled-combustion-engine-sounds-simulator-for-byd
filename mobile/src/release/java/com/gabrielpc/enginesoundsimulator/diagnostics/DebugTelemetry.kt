@@ -10,6 +10,8 @@ internal object DebugTelemetry {
 
     fun scenarioOverride(timestampNanos: Long): DebugScenarioOverride? = null
 
+    fun backfireOnly(): Boolean = false
+
     @Suppress("LongParameterList", "UnusedParameter")
     fun recordSimulation(
         timestampNanos: Long,

@@ -51,6 +51,8 @@ class EngineAudioEngine(context: Context) {
     private val nativeEventSolos = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     /** Set by lifecycle/UI code; consumed only by the serialized native control worker. */
     private val clearNativeEventOverrides = AtomicBoolean(false)
+    private val backfireOnly = AtomicBoolean(false)
+    private var sentBackfireOnly = false
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -93,6 +95,8 @@ class EngineAudioEngine(context: Context) {
     fun setEventMute(eventName: String, muted: Boolean) { nativeEventMutes[eventName] = muted }
 
     fun setEventSolo(eventName: String, solo: Boolean) { nativeEventSolos[eventName] = solo }
+
+    fun setBackfireOnly(enabled: Boolean) { backfireOnly.set(enabled) }
 
     fun loadedBankProfileId(): String? = loadedBankProfileId.get()
 
@@ -276,6 +280,11 @@ class EngineAudioEngine(context: Context) {
                     // The native runtime owns independent event maps. Clearing only Kotlin's
                     // maps would leave a removed M/S control silently applied in FMOD.
                     bridge.clearEventOverrides()
+                }
+                val requestedBackfireOnly = backfireOnly.get()
+                if (requestedBackfireOnly != sentBackfireOnly) {
+                    bridge.setBackfireOnly(requestedBackfireOnly)
+                    sentBackfireOnly = requestedBackfireOnly
                 }
                 nativeEventMutes.forEach { (name, value) -> bridge.setEventMute(name, value) }
                 nativeEventSolos.forEach { (name, value) -> bridge.setEventSolo(name, value) }

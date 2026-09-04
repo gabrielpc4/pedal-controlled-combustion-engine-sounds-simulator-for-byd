@@ -60,6 +60,8 @@ internal class NativeFmodBankBridge {
 
     external fun setCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float)
 
+    external fun setBackfireOnly(enabled: Boolean)
+
     external fun setEventMute(eventName: String, muted: Boolean)
     external fun setEventSolo(eventName: String, solo: Boolean)
     external fun clearEventOverrides()

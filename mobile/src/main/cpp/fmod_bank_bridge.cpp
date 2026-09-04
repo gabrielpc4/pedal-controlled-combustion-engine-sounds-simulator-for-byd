@@ -765,6 +765,13 @@ public:
         applyEventOverridesLocked();
     }
 
+    void setBackfireOnly(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!active_) return;
+        backfireOnly_ = enabled;
+        applyEventOverridesLocked();
+    }
+
     void setEventMute(const std::string& name, bool muted) {
         std::lock_guard<std::mutex> lock(mutex_);
         mutedEvents_[name] = muted;
@@ -1196,10 +1203,14 @@ private:
         for (auto& pair : slots_) {
             const bool muted = mutedEvents_[pair.first];
             const bool soloed = anySolo && !soloEvents_[pair.first];
+            const bool protectedBackfire = backfireOnly_ &&
+                (pair.first == "backfire_int" || pair.first == "backfire_ext");
+            const bool excludedByBackfireOnly = backfireOnly_ &&
+                pair.first != "backfire_int" && pair.first != "backfire_ext";
             const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
             const float baseGain = isEngine ? hostEngineGain_ : hostEffectsGain_;
             const float categoryGain = eventCategoryGain(pair.first);
-            pair.second->instance->setVolume((muted || soloed) ? 0.0f : baseGain * categoryGain);
+            pair.second->instance->setVolume(((!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
         }
     }
 
@@ -1641,6 +1652,7 @@ private:
     float gearShiftGain_ = 1.0f;
     float turboGain_ = 1.0f;
     float backfireGain_ = 1.0f;
+    bool backfireOnly_ = false;
     std::unordered_map<std::string, RecentSource> recentSources_;
     // Debug-only start times make STOPPED records report the observed one-shot duration. The map
     // is untouched when diagnostics are disabled, keeping release callbacks on the existing path.
@@ -1877,6 +1889,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setCategoryGa
     JNIEnv*, jobject, jfloat transmission, jfloat gearShift, jfloat turbo, jfloat backfire
 ) {
     runtime.setCategoryGains(transmission, gearShift, turbo, backfire);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireOnly(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setBackfireOnly(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL

@@ -6,12 +6,15 @@ backfire event. It is not present in release builds and does not change normal d
 ```sh
 adb -s emulator-5554 shell am broadcast \
   -a com.gabrielpc.enginesoundsimulator.action.DEBUG_TELEMETRY \
-  --es command BACKFIRE --es profile alfa-romeo-4c
+  --es command BACKFIRE_ONLY --es profile alfa-romeo-4c
 ```
 
 The scenario repeatedly holds full throttle in P to arm the authored backfire logic, then closes
 the throttle long enough for a one-shot to fire and rearm. Start/stop callbacks, voice duration,
 RPM, throttle, and backfire-trigger frames are captured by the existing debug telemetry ring.
+`BACKFIRE_ONLY` additionally mutes every other FMOD event, including engine and limiter, and
+protects the backfire event from existing mixer mute/solo selections, so it is suitable for
+listening to the effect in isolation.
 
 Export the capture after listening:
 
