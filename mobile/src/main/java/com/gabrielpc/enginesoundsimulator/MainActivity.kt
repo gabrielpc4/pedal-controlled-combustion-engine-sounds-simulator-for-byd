@@ -1063,12 +1063,11 @@ private fun DashboardEngineRow(
     Row(
         modifier = Modifier.height(42.dp),
         verticalAlignment = Alignment.CenterVertically,
-        // Engine has two labelled switches, so keeping the same 8dp gaps as the effect rows
-        // pushed its preset buttons noticeably to the right. Compact only this row so its
-        // interactive gain controls line up with the rows below without changing their labels.
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        // Keep the same control spacing as the effect rows. The engine label itself is narrower
+        // below, which removes only the extra red-marked gap without collapsing the green gaps.
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("ENGINE", color = if (external) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(150.dp))
+        Text("ENGINE", color = if (external) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(100.dp))
         DashboardLabeledSwitch("EXTERNAL", external, onExternalChange)
         DashboardLabeledSwitch("PURE", pure, onPureChange)
         DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
@@ -1080,7 +1079,7 @@ private fun DashboardEngineRow(
 
 @Composable
 private fun DashboardLabeledSwitch(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = if (checked) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
         DashboardEffectSwitch(checked) { onToggle(!checked) }
     }
