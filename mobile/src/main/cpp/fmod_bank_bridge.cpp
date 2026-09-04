@@ -5,6 +5,7 @@
 #include <fmod_studio.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cctype>
@@ -43,6 +44,10 @@ constexpr float kBackfireAudioThrottle = 1.0f;
 constexpr double kRecentSourceSeconds = 1.5;
 constexpr char kFieldSeparator = '\x1f';
 constexpr char kStableIdSeparator = '\x1e';
+constexpr std::size_t kDiagnosticRingCapacity = 8192;
+constexpr std::size_t kDiagnosticEventNameCapacity = 64;
+constexpr std::size_t kDiagnosticPathCapacity = 320;
+constexpr std::size_t kDiagnosticSourceCapacity = 320;
 
 constexpr std::array<const char*, 16> kAllowedEventNames = {
     "engine_int",
@@ -113,6 +118,40 @@ std::string eventSuffix(const std::string& path) {
 
 std::string stableSourceId(const std::string& eventPath, const std::string& soundName) {
     return eventPath + kStableIdSeparator + soundName;
+}
+
+std::string formatGuid(const FMOD_GUID& guid) {
+    char buffer[40]{};
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+        guid.Data1,
+        guid.Data2,
+        guid.Data3,
+        guid.Data4[0],
+        guid.Data4[1],
+        guid.Data4[2],
+        guid.Data4[3],
+        guid.Data4[4],
+        guid.Data4[5],
+        guid.Data4[6],
+        guid.Data4[7]
+    );
+    return buffer;
+}
+
+std::string runtimeClassificationForEvent(const std::string& name) {
+    if (!isAllowedEventName(name)) return "unsupported";
+    if (!isPlayableEventName(name)) return "excluded_by_policy";
+    if (name == "engine_int" || name == "engine_ext" ||
+        name == "transmission" || name == "transmission_ext") {
+        return "continuous";
+    }
+    if (name == "turbo") return "continuous_if_physics_has_turbo";
+    if (name == "start") return "startup_once";
+    if (name == "limiter") return "decay_controlled";
+    return "pulsed";
 }
 
 double monotonicSeconds() {
@@ -358,6 +397,9 @@ struct RecentSource {
     std::string eventPath;
     std::string eventName;
     std::string soundName;
+    unsigned int sampleLengthMs = 0;
+    int sampleChannels = 0;
+    float sampleRateHz = 0.0f;
     double lastSeenSeconds = 0.0;
     int callbackVoiceCount = 0;
     // FMOD's sound callbacks expose the source, not a Core channel handle. A monotonically
@@ -372,12 +414,90 @@ struct VoiceAggregate {
     std::string eventPath;
     std::string eventName;
     std::string soundName;
+    unsigned int sampleLengthMs = 0;
+    int sampleChannels = 0;
+    float sampleRateHz = 0.0f;
     float audibilitySquared = 0.0f;
     float routeGain = 0.0f;
     int voiceCount = 0;
     int virtualVoiceCount = 0;
     bool callbackActive = false;
 };
+
+enum class NativeDiagnosticKind : std::uint8_t {
+    EventStart,
+    EventStop,
+    VoicePlayed,
+    VoiceStopped,
+    VoiceState,
+};
+
+/**
+ * Callback sound metadata disambiguates banks that reuse a raw filename in multiple authored
+ * instruments. It is captured only in explicit debug mode; the offline inventory must still
+ * reject a non-unique event/name/format/duration join rather than guessing an instrument.
+ */
+struct SoundMetadata {
+    unsigned int lengthMs = 0;
+    int channels = 0;
+    float rateHz = 0.0f;
+};
+
+struct NativeDiagnosticRecord {
+    std::uint64_t sequence = 0;
+    double timestampSeconds = 0.0;
+    std::uint64_t simulationFrameId = 0;
+    std::uint64_t voiceSerial = 0;
+    double durationSeconds = -1.0;
+    int kind = 0;
+    int result = 0;
+    int gear = 0;
+    int voiceCount = 0;
+    int virtualVoiceCount = 0;
+    int callbackVoiceCount = 0;
+    float audibility = 0.0f;
+    float routeGain = 0.0f;
+    float rpm = 0.0f;
+    float drivetrainSpeed = 0.0f;
+    float throttle = 0.0f;
+    float boostNormalized = 0.0f;
+    float boostAbsolute = 0.0f;
+    float bov = 0.0f;
+    float bovDecay = 0.0f;
+    float shiftProgress = 0.0f;
+    std::uint64_t shiftSerial = 0;
+    int stateFlags = 0;
+    bool shifting = false;
+    unsigned int sampleLengthMs = 0;
+    int sampleChannels = 0;
+    float sampleRateHz = 0.0f;
+    std::array<char, kDiagnosticEventNameCapacity> eventName{};
+    std::array<char, kDiagnosticPathCapacity> eventPath{};
+    std::array<char, kDiagnosticSourceCapacity> sourceName{};
+};
+
+struct NativeDiagnosticRing {
+    std::array<NativeDiagnosticRecord, kDiagnosticRingCapacity> records{};
+    std::uint64_t writeSequence = 0;
+    std::uint64_t readSequence = 0;
+};
+
+struct BankEventCatalogEntry {
+    std::string path;
+    std::string guid;
+    std::string suffix;
+    std::string classification;
+};
+
+template <std::size_t Capacity>
+void copyDiagnosticText(std::array<char, Capacity>* destination, const std::string& source) {
+    if (destination == nullptr) return;
+    destination->fill('\0');
+    const std::size_t copied = std::min(source.size(), Capacity - 1);
+    if (copied > 0) {
+        std::memcpy(destination->data(), source.data(), copied);
+    }
+}
 
 class FmodRuntime {
 public:
@@ -393,7 +513,7 @@ public:
     ) {
         std::lock_guard<std::mutex> lock(mutex_);
         closeLocked();
-        diagnosticsEnabled_ = diagnosticsEnabled;
+        setDiagnosticsEnabledLocked(diagnosticsEnabled);
 
         FMOD_RESULT result = FMOD::Studio::System::create(&studio_);
         if (result != FMOD_OK) {
@@ -511,7 +631,8 @@ public:
         bool shiftRejected,
         bool backfireTriggered,
         bool tractionActive,
-        bool tractionPulse
+        bool tractionPulse,
+        std::uint64_t simulationFrameId
     ) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!active_ || studio_ == nullptr) {
@@ -522,7 +643,6 @@ public:
         const float cleanRpm = std::max(1.0f, rpm);
         const float cleanThrottle = std::clamp(throttle, 0.0f, 1.0f);
         updateTraceContextLocked(
-            cleanDt,
             cleanRpm,
             drivetrainSpeed,
             cleanThrottle,
@@ -535,7 +655,12 @@ public:
             shiftProgress,
             shiftSerial,
             shiftStarted,
-            shiftDirection
+            shiftDirection,
+            limiterPulse,
+            backfireTriggered,
+            tractionActive,
+            tractionPulse,
+            simulationFrameId
         );
         // Intentional lift-off policy: the authored engine event keeps its full-load
         // input while the drivetrain RPM falls naturally. This preserves the same
@@ -684,22 +809,7 @@ public:
             const float audibility = std::clamp(std::sqrt(source.audibilitySquared), 0.0f, 1.0f);
             const bool active = source.voiceCount > 0 || source.callbackActive;
             const bool virtualOnly = source.voiceCount > 0 && source.virtualVoiceCount == source.voiceCount;
-            if (diagnosticsEnabled_) {
-                std::ostringstream fields;
-                fields << std::fixed << std::setprecision(4)
-                       << "event=" << source.eventName
-                       << "|path=" << source.eventPath
-                       << "|source=" << source.soundName
-                       << "|id=" << source.id
-                       << "|audibility=" << audibility
-                       << "|routeGain=" << source.routeGain
-                       << "|voiceCount=" << source.voiceCount
-                       << "|virtualVoices=" << source.virtualVoiceCount
-                       << "|callbackActive=" << (source.callbackActive ? 1 : 0)
-                       << "|active=" << (active ? 1 : 0)
-                       << "|" << traceContextFields();
-                logTrace("VOICE_STATE", fields.str());
-            }
+            recordVoiceState(source, audibility);
             std::ostringstream row;
             row << source.id << kFieldSeparator
                 << source.eventPath << kFieldSeparator
@@ -711,6 +821,37 @@ public:
                 << (virtualOnly ? 1 : 0) << kFieldSeparator
                 << (active ? 1 : 0);
             rows.push_back(row.str());
+        }
+        return rows;
+    }
+
+    void setDiagnosticsEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        setDiagnosticsEnabledLocked(enabled);
+    }
+
+    void clearEventOverrides() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        mutedEvents_.clear();
+        soloEvents_.clear();
+        applyEventOverridesLocked();
+    }
+
+    std::vector<std::string> diagnosticRecords() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return drainDiagnosticRecordsLocked();
+    }
+
+    std::vector<std::string> eventCatalog() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::string> rows;
+        rows.reserve(eventCatalog_.size());
+        for (const BankEventCatalogEntry& event : eventCatalog_) {
+            rows.push_back(
+                std::string("BANK_EVENT_CATALOG") + kFieldSeparator + event.path +
+                kFieldSeparator + event.guid + kFieldSeparator + event.suffix +
+                kFieldSeparator + event.classification
+            );
         }
         return rows;
     }
@@ -738,9 +879,17 @@ public:
         recent.lastSeenSeconds = callbackTime;
         std::uint64_t voiceSerial = 0;
         double voiceDuration = -1.0;
+        const bool diagnosticsEnabled = diagnosticsEnabled_.load(std::memory_order_relaxed);
+        SoundMetadata sourceMetadata{};
+        if (diagnosticsEnabled) {
+            sourceMetadata = inspectSoundMetadata(sound);
+            recent.sampleLengthMs = sourceMetadata.lengthMs;
+            recent.sampleChannels = sourceMetadata.channels;
+            recent.sampleRateHz = sourceMetadata.rateHz;
+        }
         if (type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_PLAYED) {
             recent.callbackVoiceCount = std::min(recent.callbackVoiceCount + 1, 32767);
-            if (diagnosticsEnabled_) {
+            if (diagnosticsEnabled) {
                 voiceSerial = nextVoiceSerial_++;
                 recent.activeVoiceSerials.push_back(voiceSerial);
                 recent.latestVoiceSerial = voiceSerial;
@@ -748,7 +897,7 @@ public:
             }
         } else if (type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_STOPPED) {
             recent.callbackVoiceCount = std::max(0, recent.callbackVoiceCount - 1);
-            if (diagnosticsEnabled_ && !recent.activeVoiceSerials.empty()) {
+            if (diagnosticsEnabled && !recent.activeVoiceSerials.empty()) {
                 voiceSerial = recent.activeVoiceSerials.front();
                 recent.activeVoiceSerials.pop_front();
                 const auto start = voiceStartTimes_.find(voiceSerial);
@@ -759,7 +908,7 @@ public:
                 if (recent.activeVoiceSerials.empty()) {
                     recent.latestVoiceSerial = 0;
                 }
-            } else if (diagnosticsEnabled_ && recent.latestVoiceSerial != 0) {
+            } else if (diagnosticsEnabled && recent.latestVoiceSerial != 0) {
                 // Some FMOD backends can deliver a stop callback after the source aggregate has
                 // been refreshed without exposing the matching play in the same callback batch.
                 // Keep the diagnostic link useful without changing FMOD's lifecycle: fall back
@@ -773,30 +922,29 @@ public:
                 recent.latestVoiceSerial = 0;
             }
         }
-        if (diagnosticsEnabled_) {
-            const std::size_t trackedVoices = recent.activeVoiceSerials.size();
-            __android_log_print(
-                ANDROID_LOG_INFO,
-                kLogTag,
-                "FMOD_TRACE|VOICE_%s|t=%.6f|event=%s|path=%s|source=%s|id=%s|voice=%llu|duration=%.6f|callbackVoices=%d|trackedVoices=%zu|%s",
-                type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_PLAYED ? "PLAYED" : "STOPPED",
+        if (diagnosticsEnabled) {
+            recordDiagnostic(
+                type == FMOD_STUDIO_EVENT_CALLBACK_SOUND_PLAYED
+                    ? NativeDiagnosticKind::VoicePlayed
+                    : NativeDiagnosticKind::VoiceStopped,
                 callbackTime,
-                event.name.c_str(),
-                event.path.c_str(),
+                &event,
                 name,
-                id.c_str(),
-                static_cast<unsigned long long>(voiceSerial),
+                FMOD_OK,
+                voiceSerial,
                 voiceDuration,
+                0.0f,
+                0.0f,
+                0,
+                0,
                 recent.callbackVoiceCount,
-                trackedVoices,
-                traceContextFields().c_str()
+                sourceMetadata
             );
         }
     }
 
 private:
     void updateTraceContextLocked(
-        float dt,
         float rpm,
         float drivetrainSpeed,
         float throttle,
@@ -808,13 +956,19 @@ private:
         bool isShifting,
         float shiftProgress,
         std::uint64_t shiftSerial,
-        bool shiftStarted,
-        int shiftDirection
+        bool,
+        int,
+        bool limiterPulse,
+        bool backfireTriggered,
+        bool tractionActive,
+        bool tractionPulse,
+        std::uint64_t simulationFrameId
     ) {
-        if (!diagnosticsEnabled_) {
+        if (!diagnosticsEnabled_.load(std::memory_order_relaxed)) {
             return;
         }
-
+        std::lock_guard<std::mutex> diagnosticLock(diagnosticMutex_);
+        if (diagnosticRing_ == nullptr) return;
         traceRpm_ = rpm;
         traceDrivetrainSpeed_ = drivetrainSpeed;
         traceThrottle_ = throttle;
@@ -826,81 +980,213 @@ private:
         traceIsShifting_ = isShifting;
         traceShiftProgress_ = std::clamp(shiftProgress, 0.0f, 1.0f);
         traceShiftSerial_ = shiftSerial;
-
-        if (shiftStarted || (shiftSerial != 0 && shiftSerial != traceLastShiftSerial_)) {
-            std::ostringstream fields;
-            fields << "serial=" << shiftSerial
-                   << "|direction=" << shiftDirection
-                   << "|gear=" << gear
-                   << "|progress=" << traceShiftProgress_
-                   << "|" << traceContextFields();
-            logTrace("SHIFT_START", fields.str());
-            traceLastShiftSerial_ = shiftSerial;
-        }
-        if (traceWasShifting_ && !isShifting) {
-            std::ostringstream fields;
-            fields << "serial=" << traceLastShiftSerial_
-                   << "|gear=" << gear
-                   << "|progress=" << traceShiftProgress_
-                   << "|" << traceContextFields();
-            logTrace("SHIFT_COMPLETE", fields.str());
-        }
-        traceWasShifting_ = isShifting;
-
-        traceElapsedSeconds_ += dt;
-        const double interval = isShifting || traceWasShifting_ ? 0.003 : 0.050;
-        if (traceElapsedSeconds_ >= interval) {
-            traceElapsedSeconds_ -= interval;
-            logTrace("FRAME", traceContextFields());
-        }
+        traceLimiterPulse_ = limiterPulse;
+        traceBackfireTriggered_ = backfireTriggered;
+        traceTractionActive_ = tractionActive;
+        traceTractionPulse_ = tractionPulse;
+        traceSimulationFrameId_ = simulationFrameId;
     }
 
-    std::string traceContextFields() const {
-        std::ostringstream fields;
-        fields << std::fixed << std::setprecision(4)
-               << "rpm=" << traceRpm_
-               << "|gear=" << traceGear_
-               << "|shifting=" << (traceIsShifting_ ? 1 : 0)
-               << "|shiftProgress=" << traceShiftProgress_
-               << "|shiftSerial=" << traceShiftSerial_
-               << "|drivetrainSpeed=" << traceDrivetrainSpeed_
-               << "|throttle=" << traceThrottle_
-               << "|boostNormalized=" << traceBoostNormalized_
-               << "|boostAbsolute=" << traceBoostAbsolute_
-               << "|bov=" << traceBov_
-               << "|bovDecay=" << traceBovDecay_;
-        return fields.str();
+    void setDiagnosticsEnabledLocked(bool enabled) {
+        std::lock_guard<std::mutex> diagnosticLock(diagnosticMutex_);
+        diagnosticsEnabled_.store(enabled, std::memory_order_relaxed);
+        diagnosticRing_ = enabled ? std::make_unique<NativeDiagnosticRing>() : nullptr;
+        resetTraceContextLocked();
     }
 
-    void logTrace(const char* kind, const std::string& fields) const {
-        if (!diagnosticsEnabled_) {
-            return;
+    void resetTraceContextLocked() {
+        traceRpm_ = 0.0f;
+        traceDrivetrainSpeed_ = 0.0f;
+        traceThrottle_ = 0.0f;
+        traceBoostNormalized_ = 0.0f;
+        traceBoostAbsolute_ = 0.0f;
+        traceBov_ = 0.0f;
+        traceBovDecay_ = 0.0f;
+        traceGear_ = 0;
+        traceIsShifting_ = false;
+        traceShiftProgress_ = 0.0f;
+        traceShiftSerial_ = 0;
+        traceLimiterPulse_ = false;
+        traceBackfireTriggered_ = false;
+        traceTractionActive_ = false;
+        traceTractionPulse_ = false;
+        traceSimulationFrameId_ = 0;
+    }
+
+    static const char* diagnosticKindText(NativeDiagnosticKind kind) {
+        switch (kind) {
+            case NativeDiagnosticKind::EventStart: return "EVENT_START";
+            case NativeDiagnosticKind::EventStop: return "EVENT_STOP";
+            case NativeDiagnosticKind::VoicePlayed: return "VOICE_PLAYED";
+            case NativeDiagnosticKind::VoiceStopped: return "VOICE_STOPPED";
+            case NativeDiagnosticKind::VoiceState: return "VOICE_STATE";
         }
-        __android_log_print(
-            ANDROID_LOG_INFO,
-            kLogTag,
-            "FMOD_TRACE|%s|t=%.6f|%s",
-            kind,
+        return "UNKNOWN";
+    }
+
+    static SoundMetadata inspectSoundMetadata(FMOD::Sound* sound) {
+        SoundMetadata metadata{};
+        if (sound == nullptr) return metadata;
+
+        unsigned int lengthMs = 0;
+        if (sound->getLength(&lengthMs, FMOD_TIMEUNIT_MS) == FMOD_OK) {
+            metadata.lengthMs = lengthMs;
+        }
+
+        FMOD_SOUND_TYPE type = FMOD_SOUND_TYPE_UNKNOWN;
+        FMOD_SOUND_FORMAT format = FMOD_SOUND_FORMAT_NONE;
+        int channels = 0;
+        int bits = 0;
+        if (sound->getFormat(&type, &format, &channels, &bits) == FMOD_OK) {
+            metadata.channels = std::max(0, channels);
+        }
+
+        float frequency = 0.0f;
+        int priority = 0;
+        if (sound->getDefaults(&frequency, &priority) == FMOD_OK) {
+            metadata.rateHz = std::max(0.0f, frequency);
+        }
+        return metadata;
+    }
+
+    void recordDiagnostic(
+        NativeDiagnosticKind kind,
+        double timestampSeconds,
+        const EventSlot* event,
+        const std::string& sourceName,
+        FMOD_RESULT result,
+        std::uint64_t voiceSerial,
+        double durationSeconds,
+        float audibility,
+        float routeGain,
+        int voiceCount,
+        int virtualVoiceCount,
+        int callbackVoiceCount,
+        const SoundMetadata& sourceMetadata = {}
+    ) {
+        if (!diagnosticsEnabled_.load(std::memory_order_relaxed)) return;
+        std::lock_guard<std::mutex> diagnosticLock(diagnosticMutex_);
+        if (diagnosticRing_ == nullptr) return;
+        NativeDiagnosticRecord& record = diagnosticRing_->records[
+            diagnosticRing_->writeSequence % kDiagnosticRingCapacity
+        ];
+        record = {};
+        record.sequence = diagnosticRing_->writeSequence++;
+        record.timestampSeconds = timestampSeconds;
+        record.simulationFrameId = traceSimulationFrameId_;
+        record.voiceSerial = voiceSerial;
+        record.durationSeconds = durationSeconds;
+        record.kind = static_cast<int>(kind);
+        record.result = static_cast<int>(result);
+        record.gear = traceGear_;
+        record.voiceCount = voiceCount;
+        record.virtualVoiceCount = virtualVoiceCount;
+        record.callbackVoiceCount = callbackVoiceCount;
+        record.audibility = audibility;
+        record.routeGain = routeGain;
+        record.rpm = traceRpm_;
+        record.drivetrainSpeed = traceDrivetrainSpeed_;
+        record.throttle = traceThrottle_;
+        record.boostNormalized = traceBoostNormalized_;
+        record.boostAbsolute = traceBoostAbsolute_;
+        record.bov = traceBov_;
+        record.bovDecay = traceBovDecay_;
+        record.shiftProgress = traceShiftProgress_;
+        record.shiftSerial = traceShiftSerial_;
+        record.stateFlags =
+            (traceLimiterPulse_ ? 1 : 0) |
+            (traceBackfireTriggered_ ? 2 : 0) |
+            (traceTractionActive_ ? 4 : 0) |
+            (traceTractionPulse_ ? 8 : 0);
+        record.shifting = traceIsShifting_;
+        record.sampleLengthMs = sourceMetadata.lengthMs;
+        record.sampleChannels = sourceMetadata.channels;
+        record.sampleRateHz = sourceMetadata.rateHz;
+        if (event != nullptr) {
+            copyDiagnosticText(&record.eventName, event->name);
+            copyDiagnosticText(&record.eventPath, event->path);
+        }
+        copyDiagnosticText(&record.sourceName, sourceName);
+    }
+
+    void recordEventLifecycle(NativeDiagnosticKind kind, const EventSlot& event, FMOD_RESULT result) {
+        recordDiagnostic(kind, monotonicSeconds(), &event, {}, result, 0, -1.0, 0.0f, 0.0f, 0, 0, 0);
+    }
+
+    void recordVoiceState(const VoiceAggregate& source, float audibility) {
+        EventSlot temporary;
+        temporary.name = source.eventName;
+        temporary.path = source.eventPath;
+        recordDiagnostic(
+            NativeDiagnosticKind::VoiceState,
             monotonicSeconds(),
-            fields.c_str()
+            &temporary,
+            source.soundName,
+            FMOD_OK,
+            0,
+            -1.0,
+            audibility,
+            source.routeGain,
+            source.voiceCount,
+            source.virtualVoiceCount,
+            source.callbackActive ? source.voiceCount : 0,
+            SoundMetadata{
+                source.sampleLengthMs,
+                source.sampleChannels,
+                source.sampleRateHz,
+            }
         );
     }
 
-    void logEventLifecycle(const char* action, const EventSlot& event, FMOD_RESULT result) const {
-        if (!diagnosticsEnabled_) {
-            return;
+    std::vector<std::string> drainDiagnosticRecordsLocked() {
+        std::vector<std::string> rows;
+        std::lock_guard<std::mutex> diagnosticLock(diagnosticMutex_);
+        if (diagnosticRing_ == nullptr) return rows;
+        const std::uint64_t oldest = diagnosticRing_->writeSequence > kDiagnosticRingCapacity
+            ? diagnosticRing_->writeSequence - kDiagnosticRingCapacity
+            : 0;
+        diagnosticRing_->readSequence = std::max(diagnosticRing_->readSequence, oldest);
+        rows.reserve(static_cast<std::size_t>(diagnosticRing_->writeSequence - diagnosticRing_->readSequence));
+        while (diagnosticRing_->readSequence < diagnosticRing_->writeSequence) {
+            const NativeDiagnosticRecord& record = diagnosticRing_->records[
+                diagnosticRing_->readSequence % kDiagnosticRingCapacity
+            ];
+            if (record.sequence == diagnosticRing_->readSequence) {
+                std::ostringstream row;
+                row << diagnosticKindText(static_cast<NativeDiagnosticKind>(record.kind)) << kFieldSeparator
+                    << std::fixed << std::setprecision(6) << record.timestampSeconds << kFieldSeparator
+                    << record.simulationFrameId << kFieldSeparator
+                    << record.voiceSerial << kFieldSeparator
+                    << record.durationSeconds << kFieldSeparator
+                    << record.result << kFieldSeparator
+                    << record.gear << kFieldSeparator
+                    << record.voiceCount << kFieldSeparator
+                    << record.virtualVoiceCount << kFieldSeparator
+                    << record.callbackVoiceCount << kFieldSeparator
+                    << record.audibility << kFieldSeparator
+                    << record.routeGain << kFieldSeparator
+                    << record.rpm << kFieldSeparator
+                    << record.drivetrainSpeed << kFieldSeparator
+                    << record.throttle << kFieldSeparator
+                    << record.boostNormalized << kFieldSeparator
+                    << record.boostAbsolute << kFieldSeparator
+                    << record.bov << kFieldSeparator
+                    << record.bovDecay << kFieldSeparator
+                    << record.shiftProgress << kFieldSeparator
+                    << record.shiftSerial << kFieldSeparator
+                    << record.stateFlags << kFieldSeparator
+                    << (record.shifting ? 1 : 0) << kFieldSeparator
+                    << record.sampleLengthMs << kFieldSeparator
+                    << record.sampleChannels << kFieldSeparator
+                    << record.sampleRateHz << kFieldSeparator
+                    << record.eventName.data() << kFieldSeparator
+                    << record.eventPath.data() << kFieldSeparator
+                    << record.sourceName.data();
+                rows.push_back(row.str());
+            }
+            ++diagnosticRing_->readSequence;
         }
-        __android_log_print(
-            ANDROID_LOG_INFO,
-            kLogTag,
-            "FMOD_TRACE|EVENT_%s|t=%.6f|event=%s|path=%s|result=%d|%s",
-            action,
-            monotonicSeconds(),
-            event.name.c_str(),
-            event.path.c_str(),
-            static_cast<int>(result),
-            traceContextFields().c_str()
-        );
+        return rows;
     }
 
     void applyEventOverridesLocked() {
@@ -962,6 +1248,7 @@ private:
         slots_.clear();
         events_.clear();
         eventPaths_.clear();
+        eventCatalog_.clear();
         {
             std::lock_guard<std::mutex> callbackLock(callbackMutex_);
             recentSources_.clear();
@@ -991,25 +1278,12 @@ private:
         limiterRunning_ = false;
         limiterDecay_ = 10.0f;
         tractionDecay_ = 10.0f;
-        diagnosticsEnabled_ = false;
+        setDiagnosticsEnabledLocked(false);
         nextVoiceSerial_ = 1;
-        traceElapsedSeconds_ = 0.0;
-        traceRpm_ = 0.0f;
-        traceDrivetrainSpeed_ = 0.0f;
-        traceThrottle_ = 0.0f;
-        traceBoostNormalized_ = 0.0f;
-        traceBoostAbsolute_ = 0.0f;
-        traceBov_ = 0.0f;
-        traceBovDecay_ = 0.0f;
-        traceGear_ = 0;
-        traceIsShifting_ = false;
-        traceWasShifting_ = false;
-        traceShiftProgress_ = 0.0f;
-        traceShiftSerial_ = 0;
-        traceLastShiftSerial_ = 0;
     }
 
     void discoverEventsLocked(const std::string& bankPath) {
+        eventCatalog_.clear();
         int eventCount = 0;
         if (bank_->getEventCount(&eventCount) == FMOD_OK && eventCount > 0) {
             std::vector<FMOD::Studio::EventDescription*> descriptions(static_cast<std::size_t>(eventCount));
@@ -1023,6 +1297,16 @@ private:
                         continue;
                     }
                     const std::string suffix = eventSuffix(path);
+                    FMOD_GUID guid{};
+                    const std::string guidText = description->getID(&guid) == FMOD_OK
+                        ? formatGuid(guid)
+                        : std::string{};
+                    eventCatalog_.push_back(BankEventCatalogEntry{
+                        std::string(path),
+                        guidText,
+                        suffix,
+                        runtimeClassificationForEvent(suffix),
+                    });
                     if (isAllowedEventName(suffix)) {
                         events_[suffix] = description;
                         eventPaths_[suffix] = path;
@@ -1168,7 +1452,7 @@ private:
         instance->setTimelinePosition(0);
         const FMOD_RESULT result = instance->start();
         if (const EventSlot* event = slot(name); event != nullptr) {
-            logEventLifecycle("START", *event, result);
+            recordEventLifecycle(NativeDiagnosticKind::EventStart, *event, result);
         }
     }
 
@@ -1177,7 +1461,7 @@ private:
         if (instance != nullptr) {
             const FMOD_RESULT result = instance->stop(mode);
             if (const EventSlot* event = slot(name); event != nullptr) {
-                logEventLifecycle("STOP", *event, result);
+                recordEventLifecycle(NativeDiagnosticKind::EventStop, *event, result);
             }
         }
     }
@@ -1251,6 +1535,16 @@ private:
                 aggregate.eventPath = event.path;
                 aggregate.eventName = event.name;
                 aggregate.soundName = soundName;
+                if (diagnosticsEnabled_.load(std::memory_order_relaxed)) {
+                    // A capture can begin while a looping source is already alive, before it
+                    // receives a SOUND_PLAYED callback. Snapshot-only inspection fills that
+                    // gap outside FMOD's callback path and gives the offline join its immutable
+                    // duration/channel/rate identity without touching release playback.
+                    const SoundMetadata metadata = inspectSoundMetadata(sound);
+                    if (metadata.lengthMs > 0) aggregate.sampleLengthMs = metadata.lengthMs;
+                    if (metadata.channels > 0) aggregate.sampleChannels = metadata.channels;
+                    if (metadata.rateHz > 0.0f) aggregate.sampleRateHz = metadata.rateHz;
+                }
                 aggregate.audibilitySquared += audibility * audibility;
                 aggregate.routeGain = std::max(
                     aggregate.routeGain,
@@ -1316,6 +1610,9 @@ private:
             aggregate.eventPath = iterator->second.eventPath;
             aggregate.eventName = iterator->second.eventName;
             aggregate.soundName = iterator->second.soundName;
+            aggregate.sampleLengthMs = iterator->second.sampleLengthMs;
+            aggregate.sampleChannels = iterator->second.sampleChannels;
+            aggregate.sampleRateHz = iterator->second.sampleRateHz;
             aggregate.callbackActive = iterator->second.callbackVoiceCount > 0;
             ++iterator;
         }
@@ -1332,6 +1629,7 @@ private:
     FMOD_DSP_DESCRIPTION gain_{};
     std::unordered_map<std::string, FMOD::Studio::EventDescription*> events_;
     std::unordered_map<std::string, std::string> eventPaths_;
+    std::vector<BankEventCatalogEntry> eventCatalog_;
     std::unordered_map<std::string, std::unique_ptr<EventSlot>> slots_;
     std::unordered_map<std::string, bool> mutedEvents_;
     std::unordered_map<std::string, bool> soloEvents_;
@@ -1356,9 +1654,10 @@ private:
     bool hasTurbo_ = false;
     float idleRpm_ = 1000.0f;
     bool limiterRunning_ = false;
-    bool diagnosticsEnabled_ = false;
+    std::atomic<bool> diagnosticsEnabled_{false};
+    std::mutex diagnosticMutex_;
+    std::unique_ptr<NativeDiagnosticRing> diagnosticRing_;
     std::uint64_t nextVoiceSerial_ = 1;
-    double traceElapsedSeconds_ = 0.0;
     float traceRpm_ = 0.0f;
     float traceDrivetrainSpeed_ = 0.0f;
     float traceThrottle_ = 0.0f;
@@ -1368,10 +1667,13 @@ private:
     float traceBovDecay_ = 0.0f;
     int traceGear_ = 0;
     bool traceIsShifting_ = false;
-    bool traceWasShifting_ = false;
     float traceShiftProgress_ = 0.0f;
     std::uint64_t traceShiftSerial_ = 0;
-    std::uint64_t traceLastShiftSerial_ = 0;
+    bool traceLimiterPulse_ = false;
+    bool traceBackfireTriggered_ = false;
+    bool traceTractionActive_ = false;
+    bool traceTractionPulse_ = false;
+    std::uint64_t traceSimulationFrameId_ = 0;
 };
 
 FmodRuntime runtime;
@@ -1474,7 +1776,8 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jboolean shiftRejected,
     jboolean backfireTriggered,
     jboolean tractionActive,
-    jboolean tractionPulse
+    jboolean tractionPulse,
+    jlong simulationFrameId
 ) {
     return resultString(
         environment,
@@ -1498,7 +1801,8 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             shiftRejected == JNI_TRUE,
             backfireTriggered == JNI_TRUE,
             tractionActive == JNI_TRUE,
-            tractionPulse == JNI_TRUE
+            tractionPulse == JNI_TRUE,
+            static_cast<std::uint64_t>(std::max<jlong>(0, simulationFrameId))
         )
     );
 }
@@ -1509,6 +1813,31 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_voiceSnapshot
     jobject
 ) {
     return toJavaStringArray(environment, runtime.voiceSnapshots());
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_diagnosticRecords(
+    JNIEnv* environment,
+    jobject
+) {
+    return toJavaStringArray(environment, runtime.diagnosticRecords());
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_eventCatalog(
+    JNIEnv* environment,
+    jobject
+) {
+    return toJavaStringArray(environment, runtime.eventCatalog());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setDiagnosticsEnabled(
+    JNIEnv*,
+    jobject,
+    jboolean enabled
+) {
+    runtime.setDiagnosticsEnabled(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1523,6 +1852,14 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setEventSolo(
     JNIEnv* environment, jobject, jstring eventName, jboolean solo
 ) {
     runtime.setEventSolo(utfString(environment, eventName), solo == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_clearEventOverrides(
+    JNIEnv*,
+    jobject
+) {
+    runtime.clearEventOverrides();
 }
 
 extern "C" JNIEXPORT void JNICALL

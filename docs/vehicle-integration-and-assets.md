@@ -56,11 +56,11 @@ more useful than a permanent private log.
 
 ## FMOD-bank asset contract
 
-The original app catalog uses only source FMOD banks and preview images from
+The original-car catalog uses only source FMOD banks and preview images from
 `assetto_corsa_installation/content/cars` and its shared `content/sfx` directory. The separate
-`new_cars` directory is prepared as an inactive modded group and is never selected by the current
-dashboard. Source files are intentionally ignored because their redistribution rights have not
-been established. `tools/build_fmod_bank_packs.py` copies each selected bank unchanged into a
+`new_cars` directory supplies the independently installable modded group; it is not a source for
+the original-car inventory. Source files are intentionally ignored because their redistribution
+rights have not been established. `tools/build_fmod_bank_packs.py` copies each selected bank unchanged into a
 verified installer package; this is both a reproducibility rule and a licensing guardrail.
 
 The dashboard needs the FMOD Android SDK to build and an installed source bank to play. It has no

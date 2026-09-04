@@ -175,7 +175,6 @@ class MainActivity : ComponentActivity() {
                         onToggleInputSource = controller::toggleInputSource,
                         onToggleAudioMute = controller::toggleAudioMute,
                         onResetAllPreferences = controller::resetAllPreferences,
-                        onTransmissionChange = controller::setTransmissionPosition,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -248,7 +247,6 @@ private fun MotorSoundDashboard(
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
     onResetAllPreferences: () -> Unit,
-    onTransmissionChange: (TransmissionPosition) -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -400,7 +398,6 @@ private fun MotorSoundDashboard(
                                     state = state,
                                     onThrottle = onThrottle,
                                     onBrake = onBrake,
-                                    onTransmissionChange = onTransmissionChange,
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
                                     modifier = Modifier.padding(start = 28.dp),
@@ -417,7 +414,6 @@ private fun MotorSoundDashboard(
                             state = state,
                             onThrottle = onThrottle,
                             onBrake = onBrake,
-                            onTransmissionChange = onTransmissionChange,
                             onSelectCar = onSelectCar,
                             soundPerspective = state.soundPerspective,
                             onSoundPerspectiveChange = onSoundPerspectiveChange,
@@ -843,7 +839,6 @@ private fun ClassicDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
-    onTransmissionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
@@ -880,7 +875,6 @@ private fun ClassicDriveControls(
         )
         TransmissionShifter(
             position = state.transmissionPosition,
-            onPositionChange = onTransmissionChange,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = CLASSIC_DRIVE_CONTROL_SCALE,
         )
@@ -983,7 +977,6 @@ internal fun MixerDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
-    onTransmissionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1030,7 +1023,6 @@ internal fun MixerDriveControls(
         )
         TransmissionShifter(
             position = state.transmissionPosition,
-            onPositionChange = onTransmissionChange,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = MIXER_DRIVE_CONTROL_SCALE,
         )
@@ -1122,7 +1114,6 @@ private fun CarStage(
 @Composable
 internal fun TransmissionShifter(
     position: TransmissionPosition,
-    onPositionChange: (TransmissionPosition) -> Unit,
     lockedToVehicle: Boolean = false,
     scale: Float = 1f,
     modifier: Modifier = Modifier,
@@ -1155,6 +1146,9 @@ internal fun TransmissionShifter(
 
         TransmissionPosition.entries.forEach { option ->
             val selected = option == position
+            // P/N/D is intentionally display-only. A touch target here made it too easy to
+            // engage Neutral while driving; real-pedal mode still follows the vehicle telemetry
+            // and debug scenarios can set the selector independently of this dashboard.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1171,13 +1165,6 @@ internal fun TransmissionShifter(
                         width = if (selected) (2f * scale).dp else (1f * scale).dp,
                         color = if (selected) Cyan else Color(0xFF4A5A66),
                         shape = RoundedCornerShape((10f * scale).dp),
-                    )
-                    .then(
-                        if (lockedToVehicle) {
-                            Modifier
-                        } else {
-                            Modifier.clickable { onPositionChange(option) }
-                        },
                     ),
                 contentAlignment = Alignment.Center,
             ) {

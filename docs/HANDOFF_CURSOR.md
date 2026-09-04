@@ -354,9 +354,9 @@ event evidence instead of guessing:
 
 ## 10. Known caveats and places to re-check
 
-* Several checked-in docs still describe an older “22 originals only / modded inactive” release,
-  while current code and generated index support both groups and currently have 23 official cars.
-  Treat this discrepancy as documentation debt, not as a reason to revert working code.
+* Earlier documents described a “22 originals only / modded inactive” release. The current docs,
+  generated index, and runtime support both groups with 23 official profiles. Do not restore the
+  historical catalog boundary without an explicit product decision.
 * `docs/new-cars-exceptions.md` retains historical modded observations (silent exterior layers,
   delayed interior activation, etc.). These are not proof that the current packages fail; retest
   before fixing.

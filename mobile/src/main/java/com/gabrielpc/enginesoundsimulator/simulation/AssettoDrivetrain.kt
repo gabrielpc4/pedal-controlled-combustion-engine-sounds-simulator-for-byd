@@ -1,8 +1,5 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
-import android.util.Log
-import com.gabrielpc.enginesoundsimulator.RuntimeFeatureFlags
-
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -84,10 +81,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var backfireTimer = 0.0
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
-    /** Persistent diagnostic trace for validating authored shifts against the Android output. */
-    private var diagnosticTraceElapsedSeconds = 0.0
-    /** Keep high-rate samples briefly after a shift so clutch re-engagement cannot be missed. */
-    private var diagnosticHighRateRemainingSeconds = 0.0
     private var previousFmodWheelSpeed = 0.0
     private var lastFrame = snapshot()
 
@@ -127,8 +120,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         manualShiftRequest = 0
         landingRpmByGear.fill(0.0)
         fmodDrivetrainSpeedMetersPerSecond = 0.0
-        diagnosticTraceElapsedSeconds = 0.0
-        diagnosticHighRateRemainingSeconds = 0.0
         previousFmodWheelSpeed = 0.0
         previousTractionLimit = false
         turboQs.fill(0.0)
@@ -335,47 +326,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
-        if (RuntimeFeatureFlags.ENABLE_DETAILED_DRIVETRAIN_TELEMETRY) {
-            diagnosticHighRateRemainingSeconds = max(0.0, diagnosticHighRateRemainingSeconds - dt)
-            if (shiftStarted || shiftCompleted) {
-                diagnosticHighRateRemainingSeconds = max(
-                    diagnosticHighRateRemainingSeconds,
-                    SHIFT_DIAGNOSTIC_TAIL_SECONDS,
-                )
-            }
-            diagnosticTraceElapsedSeconds += dt
-            val traceIntervalSeconds = if (
-                shifting || diagnosticHighRateRemainingSeconds > 0.0
-            ) 0.003 else 0.050
-            if (diagnosticTraceElapsedSeconds >= traceIntervalSeconds) {
-                diagnosticTraceElapsedSeconds -= traceIntervalSeconds
-                Log.d(
-                    "AssettoDrivetrainTrace",
-                    "rpm=${rpm.toInt()} internalGear=$gear exposedGear=${if (shifting) shiftTarget else gear} " +
-                        "physicsGear=$physicsGear target=$shiftTarget shiftDir=$shiftDirection " +
-                        "shiftElapsed=${"%.4f".format(shiftElapsed)} shiftDuration=${"%.4f".format(shiftDuration)} " +
-                        "authoredShiftDuration=${"%.4f".format(authoredShiftDuration)} " +
-                        "authoredClutchDuration=${"%.4f".format(authoredClutchDuration)} " +
-                        "effectiveClutchDuration=${"%.4f".format(effectiveClutchDuration)} " +
-                        "clutch=${"%.3f".format(clutch)} vehicleSpeed=${"%.2f".format(speedMetersPerSecond * 3.6)} " +
-                        "fmodSpeed=${"%.2f".format(this.fmodDrivetrainSpeedMetersPerSecond * 3.6)} " +
-                        "throttle=${"%.3f".format(rawGas)} brake=${"%.3f".format(cleanBrake)} " +
-                        "autoRequest=$automaticRequest requested=$requestedDirection " +
-                        "upshiftRpm=${"%.0f".format(upshiftTriggerRpmForGear(gear, rawGas))} " +
-                        "downshiftRpm=${"%.0f".format(downshiftRpmForCurrentGear())} " +
-                        "downshiftCooldown=${"%.3f".format(automaticDownshiftCooldownSeconds)} " +
-                        "eventDirection=$eventDirection wheelSpeed=${"%.3f".format(wheelSpeed)} " +
-                        "engineOmega=${"%.3f".format(engineOmega)} engineTorque=${"%.3f".format(engine.torque)} " +
-                        "controlsGas=${"%.3f".format(controlsGas)} engineGas=${"%.3f".format(engineGas)} " +
-                        "autoblipStarted=${autoblipStarted != null} autoblipApplied=$autoblipApplied " +
-                        "clutchTorque=${"%.3f".format(clutchTorqueApplied)} " +
-                        "requiredClutchTorque=${"%.3f".format(requiredClutchTorque)} " +
-                        "clutchCapacity=${"%.3f".format(clutchCapacity)} gripCapacity=${"%.3f".format(gripCapacity)} " +
-                        "shiftStarted=$shiftStarted shiftCompleted=$shiftCompleted shifting=$shifting " +
-                        "cutoff=${"%.3f".format(automaticGasCutoff)}",
-                )
-            }
-        }
         lastFrame = AssettoDrivetrainFrame(
             rpm = rpm,
             speedMetersPerSecond = speedMetersPerSecond,
@@ -500,9 +450,24 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
                 val downshiftRpm = downshiftRpmForCurrentGear()
+                // Landing-RPM downshifts are an intentional app policy, but they must describe
+                // a lift/braking phase rather than the tiny post-upshift settling error. When the
+                // FMOD drivetrain speed is still increasing, a full-throttle car is accelerating
+                // and cannot legitimately request the reverse shift immediately after an upshift.
+                // The bank's RPM landing value remains the threshold once the documented/FMOD
+                // speed is actually falling.
+                // previousFmodWheelSpeed is stored as wheel angular speed (rad/s), so compare
+                // it with the same normalized wheel quantity. Comparing raw m/s to rad/s here
+                // would make every positive road speed look like a deceleration and would allow
+                // the landing-RPM rule to chatter through every gear under full throttle.
+                val currentFmodWheelSpeed =
+                    fmodDrivetrainSpeedMetersPerSecond / drivenAxle(physics.drivetrain.vehicle).radius
+                val fmodDrivetrainSpeedDecreasing =
+                    currentFmodWheelSpeed < previousFmodWheelSpeed - 1e-4
                 if (
                     shiftRpm < downshiftRpm &&
                     gear > 1 && clutch > 0.85 &&
+                    (gas <= 0.2 || fmodDrivetrainSpeedDecreasing) &&
                     downshiftAllowed(gear - 1, dt) &&
                     automaticGasCutoff <= 0.0 &&
                     automaticDownshiftCooldownSeconds <= 0.0
@@ -659,6 +624,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         } else {
             50
         }
+        // The limiter gate is evaluated at the beginning of this fixed physics step, exactly as
+        // in the authored model. Engine inertia is integrated afterwards, so a brief reading a
+        // little above limiterRpm is a physical overshoot before the next step cuts gas; it is
+        // not a second redline or a synthetic tach target. Keeping that sample preserves the
+        // bank's limiter timing and lets the limiter event receive its normal pulse.
         if (engine.limiterRpm > 0.0 && rpm > engine.limiterRpm) limiterCounter = max(1, limiterSteps)
         val limiterActive = limiterCounter > 0
         if (limiterActive) limiterCounter -= 1
@@ -773,7 +743,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val GRAVITY = 9.81
         const val STOPPED_CLUTCH_RELEASE_BRAKE = 0.2
         const val STOPPED_CLUTCH_RELEASE_SPEED_MPS = 1.0
-        const val SHIFT_DIAGNOSTIC_TAIL_SECONDS = 0.35
         // Comparison switch: disable only the bank's AutoBlip contribution while diagnosing
         // downshift RPM pulses. The authored profile remains loaded so the test is reversible.
         const val DISABLE_AUTOBLIP_FOR_COMPARISON = true

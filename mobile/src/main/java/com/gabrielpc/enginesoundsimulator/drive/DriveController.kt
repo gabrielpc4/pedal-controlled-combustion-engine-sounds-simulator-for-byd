@@ -16,6 +16,8 @@ import com.gabrielpc.enginesoundsimulator.audio.AudioMixGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGains
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
+import com.gabrielpc.enginesoundsimulator.diagnostics.DebugScenarioOverride
+import com.gabrielpc.enginesoundsimulator.diagnostics.DebugTelemetry
 import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysics
 import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -26,7 +28,6 @@ import com.gabrielpc.enginesoundsimulator.simulation.resolveDriveInput
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
-import com.gabrielpc.enginesoundsimulator.telemetry.transmissionFollowsVehicle
 import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -68,6 +69,12 @@ data class DriveSnapshot(
     val userMessage: UserVisibleMessage? = null,
 )
 
+/** Runtime-only selection restored once an ADB diagnostic scenario ends. */
+private data class DebugScenarioBaseline(
+    val profile: FmodBankProfile,
+    val perspective: EngineSoundPerspective,
+)
+
 /** Coordinates read-only inputs, the authored Assetto drivetrain, and FMOD. */
 class DriveController(context: Context) {
     private val appContext = context.applicationContext
@@ -105,6 +112,11 @@ class DriveController(context: Context) {
     private val audioInterrupted = AtomicBoolean(false)
     private val audioMuted = AtomicBoolean(false)
     private val audioMixGains = AtomicReference(AudioMixGains())
+    /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
+    private val simulationFrameSerial = AtomicLong(0L)
+    private var consumedDebugScenarioShiftSerial = 0L
+    private var activeDebugScenarioId = 0L
+    private var debugScenarioBaseline: DebugScenarioBaseline? = null
 
     @Volatile private var loopThread: Thread? = null
     @Volatile private var userMessage: UserVisibleMessage? = null
@@ -244,10 +256,6 @@ class DriveController(context: Context) {
         else if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) inputMode.set(InputMode.RealPedals)
     }
 
-    fun setTransmissionPosition(position: TransmissionPosition) {
-        if (!vehicleReader.snapshot().transmissionFollowsVehicle(inputMode.get())) transmissionPosition.set(position)
-    }
-
     fun setSoundPerspective(perspective: EngineSoundPerspective) {
         val profile = selectedProfile.get()
         selectedPerspective.set(soundPerspectiveRepository.save(profile, perspective))
@@ -348,12 +356,36 @@ class DriveController(context: Context) {
 
     private fun step(dt: Double) {
         val telemetry = vehicleReader.snapshot()
-        val mode = inputMode.get()
+        val scenario = DebugTelemetry.scenarioOverride(SystemClock.elapsedRealtimeNanos())
+        if (scenario != null) applyDebugScenario(scenario)
+        else restoreDebugScenarioIfNeeded()
+        val mode = scenario?.inputModeOrdinal
+            ?.let { InputMode.entries.getOrNull(it) }
+            ?: inputMode.get()
         val pedals = simulatedPedals.get()
-        val input = resolveDriveInput(mode, telemetry, pedals.throttle, pedals.brake)
-        val transmission = resolveTransmissionControl(mode, telemetry, transmissionPosition.get())
+        val input = resolveDriveInput(
+            mode,
+            telemetry,
+            scenario?.throttle ?: pedals.throttle,
+            scenario?.brake ?: pedals.brake,
+        )
+        val selectedTransmissionPosition = scenario?.transmissionPositionOrdinal
+            ?.let { TransmissionPosition.entries.getOrNull(it) }
+            ?: transmissionPosition.get()
+        val transmission = resolveTransmissionControl(mode, telemetry, selectedTransmissionPosition)
         if (transmission.lockedToVehicle) transmissionPosition.set(transmission.position)
-        simulation.manualShiftEnabled = manualShiftEnabled.get()
+        simulation.manualShiftEnabled = scenario?.manualModeEnabled ?: manualShiftEnabled.get()
+        if (
+            scenario != null &&
+            scenario.manualShiftSerial != 0L &&
+            scenario.manualShiftSerial != consumedDebugScenarioShiftSerial
+        ) {
+            consumedDebugScenarioShiftSerial = scenario.manualShiftSerial
+            when (scenario.manualShiftDirection) {
+                1 -> simulation.requestManualUpshift()
+                -1 -> simulation.requestManualDownshift()
+            }
+        }
         val drivetrain = simulation.update(
             DriverInput(
                 throttle = input.throttle,
@@ -364,19 +396,57 @@ class DriveController(context: Context) {
             ),
             dt,
         )
+        val simulationFrameId = simulationFrameSerial.incrementAndGet()
+        val shiftDirection = when (drivetrain.shiftDirection) {
+            ShiftDirection.UP -> 1
+            ShiftDirection.DOWN -> -1
+            ShiftDirection.NONE -> 0
+        }
+        val frameTimestampNanos = SystemClock.elapsedRealtimeNanos()
+        DebugTelemetry.recordSimulation(
+            timestampNanos = frameTimestampNanos,
+            simulationFrameId = simulationFrameId,
+            profileId = selectedProfile.get().id,
+            inputMode = mode.name,
+            perspectiveOrdinal = selectedPerspective.get().ordinal,
+            rawSpeedKmh = drivetrain.realOrDocumentedRawSpeedKmh,
+            presentationSpeedKmh = drivetrain.presentationSpeedKmh,
+            presentationAccelerationKmhPerSecond = drivetrain.presentationAccelerationKmhPerSecond,
+            fmodDrivetrainSpeedKmh = drivetrain.fmodDrivetrainSpeedKmh,
+            rpm = drivetrain.rpm,
+            gear = drivetrain.gear,
+            clutch = drivetrain.clutch,
+            transmissionPosition = transmission.position.ordinal,
+            throttle = input.throttle,
+            brake = input.brake,
+            boost = drivetrain.boost,
+            bov = drivetrain.bov,
+            bovDecaySeconds = drivetrain.bovDecaySeconds,
+            isShifting = drivetrain.isShifting,
+            shiftProgress = drivetrain.shiftProgress,
+            shiftSerial = drivetrain.shiftSerial,
+            shiftDirection = shiftDirection,
+            limiterPulse = drivetrain.limiterPulse,
+            backfireTriggered = drivetrain.backfireTriggered,
+            tractionLimitActive = drivetrain.tractionLimitActive,
+            tractionLimitPulse = drivetrain.tractionLimitPulse,
+        )
         audioEngine.update(
             EngineAudioFrame(
+                simulationFrameId = simulationFrameId,
                 rpm = drivetrain.rpm,
                 throttle = drivetrain.audioThrottle,
+                rawSpeedKmh = drivetrain.realOrDocumentedRawSpeedKmh,
+                presentationSpeedKmh = drivetrain.presentationSpeedKmh,
+                presentationAccelerationKmhPerSecond = drivetrain.presentationAccelerationKmhPerSecond,
+                brake = drivetrain.smoothedBrake,
+                clutch = drivetrain.clutch,
+                transmissionPosition = transmission.position.ordinal,
                 gear = drivetrain.gear,
                 isShifting = drivetrain.isShifting,
                 shiftProgress = drivetrain.shiftProgress,
                 shiftSerial = drivetrain.shiftSerial,
-                shiftDirection = when (drivetrain.shiftDirection) {
-                    ShiftDirection.UP -> 1
-                    ShiftDirection.DOWN -> -1
-                    ShiftDirection.NONE -> 0
-                },
+                shiftDirection = shiftDirection,
                 limiterPulse = drivetrain.limiterPulse,
                 backfireTriggered = drivetrain.backfireTriggered,
                 shiftRejected = drivetrain.shiftRejected,
@@ -416,6 +486,65 @@ class DriveController(context: Context) {
             )
         }
         handleAudioLoadFailures()
+    }
+
+    /**
+     * The debug scenario must never modify normal selections or saved preferences. It is only an
+     * ADB-driven input source used to make repeated bank audits reproducible on the same APK.
+     */
+    private fun applyDebugScenario(scenario: DebugScenarioOverride) {
+        if (activeDebugScenarioId != scenario.scenarioId) {
+            // The ADB runner is allowed to change in-memory runtime selection for a repeatable
+            // audit, but it must leave the driver's saved car and listener choice untouched.
+            debugScenarioBaseline = DebugScenarioBaseline(
+                profile = selectedProfile.get(),
+                perspective = selectedPerspective.get(),
+            )
+            activeDebugScenarioId = scenario.scenarioId
+        }
+        val requestedProfile = FmodBankProfiles.find(scenario.profileId)
+            ?.takeIf(bankResolver::isInstalled)
+        if (requestedProfile != null && requestedProfile.id != selectedProfile.get().id) {
+            synchronized(lifecycleLock) {
+                if (requestedProfile.id != selectedProfile.get().id) {
+                    selectedProfile.set(requestedProfile)
+                    audioMixGains.set(audioMixGainRepository.load(requestedProfile))
+                    audioEngine.setCategoryGains(audioMixGains.get())
+                    loadPhysics(requestedProfile)
+                    simulation.reset()
+                    selectedPerspective.set(EngineSoundPerspective.CABIN)
+                    audioEngine.setSoundProgram(requestedProfile, EngineSoundPerspective.CABIN)
+                    consumedDebugScenarioShiftSerial = 0L
+                }
+            }
+        }
+        val requestedPerspective = EngineSoundPerspective.entries.getOrNull(scenario.perspectiveOrdinal)
+            ?: EngineSoundPerspective.CABIN
+        if (requestedPerspective != selectedPerspective.get()) {
+            selectedPerspective.set(requestedPerspective)
+            audioEngine.setSoundProgram(selectedProfile.get(), requestedPerspective)
+        }
+    }
+
+    private fun restoreDebugScenarioIfNeeded() {
+        val baseline = debugScenarioBaseline ?: return
+        debugScenarioBaseline = null
+        activeDebugScenarioId = 0L
+        consumedDebugScenarioShiftSerial = 0L
+
+        synchronized(lifecycleLock) {
+            if (baseline.profile.id != selectedProfile.get().id) {
+                selectedProfile.set(baseline.profile)
+                audioMixGains.set(audioMixGainRepository.load(baseline.profile))
+                audioEngine.setCategoryGains(audioMixGains.get())
+                loadPhysics(baseline.profile)
+                simulation.reset()
+            }
+            if (baseline.perspective != selectedPerspective.get()) {
+                selectedPerspective.set(baseline.perspective)
+            }
+            audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
+        }
     }
 
     private fun handleAudioLoadFailures() {

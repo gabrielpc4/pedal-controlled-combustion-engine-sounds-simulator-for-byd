@@ -6,14 +6,16 @@ compatibility and presentation-drive task, not an export or loop-calibration tas
 1. Add one fixed official-car entry only when the source exists in
    `assetto_corsa_installation/content/cars`. Keep the exact game car ID and do not infer an audio
    relationship from a similar model name.
-2. Add the exact source-bank mapping to `tools/build_fmod_bank_packs.py`. Include `GUIDs.txt` when
-   the source provides it. A shared package is allowed only after comparing source-bank SHA-256.
+2. Add the exact source-bank mapping to `tools/build_fmod_bank_packs.py`. The package contains the
+   unchanged bank, preview, and required physics metadata; the generated original-car inventory
+   reads the official shared `GUIDs.txt` separately to resolve authored event paths. A shared
+   package is allowed only after comparing source-bank SHA-256.
 3. Keep the original `common.strings.bank` and `common.bank` installer packages available. They
    provide event names and shared FMOD dependencies for official banks that ship without a local
    `GUIDs.txt`. Open the car bank with Audio Lab or the Android validation test and confirm
    `engine_int` exists. `engine_ext`, transmission, turbo, limiter, gear, backfire, and start are
-   used only if that same car bank exposes the matching event. The inactive modded catalog is not
-   selectable in this release.
+   used only if that same car bank exposes the matching event. The modded catalog is a separate
+   installable group and is not evidence for this original-bank audit.
 4. Keep the separated speed routes. Whole-km/h BYD values must first pass through
    `QuantizedPresentationSpeedEstimator`; the resulting vehicle speed is converted to the named
    internal `fmodDrivetrainSpeed` by `EqualSpeedGearMapping`; intermediate bands use the bank's

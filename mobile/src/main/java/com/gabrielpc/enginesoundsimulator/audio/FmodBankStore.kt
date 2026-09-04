@@ -20,14 +20,6 @@ import java.util.zip.ZipFile
 internal class FmodBankStore(filesDirectory: File) {
     private val packsDirectory = File(filesDirectory, "fmod-banks")
 
-    fun isInstalled(profile: FmodBankProfile): Boolean =
-        runCatching {
-            bankFile(profile)
-            physicsFile(profile)
-            sharedBankFile(FmodBankProfiles.commonStringsPackId)
-            sharedBankFile(FmodBankProfiles.commonPackId)
-        }.isSuccess
-
     fun installedPackIds(): Set<String> = packsDirectory.listFiles()
         .orEmpty()
         .filter(File::isDirectory)
@@ -263,9 +255,24 @@ internal class FmodBankResolver(context: Context) {
         physics = store.physicsFile(profile),
     )
 
-    fun isInstalled(profile: FmodBankProfile): Boolean = store.isInstalled(profile)
+    /**
+     * A package is only selectable when its immutable physics contract belongs to the same
+     * profile as its bank.  File presence alone is not sufficient: accepting a different car's
+     * valid `physics.json` here would make the selected bank run with unrelated drivetrain data.
+     */
+    fun isInstalled(profile: FmodBankProfile): Boolean = runCatching {
+        store.bankFile(profile)
+        store.sharedBankFile(FmodBankProfiles.commonStringsPackId)
+        store.sharedBankFile(FmodBankProfiles.commonPackId)
+        physics(profile)
+    }.isSuccess
 
-    fun physics(profile: FmodBankProfile): AssettoPhysics = AssettoPhysicsLoader.load(store.physicsFile(profile))
+    fun physics(profile: FmodBankProfile): AssettoPhysics =
+        AssettoPhysicsLoader.load(store.physicsFile(profile)).also { physics ->
+            require(physics.profileId == profile.id) {
+                "Installed ${profile.displayName} package has physics for ${physics.profileId}, not ${profile.id}."
+            }
+        }
 
     fun previewFile(profile: FmodBankProfile): File? = store.previewFile(profile)
 

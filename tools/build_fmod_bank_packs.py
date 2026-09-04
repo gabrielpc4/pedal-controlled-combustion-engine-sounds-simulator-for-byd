@@ -41,6 +41,7 @@ class CarSource:
     bank_path: Path
     preview_path: Path | None
     active: bool
+    requires_physics: bool = True
 
 
 # The current product catalog is intentionally explicit. Similar names are
@@ -134,13 +135,16 @@ def discover_original_sources() -> list[CarSource]:
         directory = cars_root / source_id
         if not directory.is_dir():
             raise RuntimeError(f"{pack_id}: original car directory is missing: {directory}")
+        preview = preview_for_original(directory)
+        if preview is None:
+            raise RuntimeError(f"{pack_id}: original car has no official preview image")
         sources.append(CarSource(
             pack_id=pack_id,
             display_name=display_name,
             group=ORIGINAL_GROUP,
             source_directory=directory,
             bank_path=bank_for(directory),
-            preview_path=preview_for_original(directory),
+            preview_path=preview,
             active=True,
         ))
     return sources
@@ -168,9 +172,17 @@ def discover_modded_sources() -> list[CarSource]:
     return sources
 
 
-def load_physics(source: CarSource) -> dict[str, object] | None:
+def load_physics(source: CarSource) -> dict[str, object]:
+    """Export the physics contract required by every selectable car package.
+
+    A bank without its matching physics file may install successfully but cannot be
+    driven by the dashboard.  Treat that as a package-generation failure instead
+    of producing a bank archive that fails later on the head unit.
+    """
     if not AUDIO_LAB.is_dir():
-        return None
+        raise RuntimeError(
+            f"{source.pack_id}: Audio Lab is required to export matching physics: {AUDIO_LAB}"
+        )
     sys.path.insert(0, str(AUDIO_LAB.parent))
     from assetto_corsa_audio_lab.sim.car_config import load_car_spec
     from assetto_corsa_audio_lab.sim.drivetrain import load_drivetrain_spec
@@ -189,7 +201,7 @@ def load_physics(source: CarSource) -> dict[str, object] | None:
             except Exception as error:  # a modded package must not block originals
                 failures.append(f"{source_id}: {type(error).__name__}: {error}")
                 continue
-            return {
+            physics = {
                 "schema": PHYSICS_SCHEMA,
                 "profileId": source.pack_id,
                 "sourceCarId": source_id,
@@ -197,9 +209,63 @@ def load_physics(source: CarSource) -> dict[str, object] | None:
                 "car": asdict(car),
                 "drivetrain": asdict(drivetrain),
             }
-    if source.active:
-        raise RuntimeError(f"{source.pack_id}: could not decode original physics: {'; '.join(failures)}")
-    return None
+            validate_physics(source, physics)
+            return physics
+    raise RuntimeError(f"{source.pack_id}: could not decode matching physics: {'; '.join(failures)}")
+
+
+def validate_physics(source: CarSource, physics: dict[str, object]) -> None:
+    """Fail before packaging if a car would be missing the Android physics contract."""
+    if physics.get("schema") != PHYSICS_SCHEMA:
+        raise RuntimeError(f"{source.pack_id}: unexpected physics schema {physics.get('schema')!r}")
+    if physics.get("profileId") != source.pack_id:
+        raise RuntimeError(f"{source.pack_id}: physics profile does not match its package")
+    if physics.get("sourceDirectory") != source.source_directory.name:
+        raise RuntimeError(f"{source.pack_id}: physics source directory does not match its bank source")
+    if not isinstance(physics.get("car"), dict) or not isinstance(physics.get("drivetrain"), dict):
+        raise RuntimeError(f"{source.pack_id}: physics export is missing car or drivetrain data")
+
+
+def canonical_physics_bytes(physics: dict[str, object]) -> bytes:
+    return (json.dumps(physics, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def archive_matches_source(source: CarSource, physics: dict[str, object] | None, archive: Path) -> bool:
+    """Return true only when a retained archive still matches the source contract."""
+    if not archive.is_file():
+        return False
+    try:
+        with zipfile.ZipFile(archive) as archive_file:
+            manifest = json.loads(archive_file.read("manifest.json"))
+            if (
+                manifest.get("schema") != SCHEMA
+                or manifest.get("id") != source.pack_id
+                or manifest.get("group") != source.group
+                or manifest.get("active") is not source.active
+            ):
+                return False
+            file_entries = {
+                entry.get("path"): entry
+                for entry in manifest.get("files", [])
+                if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+            }
+            bank_archive_path = f"bank/{source.bank_path.name}"
+            if file_entries.get(bank_archive_path, {}).get("sha256") != sha256(source.bank_path):
+                return False
+            if source.requires_physics:
+                if physics is None:
+                    return False
+                physics_archive_path = f"profiles/{source.pack_id}/physics.json"
+                expected_physics_sha = hashlib.sha256(canonical_physics_bytes(physics)).hexdigest()
+                if file_entries.get(physics_archive_path, {}).get("sha256") != expected_physics_sha:
+                    return False
+            if source.preview_path is not None:
+                preview_archive_path = f"preview/{source.preview_path.name}"
+                if file_entries.get(preview_archive_path, {}).get("sha256") != sha256(source.preview_path):
+                    return False
+    except (KeyError, OSError, ValueError, zipfile.BadZipFile):
+        return False
+    return True
 
 
 def file_entry(path: Path, archive_path: str) -> dict[str, object]:
@@ -207,8 +273,12 @@ def file_entry(path: Path, archive_path: str) -> dict[str, object]:
 
 
 def build_archive(source: CarSource, physics: dict[str, object] | None, force: bool) -> dict[str, object]:
+    if source.requires_physics:
+        if physics is None:
+            raise RuntimeError(f"{source.pack_id}: selectable car package requires physics.json")
+        validate_physics(source, physics)
     archive = OUTPUT / f"{source.pack_id}.bydbank"
-    if archive.is_file() and not force:
+    if archive_matches_source(source, physics, archive) and not force:
         return {
             "id": source.pack_id,
             "name": source.display_name,
@@ -232,7 +302,7 @@ def build_archive(source: CarSource, physics: dict[str, object] | None, force: b
         if physics is not None:
             physics_copy = stage / "profiles" / source.pack_id / "physics.json"
             physics_copy.parent.mkdir(parents=True)
-            physics_copy.write_text(json.dumps(physics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            physics_copy.write_bytes(canonical_physics_bytes(physics))
             files.append(file_entry(physics_copy, f"profiles/{source.pack_id}/physics.json"))
         manifest = {
             "schema": SCHEMA,
@@ -287,7 +357,16 @@ def main() -> int:
         ("assetto-common-strings", "Assetto Corsa event strings", "common.strings.bank"),
         ("assetto-common", "Assetto Corsa shared audio", "common.bank"),
     ):
-        source = CarSource(pack_id, display_name, ORIGINAL_GROUP, common_root, common_root / filename, None, True)
+        source = CarSource(
+            pack_id=pack_id,
+            display_name=display_name,
+            group=ORIGINAL_GROUP,
+            source_directory=common_root,
+            bank_path=common_root / filename,
+            preview_path=None,
+            active=True,
+            requires_physics=False,
+        )
         package = build_archive(source, None, arguments.force)
         package["dependency"] = True
         packs.append(package)

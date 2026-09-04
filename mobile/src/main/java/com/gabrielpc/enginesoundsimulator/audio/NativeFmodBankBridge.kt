@@ -42,10 +42,19 @@ internal class NativeFmodBankBridge {
         backfireTriggered: Boolean,
         tractionActive: Boolean,
         tractionPulse: Boolean,
+        simulationFrameId: Long,
     ): String?
 
     /** Immutable source rows captured from FMOD's actual event/channel hierarchy. */
     external fun voiceSnapshots(): Array<String>
+
+    /** Debug-only data is retained natively and drained at snapshot cadence, never via Logcat. */
+    external fun diagnosticRecords(): Array<String>
+
+    /** Returns every bank event discovered before the runtime's playable-event filter. */
+    external fun eventCatalog(): Array<String>
+
+    external fun setDiagnosticsEnabled(enabled: Boolean)
 
     external fun setHostGains(engine: Float, effects: Float)
 
@@ -53,6 +62,7 @@ internal class NativeFmodBankBridge {
 
     external fun setEventMute(eventName: String, muted: Boolean)
     external fun setEventSolo(eventName: String, solo: Boolean)
+    external fun clearEventOverrides()
 
     external fun close()
 }

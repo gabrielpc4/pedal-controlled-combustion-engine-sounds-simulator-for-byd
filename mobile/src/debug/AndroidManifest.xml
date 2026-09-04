@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug-only ADB diagnostic endpoint. It is deliberately absent from release APKs. -->
+        <receiver
+            android:name=".diagnostics.DebugTelemetryReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.gabrielpc.enginesoundsimulator.action.DEBUG_TELEMETRY" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

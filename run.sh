@@ -21,4 +21,8 @@ while read -r serial; do
   fi
 done < <($ADB_BIN devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1 }')
 
-exec "$EMULATOR_BIN" -avd "$AVD_NAME" -no-boot-anim
+# Use the supported SwiftShader renderer explicitly. The previous implicit/legacy
+# renderer selection could emit FrameBuffer "Failed to find ColorBuffer" errors
+# while the window was being recreated; this keeps the test AVD on one stable
+# software graphics path and does not affect FMOD's audio device.
+exec "$EMULATOR_BIN" -avd "$AVD_NAME" -no-boot-anim -gpu swiftshader

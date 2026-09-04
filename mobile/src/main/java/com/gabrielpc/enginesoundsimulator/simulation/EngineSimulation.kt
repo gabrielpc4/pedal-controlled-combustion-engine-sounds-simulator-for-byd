@@ -29,6 +29,8 @@ data class DrivetrainState(
     val smoothedThrottle: Double = 0.0,
     val audioThrottle: Double = 0.0,
     val smoothedBrake: Double = 0.0,
+    /** Authored clutch engagement from the drivetrain, retained for debug trace correlation. */
+    val clutch: Double = 0.0,
     val engineLoad: Double = 0.0,
     val isShifting: Boolean = false,
     val shiftDirection: ShiftDirection = ShiftDirection.NONE,
@@ -235,6 +237,7 @@ class EngineSimulation {
             smoothedThrottle = frame.effectiveThrottle,
             audioThrottle = frame.driverThrottle,
             smoothedBrake = frame.brake,
+            clutch = frame.clutch,
             engineLoad = frame.effectiveThrottle,
             isShifting = frame.shifting,
             shiftDirection = when {

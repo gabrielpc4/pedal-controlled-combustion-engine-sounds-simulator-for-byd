@@ -1,6 +1,6 @@
 # FMOD bank installation
 
-The dashboard APK contains runtime code and the 22 official-car previews. The separate
+The dashboard APK contains runtime code and the 23 official-car previews. The separate
 `audio-installer` APK carries the generated bank packages and publishes them through the
 dashboard's exported provider.
 
@@ -13,10 +13,11 @@ dashboard's exported provider.
 - `modded_car_packs`: profiles discovered under `new_cars`.
 
 Both groups are installable independently. The installer can publish the original group, the
-modded group, or both; shared FMOD dependencies are installed automatically in all cases.
+modded group, or both; shared FMOD dependencies are installed automatically in all cases. The
+current original-bank audit covers only the 23 official profiles, not the modded group.
 
-Each active car package contains one original `.bank`, optional `GUIDs.txt`, the original preview
-selected from `ui/dlc_preview.png` or an official skin preview, and that car's exported
+Each active car package contains one source `.bank`, an optional preview selected from
+`ui/dlc_preview.png` or an official skin preview, and that car's exported
 `profiles/<id>/physics.json`. Shared original `common.strings.bank` and `common.bank` packages are
 included as dependencies. The generated `fmod_bank_packs/` directory is ignored and must not be
 committed.
@@ -37,8 +38,8 @@ content://com.gabrielpc.enginesoundsimulator.fmodbanks/packs/original_cars_pack/
 
 The provider accepts only schema `byd-fmod-bank-pack-v3`, verifies paths, byte count, and SHA-256,
 then atomically replaces the target directory. **DELETE ALL** removes every published group so a
-fresh original-pack installation can start over. Inactive modded entries are shown as prepared but
-remain disabled.
+fresh installation can start over. Missing bank, preview, or required `physics.json` metadata is a
+package-generation error rather than a deferred dashboard failure.
 
 ## Runtime
 

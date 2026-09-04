@@ -63,15 +63,26 @@ synthetic stepped wave. SIMULATED PEDALS integrates a fractional Seal-model spee
 truncates its public/raw representation while using the same presentation reconstruction policy as
 REAL.
 
-## Authored FMOD
+## Authored FMOD and explicit app policy
 
-FMOD 2.03.14 owns event graphs, source material, automation, randomisation, effects, and gains.
-The native bridge sends only the physical parameters and lifecycle transitions required by the
-bank. It has no per-car gain, LOAD/COAST mode, forced-load, drag, regen, or event-suppression
-layer. The mixer can apply temporary event mute/solo and host engine/effects gains strictly for
-interactive diagnosis; those controls reset outside the current session.
-Engine, transmission, turbo, limiter, shift, gear-grind, backfire, traction-control, and authored
-start events are used only when present. Tires, wind, chassis, and doors remain excluded.
+FMOD 2.03.14 owns each bank's event graphs, source material, automation, randomisation, effects,
+and authored gains. The bridge passes physical RPM, drivetrain speed, boost, BOV, shift, limiter,
+and lifecycle data without rewriting the authored graph. It also has a small, intentional app
+policy layer which must not be mistaken for bank authoring:
+
+- engine and transmission events receive authored throttle at the full-load endpoint (`1.0`), so
+  pedal position controls the drivetrain rather than attenuating or swapping those load layers;
+- backfire also receives its authored full-load endpoint (`1.0`);
+- the diagnostic host defaults are engine gain `1.0` and effects gain `2.0`; per-car mixer trims
+  multiply only transmission, gear-shift, and turbo event families;
+- traction limiting remains in the drivetrain, but traction-control sounds are deliberately
+  stopped; and
+- tires, wind, chassis, and doors are excluded from playback. Wind and tyres remain discoverable
+  so the inventory can label them as intentionally excluded rather than missing.
+
+Engine, transmission, turbo, limiter, shift, gear-grind, backfire, and authored start events are
+used only when present. The generated original-car inventory labels every behavior as bank
+authoring, app policy, runtime observation, or unresolved evidence.
 
 Cabin and exterior switch the authored interior/exterior engine event and listener. The switch is
 performed inside the active FMOD system without a host-side crossfade or restart.
@@ -81,8 +92,11 @@ performed inside the active FMOD system without a host-side crossfade or restart
 The mixer is diagnostics with temporary event-level mute/solo and host-gain controls. Native
 sound-start/stop callbacks and Core channel ownership associate each active voice with its exact
 event path and raw sound name. Cards report state, voice count, FMOD audibility, and route gain;
-identical event/source pairs may be aggregated. UI polling is separate from the 3 ms audio-control
-loop, so no mixer allocations occur on the realtime path.
+identical event/source pairs may be aggregated, but sources from different event paths never share a
+card. The same card-level mute/solo applies to every raw sample that FMOD rotates through that
+event/source identity, rather than only to whichever sample name is visible at one instant. UI
+polling is separate from the 3 ms audio-control loop, so no mixer allocations occur on the realtime
+path.
 
 ### Debug voice trace
 
@@ -92,12 +106,14 @@ serial, `VOICE_PLAYED`/`VOICE_STOPPED`, audibility, virtual voices, callback voi
 RPM/gear/boost/BOV/shift context. The flag is derived from `BuildConfig.DEBUG`, so release APKs do
 not format or emit this high-rate diagnostic stream. A source card is intentionally keyed by
 `event path + raw sound name`: it may contain multiple simultaneous Core voices and remains a
-separate source from an identically named sound owned by another event.
+separate source from an identically named sound owned by another event. If an event's playlist or
+parameter selects a different raw sample, the event-level control remains attached to the owning
+event while the source cards remain diagnostic observations of each raw name.
 
 ## Packaging and failure behavior
 
-The installer publishes `byd-fmod-bank-pack-v3` packages under
-`fmod-banks/original_cars_pack/<id>`. Common Assetto banks load before the selected car bank.
-Missing or invalid packages fail closed with an install message; a modified or old pack is never
-silently substituted. The generated modded group remains inactive until a later release explicitly
-enables it.
+The installer publishes `byd-fmod-bank-pack-v3` packages under the selected original or modded
+group. Common Assetto banks load before the selected car bank. Missing or invalid packages fail
+closed with an install message; a modified or old pack is never silently substituted. Original and
+modded packages are independently installable, while the current audit scope remains the 23
+official profiles.

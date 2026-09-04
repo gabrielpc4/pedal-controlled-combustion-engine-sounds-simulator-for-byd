@@ -28,7 +28,7 @@ the local source-bank folders first:
 
 ```sh
 python3 tools/build_fmod_bank_packs.py
-./gradlew :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug :mobile:assembleDebugAndroidTest :audio-installer:assembleDebug --no-daemon
+./gradlew :mobile:assembleDebug :audio-installer:assembleDebug --no-daemon
 ```
 
 Assembly produces the locally numbered dashboard APK and an FMOD-bank installer APK.
