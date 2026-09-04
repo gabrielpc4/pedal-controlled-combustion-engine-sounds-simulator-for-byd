@@ -8,10 +8,10 @@ engine and drivetrain sound. The app never controls the vehicle.
 
 The current catalog contains 23 official cars sourced from
 `assetto_corsa_installation/content/cars`, including the Nissan Skyline GT-R R34. The separate
-`modded_car_packs` group currently contains 33 user-supplied cars. Both groups can be installed
-independently, but the original-bank inventory and validation work intentionally covers only the
-23 official profiles in this phase. The dashboard only exposes profiles whose verified package is
-actually installed.
+`modded_car_packs` group contains 33 user-supplied cars. Both groups can be installed
+independently and the dashboard only exposes profiles whose verified package is actually
+installed. The original and modded inventories are independent evidence sets: a limitation in one
+must never cause a fallback to a similarly named car in the other.
 
 The dashboard APK contains the runtime and previews. The separate `audio-installer` APK carries
 the generated bank packages and publishes them atomically into the dashboard's private storage.
@@ -73,4 +73,9 @@ and turbo trims remain user preferences until they are reset in Settings.
 - [Car audio validation](car-audio-validation.md): manual validation procedure and evidence.
 - [Original-car audio inventory](original-cars-audio-inventory.md): generated authored-bank and
   runtime-audit reference for the 23 official profiles.
-- [New-car exceptions](new-cars-exceptions.md): documented source or bank limitations.
+- [Modded-car audio inventory](modded-cars-audio-inventory.md): generated authored bank graph,
+  source, automation, and current app-policy reference for all 33 modded profiles.
+- [Modded-car Android runtime audit](modded-cars-runtime-audit.md): controlled Android playback
+  evidence for the same 33 profiles. It distinguishes FMOD lifecycle evidence from a 0% meter.
+- [New-car exceptions](new-cars-exceptions.md): documented source, authoring, or runtime
+  limitations that remain after the audit.

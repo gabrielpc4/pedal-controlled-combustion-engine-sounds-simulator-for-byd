@@ -162,13 +162,13 @@ APP_EVENT_POLICIES: dict[str, AppEventPolicy] = {
         classification="playable",
         instance_lifecycle="Instance is created at bank load and remains dormant between accepted backfire triggers.",
         activation="Selected for cabin perspective when the app reports a backfire trigger and neither backfire perspective instance is already playing.",
-        parameters=({"name": "throttle", "value": 1.0, "source": "intentional app full-load policy"},),
+        parameters=({"name": "throttle", "value": 0.0, "source": "intentional app lift-off policy"},),
     ),
     "backfire_ext": AppEventPolicy(
         classification="playable",
         instance_lifecycle="Instance is created at bank load and remains dormant between accepted backfire triggers.",
         activation="Selected for exterior perspective when the app reports a backfire trigger and neither backfire perspective instance is already playing.",
-        parameters=({"name": "throttle", "value": 1.0, "source": "intentional app full-load policy"},),
+        parameters=({"name": "throttle", "value": 0.0, "source": "intentional app lift-off policy"},),
     ),
     "tractioncontrol_int": AppEventPolicy(
         classification="playable_but_suppressed",
@@ -2047,7 +2047,7 @@ def validate_bridge_policy_source() -> dict[str, Any]:
     content = bridge.read_text(encoding="utf-8")
     expected_markers = (
         "kFullLoadAudioThrottle = 1.0f",
-        "kBackfireAudioThrottle = 1.0f",
+        "kBackfireAudioThrottle = 0.0f",
         "isPlayableEventName",
         "name != \"wind\" && name != \"tyres\"",
         "startSelectedContinuousEventsLocked",
@@ -2331,7 +2331,7 @@ def render_markdown(inventory: Mapping[str, Any]) -> str:
             "## Current Android policy recorded by this inventory",
             "",
             "- Engine host gain: **1.0×**. Ancillary/effects host gain: **2.0×** before temporary mixer overrides.",
-            "- Engine, transmission, and backfire `throttle` parameters are intentionally held at **1.0**. Physical pedal input still affects drivetrain simulation.",
+            "- Engine and transmission `throttle` parameters are intentionally held at **1.0**. Backfire uses its authored lift-off endpoint (**0.0**) so a triggered one-shot is not muted by its own bank automation. Physical pedal input still affects drivetrain simulation.",
             "- `wind` and `tyres` are recognized then excluded. `skid_int`, `skid_ext`, `wheel`, `bodywork`, `door`, and `horn` are deliberately outside the product boundary and are not recognized by the bridge. Traction-control audio is intentionally suppressed while traction physics remains active.",
             "- A `turbo` bank event starts only when the matching original physics contains at least one turbo.",
             "",
