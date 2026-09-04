@@ -340,14 +340,16 @@ private fun MixerPerspectiveSelector(
         Slider(
             value = engineGain,
             onValueChange = { onHostGains(it, effectsGain) },
-            valueRange = 0f..3f,
+            valueRange = 0.5f..3f,
+            steps = 4,
             modifier = Modifier.width(220.dp),
         )
         Text("EFFECTS ${String.format(Locale.US, "%.1fx", effectsGain)}", color = CyanSoft, fontSize = 11.sp)
         Slider(
             value = effectsGain,
             onValueChange = { onHostGains(engineGain, it) },
-            valueRange = 0f..4f,
+            valueRange = 0.5f..4f,
+            steps = 6,
             modifier = Modifier.width(220.dp),
         )
         BackfireOnlyToggle(backfireOnly) { onBackfireOnly(!backfireOnly) }
