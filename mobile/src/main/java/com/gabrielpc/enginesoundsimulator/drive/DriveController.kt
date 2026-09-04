@@ -315,6 +315,10 @@ class DriveController(context: Context) {
 
     fun setSimulatedPedalThrottle(value: Double) {
         val clamped = value.coerceIn(0.0, 1.0)
+        // PedalControl emits an exact zero from its pointer-release callback. In Hold Pedals
+        // mode that callback must not clear the latched value; only an intentional low travel
+        // sample (0 < value <= 10%) is the explicit release gesture.
+        if (simulatedPedalsLatched.get() && clamped == 0.0) return
         val effective = if (simulatedPedalsLatched.get() && clamped <= HELD_PEDAL_RELEASE_THRESHOLD) {
             0.0
         } else {
@@ -325,6 +329,8 @@ class DriveController(context: Context) {
 
     fun setSimulatedPedalBrake(value: Double) {
         val clamped = value.coerceIn(0.0, 1.0)
+        // See throttle above: distinguish the UI's pointer-release callback from low travel.
+        if (simulatedPedalsLatched.get() && clamped == 0.0) return
         val effective = if (simulatedPedalsLatched.get() && clamped <= HELD_PEDAL_RELEASE_THRESHOLD) {
             0.0
         } else {
