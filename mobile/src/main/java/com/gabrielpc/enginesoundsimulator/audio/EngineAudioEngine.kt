@@ -172,6 +172,9 @@ class EngineAudioEngine(context: Context) {
         focusHeld.set(true)
         nativeSources.set(emptyList())
         loadFailure.set(null)
+        // A new native runtime starts with no diagnostic filter; force the desired state to be
+        // resent even when the previous session ended with ONLY BACKFIRE enabled.
+        sentBackfireOnly = false
         running.set(true)
         val runId = generation.incrementAndGet()
         val thread = Thread(
