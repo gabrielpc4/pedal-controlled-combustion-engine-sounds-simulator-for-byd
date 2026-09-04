@@ -219,16 +219,12 @@ internal fun MixerDashboardScreen(
             onPerspectiveSelected = onSoundPerspectiveChange,
             engineGain = engineGain,
             effectsGain = effectsGain,
+            backfireOnly = state.backfireOnly,
             onHostGains = { engine, effects ->
                 engineGain = engine
                 effectsGain = effects
                 onHostGains(engine, effects)
             },
-        )
-        CategoryGainControls(
-            gearShiftGain = state.gearShiftGain,
-            backfireOnly = state.backfireOnly,
-            onGearShiftGain = { onCategoryGains(state.transmissionGain, it, state.turboGain, state.backfireGain) },
             onBackfireOnly = onBackfireOnlyChange,
         )
         Spacer(Modifier.height(10.dp))
@@ -304,7 +300,9 @@ private fun MixerPerspectiveSelector(
     onPerspectiveSelected: (EngineSoundPerspective) -> Unit,
     engineGain: Float,
     effectsGain: Float,
+    backfireOnly: Boolean,
     onHostGains: (Float, Float) -> Unit,
+    onBackfireOnly: (Boolean) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -352,27 +350,6 @@ private fun MixerPerspectiveSelector(
             valueRange = 0f..4f,
             modifier = Modifier.width(220.dp),
         )
-    }
-}
-
-@Composable
-private fun CategoryGainControls(
-    gearShiftGain: Float,
-    backfireOnly: Boolean,
-    onGearShiftGain: (Float) -> Unit,
-    onBackfireOnly: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Panel)
-            .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        GainControl("GEAR SHIFT", gearShiftGain, onGearShiftGain)
         BackfireOnlyToggle(backfireOnly) { onBackfireOnly(!backfireOnly) }
     }
 }
