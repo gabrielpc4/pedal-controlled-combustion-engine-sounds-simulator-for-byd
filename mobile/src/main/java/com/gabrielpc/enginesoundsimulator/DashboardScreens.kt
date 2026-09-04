@@ -598,19 +598,19 @@ private fun BackfireSettingsPanel(
         BackfireSlider("BACKFIRE GAIN", value.backfireGain.toDouble(), 1.0f..10.0f, suffix = "x", steps = 17) {
             onChange(value.copy(backfireGain = it))
         }
-        BackfireSlider("ARM THROTTLE", value.armThrottle, 0.05f..1.0f) {
+        BackfireSlider("ARM THROTTLE", value.armThrottle, 0.05f..1.0f, steps = 17) {
             onChange(value.copy(armThrottle = it.toDouble()))
         }
-        BackfireSlider("RELEASE THROTTLE", value.releaseThrottle, 0.0f..0.9f) {
+        BackfireSlider("RELEASE THROTTLE", value.releaseThrottle, 0.0f..0.9f, steps = 17) {
             onChange(value.copy(releaseThrottle = it.toDouble()))
         }
-        BackfireSlider("RELEASE DELAY", value.releaseDelaySeconds, 0.0f..5.0f, suffix = "s") {
+        BackfireSlider("RELEASE DELAY", value.releaseDelaySeconds, 0.0f..5.0f, suffix = "s", steps = 49) {
             onChange(value.copy(releaseDelaySeconds = it.toDouble()))
         }
-        BackfireSlider("MINIMUM RPM", value.minimumRpm, 0.0f..16000.0f, integer = true) {
+        BackfireSlider("MINIMUM RPM", value.minimumRpm, 0.0f..16000.0f, integer = true, steps = 31) {
             onChange(value.copy(minimumRpm = it.toDouble()))
         }
-        BackfireSlider("MAXIMUM RPM", value.maximumRpm, 500.0f..20000.0f, integer = true) {
+        BackfireSlider("MAXIMUM RPM", value.maximumRpm, 500.0f..20000.0f, integer = true, steps = 38) {
             onChange(value.copy(maximumRpm = it.toDouble()))
         }
         Text("ALFA ROMEO BACKFIRE SAMPLES", color = Cyan, fontSize = 16.sp, fontWeight = FontWeight.Black)
