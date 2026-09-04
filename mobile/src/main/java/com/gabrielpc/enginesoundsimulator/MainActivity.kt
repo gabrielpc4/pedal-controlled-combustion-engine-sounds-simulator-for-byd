@@ -187,7 +187,14 @@ class MainActivity : ComponentActivity() {
                         onEffectEnabledChange = controller::setEffectEnabled,
                         onEffectOriginalChange = controller::setEffectOriginal,
                         onEngineExternalChange = { enabled -> controller.setSoundPerspective(if (enabled) com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR else com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.CABIN) },
-                        onEnginePureChange = controller::setExteriorPureAudio,
+                        onEnginePureChange = { enabled ->
+                            // Pure audio is an exterior-only presentation, so enabling it must
+                            // also select External; disabling it leaves the user's perspective unchanged.
+                            if (enabled) {
+                                controller.setSoundPerspective(com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR)
+                            }
+                            controller.setExteriorPureAudio(enabled)
+                        },
                         onResetAllPreferences = controller::resetAllPreferences,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
