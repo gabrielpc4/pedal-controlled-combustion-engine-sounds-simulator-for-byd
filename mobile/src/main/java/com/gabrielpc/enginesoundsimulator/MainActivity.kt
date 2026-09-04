@@ -457,7 +457,13 @@ private fun MotorSoundDashboard(
                                     onTransmissionPositionChange = onTransmissionPositionChange,
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
-                                    modifier = Modifier.padding(start = 28.dp),
+                                    // Keep the pedals as the tenth item in the same horizontal control row.
+                                    // The weight gives this final column the remaining width instead of letting
+                                    // the intrinsic pedal row push itself outside the dashboard bounds.
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                        .padding(start = 28.dp),
                                 )
                             }
                             DashboardMixerLauncherButton(
@@ -1001,7 +1007,9 @@ private fun DashboardEffectControls(
     ) + if (state.hasTurbo) listOf(Triple("TURBO", EffectSoundKind.TURBO, state.turboGain)) else emptyList()
     val rowHeight = 42.dp
     val rowGap = 7.dp
-    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // This row is a horizontal column group; keeping intrinsic width leaves the tenth
+    // column available for the pedal controls instead of consuming the whole dashboard.
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(4.dp)) {
             rows.forEachIndexed { index, row ->
                 val enabled = if (index == 0) external else when (row.second) {
