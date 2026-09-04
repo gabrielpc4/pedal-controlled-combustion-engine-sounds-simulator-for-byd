@@ -72,14 +72,15 @@ internal object DebugTelemetry {
         timestampNanos: Long,
         controlTickId: Long,
         previousSimulationFrameId: Long,
+        profileId: String,
         frame: EngineAudioFrame,
     ) = Unit
 
     @Suppress("UnusedParameter")
-    fun recordNativeRecords(timestampNanos: Long, rows: Array<String>) = Unit
+    fun recordNativeRecords(timestampNanos: Long, profileId: String, rows: Array<String>) = Unit
 
     @Suppress("UnusedParameter")
-    fun recordBankEventCatalog(timestampNanos: Long, rows: Array<String>) = Unit
+    fun recordBankEventCatalog(timestampNanos: Long, profileId: String, rows: Array<String>) = Unit
 
     @Suppress("UnusedParameter")
     fun recordBankContext(profileId: String, bankSha256: String) = Unit

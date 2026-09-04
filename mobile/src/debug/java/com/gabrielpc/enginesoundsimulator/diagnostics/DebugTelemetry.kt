@@ -119,6 +119,7 @@ internal object DebugTelemetry {
         tractionLimitPulse: Boolean,
     ) {
         val active = session.get() ?: return
+        if (!active.accepts(profileId)) return
         active.updateContext(profileId, inputMode)
         active.simulation.append(
             timestampNanos = timestampNanos,
@@ -152,9 +153,12 @@ internal object DebugTelemetry {
         timestampNanos: Long,
         controlTickId: Long,
         previousSimulationFrameId: Long,
+        profileId: String,
         frame: EngineAudioFrame,
     ) {
-        session.get()?.audio?.append(
+        val active = session.get() ?: return
+        if (!active.accepts(profileId)) return
+        active.audio.append(
             timestampNanos = timestampNanos,
             controlTickId = controlTickId,
             previousSimulationFrameId = previousSimulationFrameId,
@@ -167,13 +171,15 @@ internal object DebugTelemetry {
      * after FMOD has left its callback/update path and is therefore absent from the realtime
      * physics and audio-control paths.
      */
-    fun recordNativeRecords(timestampNanos: Long, rows: Array<String>) {
+    fun recordNativeRecords(timestampNanos: Long, profileId: String, rows: Array<String>) {
         val active = session.get() ?: return
+        if (!active.accepts(profileId)) return
         rows.forEach { active.native.append(timestampNanos, it) }
     }
 
-    fun recordBankEventCatalog(timestampNanos: Long, rows: Array<String>) {
+    fun recordBankEventCatalog(timestampNanos: Long, profileId: String, rows: Array<String>) {
         val active = session.get() ?: return
+        if (!active.accepts(profileId)) return
         rows.forEach { active.bankEventCatalog.append(timestampNanos, it) }
     }
 
@@ -182,7 +188,7 @@ internal object DebugTelemetry {
      * The digest is calculated only when capture starts, never on the control loop's normal path.
      */
     fun recordBankContext(profileId: String, bankSha256: String) {
-        session.get()?.updateBankContext(profileId, bankSha256)
+        session.get()?.takeIf { it.accepts(profileId) }?.updateBankContext(profileId, bankSha256)
     }
 
     fun handleCommand(context: Context, requestedCommand: String?, extras: Bundle?): String {
@@ -217,7 +223,9 @@ internal object DebugTelemetry {
                 if (profileId.isEmpty()) {
                     "scenario requires --es profile <installed-profile-id>"
                 } else {
-                    if (session.get() == null) session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY))
+                    if (session.get() == null) {
+                        session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY, profileId))
+                    }
                     scenario.set(
                         DeterministicScenario(
                             id = exportSerial.incrementAndGet(),
@@ -229,12 +237,34 @@ internal object DebugTelemetry {
                 }
             }
 
+            "MODDED_AUDIT" -> {
+                val profileId = extras?.getString(EXTRA_PROFILE_ID)?.trim().orEmpty()
+                if (profileId.isEmpty()) {
+                    "modded audit requires --es profile <installed-profile-id>"
+                } else {
+                    if (session.get() == null) {
+                        session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY, profileId))
+                    }
+                    scenario.set(
+                        DeterministicScenario(
+                            exportSerial.incrementAndGet(),
+                            profileId,
+                            SystemClock.elapsedRealtimeNanos(),
+                            ScenarioKind.AUTHORED_BANK_AUDIT,
+                        ),
+                    )
+                    "modded authored-bank audit started for $profileId"
+                }
+            }
+
             "BACKFIRE" -> {
                 val profileId = extras?.getString(EXTRA_PROFILE_ID)?.trim().orEmpty()
                 if (profileId.isEmpty()) {
                     "backfire scenario requires --es profile <installed-profile-id>"
                 } else {
-                    if (session.get() == null) session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY))
+                    if (session.get() == null) {
+                        session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY, profileId))
+                    }
                     scenario.set(
                         DeterministicScenario(
                             id = exportSerial.incrementAndGet(),
@@ -252,7 +282,9 @@ internal object DebugTelemetry {
                 if (profileId.isEmpty()) {
                     "backfire-only scenario requires --es profile <installed-profile-id>"
                 } else {
-                    if (session.get() == null) session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY))
+                    if (session.get() == null) {
+                        session.set(CaptureSession(FRAME_CAPACITY, NATIVE_RECORD_CAPACITY, profileId))
+                    }
                     backfireOnlyMode.set(true)
                     scenario.set(DeterministicScenario(exportSerial.incrementAndGet(), profileId, SystemClock.elapsedRealtimeNanos(), ScenarioKind.BACKFIRE))
                     "backfire-only scenario started for $profileId"
@@ -275,7 +307,7 @@ internal object DebugTelemetry {
             }
 
             "STATUS" -> session.get()?.status() ?: "capture off"
-            else -> "unknown command '$command'; use START, CLEAR, PERF_START, PERF_STOP, PERF_STATUS, SCENARIO, BACKFIRE, BACKFIRE_ONLY, CANCEL_SCENARIO, DUMP, STOP, or STATUS"
+            else -> "unknown command '$command'; use START, CLEAR, PERF_START, PERF_STOP, PERF_STATUS, SCENARIO, MODDED_AUDIT, BACKFIRE, BACKFIRE_ONLY, CANCEL_SCENARIO, DUMP, STOP, or STATUS"
         }
         writeStatus(context, result)
         return result
@@ -410,7 +442,11 @@ internal object DebugTelemetry {
         }
     }
 
-    private class CaptureSession(frameCapacity: Int, nativeRecordCapacity: Int) {
+    private class CaptureSession(
+        frameCapacity: Int,
+        nativeRecordCapacity: Int,
+        private val expectedProfileId: String? = null,
+    ) {
         val startedElapsedNanos = SystemClock.elapsedRealtimeNanos()
         val simulation = SimulationRing(frameCapacity)
         val audio = AudioRing(frameCapacity)
@@ -420,6 +456,9 @@ internal object DebugTelemetry {
         @Volatile private var profileId = "unknown"
         @Volatile private var inputMode = "unknown"
         @Volatile private var bankSha256 = "unknown"
+
+        fun accepts(candidateProfileId: String): Boolean =
+            expectedProfileId == null || expectedProfileId == candidateProfileId
 
         fun updateContext(nextProfileId: String, nextInputMode: String) {
             profileId = nextProfileId
@@ -816,6 +855,7 @@ internal object DebugTelemetry {
                 manualModeEnabled = phase.manual,
                 manualShiftSerial = if (actionWindow != 0) (id * 10L) + if (actionWindow > 0) 1L else 2L else 0L,
                 manualShiftDirection = actionWindow,
+                forceAuthoredBankEffects = kind == ScenarioKind.AUTHORED_BANK_AUDIT,
             )
         }
 
@@ -851,7 +891,7 @@ internal object DebugTelemetry {
         )
     }
 
-    private enum class ScenarioKind { GENERAL, BACKFIRE }
+    private enum class ScenarioKind { GENERAL, AUTHORED_BANK_AUDIT, BACKFIRE }
 
     private fun bitFlags(
         isShifting: Boolean,

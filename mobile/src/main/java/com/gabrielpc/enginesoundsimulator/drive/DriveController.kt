@@ -754,6 +754,17 @@ class DriveController(context: Context) {
             selectedPerspective.set(requestedPerspective)
             audioEngine.setSoundProgram(selectedProfile.get(), requestedPerspective)
         }
+        if (scenario.forceAuthoredBankEffects) {
+            // The modded-bank audit must exercise authored gear/backfire events rather than the
+            // driver's persistent replacement samples. This is debug-scenario-only and the
+            // saved per-car controls are restored as soon as the scenario finishes.
+            audioEngine.setBackfireAudioEnabled(true)
+            audioEngine.setBackfireUseOriginal(true)
+            audioEngine.setShiftSoundEnabled(true)
+            audioEngine.setShiftSoundOverride(false)
+            audioEngine.setTransmissionAudioEnabled(true)
+            audioEngine.setTurboAudioEnabled(true)
+        }
     }
 
     private fun restoreDebugScenarioIfNeeded() {
@@ -774,6 +785,14 @@ class DriveController(context: Context) {
                 selectedPerspective.set(baseline.perspective)
             }
             audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
+            val restoredModes = carEffectModesRepository.load(selectedProfile.get())
+            carEffectModes.set(restoredModes)
+            audioEngine.setBackfireAudioEnabled(restoredModes.popsAndBangsEnabled)
+            audioEngine.setBackfireUseOriginal(restoredModes.popsAndBangsOriginal)
+            audioEngine.setShiftSoundEnabled(restoredModes.shiftSoundsEnabled)
+            audioEngine.setShiftSoundOverride(!restoredModes.shiftSoundsOriginal)
+            audioEngine.setTransmissionAudioEnabled(restoredModes.transmissionEnabled)
+            audioEngine.setTurboAudioEnabled(restoredModes.turboEnabled)
         }
     }
 

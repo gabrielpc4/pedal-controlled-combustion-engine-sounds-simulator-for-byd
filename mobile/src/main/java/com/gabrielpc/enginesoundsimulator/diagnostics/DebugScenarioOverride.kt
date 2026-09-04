@@ -15,4 +15,5 @@ internal data class DebugScenarioOverride(
     val manualModeEnabled: Boolean,
     val manualShiftSerial: Long = 0L,
     val manualShiftDirection: Int = 0,
+    val forceAuthoredBankEffects: Boolean = false,
 )

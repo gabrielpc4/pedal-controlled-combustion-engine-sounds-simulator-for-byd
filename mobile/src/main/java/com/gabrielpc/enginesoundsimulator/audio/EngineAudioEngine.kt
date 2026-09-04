@@ -10,6 +10,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.nativeFmodSpatialCoordinate
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -47,6 +48,8 @@ class EngineAudioEngine(context: Context) {
     private val fmodUpdateRateHz = AtomicInteger(FmodUpdateRate.DEFAULT_HZ)
     private val limiterPulseSerial = AtomicLong(0L)
     private val backfirePulseSerial = AtomicLong(0L)
+    private val observedShiftSerial = AtomicLong(0L)
+    private val pendingShiftPulses = ConcurrentLinkedQueue<ShiftPulse>()
     private val rejectedShiftSerial = AtomicLong(0L)
     private val tractionPulseSerial = AtomicLong(0L)
     private val hostEngineGain = AtomicReference(1.0f)
@@ -66,8 +69,8 @@ class EngineAudioEngine(context: Context) {
     private val turboAudioEnabled = AtomicBoolean(true)
     private val backfireUseOriginal = AtomicBoolean(false)
     private val exteriorPureAudio = AtomicBoolean(false)
-    private var sentBackfireOnly = false
-    private var sentExteriorPureAudio = false
+    private var sentBackfireOnly: Boolean? = null
+    private var sentExteriorPureAudio: Boolean? = null
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -166,6 +169,7 @@ class EngineAudioEngine(context: Context) {
     fun update(frame: EngineAudioFrame) {
         parameters.set(frame)
         soundPerspective.set(frame.perspective)
+        enqueueShiftPulse(frame)
         if (frame.limiterPulse) limiterPulseSerial.incrementAndGet()
         // A gear change has its own brief throttle cut. Never let that transport-level cut become
         // a backfire pulse, even if the simulation frame arrives at the audio worker one tick late.
@@ -174,6 +178,25 @@ class EngineAudioEngine(context: Context) {
         }
         if (frame.shiftRejected) rejectedShiftSerial.incrementAndGet()
         if (frame.tractionLimitPulse) tractionPulseSerial.incrementAndGet()
+    }
+
+    /**
+     * The drivetrain publishes at its fixed step while FMOD consumes only the latest frame.
+     * Keep gear-start direction as an explicit transport pulse: a 60 Hz consumer can otherwise
+     * observe the newer serial only after the 100/150 ms shift has completed, when the frame's
+     * direction is correctly NONE but the authored gear event can no longer be selected.
+     */
+    private fun enqueueShiftPulse(frame: EngineAudioFrame) {
+        if (frame.shiftDirection == 0) return
+
+        while (true) {
+            val previousSerial = observedShiftSerial.get()
+            if (frame.shiftSerial <= previousSerial) return
+            if (observedShiftSerial.compareAndSet(previousSerial, frame.shiftSerial)) {
+                pendingShiftPulses.offer(ShiftPulse(frame.shiftSerial, frame.shiftDirection))
+                return
+            }
+        }
     }
 
     fun setFocusChangeListener(listener: ((AudioFocusEvent) -> Unit)?) {
@@ -212,6 +235,7 @@ class EngineAudioEngine(context: Context) {
 
             loadedBankProfileId.set(null)
             nativeSources.set(emptyList())
+            clearPendingShiftPulses()
             if (running.get() || controlThread.get()?.isAlive == true) {
                 stopLocked()
                 startLocked()
@@ -225,6 +249,7 @@ class EngineAudioEngine(context: Context) {
         val profile = selectedProfile.get()
         nativeEventMutes.clear()
         nativeEventSolos.clear()
+        clearPendingShiftPulses()
         nativeEventOverridesVersion.incrementAndGet()
         if (!runCatching(::requestFocus).getOrDefault(false)) {
             reportLoadFailure(profile.id, "Audio focus was not granted by the system.")
@@ -234,9 +259,11 @@ class EngineAudioEngine(context: Context) {
         focusHeld.set(true)
         nativeSources.set(emptyList())
         loadFailure.set(null)
-        // A new native runtime starts with no diagnostic filter; force the desired state to be
-        // resent even when the previous session ended with ONLY BACKFIRE enabled.
-        sentBackfireOnly = false
+        // NativeFmodBankBridge owns one process-global FMOD runtime. A close/open creates fresh
+        // event instances but intentionally retains host control values, so every per-car mode
+        // must be resent rather than assumed to equal the C++ field initializer.
+        sentBackfireOnly = null
+        sentExteriorPureAudio = null
         running.set(true)
         val runId = generation.incrementAndGet()
         val thread = Thread(
@@ -256,6 +283,7 @@ class EngineAudioEngine(context: Context) {
     private fun stopLocked() {
         running.set(false)
         generation.incrementAndGet()
+        clearPendingShiftPulses()
         stopSnapshotThread()
         val thread = controlThread.get()
         thread?.interrupt()
@@ -273,7 +301,6 @@ class EngineAudioEngine(context: Context) {
         var opened = false
         var lastTickNanos = System.nanoTime()
         var nextControlNanos = lastTickNanos
-        var lastShiftSerial = 0L
         var controlTickId = 0L
         var lastConsumedSimulationFrameId = 0L
         var consumedLimiterPulse = limiterPulseSerial.get()
@@ -285,13 +312,13 @@ class EngineAudioEngine(context: Context) {
         var sentHostEffectsGain: Float? = null
         var sentNativeEventOverridesVersion = -1L
         var sentBackfireAllowedSamplesMask = -1
-        var sentBackfireAudioEnabled = true
-        var sentShiftSoundOverride = false
+        var sentBackfireAudioEnabled: Boolean? = null
+        var sentShiftSoundOverride: Boolean? = null
         var sentShiftOverrideGain = -1f
-        var sentShiftSoundEnabled = true
-        var sentTransmissionAudioEnabled = true
-        var sentTurboAudioEnabled = true
-        var sentBackfireUseOriginal = false
+        var sentShiftSoundEnabled: Boolean? = null
+        var sentTransmissionAudioEnabled: Boolean? = null
+        var sentTurboAudioEnabled: Boolean? = null
+        var sentBackfireUseOriginal: Boolean? = null
         var sentNativeDiagnosticsEnabled = DebugTelemetry.nativeDiagnosticsEnabled()
         var eventCatalogCaptured = false
         var diagnosticBankSha256: String? = null
@@ -323,7 +350,7 @@ class EngineAudioEngine(context: Context) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             lastTickNanos = System.nanoTime()
             nextControlNanos = lastTickNanos
-            startSnapshotThread(runId, bridge)
+            startSnapshotThread(runId, profile.id, bridge)
 
             // Apply the persisted mode immediately after opening so the first exterior frame
             // cannot briefly use the authored spatial placement before the control loop runs.
@@ -361,7 +388,7 @@ class EngineAudioEngine(context: Context) {
                         "unavailable"
                     }.also { diagnosticBankSha256 = it }
                     DebugTelemetry.recordBankContext(profile.id, bankSha256)
-                    DebugTelemetry.recordBankEventCatalog(now, bridge.eventCatalog())
+                    DebugTelemetry.recordBankEventCatalog(now, profile.id, bridge.eventCatalog())
                     eventCatalogCaptured = true
                 }
 
@@ -461,8 +488,15 @@ class EngineAudioEngine(context: Context) {
                     .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                 val tractionPulseCount = (currentTractionPulse - consumedTractionPulse)
                     .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
-                val shiftStartedCount = (frame.shiftSerial - lastShiftSerial)
-                    .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                val shiftPulse = pendingShiftPulses.poll()
+                val shiftDirection = shiftPulse?.direction ?: 0
+                var shiftStartedCount = if (shiftPulse == null) 0 else 1
+                // Preserve separately queued opposite-direction shifts for the next FMOD tick.
+                // Consecutive pulses in the same direction can be represented by one native call.
+                while (pendingShiftPulses.peek()?.direction == shiftDirection && shiftDirection != 0) {
+                    pendingShiftPulses.poll()
+                    shiftStartedCount += 1
+                }
                 val maximumBoost = frame.maximumBoost.coerceAtLeast(0.001)
                 val audioWallStartedNanos = if (measurePerformance) System.nanoTime() else 0L
                 val audioCpuStartedNanos = if (measurePerformance) Debug.threadCpuTimeNanos() else 0L
@@ -482,7 +516,7 @@ class EngineAudioEngine(context: Context) {
                     shiftSerial = frame.shiftSerial,
                     limiterPulseCount = limiterPulseCount,
                     shiftStartedCount = shiftStartedCount,
-                    shiftDirection = frame.shiftDirection,
+                    shiftDirection = shiftDirection,
                     shiftRejectedCount = rejectedShiftCount,
                     backfirePulseCount = backfirePulseCount,
                     backfireSampleIndex = frame.backfireSampleIndex,
@@ -512,12 +546,12 @@ class EngineAudioEngine(context: Context) {
                     timestampNanos = now,
                     controlTickId = controlTickId,
                     previousSimulationFrameId = lastConsumedSimulationFrameId,
+                    profileId = profile.id,
                     frame = frame,
                 )
                 if (frame.simulationFrameId > 0L) {
                     lastConsumedSimulationFrameId = frame.simulationFrameId
                 }
-                lastShiftSerial = frame.shiftSerial
                 consumedLimiterPulse = currentLimiterPulse
                 consumedBackfirePulse = currentBackfirePulse
                 consumedRejectedShift = currentRejectedShift
@@ -546,8 +580,8 @@ class EngineAudioEngine(context: Context) {
 
     private fun isCurrent(runId: Long): Boolean = running.get() && generation.get() == runId
 
-    private fun startSnapshotThread(runId: Long, bridge: NativeFmodBankBridge) {
-        val thread = Thread({ mixerSnapshotLoop(runId, bridge) }, "fmod-mixer-snapshot").apply {
+    private fun startSnapshotThread(runId: Long, profileId: String, bridge: NativeFmodBankBridge) {
+        val thread = Thread({ mixerSnapshotLoop(runId, profileId, bridge) }, "fmod-mixer-snapshot").apply {
             isDaemon = true
         }
         snapshotThread.set(thread)
@@ -557,7 +591,7 @@ class EngineAudioEngine(context: Context) {
         }
     }
 
-    private fun mixerSnapshotLoop(runId: Long, bridge: NativeFmodBankBridge) {
+    private fun mixerSnapshotLoop(runId: Long, profileId: String, bridge: NativeFmodBankBridge) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
         var nextSnapshotNanos = 0L
         var nextDiagnosticsDrainNanos = 0L
@@ -582,7 +616,7 @@ class EngineAudioEngine(context: Context) {
                 nextSnapshotNanos = now + SNAPSHOT_PERIOD_NANOS
             }
             if (DebugTelemetry.nativeDiagnosticsEnabled() && now >= nextDiagnosticsDrainNanos) {
-                DebugTelemetry.recordNativeRecords(now, bridge.diagnosticRecords())
+                DebugTelemetry.recordNativeRecords(now, profileId, bridge.diagnosticRecords())
                 nextDiagnosticsDrainNanos = now + DIAGNOSTIC_DRAIN_PERIOD_NANOS
             }
             LockSupport.parkNanos(SNAPSHOT_WORKER_PARK_NANOS)
@@ -613,6 +647,11 @@ class EngineAudioEngine(context: Context) {
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
+    }
+
+    private fun clearPendingShiftPulses() {
+        pendingShiftPulses.clear()
+        observedShiftSerial.set(0L)
     }
 
     private fun reportLoadFailure(profileId: String, detail: String) {
@@ -673,6 +712,11 @@ class EngineAudioEngine(context: Context) {
         const val MAX_CONTROL_STEP_SECONDS = 0.040
         const val DEBUG_DIGEST_BUFFER_BYTES = 256 * 1024
     }
+
+    private data class ShiftPulse(
+        val serial: Long,
+        val direction: Int,
+    )
 }
 
 internal data class AudioLoadFailure(

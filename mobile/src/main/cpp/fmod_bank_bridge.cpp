@@ -21,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -392,6 +393,10 @@ struct EventSlot {
     std::string path;
     FMOD::Studio::EventDescription* description = nullptr;
     FMOD::Studio::EventInstance* instance = nullptr;
+    std::unordered_set<std::string> parameterNames;
+    std::unordered_map<std::string, FMOD_STUDIO_PARAMETER_ID> parameterIdsByName;
+    std::unordered_set<std::string> parameterIdFallbacksReported;
+    std::unordered_set<std::string> parameterFailuresReported;
 };
 
 struct RecentSource {
@@ -431,6 +436,13 @@ enum class NativeDiagnosticKind : std::uint8_t {
     VoicePlayed,
     VoiceStopped,
     VoiceState,
+    ShiftDispatch,
+    EventStartSkipped,
+    ParameterWriteFailure,
+    ParameterIdFallback,
+    GlobalParameterFallback,
+    GlobalParameterWriteFailure,
+    EventParameterCatalog,
 };
 
 /**
@@ -602,8 +614,11 @@ public:
         hasTurbo_ = hasTurbo;
         idleRpm_ = std::max(1.0f, idleRpm);
         setListenerLocked();
-        initializeParametersLocked();
         startSelectedContinuousEventsLocked();
+        // Establish the normal FMOD lifecycle before delivering the first physical values:
+        // create the continuous instances, write their authored parameters, then run Studio's
+        // first update. This changes no parameter value, curve, gain, or source-selection policy.
+        initializeParametersLocked();
         startEventLocked("start");
         result = studio_->update();
         if (result != FMOD_OK) {
@@ -674,18 +689,20 @@ public:
             switchPerspectiveLocked(perspective);
         }
 
-        for (const char* name : {"engine_int", "engine_ext"}) {
-            setParameterQuietly(slotInstance(name), "rpms", cleanRpm);
+        const std::string selectedEngine = perspectiveEventLocked("engine_int", "engine_ext");
+        if (!selectedEngine.empty()) {
+            setParameterQuietly(selectedEngine, "rpms", cleanRpm);
         }
-        for (const char* name : {"transmission", "transmission_ext"}) {
-            setParameterQuietly(slotInstance(name), "drivetrain_speed", drivetrainSpeed);
+        const std::string selectedTransmission = perspectiveEventLocked("transmission", "transmission_ext");
+        if (!selectedTransmission.empty()) {
+            setParameterQuietly(selectedTransmission, "drivetrain_speed", drivetrainSpeed);
         }
 
         EventSlot* turbo = slot("turbo");
         if (turbo != nullptr && hasTurbo_) {
-            setParameterQuietly(turbo->instance, "boost", std::max(0.0f, boost));
-            setParameterQuietly(turbo->instance, "bov", std::max(0.0f, bov));
-            setParameterQuietly(turbo->instance, "bov_decay", std::max(0.0f, bovDecay));
+            setParameterQuietly("turbo", "boost", std::max(0.0f, boost));
+            setParameterQuietly("turbo", "bov", std::max(0.0f, bov));
+            setParameterQuietly("turbo", "bov_decay", std::max(0.0f, bovDecay));
         }
 
         limiterDecay_ += cleanDt;
@@ -694,13 +711,15 @@ public:
         }
         EventSlot* limiter = slot("limiter");
         if (limiter != nullptr) {
-            setParameterQuietly(limiter->instance, "decay", limiterDecay_);
             if (limiterDecay_ <= 10.0f && !limiterRunning_) {
+                setParameterQuietly("limiter", "decay", limiterDecay_);
                 startEventLocked("limiter");
                 limiterRunning_ = true;
             } else if (limiterDecay_ > 10.0f && limiterRunning_) {
                 stopEventLocked("limiter", FMOD_STUDIO_STOP_ALLOWFADEOUT);
                 limiterRunning_ = false;
+            } else if (limiterRunning_) {
+                setParameterQuietly("limiter", "decay", limiterDecay_);
             }
         }
 
@@ -708,6 +727,30 @@ public:
             const std::string selected = perspective_ == kPerspectiveExterior
                 ? "gear_ext"
                 : "gear_int";
+            EventSlot* selectedGear = slot(selected);
+            if (diagnosticsEnabled_.load(std::memory_order_relaxed)) {
+                const bool alreadyPlaying = isPlayingLocked(slotInstance(selected));
+                const std::string detail = std::string("pulses=") + std::to_string(shiftStartedCount) +
+                    ";direction=" + std::to_string(shiftDirection) +
+                    ";enabled=" + (shiftSoundEnabled_ ? "1" : "0") +
+                    ";override=" + (shiftSoundOverride_ ? "1" : "0") +
+                    ";slot=" + (selectedGear != nullptr ? "1" : "0") +
+                    ";alreadyPlaying=" + (alreadyPlaying ? "1" : "0");
+                recordDiagnostic(
+                    NativeDiagnosticKind::ShiftDispatch,
+                    monotonicSeconds(),
+                    selectedGear,
+                    detail,
+                    FMOD_OK,
+                    0,
+                    -1.0,
+                    0.0f,
+                    0.0f,
+                    0,
+                    0,
+                    0
+                );
+            }
             for (int pulse = 0; pulse < shiftStartedCount; ++pulse) {
                 if (!shiftSoundEnabled_) continue;
                 if (shiftSoundOverride_) {
@@ -716,7 +759,7 @@ public:
                 }
                 if (slot(selected) != nullptr && !isPlayingLocked(slotInstance(selected))) {
                     stopEventLocked(selected, FMOD_STUDIO_STOP_ALLOWFADEOUT);
-                    setParameterQuietly(slotInstance(selected), "state", shiftDirection > 0 ? 1.0f : 0.0f);
+                    setParameterQuietly(selected, "state", shiftDirection > 0 ? 1.0f : 0.0f);
                     startEventLocked(selected);
                 }
             }
@@ -736,6 +779,7 @@ public:
                 } else {
                     // A disabled global policy means pure bank behavior: the app only sends the
                     // lift-off edge and lets the authored FMOD event choose its own sources.
+                    setParameterQuietly(selected, "throttle", kBackfireAudioThrottle);
                     startEventLocked(selected);
                 }
             }
@@ -748,7 +792,6 @@ public:
         // should not announce the internal correction as a driver-event effect.
         tractionDecay_ = 10.0f;
         for (const char* name : {"tractioncontrol_int", "tractioncontrol_ext"}) {
-            setParameterQuietly(slotInstance(name), "decay", tractionDecay_);
             if (isPlayingLocked(slotInstance(name))) {
                 stopEventLocked(name, FMOD_STUDIO_STOP_IMMEDIATE);
             }
@@ -1163,10 +1206,18 @@ private:
     }
 
     void setDiagnosticsEnabledLocked(bool enabled) {
-        std::lock_guard<std::mutex> diagnosticLock(diagnosticMutex_);
-        diagnosticsEnabled_.store(enabled, std::memory_order_relaxed);
-        diagnosticRing_ = enabled ? std::make_unique<NativeDiagnosticRing>() : nullptr;
-        resetTraceContextLocked();
+        {
+            std::lock_guard<std::mutex> diagnosticLock(diagnosticMutex_);
+            diagnosticsEnabled_.store(enabled, std::memory_order_relaxed);
+            diagnosticRing_ = enabled ? std::make_unique<NativeDiagnosticRing>() : nullptr;
+            resetTraceContextLocked();
+        }
+        if (enabled) {
+            recordGlobalParameterCatalogLocked();
+            for (const auto& slotEntry : slots_) {
+                recordEventParameterCatalogLocked(*slotEntry.second);
+            }
+        }
     }
 
     void resetTraceContextLocked() {
@@ -1195,6 +1246,13 @@ private:
             case NativeDiagnosticKind::VoicePlayed: return "VOICE_PLAYED";
             case NativeDiagnosticKind::VoiceStopped: return "VOICE_STOPPED";
             case NativeDiagnosticKind::VoiceState: return "VOICE_STATE";
+            case NativeDiagnosticKind::ShiftDispatch: return "SHIFT_DISPATCH";
+            case NativeDiagnosticKind::EventStartSkipped: return "EVENT_START_SKIPPED";
+            case NativeDiagnosticKind::ParameterWriteFailure: return "PARAMETER_WRITE_FAILURE";
+            case NativeDiagnosticKind::ParameterIdFallback: return "PARAMETER_ID_FALLBACK";
+            case NativeDiagnosticKind::GlobalParameterFallback: return "GLOBAL_PARAMETER_FALLBACK";
+            case NativeDiagnosticKind::GlobalParameterWriteFailure: return "GLOBAL_PARAMETER_WRITE_FAILURE";
+            case NativeDiagnosticKind::EventParameterCatalog: return "EVENT_PARAMETER_CATALOG";
         }
         return "UNKNOWN";
     }
@@ -1454,6 +1512,9 @@ private:
             }
         }
         slots_.clear();
+        globalParameterNames_.clear();
+        globalParameterFallbacksReported_.clear();
+        globalParameterFailuresReported_.clear();
         events_.clear();
         eventPaths_.clear();
         eventCatalog_.clear();
@@ -1492,23 +1553,31 @@ private:
 
     void discoverEventsLocked(const std::string& bankPath) {
         eventCatalog_.clear();
+        // `common.strings.bank` can give a modded EventDescription its stock donor-car path.
+        // Retain its GUIDs from the actual loaded car bank, then let that bank's adjacent
+        // GUIDs.txt supply the canonical mod path below. This affects discovery/card identity,
+        // never which FMOD event instance or authored audio is played.
+        std::unordered_map<std::string, FMOD::Studio::EventDescription*> loadedCarEventDescriptions;
         int eventCount = 0;
         if (bank_->getEventCount(&eventCount) == FMOD_OK && eventCount > 0) {
             std::vector<FMOD::Studio::EventDescription*> descriptions(static_cast<std::size_t>(eventCount));
             int actualCount = 0;
             if (bank_->getEventList(descriptions.data(), eventCount, &actualCount) == FMOD_OK) {
                 for (int index = 0; index < actualCount; ++index) {
-                    char path[512]{};
-                    int retrieved = 0;
                     FMOD::Studio::EventDescription* description = descriptions[static_cast<std::size_t>(index)];
-                    if (description->getPath(path, sizeof(path), &retrieved) != FMOD_OK) {
-                        continue;
-                    }
-                    const std::string suffix = eventSuffix(path);
                     FMOD_GUID guid{};
                     const std::string guidText = description->getID(&guid) == FMOD_OK
                         ? formatGuid(guid)
                         : std::string{};
+                    if (!guidText.empty()) {
+                        loadedCarEventDescriptions.emplace(guidText, description);
+                    }
+                    char path[512]{};
+                    int retrieved = 0;
+                    if (description->getPath(path, sizeof(path), &retrieved) != FMOD_OK) {
+                        continue;
+                    }
+                    const std::string suffix = eventSuffix(path);
                     eventCatalog_.push_back(BankEventCatalogEntry{
                         std::string(path),
                         guidText,
@@ -1536,16 +1605,41 @@ private:
             }
             const std::string path = trimWhitespace(line.substr(space + 1));
             const std::string suffix = eventSuffix(path);
-            if (!isAllowedEventName(suffix) || events_.find(suffix) != events_.end()) {
+            if (path.rfind("event:/", 0) != 0) {
                 continue;
             }
             FMOD_GUID guid{};
             if (!parseGuid(line.substr(0, space), &guid)) {
                 continue;
             }
-            FMOD::Studio::EventDescription* description = nullptr;
-            if (studio_->getEventByID(&guid, &description) == FMOD_OK && description != nullptr) {
-                events_[suffix] = description;
+            const std::string guidText = formatGuid(guid);
+            const auto localDescription = loadedCarEventDescriptions.find(guidText);
+            if (localDescription == loadedCarEventDescriptions.end()) {
+                continue;
+            }
+            // A mod can deliberately reuse a stock GUID. The `Bank::getEventList` description
+            // is unambiguously owned by the selected car bank; `System::getEventByID` may instead
+            // resolve the common strings bank's stock donor. Keep the local description for
+            // playback and use GUIDs.txt solely to restore its local authored path in the catalog.
+            const auto catalogued = std::find_if(
+                eventCatalog_.begin(),
+                eventCatalog_.end(),
+                [&guidText](const BankEventCatalogEntry& entry) { return entry.guid == guidText; }
+            );
+            if (catalogued == eventCatalog_.end()) {
+                eventCatalog_.push_back(BankEventCatalogEntry{
+                    path,
+                    guidText,
+                    suffix,
+                    runtimeClassificationForEvent(suffix),
+                });
+            } else {
+                catalogued->path = path;
+                catalogued->suffix = suffix;
+                catalogued->classification = runtimeClassificationForEvent(suffix);
+            }
+            if (isAllowedEventName(suffix)) {
+                events_[suffix] = localDescription->second;
                 eventPaths_[suffix] = path;
             }
         }
@@ -1560,23 +1654,147 @@ private:
         event->name = name;
         event->path = eventPaths_[name];
         event->description = description;
-        FMOD_RESULT result = description->createInstance(&event->instance);
+        FMOD_RESULT result = createEventInstanceLocked(*event);
         if (result != FMOD_OK || event->instance == nullptr) {
             lastError_ = resultText(result, "create " + name);
             return nullptr;
         }
-        // Match the requested host mix: engine at unity, ancillary events at +6 dB.
-        // This multiplies the authored Studio mix without replacing its automation.
-        const bool isEngine = name == "engine_int" || name == "engine_ext";
-        event->instance->setVolume((isEngine ? hostEngineGain_ : hostEffectsGain_) * eventCategoryGain(name));
+        cacheEventParameterNamesLocked(*event);
         EventSlot* stable = event.get();
-        event->instance->setUserData(stable);
-        event->instance->setCallback(
+        if (diagnosticsEnabled_.load(std::memory_order_relaxed)) recordEventParameterCatalogLocked(*stable);
+        slots_[name] = std::move(event);
+        return stable;
+    }
+
+    FMOD_RESULT createEventInstanceLocked(EventSlot& event) {
+        if (event.description == nullptr) {
+            return FMOD_ERR_INVALID_HANDLE;
+        }
+        FMOD::Studio::EventInstance* instance = nullptr;
+        const FMOD_RESULT result = event.description->createInstance(&instance);
+        if (result != FMOD_OK || instance == nullptr) {
+            return result;
+        }
+
+        // Host gain multiplies authored Studio automation; it does not replace a bank's mix.
+        const bool isEngine = event.name == "engine_int" || event.name == "engine_ext";
+        instance->setVolume((isEngine ? hostEngineGain_ : hostEffectsGain_) * eventCategoryGain(event.name));
+        instance->setUserData(&event);
+        instance->setCallback(
             eventCallback,
             FMOD_STUDIO_EVENT_CALLBACK_SOUND_PLAYED | FMOD_STUDIO_EVENT_CALLBACK_SOUND_STOPPED
         );
-        slots_[name] = std::move(event);
-        return stable;
+        event.instance = instance;
+        return FMOD_OK;
+    }
+
+    void cacheEventParameterNamesLocked(EventSlot& event) {
+        if (event.description == nullptr) {
+            return;
+        }
+        int count = 0;
+        if (event.description->getParameterDescriptionCount(&count) != FMOD_OK || count <= 0) {
+            return;
+        }
+        for (int index = 0; index < count; ++index) {
+            FMOD_STUDIO_PARAMETER_DESCRIPTION parameter{};
+            if (event.description->getParameterDescriptionByIndex(index, &parameter) == FMOD_OK &&
+                parameter.name != nullptr && parameter.name[0] != '\0') {
+                event.parameterNames.emplace(parameter.name);
+                event.parameterIdsByName.emplace(parameter.name, parameter.id);
+            }
+        }
+    }
+
+    void recordEventParameterCatalogLocked(const EventSlot& event) {
+        if (event.description == nullptr || !diagnosticsEnabled_.load(std::memory_order_relaxed)) {
+            return;
+        }
+        int count = 0;
+        const FMOD_RESULT countResult = event.description->getParameterDescriptionCount(&count);
+        recordDiagnostic(
+            NativeDiagnosticKind::EventParameterCatalog,
+            monotonicSeconds(),
+            &event,
+            "count=" + std::to_string(count),
+            countResult,
+            0,
+            -1.0,
+            0.0f,
+            0.0f,
+            0,
+            0,
+            0
+        );
+        if (countResult != FMOD_OK) {
+            return;
+        }
+        for (int index = 0; index < count; ++index) {
+            FMOD_STUDIO_PARAMETER_DESCRIPTION parameter{};
+            const FMOD_RESULT parameterResult = event.description->getParameterDescriptionByIndex(index, &parameter);
+            const std::string parameterName = parameterResult == FMOD_OK && parameter.name != nullptr
+                ? parameter.name
+                : "index=" + std::to_string(index);
+            recordDiagnostic(
+                NativeDiagnosticKind::EventParameterCatalog,
+                monotonicSeconds(),
+                &event,
+                parameterName,
+                parameterResult,
+                0,
+                -1.0,
+                0.0f,
+                0.0f,
+                0,
+                0,
+                0
+            );
+        }
+    }
+
+    void recordGlobalParameterCatalogLocked() {
+        if (studio_ == nullptr || !diagnosticsEnabled_.load(std::memory_order_relaxed)) {
+            return;
+        }
+        int count = 0;
+        const FMOD_RESULT countResult = studio_->getParameterDescriptionCount(&count);
+        recordDiagnostic(
+            NativeDiagnosticKind::EventParameterCatalog,
+            monotonicSeconds(),
+            nullptr,
+            "global-count=" + std::to_string(count),
+            countResult,
+            0,
+            -1.0,
+            0.0f,
+            0.0f,
+            0,
+            0,
+            0
+        );
+        if (countResult != FMOD_OK || count <= 0) {
+            return;
+        }
+        std::vector<FMOD_STUDIO_PARAMETER_DESCRIPTION> parameters(static_cast<std::size_t>(count));
+        int actual = 0;
+        const FMOD_RESULT listResult = studio_->getParameterDescriptionList(parameters.data(), count, &actual);
+        for (int index = 0; listResult == FMOD_OK && index < actual; ++index) {
+            const char* name = parameters[static_cast<std::size_t>(index)].name;
+            recordDiagnostic(
+                NativeDiagnosticKind::EventParameterCatalog,
+                monotonicSeconds(),
+                nullptr,
+                "global=" + std::string(name == nullptr ? "<unnamed>" : name),
+                listResult,
+                0,
+                -1.0,
+                0.0f,
+                0.0f,
+                0,
+                0,
+                0
+            );
+        }
     }
 
     EventSlot* slot(const std::string& name) const {
@@ -1600,32 +1818,22 @@ private:
     }
 
     void initializeParametersLocked() {
-        for (const char* name : {"engine_int", "engine_ext"}) {
-            setParameterQuietly(slotInstance(name), "rpms", idleRpm_);
-        }
+        const std::string selectedEngine = perspectiveEventLocked("engine_int", "engine_ext");
+        if (!selectedEngine.empty()) setParameterQuietly(selectedEngine, "rpms", idleRpm_);
         applyAudioThrottlePolicyLocked();
-        for (const char* name : {"gear_int", "gear_ext"}) {
-            setParameterQuietly(slotInstance(name), "state", 1.0f);
-        }
-        for (const char* name : {"transmission", "transmission_ext"}) {
-            setParameterQuietly(slotInstance(name), "drivetrain_speed", 0.0f);
-        }
-        for (const char* name : {"tractioncontrol_int", "tractioncontrol_ext"}) {
-            setParameterQuietly(slotInstance(name), "decay", tractionDecay_);
-        }
-        setParameterQuietly(slotInstance("limiter"), "decay", limiterDecay_);
+        const std::string selectedTransmission = perspectiveEventLocked("transmission", "transmission_ext");
+        if (!selectedTransmission.empty()) setParameterQuietly(selectedTransmission, "drivetrain_speed", 0.0f);
     }
 
     void applyAudioThrottlePolicyLocked() {
         // These values are deliberately not the physical pedal. They select each authored
         // event's 0 dB endpoint so the app never adds throttle-dependent attenuation. The engine
-        // and transmission stay at their load endpoint; backfire uses its lift-off endpoint.
-        for (const char* name : {"engine_int", "engine_ext", "transmission", "transmission_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
-        }
-        for (const char* name : {"backfire_int", "backfire_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", kBackfireAudioThrottle);
-        }
+        // and transmission stay at their load endpoint. Backfire receives its lift-off endpoint
+        // only when it starts, which is required by some legacy one-shot event instances.
+        const std::string selectedEngine = perspectiveEventLocked("engine_int", "engine_ext");
+        const std::string selectedTransmission = perspectiveEventLocked("transmission", "transmission_ext");
+        if (!selectedEngine.empty()) setParameterQuietly(selectedEngine, "throttle", kFullLoadAudioThrottle);
+        if (!selectedTransmission.empty()) setParameterQuietly(selectedTransmission, "throttle", kFullLoadAudioThrottle);
     }
 
     void startSelectedContinuousEventsLocked() {
@@ -1651,6 +1859,10 @@ private:
             stopEventLocked(oldTransmission, FMOD_STUDIO_STOP_ALLOWFADEOUT);
             startEventLocked(newTransmission);
         }
+        // The selected continuous graph can change while the pedal is steady. Reapply its
+        // authored full-load endpoint rather than inheriting the bank default for a frame after
+        // a cabin/exterior transition. A backfire endpoint is written only when that one-shot starts.
+        applyAudioThrottlePolicyLocked();
         applySpatialAttributesLocked();
     }
 
@@ -1677,13 +1889,30 @@ private:
     }
 
     void startEventLocked(const std::string& name) {
-        FMOD::Studio::EventInstance* instance = slotInstance(name);
+        EventSlot* event = slot(name);
+        FMOD::Studio::EventInstance* instance = event == nullptr ? nullptr : event->instance;
         if (instance == nullptr) {
+            // Debug evidence for a discovered event that failed to acquire a playable slot.
+            // This is intentionally no-op in normal runs because recordDiagnostic is disabled.
+            recordDiagnostic(
+                NativeDiagnosticKind::EventStartSkipped,
+                monotonicSeconds(),
+                nullptr,
+                name,
+                FMOD_ERR_INVALID_HANDLE,
+                0,
+                -1.0,
+                0.0f,
+                0.0f,
+                0,
+                0,
+                0
+            );
             return;
         }
         instance->setTimelinePosition(0);
         const FMOD_RESULT result = instance->start();
-        if (const EventSlot* event = slot(name); event != nullptr) {
+        if (event != nullptr) {
             recordEventLifecycle(NativeDiagnosticKind::EventStart, *event, result);
         }
     }
@@ -1714,16 +1943,140 @@ private:
                 state == FMOD_STUDIO_PLAYBACK_SUSTAINING);
     }
 
-    static void setParameterQuietly(
-        FMOD::Studio::EventInstance* instance,
+    FMOD_RESULT setParameterQuietly(
+        const std::string& eventName,
         const char* name,
-        float value
+        float value,
+        bool reportFailure = true
     ) {
-        if (instance != nullptr) {
-            // Preserve authored parameter seek speed. Forcing an immediate
-            // seek is what turns whole-km/h telemetry edges into pitch steps.
-            instance->setParameterByName(name, value, false);
+        EventSlot* event = slot(eventName);
+        if (event == nullptr || event->instance == nullptr) {
+            return FMOD_ERR_INVALID_HANDLE;
         }
+
+        // Banks do not all expose the same optional controls. Sending a made-up parameter name
+        // to Studio produces a recurring error without changing audio, so guard it from the
+        // immutable EventDescription metadata captured when this event instance was created.
+        // The remaining writes still use the bank's own curves and seek speeds.
+        if (event->parameterNames.find(name) == event->parameterNames.end()) {
+            return FMOD_ERR_EVENT_NOTFOUND;
+        }
+
+        // Preserve authored parameter seek speed. Forcing an immediate seek is what turns
+        // whole-km/h telemetry edges into pitch steps. Modded banks can expose a valid local
+        // parameter while the shared strings bank has only a donor-car alias. In that case FMOD
+        // 2.x may reject the name lookup although the EventDescription still owns the parameter.
+        // Resolve its authored ID once and keep using that ID; this preserves the bank's curves
+        // and does not synthesize a replacement control surface.
+        if (globalParameterNames_.find(name) != globalParameterNames_.end()) {
+            return studio_->setParameterByName(name, value, false);
+        }
+
+        FMOD_RESULT result = event->instance->setParameterByName(name, value, false);
+        if (result != FMOD_OK && studio_ != nullptr) {
+            const FMOD_RESULT globalResult = studio_->setParameterByName(name, value, false);
+            if (globalResult == FMOD_OK) {
+                globalParameterNames_.emplace(name);
+                if (globalParameterFallbacksReported_.emplace(name).second) {
+                    recordDiagnostic(
+                        NativeDiagnosticKind::GlobalParameterFallback,
+                        monotonicSeconds(),
+                        event,
+                        name,
+                        result,
+                        0,
+                        -1.0,
+                        0.0f,
+                        0.0f,
+                        0,
+                        0,
+                        0
+                    );
+                }
+                return FMOD_OK;
+            }
+            if (reportFailure && globalParameterFailuresReported_.emplace(name).second) {
+                recordDiagnostic(
+                    NativeDiagnosticKind::GlobalParameterWriteFailure,
+                    monotonicSeconds(),
+                    event,
+                    name,
+                    globalResult,
+                    0,
+                    -1.0,
+                    0.0f,
+                    0.0f,
+                    0,
+                    0,
+                    0
+                );
+            }
+        }
+        if (result != FMOD_OK && event->description != nullptr) {
+            auto parameter = event->parameterIdsByName.find(name);
+            if (parameter == event->parameterIdsByName.end()) {
+                FMOD_STUDIO_PARAMETER_DESCRIPTION description{};
+                if (event->description->getParameterDescriptionByName(name, &description) == FMOD_OK) {
+                    parameter = event->parameterIdsByName.emplace(name, description.id).first;
+                } else {
+                    // Some legacy banks only expose their local parameter table by index after
+                    // a modern shared strings bank has supplied a donor event alias. Enumerating
+                    // the owning EventDescription is still authored data, unlike guessing an
+                    // index from the app's event naming convention.
+                    int parameterCount = 0;
+                    if (event->description->getParameterDescriptionCount(&parameterCount) == FMOD_OK) {
+                        for (int index = 0; index < parameterCount; ++index) {
+                            FMOD_STUDIO_PARAMETER_DESCRIPTION indexed{};
+                            if (event->description->getParameterDescriptionByIndex(index, &indexed) == FMOD_OK &&
+                                indexed.name != nullptr && name == std::string(indexed.name)) {
+                                parameter = event->parameterIdsByName.emplace(name, indexed.id).first;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (parameter != event->parameterIdsByName.end()) {
+                const FMOD_RESULT fallback = event->instance->setParameterByID(parameter->second, value, false);
+                if (fallback == FMOD_OK) {
+                    if (event->parameterIdFallbacksReported.emplace(name).second) {
+                        recordDiagnostic(
+                            NativeDiagnosticKind::ParameterIdFallback,
+                            monotonicSeconds(),
+                            event,
+                            name,
+                            result,
+                            0,
+                            -1.0,
+                            0.0f,
+                            0.0f,
+                            0,
+                            0,
+                            0
+                        );
+                    }
+                    return FMOD_OK;
+                }
+                result = fallback;
+            }
+        }
+        if (result != FMOD_OK && reportFailure && event->parameterFailuresReported.emplace(name).second) {
+            recordDiagnostic(
+                NativeDiagnosticKind::ParameterWriteFailure,
+                monotonicSeconds(),
+                event,
+                name,
+                result,
+                0,
+                -1.0,
+                0.0f,
+                0.0f,
+                0,
+                0,
+                0
+            );
+        }
+        return result;
     }
 
     void collectVoiceSnapshotsLocked(std::unordered_map<std::string, VoiceAggregate>* aggregates) {
@@ -1863,6 +2216,9 @@ private:
     std::unordered_map<std::string, std::string> eventPaths_;
     std::vector<BankEventCatalogEntry> eventCatalog_;
     std::unordered_map<std::string, std::unique_ptr<EventSlot>> slots_;
+    std::unordered_set<std::string> globalParameterNames_;
+    std::unordered_set<std::string> globalParameterFallbacksReported_;
+    std::unordered_set<std::string> globalParameterFailuresReported_;
     std::unordered_map<std::string, bool> mutedEvents_;
     std::unordered_map<std::string, bool> soloEvents_;
     float hostEngineGain_ = 1.0f;
