@@ -59,7 +59,9 @@ class EngineAudioEngine(context: Context) {
     private val backfireOnly = AtomicBoolean(false)
     private val backfireAudioEnabled = AtomicBoolean(true)
     private val backfireAllowedSamplesMask = AtomicInteger(0b111111)
+    private val exteriorPureAudio = AtomicBoolean(false)
     private var sentBackfireOnly = false
+    private var sentExteriorPureAudio = false
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -124,6 +126,8 @@ class EngineAudioEngine(context: Context) {
     fun setBackfireOnly(enabled: Boolean) { backfireOnly.set(enabled) }
 
     fun setBackfireAudioEnabled(enabled: Boolean) { backfireAudioEnabled.set(enabled) }
+
+    fun setExteriorPureAudio(enabled: Boolean) { exteriorPureAudio.set(enabled) }
 
     fun setBackfireAllowedSamples(samples: Set<Int>) {
         val mask = samples.fold(0) { result, sample ->
@@ -298,6 +302,12 @@ class EngineAudioEngine(context: Context) {
             nextControlNanos = lastTickNanos
             startSnapshotThread(runId, bridge)
 
+            // Apply the persisted mode immediately after opening so the first exterior frame
+            // cannot briefly use the authored spatial placement before the control loop runs.
+            val requestedExteriorPureAudio = exteriorPureAudio.get()
+            bridge.setExteriorPureAudio(requestedExteriorPureAudio)
+            sentExteriorPureAudio = requestedExteriorPureAudio
+
             while (isCurrent(runId)) {
                 val now = System.nanoTime()
                 val controlPeriodNanos = FmodUpdateRate.periodNanos(fmodUpdateRateHz.get())
@@ -380,6 +390,11 @@ class EngineAudioEngine(context: Context) {
                 if (requestedBackfireOnly != sentBackfireOnly) {
                     bridge.setBackfireOnly(requestedBackfireOnly)
                     sentBackfireOnly = requestedBackfireOnly
+                }
+                val requestedExteriorPureAudio = exteriorPureAudio.get()
+                if (requestedExteriorPureAudio != sentExteriorPureAudio) {
+                    bridge.setExteriorPureAudio(requestedExteriorPureAudio)
+                    sentExteriorPureAudio = requestedExteriorPureAudio
                 }
                 val currentLimiterPulse = limiterPulseSerial.get()
                 val currentBackfirePulse = backfirePulseSerial.get()

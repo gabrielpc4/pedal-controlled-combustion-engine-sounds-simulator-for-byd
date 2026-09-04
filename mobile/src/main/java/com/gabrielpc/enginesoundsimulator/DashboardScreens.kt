@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -410,6 +411,8 @@ internal fun SettingsScreen(
     onResetAll: () -> Unit,
     fmodUpdateRateHz: Int,
     onFmodUpdateRateChange: (Int) -> Unit,
+    exteriorPureAudio: Boolean,
+    onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
@@ -442,6 +445,10 @@ internal fun SettingsScreen(
                 rateHz = fmodUpdateRateHz,
                 onRateChange = onFmodUpdateRateChange,
             )
+            ExteriorPureAudioControl(
+                enabled = exteriorPureAudio,
+                onEnabledChange = onExteriorPureAudioChange,
+            )
             Button(
                 onClick = onResetAll,
                 colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
@@ -455,6 +462,30 @@ internal fun SettingsScreen(
                 onPreview = onPreviewBackfireSample,
             )
         }
+    }
+}
+
+@Composable
+private fun ExteriorPureAudioControl(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("EXTERIOR PURE AUDIO", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text(
+                "Neutralizes exterior 3D distance and pan. FMOD events, pitch, gain, fades and authored DSP remain active.",
+                color = Muted,
+                fontSize = 12.sp,
+            )
+        }
+        Switch(checked = enabled, onCheckedChange = onEnabledChange)
     }
 }
 

@@ -69,6 +69,9 @@ internal class NativeFmodBankBridge {
     /** Bit mask for the four Alfa bank-derived one-shot sources (bit 0 = source 1). */
     external fun setBackfireAllowedSamples(mask: Int)
 
+    /** Neutralizes exterior 3D distance/pan while preserving authored Studio events and DSP. */
+    external fun setExteriorPureAudio(enabled: Boolean)
+
     external fun setEventOverrides(mutedEvents: Array<String>, soloEvents: Array<String>)
 
     external fun close()

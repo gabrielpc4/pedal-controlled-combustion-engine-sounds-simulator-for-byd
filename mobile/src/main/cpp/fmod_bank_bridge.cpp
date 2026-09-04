@@ -595,10 +595,7 @@ public:
         backfireAttributes_ = attributesAt(spatial[3], spatial[4], spatial[5]);
         cabinListenerAttributes_ = attributesAt(spatial[6], spatial[7], spatial[8]);
         exteriorListenerAttributes_ = attributesAt(spatial[9], spatial[10], spatial[11]);
-        for (auto& pair : slots_) {
-            const bool backfire = pair.first == "backfire_int" || pair.first == "backfire_ext";
-            pair.second->instance->set3DAttributes(backfire ? &backfireAttributes_ : &engineAttributes_);
-        }
+        applySpatialAttributesLocked();
 
         perspective_ = perspective;
         hasTurbo_ = hasTurbo;
@@ -813,6 +810,14 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         backfireAllowedSamplesMask_ = mask & 0x0F;
         if (backfireAllowedSamplesMask_ == 0) backfireAllowedSamplesMask_ = 1;
+    }
+
+    void setExteriorPureAudio(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!active_ || exteriorPureAudio_ == enabled) return;
+        exteriorPureAudio_ = enabled;
+        applySpatialAttributesLocked();
+        setListenerLocked();
     }
 
     void setEventOverrides(
@@ -1557,13 +1562,29 @@ private:
             stopEventLocked(oldTransmission, FMOD_STUDIO_STOP_ALLOWFADEOUT);
             startEventLocked(newTransmission);
         }
+        applySpatialAttributesLocked();
     }
 
     void setListenerLocked() {
+        // In the optional exterior-pure mode, placing the listener at the engine emitter
+        // neutralizes FMOD distance attenuation and stereo pan without bypassing Studio DSP.
         const FMOD_3D_ATTRIBUTES& listener = perspective_ == kPerspectiveExterior
-            ? exteriorListenerAttributes_
+            ? (exteriorPureAudio_ ? engineAttributes_ : exteriorListenerAttributes_)
             : cabinListenerAttributes_;
         studio_->setListenerAttributes(0, &listener);
+    }
+
+    void applySpatialAttributesLocked() {
+        for (auto& pair : slots_) {
+            const bool backfire = pair.first == "backfire_int" || pair.first == "backfire_ext";
+            const FMOD_3D_ATTRIBUTES* attributes = nullptr;
+            if (perspective_ == kPerspectiveExterior && exteriorPureAudio_) {
+                attributes = &engineAttributes_;
+            } else {
+                attributes = backfire ? &backfireAttributes_ : &engineAttributes_;
+            }
+            pair.second->instance->set3DAttributes(attributes);
+        }
     }
 
     void startEventLocked(const std::string& name) {
@@ -1780,6 +1801,7 @@ private:
     float tractionDecay_ = 10.0f;
     int perspective_ = 0;
     bool active_ = false;
+    bool exteriorPureAudio_ = false;
     bool hasTurbo_ = false;
     float idleRpm_ = 1000.0f;
     bool limiterRunning_ = false;
@@ -2026,6 +2048,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireAl
     JNIEnv*, jobject, jint mask
 ) {
     runtime.setBackfireAllowedSamples(mask);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setExteriorPureAudio(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setExteriorPureAudio(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL

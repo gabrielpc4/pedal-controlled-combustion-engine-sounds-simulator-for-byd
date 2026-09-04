@@ -15,6 +15,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRateRepository
+import com.gabrielpc.enginesoundsimulator.audio.ExteriorAudioModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGains
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
@@ -79,6 +80,7 @@ data class DriveSnapshot(
     val carAudioReady: Boolean = false,
     val manualShiftModeEnabled: Boolean = false,
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
+    val exteriorPureAudio: Boolean = false,
     val userMessage: UserVisibleMessage? = null,
 )
 
@@ -103,6 +105,7 @@ class DriveController(context: Context) {
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
     private val audioMixGainRepository = AudioMixGainRepository(appContext)
     private val fmodUpdateRateRepository = FmodUpdateRateRepository(appContext)
+    private val exteriorAudioModeRepository = ExteriorAudioModeRepository(appContext)
     private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
@@ -133,6 +136,7 @@ class DriveController(context: Context) {
     private val backfireSettings = AtomicReference(BackfireSettings())
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
+    private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
     private var consumedDebugScenarioShiftSerial = 0L
@@ -173,6 +177,7 @@ class DriveController(context: Context) {
         simulation.manualShiftEnabled = manualShiftEnabled.get()
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
         audioEngine.setFmodUpdateRateHz(fmodUpdateRateHz.get())
+        audioEngine.setExteriorPureAudio(exteriorPureAudio.get())
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
         audioMixGains.set(audioMixGainRepository.load(selectedProfile.get()))
         audioEngine.setCategoryGains(audioMixGains.get())
@@ -208,6 +213,7 @@ class DriveController(context: Context) {
             backfireOnly = backfireOnly.get(),
             backfireSettings = backfireSettings.get(),
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
+            exteriorPureAudio = exteriorPureAudio.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
         )
@@ -283,6 +289,12 @@ class DriveController(context: Context) {
     }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
+
+    fun setExteriorPureAudio(enabled: Boolean) {
+        exteriorPureAudio.set(enabled)
+        exteriorAudioModeRepository.save(enabled)
+        audioEngine.setExteriorPureAudio(enabled)
+    }
     fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float) {
         // These trims are intentionally per-car and survive normal APK updates. Reset All is the
         // explicit opt-in that clears them, so selecting another car never carries a hidden mix.
@@ -325,8 +337,10 @@ class DriveController(context: Context) {
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
         backfireSettingsRepository.reset()
         fmodUpdateRateRepository.reset()
+        exteriorAudioModeRepository.reset()
         audioMixGains.set(AudioMixGains())
         fmodUpdateRateHz.set(FmodUpdateRate.DEFAULT_HZ)
+        exteriorPureAudio.set(false)
         backfireSettings.set(BackfireSettings())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
@@ -334,6 +348,7 @@ class DriveController(context: Context) {
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())
         audioEngine.setFmodUpdateRateHz(FmodUpdateRate.DEFAULT_HZ)
+        audioEngine.setExteriorPureAudio(false)
         simulation.reset()
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
     }
