@@ -1010,7 +1010,9 @@ private fun DashboardEffectControls(
                     EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
                     EffectSoundKind.TURBO -> state.turboEnabled
                 }
-                Text(row.first, color = if (enabled) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.height(rowHeight))
+                Box(Modifier.width(150.dp).height(rowHeight), contentAlignment = Alignment.CenterStart) {
+                    Text(row.first, color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
@@ -1018,7 +1020,7 @@ private fun DashboardEffectControls(
             rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
-            DashboardEffectSwitch(external) { onEngineExternalChange(!external) }
+            DashboardSwitchCell(rowHeight, external) { onEngineExternalChange(!external) }
             rows.drop(1).forEach { row ->
                 val enabled = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
@@ -1026,7 +1028,7 @@ private fun DashboardEffectControls(
                     EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
                     EffectSoundKind.TURBO -> state.turboEnabled
                 }
-                DashboardEffectSwitch(enabled) { onEnabledChange(row.second, !enabled) }
+                DashboardSwitchCell(rowHeight, enabled) { onEnabledChange(row.second, !enabled) }
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
@@ -1037,7 +1039,7 @@ private fun DashboardEffectControls(
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
-            DashboardEffectSwitch(state.exteriorPureAudio) { onEnginePureChange(!state.exteriorPureAudio) }
+            DashboardSwitchCell(rowHeight, state.exteriorPureAudio) { onEnginePureChange(!state.exteriorPureAudio) }
             rows.drop(1).forEach { row ->
                 val original = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOriginal
@@ -1045,7 +1047,7 @@ private fun DashboardEffectControls(
                     else -> false
                 }
                 if (row.second == EffectSoundKind.POPS_AND_BANGS || row.second == EffectSoundKind.SHIFT) {
-                    DashboardEffectSwitch(original) { onOriginalChange(row.second, !original) }
+                    DashboardSwitchCell(rowHeight, original) { onOriginalChange(row.second, !original) }
                 } else DashboardEmptyControlCell(rowHeight)
             }
         }
@@ -1074,13 +1076,16 @@ private fun DashboardEmptyControlCell(height: Dp) {
 
 @Composable
 private fun DashboardColumnTextCell(label: String, active: Boolean, height: Dp) {
-    Text(
-        label,
-        color = if (active) Cyan else Muted,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Black,
-        modifier = Modifier.height(height),
-    )
+    Box(Modifier.width(95.dp).height(height), contentAlignment = Alignment.CenterEnd) {
+        Text(label, color = if (active) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
+    }
+}
+
+@Composable
+private fun DashboardSwitchCell(height: Dp, checked: Boolean, onToggle: () -> Unit) {
+    Box(Modifier.width(64.dp).height(height), contentAlignment = Alignment.Center) {
+        DashboardEffectSwitch(checked, onToggle)
+    }
 }
 
 @Composable
@@ -1091,7 +1096,7 @@ private fun DashboardOriginalColumnCell(
     height: Dp,
 ) {
     if (available) {
-        Text("ORIGINAL", color = if (original) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.height(height))
+        DashboardColumnTextCell("ORIGINAL", original, height)
     } else {
         DashboardEmptyControlCell(height)
     }
@@ -1104,21 +1109,23 @@ private fun DashboardGainButton(
     textColor: Color,
     onClick: () -> Unit,
 ) {
-    Text(
-        text = preset.label,
-        color = textColor,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
-        modifier = Modifier
-            .width(105.dp)
-            .height(38.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (selected) Cyan else PanelBright)
-            .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .padding(top = 10.dp),
-    )
+    Box(Modifier.width(105.dp).height(42.dp), contentAlignment = Alignment.Center) {
+        Text(
+            text = preset.label,
+            color = textColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(38.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (selected) Cyan else PanelBright)
+                .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
+                .clickable(onClick = onClick)
+                .padding(top = 10.dp),
+        )
+    }
 }
 
 @Composable
