@@ -24,6 +24,7 @@ internal class BydSealSimulatedPedalsMotion {
         transmissionPosition: TransmissionPosition,
         deltaSeconds: Double,
         initialDocumentedContinuousSpeedKmh: Double? = null,
+        launchControlEnabled: Boolean = false,
     ): BydSealMotionFrame {
         initialDocumentedContinuousSpeedKmh?.let {
             documentedContinuousSpeedKmh = it.coerceIn(0.0, TOP_SPEED_KMH)
@@ -37,7 +38,15 @@ internal class BydSealSimulatedPedalsMotion {
         val pedal = throttle.coerceIn(0.0, 1.0)
         val brakePedal = brake.coerceIn(0.0, 1.0)
         val canDrive = transmissionPosition == TransmissionPosition.DRIVE
-        val propulsion = if (canDrive) {
+        // Launch control is an app-level staging policy copied from the legacy main branch.
+        // While SIMULATED PEDALS holds full throttle and the brake at a standstill, the virtual
+        // Seal must remain stopped so the drivetrain can stage RPM instead of creeping forward.
+        // REAL PEDALS never passes this flag; its reported road speed remains authoritative.
+        val launchStagingBrakeHeld = launchControlEnabled &&
+            pedal >= LaunchControl.FULL_THROTTLE_THRESHOLD &&
+            brakePedal >= LaunchControl.ARM_BRAKE_THRESHOLD &&
+            documentedContinuousSpeedKmh / 3.6 <= LaunchControl.STANDSTILL_SPEED_MPS
+        val propulsion = if (canDrive && !launchStagingBrakeHeld) {
             fullThrottleAccelerationKmhPerSecond(documentedContinuousSpeedKmh) * pedal
         } else {
             0.0

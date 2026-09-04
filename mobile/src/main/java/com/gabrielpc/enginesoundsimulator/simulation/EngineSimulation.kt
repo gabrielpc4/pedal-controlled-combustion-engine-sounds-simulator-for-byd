@@ -148,6 +148,7 @@ class EngineSimulation {
                 transmissionPosition = input.transmissionPosition,
                 deltaSeconds = dt,
                 initialDocumentedContinuousSpeedKmh = documentedModelSeedSpeedKmh,
+                launchControlEnabled = input.simulatedPedals,
             )
         } else {
             null
@@ -212,6 +213,10 @@ class EngineSimulation {
             externalVehicleSpeedMetersPerSecond = drivetrainRawSpeedKmh?.div(3.6),
             fmodDrivetrainSpeedMetersPerSecond = fmodDrivetrainSpeedKmh.div(3.6),
             deltaSeconds = dt,
+            // Launch control is a driver-input policy and therefore applies to both pedal
+            // sources and both shift modes. The drivetrain still keeps REAL speed authoritative;
+            // this flag only enables staging/tach behavior when the selector is in D.
+            launchControlEnabled = input.transmissionPosition == TransmissionPosition.DRIVE,
         )
         val audiblePresentationSpeedKmh = realOrDocumentedExtrapolatedPresentationSpeedKmh
             ?: frame.speedMetersPerSecond * 3.6

@@ -90,6 +90,17 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
     private var previousFmodWheelSpeed = 0.0
+    // Launch control is deliberately kept in the drivetrain because this is where the
+    // authoritative RPM, clutch, gear and wheel-coupling state lives. It is enabled by D input
+    // from either pedal source and either shift mode; FMOD still receives resulting parameters.
+    private var launchControlPhase = LaunchControlPhase.INACTIVE
+    private var launchControlJitterPhase = 0.0
+    private var launchControlArmedElapsedSeconds = 0.0
+    private var launchControlArmedStartRpm = physics.engine.idleRpm
+    private var launchControlDisarmElapsedSeconds = 0.0
+    private var launchControlDisarmStartRpm = physics.engine.idleRpm
+    private var launchControlTachCycleElapsedSeconds = 0.0
+    private var launchControlTachCycleStartRpm = physics.engine.idleRpm
     private var driven = drivenAxle(physics.drivetrain.vehicle)
     private var aeroDrag = 0.0
     private var downforce = 0.0
@@ -108,6 +119,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         boost = 0.0
         bov = 0.0
         bovDecay = 10.0
+        resetLaunchControl()
     }
 
     fun updateBackfireSettings(updated: BackfireSettings) {
@@ -150,6 +162,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         landingRpmByGear.fill(0.0)
         fmodDrivetrainSpeedMetersPerSecond = 0.0
         previousFmodWheelSpeed = 0.0
+        resetLaunchControl()
         previousTractionLimit = false
         turboQs.fill(0.0)
         boost = 0.0
@@ -201,6 +214,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         externalVehicleSpeedMetersPerSecond: Double?,
         fmodDrivetrainSpeedMetersPerSecond: Double?,
         deltaSeconds: Double,
+        launchControlEnabled: Boolean,
     ): AssettoDrivetrainFrame {
         val dt = f32(deltaSeconds.coerceIn(0.0001, 0.050))
         currentTransmissionPosition = transmissionPosition
@@ -236,6 +250,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         var eventDirection = if (shifting) shiftDirection else 0
         val rawGas = throttle.coerceIn(0.0, 1.0)
         val cleanBrake = brake.coerceIn(0.0, 1.0)
+        updateLaunchControl(
+            rawThrottle = rawGas,
+            brake = cleanBrake,
+            // The launch sequence is deliberately available in automatic and manual modes.
+            // `automaticShifting` still controls only automatic gear decisions below.
+            enabled = launchControlEnabled && transmissionPosition == TransmissionPosition.DRIVE,
+        )
         updateAeroForSpeed(speedMetersPerSecond)
 
         val clutch = autoclutchStep(dt, rawGas, cleanBrake)
@@ -386,6 +407,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 rpm = physics.engine.limiterRpm
             }
         }
+        updateLaunchControlRpm(dt, rawGas)
+        if (physics.engine.limiterRpm > 0.0) {
+            rpm = rpm.coerceAtMost(physics.engine.limiterRpm)
+        }
         previousFmodWheelSpeed = wheelSpeed
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
@@ -507,6 +532,14 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         dt: Double,
     ): Int {
         if (!enabled || gear == -1 || shifting) return 0
+        // While staging, launch control owns the engine RPM target. Do not let the automatic
+        // threshold interpret the 5k staging ramp as a request to leave first gear before the
+        // driver releases the brake.
+        if (launchControlPhase == LaunchControlPhase.ARMED ||
+            launchControlPhase == LaunchControlPhase.DISARMING
+        ) {
+            return 0
+        }
         var request = 0
         if (clutch > 0.99 || gear == 0) {
             // Upshifts remain bank-authored except for the explicitly restored main-branch 1→2
@@ -678,6 +711,120 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     }
 
     private fun ratioForGear(gear: Int): Double = physics.drivetrain.ratioForGear(gear)
+
+    private fun resetLaunchControl() {
+        launchControlPhase = LaunchControlPhase.INACTIVE
+        launchControlJitterPhase = 0.0
+        launchControlArmedElapsedSeconds = 0.0
+        launchControlArmedStartRpm = physics.engine.idleRpm
+        launchControlDisarmElapsedSeconds = 0.0
+        launchControlDisarmStartRpm = physics.engine.idleRpm
+        launchControlTachCycleElapsedSeconds = 0.0
+        launchControlTachCycleStartRpm = physics.engine.idleRpm
+    }
+
+    private fun updateLaunchControl(
+        rawThrottle: Double,
+        brake: Double,
+        enabled: Boolean,
+    ) {
+        val previousPhase = launchControlPhase
+        launchControlPhase = LaunchControl.advancePhase(
+            phase = launchControlPhase,
+            rawThrottle = rawThrottle,
+            brake = brake,
+            speedMps = speedMetersPerSecond,
+            enabled = enabled,
+        )
+        if (launchControlPhase == LaunchControlPhase.ARMED && previousPhase != LaunchControlPhase.ARMED) {
+            launchControlJitterPhase = 0.0
+            launchControlArmedElapsedSeconds = 0.0
+            launchControlArmedStartRpm = rpm
+        }
+        if (launchControlPhase == LaunchControlPhase.DISARMING && previousPhase == LaunchControlPhase.ARMED) {
+            launchControlDisarmElapsedSeconds = 0.0
+            launchControlDisarmStartRpm = rpm
+        }
+        if (launchControlPhase == LaunchControlPhase.LAUNCHED && previousPhase != LaunchControlPhase.LAUNCHED) {
+            launchControlTachCycleElapsedSeconds = 0.0
+            launchControlTachCycleStartRpm = rpm
+        }
+    }
+
+    private fun updateLaunchControlRpm(dt: Double, rawThrottle: Double) {
+        when (launchControlPhase) {
+            LaunchControlPhase.INACTIVE -> Unit
+
+            LaunchControlPhase.DISARMING -> {
+                launchControlDisarmElapsedSeconds += dt
+                val target = LaunchControl.disarmTargetRpm(
+                    disarmElapsedSeconds = launchControlDisarmElapsedSeconds,
+                    startRpm = launchControlDisarmStartRpm,
+                    endRpm = launchControlArmedStartRpm,
+                )
+                rpm = approachRpm(target, LaunchControl.ARMED_RAMP_FOLLOW_SECONDS, dt)
+                if (launchControlDisarmElapsedSeconds >= LaunchControl.ARMED_RAMP_SECONDS) {
+                    launchControlPhase = LaunchControlPhase.INACTIVE
+                    rpm = launchControlArmedStartRpm.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
+                }
+            }
+
+            LaunchControlPhase.ARMED -> {
+                launchControlArmedElapsedSeconds += dt
+                launchControlJitterPhase = launchControlJitterPhaseStep(dt, launchControlJitterPhase)
+                val target = LaunchControl.armedTargetRpm(
+                    armedElapsedSeconds = launchControlArmedElapsedSeconds,
+                    jitterPhaseRadians = launchControlJitterPhase,
+                    startRpm = launchControlArmedStartRpm,
+                )
+                val response = if (
+                    launchControlArmedElapsedSeconds <
+                    LaunchControl.ARMED_RAMP_SECONDS + LaunchControl.ARMED_SETTLE_SECONDS
+                ) {
+                    LaunchControl.ARMED_RAMP_FOLLOW_SECONDS
+                } else {
+                    LaunchControl.ARMED_JITTER_FOLLOW_SECONDS
+                }
+                rpm = approachRpm(target, response, dt)
+            }
+
+            LaunchControlPhase.LAUNCHED -> {
+                val shiftActive = shifting
+                if (shiftActive) {
+                    // During a gear change the authored drivetrain ratio and the app's fixed
+                    // clutch profile remain authoritative; the tach animation resumes in first.
+                    val target = if (shiftDirection > 0) {
+                        rpm.coerceAtMost(upshiftTriggerRpmForGear(gear, rawThrottle))
+                    } else {
+                        rpm.coerceAtMost(physics.engine.limiterRpm)
+                    }
+                    rpm = approachRpm(target, FIXED_UPSHIFT_SECONDS, dt)
+                } else if (LaunchControl.shouldPlayLaunchTachAnimation(gear - 1, rawThrottle)) {
+                    launchControlTachCycleElapsedSeconds += dt
+                    val target = LaunchControl.launchedTachTargetRpm(
+                        cycleElapsedSeconds = launchControlTachCycleElapsedSeconds,
+                        redlineRpm = physics.engine.limiterRpm,
+                        launchStartRpm = launchControlTachCycleStartRpm,
+                    )
+                    val response = if (target >= rpm) {
+                        LaunchControl.LAUNCHED_TACH_REV_UP_FOLLOW_SECONDS
+                    } else {
+                        LaunchControl.LAUNCHED_TACH_BOUNCE_FOLLOW_SECONDS
+                    }
+                    rpm = approachRpm(target, response, dt)
+                } else {
+                    val target = rpm.coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
+                    rpm = approachRpm(target, LaunchControl.LAUNCHED_ENGINE_BRAKE_RESPONSE_SECONDS, dt)
+                }
+            }
+        }
+    }
+
+    private fun approachRpm(target: Double, responseSeconds: Double, dt: Double): Double {
+        val response = responseSeconds.coerceAtLeast(0.001)
+        val alpha = (1.0 - kotlin.math.exp(-dt / response)).coerceIn(0.0, 1.0)
+        return (rpm + (target - rpm) * alpha).coerceIn(physics.engine.idleRpm, physics.engine.limiterRpm)
+    }
 
     private val physicsGear: Int
         get() = if (shifting) 0 else gear
