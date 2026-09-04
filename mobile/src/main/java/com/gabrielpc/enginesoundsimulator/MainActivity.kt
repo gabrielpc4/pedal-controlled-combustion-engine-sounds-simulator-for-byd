@@ -1002,7 +1002,7 @@ private fun DashboardEffectControls(
     val rowHeight = 42.dp
     val rowGap = 7.dp
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(4.dp)) {
             rows.forEachIndexed { index, row ->
                 val enabled = if (index == 0) external else when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
@@ -1015,11 +1015,11 @@ private fun DashboardEffectControls(
                 }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
             DashboardColumnTextCell("EXTERNAL", external, rowHeight)
             rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
         }
-        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, external, Line) { onEngineExternalChange(!external) }
             rows.drop(1).forEach { row ->
                 val enabled = when (row.second) {
@@ -1031,14 +1031,14 @@ private fun DashboardEffectControls(
                 DashboardSwitchCell(rowHeight, enabled, Line) { onEnabledChange(row.second, !enabled) }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
             DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
             DashboardOriginalColumnCell(state.popsAndBangsOriginal, true, { onOriginalChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOriginal) }, rowHeight)
             DashboardOriginalColumnCell(state.shiftSoundsOriginal, true, { onOriginalChange(EffectSoundKind.SHIFT, !state.shiftSoundsOriginal) }, rowHeight)
             DashboardEmptyControlCell(rowHeight)
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
-        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) { onEnginePureChange(!state.exteriorPureAudio) }
             rows.drop(1).forEach { row ->
                 val original = when (row.second) {
@@ -1052,7 +1052,7 @@ private fun DashboardEffectControls(
             }
         }
         DASHBOARD_EFFECT_GAIN_PRESETS.forEachIndexed { columnIndex, preset ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
                 rows.forEach { row ->
                     val selected = kotlin.math.abs(row.third - preset.gain) < 0.001f
                     DashboardGainButton(preset, selected, if (selected) Night else Cyan, Line) {
@@ -1071,7 +1071,7 @@ private fun DashboardEffectControls(
 
 @Composable
 private fun DashboardEmptyControlCell(height: Dp) {
-    Spacer(Modifier.width(64.dp).height(height))
+    Spacer(Modifier.height(height))
 }
 
 @Composable
