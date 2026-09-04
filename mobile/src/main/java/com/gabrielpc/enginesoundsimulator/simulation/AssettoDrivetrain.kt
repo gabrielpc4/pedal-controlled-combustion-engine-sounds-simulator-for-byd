@@ -371,6 +371,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             if (oldSpeed <= 0.0 && driveForce <= resistingForce) speedMetersPerSecond = 0.0
         }
         rpm = max(0.0, engineOmega * RPM_PER_RADIAN_SECOND)
+        // LIMITER is a hard upper bound for the value sent to FMOD and the tachometer. This
+        // applies equally to automatic and manual transmission: holding a gear at the limiter
+        // now cuts torque without ever producing an above-limiter RPM sample.
+        if (physics.engine.limiterRpm > 0.0) {
+            rpm = rpm.coerceAtMost(physics.engine.limiterRpm)
+        }
         previousFmodWheelSpeed = wheelSpeed
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
@@ -587,12 +593,22 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
      */
     private fun upshiftTriggerRpmForGear(currentGear: Int, gas: Double): Double {
         val authored = physics.drivetrain.automaticUpshiftRpm.toDouble()
-        return if (currentGear == 1 && gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD) {
+        val requested = if (currentGear == 1 && gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD) {
             (MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM - customShiftAdvanceRpm())
                 .coerceAtMost(authored)
                 .coerceAtLeast(physics.engine.idleRpm + 500.0)
         } else {
             authored
+        }
+        // A few imported profiles contain an automatic UP value a little above LIMITER. The
+        // bank can still author a distinct shift-light/redline relationship, but the app must
+        // never request a shift after the engine has already crossed its hard limiter. This
+        // clamp is only a safety bound; it does not raise profiles such as the LFA Concept's
+        // authored 6,800-RPM UP point to the 9,000-RPM limiter.
+        return if (physics.engine.limiterRpm > 0.0) {
+            requested.coerceAtMost(physics.engine.limiterRpm)
+        } else {
+            requested
         }
     }
 
@@ -711,12 +727,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         } else {
             50
         }
-        // The limiter gate is evaluated at the beginning of this fixed physics step, exactly as
-        // in the authored model. Engine inertia is integrated afterwards, so a brief reading a
-        // little above limiterRpm is a physical overshoot before the next step cuts gas; it is
-        // not a second redline or a synthetic tach target. Keeping that sample preserves the
-        // bank's limiter timing and lets the limiter event receive its normal pulse.
-        if (engine.limiterRpm > 0.0 && rpm > engine.limiterRpm) limiterCounter = max(1, limiterSteps)
+        // The limiter gate is evaluated at the beginning of this fixed physics step, while the
+        // engine is integrated below. A previous version intentionally exposed one overshoot
+        // sample; that made manual mode visibly exceed the car's hard limiter and let an
+        // automatic UP value above LIMITER start a shift too late. At the exact boundary we arm
+        // the authored limiter pulse, then the integration result is clamped to the boundary.
+        if (engine.limiterRpm > 0.0 && rpm >= engine.limiterRpm) limiterCounter = max(1, limiterSteps)
         val limiterActive = limiterCounter > 0
         if (limiterActive) limiterCounter -= 1
         val effective = if (limiterActive) 0.0 else mapped
