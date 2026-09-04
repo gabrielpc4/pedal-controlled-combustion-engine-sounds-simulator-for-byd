@@ -212,25 +212,23 @@ internal fun MixerDashboardScreen(
             onSelectCar = onSelectCar,
         )
         Spacer(Modifier.height(6.dp))
+        var engineGain by remember { mutableStateOf(1.0f) }
+        var effectsGain by remember { mutableStateOf(2.0f) }
         MixerPerspectiveSelector(
             perspective = soundPerspective,
             onPerspectiveSelected = onSoundPerspectiveChange,
+            engineGain = engineGain,
+            effectsGain = effectsGain,
+            onHostGains = { engine, effects ->
+                engineGain = engine
+                effectsGain = effects
+                onHostGains(engine, effects)
+            },
         )
-        var engineGain by remember { mutableStateOf(1.0f) }
-        var effectsGain by remember { mutableStateOf(2.0f) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("ENGINE ${String.format(Locale.US, "%.1fx", engineGain)}", color = CyanSoft, fontSize = 11.sp)
-            Slider(engineGain, { engineGain = it; onHostGains(it, effectsGain) }, valueRange = 0f..3f, modifier = Modifier.weight(1f))
-            Text("EFFECTS ${String.format(Locale.US, "%.1fx", effectsGain)}", color = CyanSoft, fontSize = 11.sp)
-            Slider(effectsGain, { effectsGain = it; onHostGains(engineGain, it) }, valueRange = 0f..4f, modifier = Modifier.weight(1f))
-        }
         CategoryGainControls(
-            transmissionGain = state.transmissionGain,
             gearShiftGain = state.gearShiftGain,
-            turboGain = state.turboGain,
-            backfireGain = state.backfireGain,
             backfireOnly = state.backfireOnly,
-            onChange = onCategoryGains,
+            onGearShiftGain = { onCategoryGains(state.transmissionGain, it, state.turboGain, state.backfireGain) },
             onBackfireOnly = onBackfireOnlyChange,
         )
         Spacer(Modifier.height(10.dp))
@@ -304,6 +302,9 @@ internal fun MixerDashboardScreen(
 private fun MixerPerspectiveSelector(
     perspective: EngineSoundPerspective,
     onPerspectiveSelected: (EngineSoundPerspective) -> Unit,
+    engineGain: Float,
+    effectsGain: Float,
+    onHostGains: (Float, Float) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -333,20 +334,32 @@ private fun MixerPerspectiveSelector(
                     .clip(RoundedCornerShape(5.dp))
                     .background(if (active) Cyan.copy(alpha = 0.14f) else Color.Transparent)
                     .clickable { onPerspectiveSelected(option) }
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
+        Spacer(Modifier.weight(1f))
+        Text("ENGINE ${String.format(Locale.US, "%.1fx", engineGain)}", color = CyanSoft, fontSize = 11.sp)
+        Slider(
+            value = engineGain,
+            onValueChange = { onHostGains(it, effectsGain) },
+            valueRange = 0f..3f,
+            modifier = Modifier.width(220.dp),
+        )
+        Text("EFFECTS ${String.format(Locale.US, "%.1fx", effectsGain)}", color = CyanSoft, fontSize = 11.sp)
+        Slider(
+            value = effectsGain,
+            onValueChange = { onHostGains(engineGain, it) },
+            valueRange = 0f..4f,
+            modifier = Modifier.width(220.dp),
+        )
     }
 }
 
 @Composable
 private fun CategoryGainControls(
-    transmissionGain: Float,
     gearShiftGain: Float,
-    turboGain: Float,
-    backfireGain: Float,
     backfireOnly: Boolean,
-    onChange: (Float, Float, Float, Float) -> Unit,
+    onGearShiftGain: (Float) -> Unit,
     onBackfireOnly: (Boolean) -> Unit,
 ) {
     Row(
@@ -359,10 +372,7 @@ private fun CategoryGainControls(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        GainControl("TRANSMISSION", transmissionGain) { onChange(it, gearShiftGain, turboGain, backfireGain) }
-        GainControl("GEAR SHIFT", gearShiftGain) { onChange(transmissionGain, it, turboGain, backfireGain) }
-        GainControl("TURBO", turboGain) { onChange(transmissionGain, gearShiftGain, it, backfireGain) }
-        GainControl("BACKFIRE", backfireGain) { onChange(transmissionGain, gearShiftGain, turboGain, it) }
+        GainControl("GEAR SHIFT", gearShiftGain, onGearShiftGain)
         BackfireOnlyToggle(backfireOnly) { onBackfireOnly(!backfireOnly) }
     }
 }
