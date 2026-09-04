@@ -549,6 +549,7 @@ public:
         }
 
         loadAlfaBackfireSamplesLocked(alfaBackfireDirectory);
+        loadShiftSamplesLocked(alfaBackfireDirectory);
 
         distanceFilter_ = createDistanceFilterDescriptor();
         result = studio_->registerPlugin(&distanceFilter_);
@@ -708,6 +709,10 @@ public:
                 ? "gear_ext"
                 : "gear_int";
             for (int pulse = 0; pulse < shiftStartedCount; ++pulse) {
+                if (shiftSoundOverride_) {
+                    playShiftSampleLocked(shiftDirection > 0);
+                    continue;
+                }
                 if (slot(selected) != nullptr && !isPlayingLocked(slotInstance(selected))) {
                     stopEventLocked(selected, FMOD_STUDIO_STOP_ALLOWFADEOUT);
                     setParameterQuietly(slotInstance(selected), "state", shiftDirection > 0 ? 1.0f : 0.0f);
@@ -810,6 +815,13 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         backfireAllowedSamplesMask_ = mask & 0x0F;
         if (backfireAllowedSamplesMask_ == 0) backfireAllowedSamplesMask_ = 1;
+    }
+
+    void setShiftSoundOverride(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!active_ || shiftSoundOverride_ == enabled) return;
+        shiftSoundOverride_ = enabled;
+        applyEventOverridesLocked();
     }
 
     void setExteriorPureAudio(bool enabled) {
@@ -1012,6 +1024,35 @@ private:
             }
         }
         alfaBackfireSamplesLoaded_ = allLoaded;
+    }
+
+    void loadShiftSamplesLocked(const std::string& directory) {
+        const std::array<const char*, 2> names = {"shift_up", "shift_down"};
+        for (int index = 0; index < 2; ++index) {
+            const std::string path = directory + "/" + names[index] + ".wav";
+            if (core_->createSound(path.c_str(), FMOD_DEFAULT, nullptr, &shiftSamples_[index]) != FMOD_OK) {
+                for (FMOD::Sound*& sound : shiftSamples_) {
+                    if (sound != nullptr) { sound->release(); sound = nullptr; }
+                }
+                return;
+            }
+        }
+        shiftSamplesLoaded_ = true;
+    }
+
+    void playShiftSampleLocked(bool upshift) {
+        if (!shiftSamplesLoaded_ || core_ == nullptr) return;
+        if (shiftChannel_ != nullptr) {
+            shiftChannel_->stop();
+            shiftChannel_ = nullptr;
+        }
+        FMOD::Channel* channel = nullptr;
+        const int index = upshift ? 0 : 1;
+        if (core_->playSound(shiftSamples_[index], nullptr, true, &channel) != FMOD_OK || channel == nullptr) return;
+        channel->setMode(FMOD_2D);
+        channel->setVolume(hostEffectsGain_ * gearShiftGain_);
+        channel->setPaused(false);
+        shiftChannel_ = channel;
     }
 
     void playAlfaBackfireSampleLocked(int sampleIndex) {
@@ -1303,9 +1344,11 @@ private:
             const bool excludedByBackfireOnly = backfireOnly_ &&
                 pair.first != "backfire_int" && pair.first != "backfire_ext";
             const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
+            const bool disabledShift = shiftSoundOverride_ &&
+                (pair.first == "gear_int" || pair.first == "gear_ext" || pair.first == "gear_grind");
             const float baseGain = isEngine ? hostEngineGain_ : hostEffectsGain_;
             const float categoryGain = eventCategoryGain(pair.first);
-            pair.second->instance->setVolume((disabledBackfire || (!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
+            pair.second->instance->setVolume((disabledBackfire || disabledShift || (!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
         }
     }
 
@@ -1348,12 +1391,20 @@ private:
             alfaBackfireChannel_->stop();
             alfaBackfireChannel_ = nullptr;
         }
+        if (shiftChannel_ != nullptr) {
+            shiftChannel_->stop();
+            shiftChannel_ = nullptr;
+        }
         for (FMOD::Sound*& sound : alfaBackfireSamples_) {
             if (sound != nullptr) {
                 sound->release();
                 sound = nullptr;
             }
         }
+        for (FMOD::Sound*& sound : shiftSamples_) {
+            if (sound != nullptr) { sound->release(); sound = nullptr; }
+        }
+        shiftSamplesLoaded_ = false;
         alfaBackfireSamplesLoaded_ = false;
         for (auto& pair : slots_) {
             if (pair.second->instance != nullptr) {
@@ -1784,10 +1835,14 @@ private:
     float backfireGain_ = 1.0f;
     bool backfireOnly_ = false;
     bool backfireAudioEnabled_ = true;
+    bool shiftSoundOverride_ = false;
     int backfireAllowedSamplesMask_ = 0x0F;
     std::array<FMOD::Sound*, 4> alfaBackfireSamples_{};
     FMOD::Channel* alfaBackfireChannel_ = nullptr;
     bool alfaBackfireSamplesLoaded_ = false;
+    std::array<FMOD::Sound*, 2> shiftSamples_{};
+    FMOD::Channel* shiftChannel_ = nullptr;
+    bool shiftSamplesLoaded_ = false;
     std::unordered_map<std::string, RecentSource> recentSources_;
     // Debug-only start times make STOPPED records report the observed one-shot duration. The map
     // is untouched when diagnostics are disabled, keeping release callbacks on the existing path.
@@ -2048,6 +2103,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireAl
     JNIEnv*, jobject, jint mask
 ) {
     runtime.setBackfireAllowedSamples(mask);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftSoundOverride(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setShiftSoundOverride(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL

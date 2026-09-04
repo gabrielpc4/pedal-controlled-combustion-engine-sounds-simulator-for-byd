@@ -75,6 +75,7 @@ data class DriveSnapshot(
     val backfireOnly: Boolean = false,
     /** Global backfire policy, deliberately independent of each car bank's authored thresholds. */
     val backfireSettings: BackfireSettings = BackfireSettings(),
+    val shiftSoundSettings: ShiftSoundSettings = ShiftSoundSettings(),
     val soundPerspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
@@ -107,6 +108,7 @@ class DriveController(context: Context) {
     private val fmodUpdateRateRepository = FmodUpdateRateRepository(appContext)
     private val exteriorAudioModeRepository = ExteriorAudioModeRepository(appContext)
     private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
+    private val shiftSoundSettingsRepository = ShiftSoundSettingsRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
@@ -134,6 +136,7 @@ class DriveController(context: Context) {
     // Deliberately session-only: this diagnostic/listening mode must never become a car preference.
     private val backfireOnly = AtomicBoolean(false)
     private val backfireSettings = AtomicReference(BackfireSettings())
+    private val shiftSoundSettings = AtomicReference(ShiftSoundSettings())
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
@@ -182,9 +185,11 @@ class DriveController(context: Context) {
         audioMixGains.set(audioMixGainRepository.load(selectedProfile.get()))
         audioEngine.setCategoryGains(audioMixGains.get())
         backfireSettings.set(backfireSettingsRepository.load())
+        shiftSoundSettings.set(shiftSoundSettingsRepository.load())
         simulation.updateBackfireSettings(backfireSettings.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
         audioEngine.setBackfireAudioEnabled(backfireSettings.get().backfireAudioEnabled)
+        audioEngine.setShiftSoundOverride(shiftSoundSettings.get().overrideEnabled)
     }
 
     fun isRunning(): Boolean = running.get()
@@ -212,6 +217,7 @@ class DriveController(context: Context) {
             backfireGain = audioMixGains.get().backfire,
             backfireOnly = backfireOnly.get(),
             backfireSettings = backfireSettings.get(),
+            shiftSoundSettings = shiftSoundSettings.get(),
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
@@ -330,20 +336,29 @@ class DriveController(context: Context) {
         }
     }
 
+    fun setShiftSoundSettings(updated: ShiftSoundSettings) {
+        shiftSoundSettings.set(updated)
+        shiftSoundSettingsRepository.save(updated)
+        audioEngine.setShiftSoundOverride(updated.overrideEnabled)
+    }
+
     fun resetAllPreferences() {
         audioMixGainRepository.resetAll()
         appContext.getSharedPreferences(AppPreferenceStores.SELECTED_CAR, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.SHIFT_MODE, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
         backfireSettingsRepository.reset()
+        shiftSoundSettingsRepository.reset()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
         audioMixGains.set(AudioMixGains())
         fmodUpdateRateHz.set(FmodUpdateRate.DEFAULT_HZ)
         exteriorPureAudio.set(false)
         backfireSettings.set(BackfireSettings())
+        shiftSoundSettings.set(ShiftSoundSettings())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
+        audioEngine.setShiftSoundOverride(false)
         selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())

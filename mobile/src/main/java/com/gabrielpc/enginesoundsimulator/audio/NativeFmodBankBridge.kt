@@ -66,6 +66,8 @@ internal class NativeFmodBankBridge {
 
     external fun setBackfireAudioEnabled(enabled: Boolean)
 
+    external fun setShiftSoundOverride(enabled: Boolean)
+
     /** Bit mask for the four Alfa bank-derived one-shot sources (bit 0 = source 1). */
     external fun setBackfireAllowedSamples(mask: Int)
 

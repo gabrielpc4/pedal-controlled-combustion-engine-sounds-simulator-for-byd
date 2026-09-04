@@ -101,6 +101,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
@@ -192,6 +193,7 @@ class MainActivity : ComponentActivity() {
                         onCategoryGains = controller::setFmodCategoryGains,
                         onToggleBackfireOnly = controller::setBackfireOnly,
                         onBackfireSettingsChange = controller::setBackfireSettings,
+                        onShiftSoundSettingsChange = controller::setShiftSoundSettings,
                         onPreviewBackfireSample = backfirePreviewPlayer::play,
                         onEventMute = controller::setFmodEventMute,
                         onEventSolo = controller::setFmodEventSolo,
@@ -275,6 +277,7 @@ private fun MotorSoundDashboard(
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
     onToggleBackfireOnly: (Boolean) -> Unit,
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
+    onShiftSoundSettingsChange: (ShiftSoundSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
@@ -470,6 +473,8 @@ private fun MotorSoundDashboard(
                             onExteriorPureAudioChange = onExteriorPureAudioChange,
                             backfireSettings = state.backfireSettings,
                             onBackfireSettingsChange = onBackfireSettingsChange,
+                            shiftSoundSettings = state.shiftSoundSettings,
+                            onShiftSoundSettingsChange = onShiftSoundSettingsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                     }

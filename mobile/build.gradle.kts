@@ -46,6 +46,7 @@ val gitSha = gitShortShaFromFiles(rootProject.projectDir)
 val buildTimeUtc: String = Instant.now().toString()
 
 val generatedPreviewAssets = file("build/generated/carPreviewAssets")
+val generatedShiftOverrideAssets = file("build/generated/shiftOverrideAssets")
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -121,6 +122,19 @@ val prepareCarPreviewAssets = tasks.register<Sync>("prepareCarPreviewAssets") {
     }
     into(generatedPreviewAssets)
 }
+val prepareShiftOverrideAssets = tasks.register<Sync>("prepareShiftOverrideAssets") {
+    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted")) {
+        include("fx_shift_up.wav")
+        rename { "shift_up.wav" }
+        into("shift")
+    }
+    from(rootProject.file("audio_samples/fx_lamborghini_huracan_trofeo_evo2/converted")) {
+        include("fx_shift_down.wav")
+        rename { "shift_down.wav" }
+        into("shift")
+    }
+    into(generatedShiftOverrideAssets)
+}
 
 if (isAssembling && stampCarBuild) {
     val nextBuildNumber = stampedBuildNumber
@@ -142,7 +156,9 @@ if (isAssembling && stampCarBuild) {
 tasks.named("preBuild").configure {
     dependsOn(prepareCarPreviewAssets)
     dependsOn(prepareFmodSdk)
+    dependsOn(prepareShiftOverrideAssets)
 }
+
 
 android {
     namespace = "com.gabrielpc.enginesoundsimulator"
@@ -183,6 +199,7 @@ android {
         buildConfig = true
     }
     sourceSets.getByName("main").assets.srcDir(generatedPreviewAssets)
+    sourceSets.getByName("main").assets.srcDir(generatedShiftOverrideAssets)
     sourceSets.getByName("main").jniLibs.srcDir(File(generatedFmodSdk, "lib"))
     externalNativeBuild {
         cmake {

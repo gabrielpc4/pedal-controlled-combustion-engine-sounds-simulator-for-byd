@@ -82,6 +82,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -415,6 +416,8 @@ internal fun SettingsScreen(
     onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
+    shiftSoundSettings: ShiftSoundSettings,
+    onShiftSoundSettingsChange: (ShiftSoundSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -449,6 +452,10 @@ internal fun SettingsScreen(
                 enabled = exteriorPureAudio,
                 onEnabledChange = onExteriorPureAudioChange,
             )
+            ShiftSoundOverrideControl(
+                enabled = shiftSoundSettings.overrideEnabled,
+                onEnabledChange = { onShiftSoundSettingsChange(ShiftSoundSettings(it)) },
+            )
             Button(
                 onClick = onResetAll,
                 colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
@@ -481,6 +488,27 @@ private fun ExteriorPureAudioControl(
             Text("EXTERIOR PURE AUDIO", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
             Text(
                 "Neutralizes exterior 3D distance and pan. FMOD events, pitch, gain, fades and authored DSP remain active.",
+                color = Muted,
+                fontSize = 12.sp,
+            )
+        }
+        Switch(checked = enabled, onCheckedChange = onEnabledChange)
+    }
+}
+
+@Composable
+private fun ShiftSoundOverrideControl(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().border(1.dp, Line, RoundedCornerShape(8.dp)).padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("SHIFT SOUND OVERRIDE", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text(
+                "Uses the bundled upshift/downshift samples instead of the car's authored gear sounds.",
                 color = Muted,
                 fontSize = 12.sp,
             )

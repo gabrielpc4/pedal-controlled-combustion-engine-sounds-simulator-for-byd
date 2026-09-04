@@ -59,6 +59,7 @@ class EngineAudioEngine(context: Context) {
     private val backfireOnly = AtomicBoolean(false)
     private val backfireAudioEnabled = AtomicBoolean(true)
     private val backfireAllowedSamplesMask = AtomicInteger(0b111111)
+    private val shiftSoundOverride = AtomicBoolean(false)
     private val exteriorPureAudio = AtomicBoolean(false)
     private var sentBackfireOnly = false
     private var sentExteriorPureAudio = false
@@ -126,6 +127,8 @@ class EngineAudioEngine(context: Context) {
     fun setBackfireOnly(enabled: Boolean) { backfireOnly.set(enabled) }
 
     fun setBackfireAudioEnabled(enabled: Boolean) { backfireAudioEnabled.set(enabled) }
+
+    fun setShiftSoundOverride(enabled: Boolean) { shiftSoundOverride.set(enabled) }
 
     fun setExteriorPureAudio(enabled: Boolean) { exteriorPureAudio.set(enabled) }
 
@@ -269,6 +272,7 @@ class EngineAudioEngine(context: Context) {
         var sentNativeEventOverridesVersion = -1L
         var sentBackfireAllowedSamplesMask = -1
         var sentBackfireAudioEnabled = true
+        var sentShiftSoundOverride = false
         var sentNativeDiagnosticsEnabled = DebugTelemetry.nativeDiagnosticsEnabled()
         var eventCatalogCaptured = false
         var diagnosticBankSha256: String? = null
@@ -385,6 +389,11 @@ class EngineAudioEngine(context: Context) {
                 if (requestedBackfireAudioEnabled != sentBackfireAudioEnabled) {
                     bridge.setBackfireAudioEnabled(requestedBackfireAudioEnabled)
                     sentBackfireAudioEnabled = requestedBackfireAudioEnabled
+                }
+                val requestedShiftSoundOverride = shiftSoundOverride.get()
+                if (requestedShiftSoundOverride != sentShiftSoundOverride) {
+                    bridge.setShiftSoundOverride(requestedShiftSoundOverride)
+                    sentShiftSoundOverride = requestedShiftSoundOverride
                 }
                 val requestedBackfireOnly = backfireOnly.get()
                 if (requestedBackfireOnly != sentBackfireOnly) {
@@ -575,6 +584,14 @@ class EngineAudioEngine(context: Context) {
             val destination = File(directory, "$sourceName.wav")
             if (!destination.exists() || destination.length() == 0L) {
                 appContext.assets.open("backfire/alfa/$sourceName.wav").use { input ->
+                    destination.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+        listOf("shift_up", "shift_down").forEach { sourceName ->
+            val destination = File(directory, "$sourceName.wav")
+            if (!destination.exists() || destination.length() == 0L) {
+                appContext.assets.open("shift/$sourceName.wav").use { input ->
                     destination.outputStream().use { output -> input.copyTo(output) }
                 }
             }
