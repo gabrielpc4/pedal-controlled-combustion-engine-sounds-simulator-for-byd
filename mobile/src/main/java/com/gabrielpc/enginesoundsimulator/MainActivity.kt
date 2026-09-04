@@ -1014,11 +1014,11 @@ private fun DashboardEffectControls(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
-            DashboardEngineLabelSwitch("EXTERNAL", external, onEngineExternalChange, rowHeight)
+            DashboardColumnTextCell("EXTERNAL", external, rowHeight)
             rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
-            DashboardEmptyControlCell(rowHeight)
+            DashboardEffectSwitch(external) { onEngineExternalChange(!external) }
             rows.drop(1).forEach { row ->
                 val enabled = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
@@ -1030,7 +1030,7 @@ private fun DashboardEffectControls(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
-            DashboardEngineLabelSwitch("PURE", state.exteriorPureAudio, onEnginePureChange, rowHeight)
+            DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
             DashboardOriginalColumnCell(state.popsAndBangsOriginal, true, { onOriginalChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOriginal) }, rowHeight)
             DashboardOriginalColumnCell(state.shiftSoundsOriginal, true, { onOriginalChange(EffectSoundKind.SHIFT, !state.shiftSoundsOriginal) }, rowHeight)
             DashboardEmptyControlCell(rowHeight)
@@ -1073,20 +1073,14 @@ private fun DashboardEmptyControlCell(height: Dp) {
 }
 
 @Composable
-private fun DashboardEngineLabelSwitch(
-    label: String,
-    checked: Boolean,
-    onToggle: (Boolean) -> Unit,
-    height: Dp,
-) {
-    Row(
+private fun DashboardColumnTextCell(label: String, active: Boolean, height: Dp) {
+    Text(
+        label,
+        color = if (active) Cyan else Muted,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Black,
         modifier = Modifier.height(height),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(label, color = if (checked) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
-        DashboardEffectSwitch(checked) { onToggle(!checked) }
-    }
+    )
 }
 
 @Composable
