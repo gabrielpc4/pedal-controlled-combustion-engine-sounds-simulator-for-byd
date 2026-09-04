@@ -444,6 +444,16 @@ internal fun SettingsScreen(
                 enabled = exteriorPureAudio,
                 onEnabledChange = onExteriorPureAudioChange,
             )
+            Text("SHIFT OVERRIDE GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
+                    Button(
+                        onClick = { onShiftSoundSettingsChange(shiftSoundSettings.copy(overrideGain = gain)) },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (shiftSoundSettings.overrideGain == gain) Cyan else PanelBright),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("${gain}x", color = if (shiftSoundSettings.overrideGain == gain) Night else White) }
+                }
+            }
             Button(
                 onClick = onResetAll,
                 colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),

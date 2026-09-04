@@ -4,7 +4,7 @@ import android.content.Context
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.audio.CarEffectModes
 
-data class ShiftSoundSettings(val overrideEnabled: Boolean = false)
+data class ShiftSoundSettings(val overrideEnabled: Boolean = true, val overrideGain: Float = 0.5f)
 
 enum class EffectSoundKind { POPS_AND_BANGS, SHIFT, TRANSMISSION, TURBO }
 
@@ -28,11 +28,13 @@ internal class ShiftSoundSettingsRepository(context: Context) {
     )
 
     fun load(): ShiftSoundSettings = ShiftSoundSettings(
-        overrideEnabled = preferences.getBoolean("override_enabled", false),
+        overrideEnabled = preferences.getBoolean("override_enabled", true),
+        overrideGain = preferences.getFloat("override_gain", 0.5f).coerceIn(0.25f, 1.0f),
     )
 
     fun save(settings: ShiftSoundSettings) {
-        preferences.edit().putBoolean("override_enabled", settings.overrideEnabled).apply()
+        preferences.edit().putBoolean("override_enabled", settings.overrideEnabled)
+            .putFloat("override_gain", settings.overrideGain.coerceIn(0.25f, 1.0f)).apply()
     }
 
     fun reset() { preferences.edit().clear().apply() }

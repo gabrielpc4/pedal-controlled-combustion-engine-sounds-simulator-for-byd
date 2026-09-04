@@ -204,6 +204,7 @@ class DriveController(context: Context) {
         audioEngine.setBackfireUseOriginal(carEffectModes.get().popsAndBangsOriginal)
         audioEngine.setShiftSoundEnabled(carEffectModes.get().shiftSoundsEnabled)
         audioEngine.setShiftSoundOverride(!carEffectModes.get().shiftSoundsOriginal)
+        audioEngine.setShiftOverrideGain(shiftSoundSettings.get().overrideGain)
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
     }
@@ -390,6 +391,7 @@ class DriveController(context: Context) {
         shiftSoundSettings.set(updated)
         shiftSoundSettingsRepository.save(updated)
         audioEngine.setShiftSoundOverride(updated.overrideEnabled)
+        audioEngine.setShiftOverrideGain(updated.overrideGain)
     }
 
     fun resetAllPreferences() {

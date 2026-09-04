@@ -60,6 +60,7 @@ class EngineAudioEngine(context: Context) {
     private val backfireAudioEnabled = AtomicBoolean(true)
     private val backfireAllowedSamplesMask = AtomicInteger(0b111111)
     private val shiftSoundOverride = AtomicBoolean(false)
+    private val shiftOverrideGain = AtomicReference(0.5f)
     private val shiftSoundEnabled = AtomicBoolean(true)
     private val transmissionAudioEnabled = AtomicBoolean(true)
     private val turboAudioEnabled = AtomicBoolean(true)
@@ -133,6 +134,7 @@ class EngineAudioEngine(context: Context) {
     fun setBackfireAudioEnabled(enabled: Boolean) { backfireAudioEnabled.set(enabled) }
 
     fun setShiftSoundOverride(enabled: Boolean) { shiftSoundOverride.set(enabled) }
+    fun setShiftOverrideGain(gain: Float) { shiftOverrideGain.set(gain.coerceIn(0.25f, 1.0f)) }
 
     fun setShiftSoundEnabled(enabled: Boolean) { shiftSoundEnabled.set(enabled) }
 
@@ -285,6 +287,7 @@ class EngineAudioEngine(context: Context) {
         var sentBackfireAllowedSamplesMask = -1
         var sentBackfireAudioEnabled = true
         var sentShiftSoundOverride = false
+        var sentShiftOverrideGain = -1f
         var sentShiftSoundEnabled = true
         var sentTransmissionAudioEnabled = true
         var sentTurboAudioEnabled = true
@@ -410,6 +413,11 @@ class EngineAudioEngine(context: Context) {
                 if (requestedShiftSoundOverride != sentShiftSoundOverride) {
                     bridge.setShiftSoundOverride(requestedShiftSoundOverride)
                     sentShiftSoundOverride = requestedShiftSoundOverride
+                }
+                val requestedShiftOverrideGain = shiftOverrideGain.get()
+                if (requestedShiftOverrideGain != sentShiftOverrideGain) {
+                    bridge.setShiftOverrideGain(requestedShiftOverrideGain)
+                    sentShiftOverrideGain = requestedShiftOverrideGain
                 }
                 val requestedShiftSoundEnabled = shiftSoundEnabled.get()
                 if (requestedShiftSoundEnabled != sentShiftSoundEnabled) {

@@ -833,6 +833,11 @@ public:
         applyEventOverridesLocked();
     }
 
+    void setShiftOverrideGain(float gain) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shiftOverrideGain_ = std::max(0.0f, gain);
+    }
+
     void setTransmissionAudioEnabled(bool enabled) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (transmissionAudioEnabled_ == enabled) return;
@@ -1078,7 +1083,7 @@ private:
         const int index = upshift ? 0 : 1;
         if (core_->playSound(shiftSamples_[index], nullptr, true, &channel) != FMOD_OK || channel == nullptr) return;
         channel->setMode(FMOD_2D);
-        channel->setVolume(hostEffectsGain_ * gearShiftGain_);
+        channel->setVolume(hostEffectsGain_ * gearShiftGain_ * shiftOverrideGain_);
         channel->setPaused(false);
         shiftChannel_ = channel;
     }
@@ -1870,6 +1875,7 @@ private:
     bool backfireAudioEnabled_ = true;
     bool backfireUseOriginal_ = false;
     bool shiftSoundOverride_ = false;
+    float shiftOverrideGain_ = 0.5f;
     bool shiftSoundEnabled_ = true;
     bool transmissionAudioEnabled_ = true;
     bool turboAudioEnabled_ = true;
@@ -2154,6 +2160,12 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftSound
     JNIEnv*, jobject, jboolean enabled
 ) {
     runtime.setShiftSoundEnabled(enabled == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftOverrideGain(
+        JNIEnv*, jobject, jfloat gain) {
+    runtime.setShiftOverrideGain(gain);
 }
 
 extern "C" JNIEXPORT void JNICALL

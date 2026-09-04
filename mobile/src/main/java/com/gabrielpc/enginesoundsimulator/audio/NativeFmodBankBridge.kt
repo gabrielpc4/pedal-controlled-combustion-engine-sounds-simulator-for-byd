@@ -69,6 +69,7 @@ internal class NativeFmodBankBridge {
     external fun setShiftSoundOverride(enabled: Boolean)
 
     external fun setShiftSoundEnabled(enabled: Boolean)
+    external fun setShiftOverrideGain(gain: Float)
 
     external fun setTransmissionAudioEnabled(enabled: Boolean)
 
