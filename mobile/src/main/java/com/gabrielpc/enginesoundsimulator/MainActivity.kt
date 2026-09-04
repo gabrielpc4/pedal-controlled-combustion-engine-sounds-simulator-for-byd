@@ -1025,11 +1025,11 @@ private fun DashboardEffectControls(
                 }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, textColumnBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, textColumnBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardColumnTextCell("EXTERNAL", external, rowHeight)
             rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, firstSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, firstSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, external, firstSwitchBorder) { onEngineExternalChange(!external) }
             rows.drop(1).forEach { row ->
                 val enabled = when (row.second) {
@@ -1041,14 +1041,14 @@ private fun DashboardEffectControls(
                 DashboardSwitchCell(rowHeight, enabled, firstSwitchBorder) { onEnabledChange(row.second, !enabled) }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, textColumnBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, textColumnBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
             DashboardOriginalColumnCell(state.popsAndBangsOriginal, true, { onOriginalChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOriginal) }, rowHeight)
             DashboardOriginalColumnCell(state.shiftSoundsOriginal, true, { onOriginalChange(EffectSoundKind.SHIFT, !state.shiftSoundsOriginal) }, rowHeight)
             DashboardEmptyControlCell(rowHeight)
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, secondSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
+        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).border(1.dp, secondSwitchBorder, RoundedCornerShape(8.dp)).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, state.exteriorPureAudio, secondSwitchBorder) { onEnginePureChange(!state.exteriorPureAudio) }
             rows.drop(1).forEach { row ->
                 val original = when (row.second) {
