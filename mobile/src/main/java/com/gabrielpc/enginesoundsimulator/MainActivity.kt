@@ -1062,7 +1062,7 @@ private fun DashboardEffectControls(
             }
         }
         DASHBOARD_EFFECT_GAIN_PRESETS.forEachIndexed { columnIndex, preset ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(120.dp).border(1.dp, gainColumnBorders[columnIndex], RoundedCornerShape(8.dp)).padding(3.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.border(1.dp, gainColumnBorders[columnIndex], RoundedCornerShape(8.dp)).padding(3.dp)) {
                 rows.forEach { row ->
                     val selected = kotlin.math.abs(row.third - preset.gain) < 0.001f
                     DashboardGainButton(preset, selected, if (selected) Night else Cyan, gainColumnBorders[columnIndex]) {
