@@ -443,10 +443,6 @@ internal fun SettingsScreen(
                 enabled = exteriorPureAudio,
                 onEnabledChange = onExteriorPureAudioChange,
             )
-            ShiftSoundOverrideControl(
-                enabled = shiftSoundSettings.overrideEnabled,
-                onEnabledChange = { onShiftSoundSettingsChange(ShiftSoundSettings(it)) },
-            )
             Button(
                 onClick = onResetAll,
                 colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),

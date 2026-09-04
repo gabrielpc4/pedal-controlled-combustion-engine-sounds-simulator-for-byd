@@ -8,7 +8,8 @@ internal data class CarEffectModes(
     val popsAndBangsEnabled: Boolean = true,
     val popsAndBangsOriginal: Boolean = false,
     val shiftSoundsEnabled: Boolean = true,
-    val shiftSoundsOriginal: Boolean = true,
+    // Override is the default per car; users can opt back into the authored bank sound.
+    val shiftSoundsOriginal: Boolean = false,
     val transmissionEnabled: Boolean = true,
     val turboEnabled: Boolean = true,
 )
@@ -23,7 +24,7 @@ internal class CarEffectModesRepository(context: Context) {
         popsAndBangsEnabled = read(profile, "pops_enabled", true),
         popsAndBangsOriginal = read(profile, "pops_original", false),
         shiftSoundsEnabled = read(profile, "shift_enabled", true),
-        shiftSoundsOriginal = read(profile, "shift_original", true),
+        shiftSoundsOriginal = read(profile, "shift_original", false),
         transmissionEnabled = read(profile, "transmission_enabled", true),
         turboEnabled = read(profile, "turbo_enabled", true),
     )
