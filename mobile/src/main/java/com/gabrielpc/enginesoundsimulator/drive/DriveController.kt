@@ -49,6 +49,10 @@ enum class InputMode(val primaryLabel: String, val secondaryLabel: String = "PED
     val displayName: String get() = "$primaryLabel $secondaryLabel"
 }
 
+// In Hold Pedals mode, the bottom part of the touch track is an explicit release gesture. This
+// keeps a latched value from requiring pixel-perfect travel back to zero before disengaging.
+private const val HELD_PEDAL_RELEASE_THRESHOLD = 0.10
+
 data class DriveSnapshot(
     val drivetrain: DrivetrainState,
     val inputSourcePrimary: String,
@@ -311,14 +315,22 @@ class DriveController(context: Context) {
 
     fun setSimulatedPedalThrottle(value: Double) {
         val clamped = value.coerceIn(0.0, 1.0)
-        if (clamped == 0.0 && simulatedPedalsLatched.get()) return
-        simulatedPedals.updateAndGet { it.copy(throttle = clamped) }
+        val effective = if (simulatedPedalsLatched.get() && clamped <= HELD_PEDAL_RELEASE_THRESHOLD) {
+            0.0
+        } else {
+            clamped
+        }
+        simulatedPedals.updateAndGet { it.copy(throttle = effective) }
     }
 
     fun setSimulatedPedalBrake(value: Double) {
         val clamped = value.coerceIn(0.0, 1.0)
-        if (clamped == 0.0 && simulatedPedalsLatched.get()) return
-        simulatedPedals.updateAndGet { it.copy(brake = clamped) }
+        val effective = if (simulatedPedalsLatched.get() && clamped <= HELD_PEDAL_RELEASE_THRESHOLD) {
+            0.0
+        } else {
+            clamped
+        }
+        simulatedPedals.updateAndGet { it.copy(brake = effective) }
     }
 
     fun setSimulatedRegen(value: Double) { simulatedRegen.set(value.coerceIn(0.0, 1.0)) }
