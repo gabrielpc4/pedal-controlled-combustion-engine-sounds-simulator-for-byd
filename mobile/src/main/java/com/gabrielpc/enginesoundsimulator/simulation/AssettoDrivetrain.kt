@@ -79,6 +79,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var bovDecay = 10.0
     private var backfireArmed = false
     private var backfireReleaseTimer = 0.0
+    private var previousBackfireThrottle = 0.0
+    private var backfireSuppressedAfterShift = false
     private var backfireSettings = BackfireSettings()
     private var nextBackfireSampleCursor = 0
     private var limiterCounter = 0
@@ -108,6 +110,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         backfireSettings = updated.normalized()
         backfireArmed = false
         backfireReleaseTimer = 0.0
+        previousBackfireThrottle = 0.0
+        backfireSuppressedAfterShift = false
         nextBackfireSampleCursor = 0
     }
 
@@ -142,6 +146,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         bovDecay = 10.0
         backfireArmed = false
         backfireReleaseTimer = 0.0
+        previousBackfireThrottle = 0.0
+        backfireSuppressedAfterShift = false
         limiterCounter = 0
         lastFrame.rpm = rpm
         lastFrame.speedMetersPerSecond = speedMetersPerSecond
@@ -380,7 +386,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         lastFrame.bovDecaySeconds = bovDecay
         lastFrame.limiterPulse = engine.limiterActive
         lastFrame.backfireTriggered = engine.backfire
-        lastFrame.backfireSampleIndex = if (engine.backfire) chooseBackfireSample() else -1
+        lastFrame.backfireSampleIndex = if (engine.backfire &&
+            (backfireSettings.soundOnlyOverrideEnabled || !engine.naturalBankBackfire)
+        ) {
+            chooseBackfireSample()
+        } else {
+            -1
+        }
         lastFrame.shiftStarted = shiftStarted
         lastFrame.shiftRejected = shiftRejected
         lastFrame.shifting = shifting
@@ -639,15 +651,31 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private fun engineTorque(dt: Double, controlsGas: Double, engineGas: Double): EngineTorqueFrame {
         val engine = physics.engine
         val backfire = backfireSettings
-        if (!backfire.enabled) {
+        // Automatic shifting briefly cuts engine gas. That cut is not a driver lift-off and must
+        // never arm or trigger the global backfire policy.
+        val shiftThrottleCut = shifting || automaticGasCutoff > 0.0 || engineCutoff > 0.0
+        if (shiftThrottleCut) {
+            // A transmission cut is not a driver release. Require a fresh throttle run after the
+            // shift before the global override can arm again.
+            backfireArmed = false
+            backfireReleaseTimer = 0.0
+            backfireSuppressedAfterShift = true
+        }
+        if (!shiftThrottleCut && controlsGas > 0.10) {
+            backfireSuppressedAfterShift = false
+        }
+        val naturalBankBackfire = !backfire.overrideLogicEnabled && !shiftThrottleCut &&
+            !backfireSuppressedAfterShift && previousBackfireThrottle > 0.10 && controlsGas <= 0.10
+        if (!backfire.overrideLogicEnabled) {
             backfireArmed = false
             backfireReleaseTimer = 0.0
         }
-        if (backfire.enabled && controlsGas >= backfire.armThrottle) {
+        if (backfire.overrideLogicEnabled && controlsGas >= backfire.armThrottle) {
             backfireArmed = true
             backfireReleaseTimer = 0.0
+            backfireSuppressedAfterShift = false
         }
-        if (backfireArmed && controlsGas <= backfire.releaseThrottle) {
+        if (!shiftThrottleCut && backfireArmed && controlsGas <= backfire.releaseThrottle) {
             backfireReleaseTimer = min(10.0, backfireReleaseTimer + dt)
         } else if (backfireArmed) {
             backfireReleaseTimer = 0.0
@@ -655,7 +683,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // This intentionally replaces the bank's per-car RPM/gas gates with one global policy:
         // a clear attempted run followed by a configurable lift-off delay is the user-facing
         // definition of backfire, independent of how a particular bank authored its thresholds.
-        val triggerBackfire = backfire.enabled && backfireArmed &&
+        val triggerBackfire = backfire.overrideLogicEnabled && !shiftThrottleCut && !backfireSuppressedAfterShift && backfireArmed &&
             controlsGas <= backfire.releaseThrottle &&
             rpm >= backfire.minimumRpm && rpm <= backfire.maximumRpm &&
             backfireReleaseTimer >= backfire.releaseDelaySeconds
@@ -663,6 +691,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             backfireArmed = false
             backfireReleaseTimer = 0.0
         }
+        previousBackfireThrottle = if (shiftThrottleCut) previousBackfireThrottle else controlsGas
 
         val mapped = interpolateAssettoCurve(engine.throttleCurve, engineGas)
         val limiterSteps = if (engine.limiterHz > 0.0) {
@@ -707,7 +736,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         engineTorqueResult.torque = torque
         engineTorqueResult.effectiveThrottle = effective
         engineTorqueResult.limiterActive = limiterActive
-        engineTorqueResult.backfire = triggerBackfire
+        // With the global policy disabled, the app only reports the lift-off edge to FMOD. The
+        // bank's own backfire event, automation, and source randomisation then decide whether
+        // anything is audible; no extracted sample or app threshold is imposed in this mode.
+        engineTorqueResult.backfire = triggerBackfire || naturalBankBackfire
+        engineTorqueResult.naturalBankBackfire = naturalBankBackfire
         return engineTorqueResult
     }
 
@@ -797,6 +830,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         var effectiveThrottle: Double = 0.0,
         var limiterActive: Boolean = false,
         var backfire: Boolean = false,
+        var naturalBankBackfire: Boolean = false,
     )
 
     private data class DrivenAxle(val radius: Double, val normalFraction: Double, val grip: Double)

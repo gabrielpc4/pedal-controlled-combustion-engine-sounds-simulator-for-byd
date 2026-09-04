@@ -56,7 +56,7 @@ data class DriveSnapshot(
     val inputSourceFaded: Boolean,
     val throttle: Double,
     val brake: Double,
-    val simulatedRegen: Double = 0.0,
+    val simulatedRegen: Double = 1.0,
     val transmissionPosition: TransmissionPosition,
     val engineSoundEnabled: Boolean,
     val audioMuted: Boolean = false,
@@ -122,7 +122,7 @@ class DriveController(context: Context) {
     private val generation = AtomicLong(0L)
     private val simulatedPedals = AtomicReference(SimulatedPedalInput())
     private val simulatedPedalsLatched = AtomicBoolean(false)
-    private val simulatedRegen = AtomicReference(0.0)
+    private val simulatedRegen = AtomicReference(1.0)
     private val inputMode = AtomicReference(InputMode.RealPedals)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val uiActive = AtomicBoolean(false)
@@ -151,7 +151,7 @@ class DriveController(context: Context) {
         inputSourceFaded = false,
         throttle = 0.0,
         brake = 0.0,
-        simulatedRegen = 0.0,
+        simulatedRegen = 1.0,
         transmissionPosition = TransmissionPosition.DRIVE,
         engineSoundEnabled = false,
         selectedCarId = selectedProfile.get().id,
@@ -178,6 +178,8 @@ class DriveController(context: Context) {
         audioEngine.setCategoryGains(audioMixGains.get())
         backfireSettings.set(backfireSettingsRepository.load())
         simulation.updateBackfireSettings(backfireSettings.get())
+        audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
+        audioEngine.setBackfireAudioEnabled(backfireSettings.get().backfireAudioEnabled)
     }
 
     fun isRunning(): Boolean = running.get()
@@ -249,7 +251,7 @@ class DriveController(context: Context) {
             backfireOnly.set(false)
             audioEngine.setBackfireOnly(false)
             simulatedPedals.set(SimulatedPedalInput())
-            simulatedRegen.set(0.0)
+            simulatedRegen.set(1.0)
             simulatedPedalsLatched.set(false)
         }
     }
@@ -305,6 +307,15 @@ class DriveController(context: Context) {
         backfireSettings.set(normalized)
         backfireSettingsRepository.save(normalized)
         simulation.updateBackfireSettings(normalized)
+        audioEngine.setBackfireAllowedSamples(normalized.allowedSamples)
+        audioEngine.setBackfireAudioEnabled(normalized.backfireAudioEnabled)
+        val currentGains = audioMixGains.get()
+        if (currentGains.backfire != normalized.backfireGain) {
+            val updatedGains = currentGains.copy(backfire = normalized.backfireGain)
+            audioMixGains.set(updatedGains)
+            audioMixGainRepository.save(selectedProfile.get(), updatedGains)
+            audioEngine.setCategoryGains(updatedGains)
+        }
     }
 
     fun resetAllPreferences() {

@@ -64,6 +64,11 @@ internal class NativeFmodBankBridge {
 
     external fun setBackfireOnly(enabled: Boolean)
 
+    external fun setBackfireAudioEnabled(enabled: Boolean)
+
+    /** Bit mask for the four Alfa bank-derived one-shot sources (bit 0 = source 1). */
+    external fun setBackfireAllowedSamples(mask: Int)
+
     external fun setEventOverrides(mutedEvents: Array<String>, soloEvents: Array<String>)
 
     external fun close()

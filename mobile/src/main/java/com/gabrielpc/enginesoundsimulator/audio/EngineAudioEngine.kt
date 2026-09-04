@@ -57,6 +57,8 @@ class EngineAudioEngine(context: Context) {
     /** Incremented only when the UI changes an override; the worker sends the batch once. */
     private val nativeEventOverridesVersion = AtomicLong(0L)
     private val backfireOnly = AtomicBoolean(false)
+    private val backfireAudioEnabled = AtomicBoolean(true)
+    private val backfireAllowedSamplesMask = AtomicInteger(0b111111)
     private var sentBackfireOnly = false
 
     @Volatile
@@ -121,6 +123,17 @@ class EngineAudioEngine(context: Context) {
 
     fun setBackfireOnly(enabled: Boolean) { backfireOnly.set(enabled) }
 
+    fun setBackfireAudioEnabled(enabled: Boolean) { backfireAudioEnabled.set(enabled) }
+
+    fun setBackfireAllowedSamples(samples: Set<Int>) {
+        val mask = samples.fold(0) { result, sample ->
+            if (sample in 1..4) result or (1 shl (sample - 1)) else result
+        }
+        // Keep one source available so a stale trigger cannot become silent while preferences
+        // are being applied between simulation and audio-control ticks.
+        backfireAllowedSamplesMask.set(if (mask == 0) 1 else mask)
+    }
+
     fun loadedBankProfileId(): String? = loadedBankProfileId.get()
 
     internal fun consumeLoadFailure(): AudioLoadFailure? = loadFailure.getAndSet(null)
@@ -133,7 +146,11 @@ class EngineAudioEngine(context: Context) {
         parameters.set(frame)
         soundPerspective.set(frame.perspective)
         if (frame.limiterPulse) limiterPulseSerial.incrementAndGet()
-        if (frame.backfireTriggered) backfirePulseSerial.incrementAndGet()
+        // A gear change has its own brief throttle cut. Never let that transport-level cut become
+        // a backfire pulse, even if the simulation frame arrives at the audio worker one tick late.
+        if (frame.backfireTriggered && !frame.isShifting && frame.shiftDirection == 0) {
+            backfirePulseSerial.incrementAndGet()
+        }
         if (frame.shiftRejected) rejectedShiftSerial.incrementAndGet()
         if (frame.tractionLimitPulse) tractionPulseSerial.incrementAndGet()
     }
@@ -246,6 +263,8 @@ class EngineAudioEngine(context: Context) {
         var sentHostEngineGain: Float? = null
         var sentHostEffectsGain: Float? = null
         var sentNativeEventOverridesVersion = -1L
+        var sentBackfireAllowedSamplesMask = -1
+        var sentBackfireAudioEnabled = true
         var sentNativeDiagnosticsEnabled = DebugTelemetry.nativeDiagnosticsEnabled()
         var eventCatalogCaptured = false
         var diagnosticBankSha256: String? = null
@@ -346,6 +365,16 @@ class EngineAudioEngine(context: Context) {
                     )
                     sentNativeEventOverridesVersion = requestedNativeEventOverridesVersion
                     overrideBatchCalls = 1
+                }
+                val requestedBackfireAllowedSamplesMask = backfireAllowedSamplesMask.get()
+                if (requestedBackfireAllowedSamplesMask != sentBackfireAllowedSamplesMask) {
+                    bridge.setBackfireAllowedSamples(requestedBackfireAllowedSamplesMask)
+                    sentBackfireAllowedSamplesMask = requestedBackfireAllowedSamplesMask
+                }
+                val requestedBackfireAudioEnabled = backfireAudioEnabled.get()
+                if (requestedBackfireAudioEnabled != sentBackfireAudioEnabled) {
+                    bridge.setBackfireAudioEnabled(requestedBackfireAudioEnabled)
+                    sentBackfireAudioEnabled = requestedBackfireAudioEnabled
                 }
                 val requestedBackfireOnly = backfireOnly.get()
                 if (requestedBackfireOnly != sentBackfireOnly) {
@@ -526,10 +555,11 @@ class EngineAudioEngine(context: Context) {
     private fun ensureAlfaBackfireSamples(): File {
         val directory = File(appContext.filesDir, "alfa-backfire")
         directory.mkdirs()
-        (1..4).forEach { sample ->
-            val destination = File(directory, "backfire_$sample.wav")
+        com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources.indices.forEach { sample ->
+            val sourceName = com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources.names[sample - 1]
+            val destination = File(directory, "$sourceName.wav")
             if (!destination.exists() || destination.length() == 0L) {
-                appContext.assets.open("backfire/alfa/backfire_$sample.wav").use { input ->
+                appContext.assets.open("backfire/alfa/$sourceName.wav").use { input ->
                     destination.outputStream().use { output -> input.copyTo(output) }
                 }
             }

@@ -727,9 +727,11 @@ public:
         for (int pulse = 0; pulse < backfirePulseCount; ++pulse) {
             if (!eitherBackfirePlayingLocked()) {
                 const std::string selected = perspectiveEventLocked("backfire_int", "backfire_ext");
-                if (alfaBackfireSamplesLoaded_) {
+                if (backfireSampleIndex >= 1 && alfaBackfireSamplesLoaded_) {
                     playAlfaBackfireSampleLocked(backfireSampleIndex);
                 } else {
+                    // A disabled global policy means pure bank behavior: the app only sends the
+                    // lift-off edge and lets the authored FMOD event choose its own sources.
                     startEventLocked(selected);
                 }
             }
@@ -794,6 +796,23 @@ public:
         if (backfireOnly_ == enabled) return;
         backfireOnly_ = enabled;
         applyEventOverridesLocked();
+    }
+
+    void setBackfireAudioEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (backfireAudioEnabled_ == enabled) return;
+        backfireAudioEnabled_ = enabled;
+        if (!backfireAudioEnabled_ && alfaBackfireChannel_ != nullptr) {
+            alfaBackfireChannel_->stop();
+            alfaBackfireChannel_ = nullptr;
+        }
+        applyEventOverridesLocked();
+    }
+
+    void setBackfireAllowedSamples(int mask) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        backfireAllowedSamplesMask_ = mask & 0x0F;
+        if (backfireAllowedSamplesMask_ == 0) backfireAllowedSamplesMask_ = 1;
     }
 
     void setEventOverrides(
@@ -973,8 +992,11 @@ private:
     void loadAlfaBackfireSamplesLocked(const std::string& directory) {
         if (core_ == nullptr || directory.empty()) return;
         bool allLoaded = true;
-        for (int index = 0; index < 4; ++index) {
-            const std::string path = directory + "/backfire_" + std::to_string(index + 1) + ".wav";
+        static constexpr std::array<const char*, 4> kAlfaBackfireSources = {
+            "backfire_1", "backfire_2", "backfire_3", "backfire_4"
+        };
+        for (int index = 0; index < static_cast<int>(kAlfaBackfireSources.size()); ++index) {
+            const std::string path = directory + "/" + kAlfaBackfireSources[index] + ".wav";
             const FMOD_RESULT result = core_->createSound(path.c_str(), FMOD_DEFAULT, nullptr, &alfaBackfireSamples_[index]);
             if (result != FMOD_OK || alfaBackfireSamples_[index] == nullptr) {
                 allLoaded = false;
@@ -988,10 +1010,23 @@ private:
     }
 
     void playAlfaBackfireSampleLocked(int sampleIndex) {
-        if (!alfaBackfireSamplesLoaded_ || core_ == nullptr || sampleIndex < 1 || sampleIndex > 4) return;
+        if (!alfaBackfireSamplesLoaded_ || core_ == nullptr) return;
+        int selectedIndex = sampleIndex;
+        if (selectedIndex < 1 || selectedIndex > 4 ||
+            (backfireAllowedSamplesMask_ & (1 << (selectedIndex - 1))) == 0) {
+            selectedIndex = 0;
+            for (int candidate = 1; candidate <= 4; ++candidate) {
+                if ((backfireAllowedSamplesMask_ & (1 << (candidate - 1))) != 0 &&
+                    alfaBackfireSamples_[candidate - 1] != nullptr) {
+                    selectedIndex = candidate;
+                    break;
+                }
+            }
+            if (selectedIndex == 0) return;
+        }
         FMOD::Channel* channel = nullptr;
         const FMOD_RESULT result = core_->playSound(
-            alfaBackfireSamples_[sampleIndex - 1],
+            alfaBackfireSamples_[selectedIndex - 1],
             nullptr,
             true,
             &channel
@@ -1258,12 +1293,14 @@ private:
             const bool soloed = anySolo && !soloEvents_[pair.first];
             const bool protectedBackfire = backfireOnly_ &&
                 (pair.first == "backfire_int" || pair.first == "backfire_ext");
+            const bool disabledBackfire = !backfireAudioEnabled_ &&
+                (pair.first == "backfire_int" || pair.first == "backfire_ext");
             const bool excludedByBackfireOnly = backfireOnly_ &&
                 pair.first != "backfire_int" && pair.first != "backfire_ext";
             const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
             const float baseGain = isEngine ? hostEngineGain_ : hostEffectsGain_;
             const float categoryGain = eventCategoryGain(pair.first);
-            pair.second->instance->setVolume(((!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
+            pair.second->instance->setVolume((disabledBackfire || (!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
         }
     }
 
@@ -1725,6 +1762,8 @@ private:
     float turboGain_ = 1.0f;
     float backfireGain_ = 1.0f;
     bool backfireOnly_ = false;
+    bool backfireAudioEnabled_ = true;
+    int backfireAllowedSamplesMask_ = 0x0F;
     std::array<FMOD::Sound*, 4> alfaBackfireSamples_{};
     FMOD::Channel* alfaBackfireChannel_ = nullptr;
     bool alfaBackfireSamplesLoaded_ = false;
@@ -1973,6 +2012,20 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireOn
     JNIEnv*, jobject, jboolean enabled
 ) {
     runtime.setBackfireOnly(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireAudioEnabled(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setBackfireAudioEnabled(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireAllowedSamples(
+    JNIEnv*, jobject, jint mask
+) {
+    runtime.setBackfireAllowedSamples(mask);
 }
 
 extern "C" JNIEXPORT void JNICALL

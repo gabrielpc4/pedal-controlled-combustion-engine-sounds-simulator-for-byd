@@ -81,6 +81,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
@@ -538,8 +539,17 @@ private fun BackfireSettingsPanel(
             color = Muted,
             fontSize = 14.sp,
         )
-        SettingsToggle("BACKFIRE ENABLED", value.enabled) {
-            onChange(value.copy(enabled = !value.enabled))
+        SettingsToggle("BACKFIRE OVERRIDE LOGIC", value.overrideLogicEnabled) {
+            onChange(value.copy(overrideLogicEnabled = !value.overrideLogicEnabled))
+        }
+        SettingsToggle("OVERRIDE SOUNDS ONLY", value.soundOnlyOverrideEnabled) {
+            onChange(value.copy(soundOnlyOverrideEnabled = !value.soundOnlyOverrideEnabled))
+        }
+        SettingsToggle("BACKFIRE AUDIO ENABLED", value.backfireAudioEnabled) {
+            onChange(value.copy(backfireAudioEnabled = !value.backfireAudioEnabled))
+        }
+        BackfireSlider("BACKFIRE GAIN", value.backfireGain.toDouble(), 1.0f..10.0f, suffix = "x", steps = 17) {
+            onChange(value.copy(backfireGain = it))
         }
         BackfireSlider("ARM THROTTLE", value.armThrottle, 0.05f..1.0f) {
             onChange(value.copy(armThrottle = it.toDouble()))
@@ -557,7 +567,7 @@ private fun BackfireSettingsPanel(
             onChange(value.copy(maximumRpm = it.toDouble()))
         }
         Text("ALFA ROMEO BACKFIRE SAMPLES", color = Cyan, fontSize = 16.sp, fontWeight = FontWeight.Black)
-        (1..4).forEach { sample ->
+        AlfaBackfireSources.indices.forEach { sample ->
             val allowed = sample in value.allowedSamples
             Row(
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel)
@@ -565,7 +575,7 @@ private fun BackfireSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("BACKFIRE $sample", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(AlfaBackfireSources.names[sample - 1], color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Text("PLAY ▶", color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.Black,
                     modifier = Modifier.clickable { onPreview(sample) }.padding(8.dp))
                 SettingsToggle("ALLOW", allowed, compact = true) {
@@ -602,6 +612,7 @@ private fun BackfireSlider(
     range: ClosedFloatingPointRange<Float>,
     suffix: String = "",
     integer: Boolean = false,
+    steps: Int = 0,
     onChange: (Float) -> Unit,
 ) {
     val shown = if (integer) String.format(Locale.US, "%.0f", value) else String.format(Locale.US, "%.2f", value)
@@ -610,7 +621,7 @@ private fun BackfireSlider(
             Text(label, color = CyanSoft, fontSize = 12.sp, fontWeight = FontWeight.Black)
             Text("$shown$suffix", color = White, fontSize = 12.sp)
         }
-        Slider(value = value.toFloat().coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range)
+        Slider(value = value.toFloat().coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range, steps = steps)
     }
 }
 
