@@ -108,6 +108,7 @@ import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessageSeverity
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
+import com.gabrielpc.enginesoundsimulator.audio.CarSubtitleCatalog
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.BackfirePreviewPlayer
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
@@ -1415,6 +1416,10 @@ private fun CarStage(
     modifier: Modifier = Modifier,
 ) {
     var carPickerExpanded by remember { mutableStateOf(false) }
+    val selectedProfile = remember(state.selectedCarId) { FmodBankProfiles.find(state.selectedCarId) }
+    val selectedCarSubtitle = remember(selectedProfile.id) {
+        CarSubtitleCatalog.forProfileId(selectedProfile.id)
+    }
     Box(modifier = modifier) {
         Column(
             modifier = Modifier
@@ -1430,7 +1435,7 @@ private fun CarStage(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                text = "ORIGINAL ASSETTO CORSA DATA",
+                text = selectedCarSubtitle.uppercase(),
                 color = CyanSoft,
                 fontSize = 12.sp,
                 letterSpacing = 1.1.sp,
@@ -1440,7 +1445,6 @@ private fun CarStage(
 
         val context = LocalContext.current
         val audioResolver = remember(context) { FmodBankResolver(context.applicationContext) }
-        val selectedProfile = remember(state.selectedCarId) { FmodBankProfiles.find(state.selectedCarId) }
         val installedPreviewPath = audioResolver.previewFile(selectedProfile)?.path
         val preview = remember(state.selectedCarId, installedPreviewPath) {
             runCatching {

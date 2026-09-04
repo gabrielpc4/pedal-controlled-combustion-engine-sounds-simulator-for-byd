@@ -78,6 +78,8 @@ that defaults to 0.5x and is applied before the per-car transmission trim.
 - [FMOD bank calibration](fmod-bank-calibration.md): reference-bank inspection workflow.
 - [FMOD bank installation](fmod-bank-installation.md): two-group package format and file-manager delivery.
 - [Car audio validation](car-audio-validation.md): manual validation procedure and evidence.
+- [Car subtitles](car-subtitles.md): generated, source-specific dashboard descriptions for every
+  selectable original and modded profile.
 - [Original-car audio inventory](original-cars-audio-inventory.md): generated authored-bank and
   runtime-audit reference for all usable official profiles.
 - [Modded-car audio inventory](modded-cars-audio-inventory.md): generated authored bank graph,
