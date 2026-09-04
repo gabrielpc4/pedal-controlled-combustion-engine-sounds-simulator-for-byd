@@ -47,6 +47,8 @@ data class DriveSnapshot(
     val inputSourcePrimary: String,
     val inputSourceSecondary: String,
     val inputSourceIsRealPedals: Boolean,
+    /** True when simulated pedal percentages remain latched after the pointer is released. */
+    val simulatedPedalsLatched: Boolean = false,
     val inputSourceFaded: Boolean,
     val throttle: Double,
     val brake: Double,
@@ -106,6 +108,7 @@ class DriveController(context: Context) {
     private val running = AtomicBoolean(false)
     private val generation = AtomicLong(0L)
     private val simulatedPedals = AtomicReference(SimulatedPedalInput())
+    private val simulatedPedalsLatched = AtomicBoolean(false)
     private val inputMode = AtomicReference(InputMode.RealPedals)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val uiActive = AtomicBoolean(false)
@@ -125,6 +128,7 @@ class DriveController(context: Context) {
         inputSourcePrimary = InputMode.SimulatedPedals.primaryLabel,
         inputSourceSecondary = InputMode.SimulatedPedals.secondaryLabel,
         inputSourceIsRealPedals = false,
+        simulatedPedalsLatched = false,
         inputSourceFaded = false,
         throttle = 0.0,
         brake = 0.0,
@@ -202,11 +206,26 @@ class DriveController(context: Context) {
             vehicleReader.stop()
             audioEngine.stop()
             simulatedPedals.set(SimulatedPedalInput())
+            simulatedPedalsLatched.set(false)
         }
     }
 
-    fun setSimulatedPedalThrottle(value: Double) { simulatedPedals.updateAndGet { it.copy(throttle = value.coerceIn(0.0, 1.0)) } }
-    fun setSimulatedPedalBrake(value: Double) { simulatedPedals.updateAndGet { it.copy(brake = value.coerceIn(0.0, 1.0)) } }
+    fun setSimulatedPedalsLatched(enabled: Boolean) {
+        simulatedPedalsLatched.set(enabled)
+        if (!enabled) simulatedPedals.set(SimulatedPedalInput())
+    }
+
+    fun setSimulatedPedalThrottle(value: Double) {
+        val clamped = value.coerceIn(0.0, 1.0)
+        if (clamped == 0.0 && simulatedPedalsLatched.get()) return
+        simulatedPedals.updateAndGet { it.copy(throttle = clamped) }
+    }
+
+    fun setSimulatedPedalBrake(value: Double) {
+        val clamped = value.coerceIn(0.0, 1.0)
+        if (clamped == 0.0 && simulatedPedalsLatched.get()) return
+        simulatedPedals.updateAndGet { it.copy(brake = clamped) }
+    }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
     fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float) {
@@ -468,6 +487,7 @@ class DriveController(context: Context) {
                 inputSourcePrimary = sourceUi.primaryLabel,
                 inputSourceSecondary = sourceUi.secondaryLabel,
                 inputSourceIsRealPedals = sourceUi.isRealPedals,
+                simulatedPedalsLatched = simulatedPedalsLatched.get(),
                 inputSourceFaded = sourceUi.faded,
                 throttle = input.throttle,
                 brake = input.brake,

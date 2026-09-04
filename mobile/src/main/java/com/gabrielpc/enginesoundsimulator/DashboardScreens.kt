@@ -108,6 +108,7 @@ internal fun MixerDashboardScreen(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onToggleSimulatedPedalLatch: () -> Unit,
     onSelectCar: (String) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -271,6 +272,7 @@ internal fun MixerDashboardScreen(
                 state = state,
                 onThrottle = onThrottle,
                 onBrake = onBrake,
+                onToggleSimulatedPedalLatch = onToggleSimulatedPedalLatch,
                 onManualUpshift = onManualUpshift,
                 onManualDownshift = onManualDownshift,
                 modifier = Modifier

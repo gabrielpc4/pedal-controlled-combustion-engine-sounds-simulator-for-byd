@@ -170,6 +170,7 @@ class MainActivity : ComponentActivity() {
                         uiMonitoringActive = uiMonitoringActive,
                         onThrottle = controller::setSimulatedPedalThrottle,
                         onBrake = controller::setSimulatedPedalBrake,
+                        onToggleSimulatedPedalLatch = controller::setSimulatedPedalsLatched,
                         onSelectSimulatedPedals = controller::selectSimulatedPedals,
                         onSelectRealPedals = controller::selectRealPedals,
                         onToggleInputSource = controller::toggleInputSource,
@@ -242,6 +243,7 @@ private fun MotorSoundDashboard(
     uiMonitoringActive: Boolean,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onToggleSimulatedPedalLatch: (Boolean) -> Unit,
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
@@ -398,6 +400,7 @@ private fun MotorSoundDashboard(
                                     state = state,
                                     onThrottle = onThrottle,
                                     onBrake = onBrake,
+                                    onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
                                     modifier = Modifier.padding(start = 28.dp),
@@ -414,6 +417,7 @@ private fun MotorSoundDashboard(
                             state = state,
                             onThrottle = onThrottle,
                             onBrake = onBrake,
+                            onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
                             onSelectCar = onSelectCar,
                             soundPerspective = state.soundPerspective,
                             onSoundPerspectiveChange = onSoundPerspectiveChange,
@@ -813,6 +817,50 @@ private fun HeaderIconButton(
     }
 }
 
+/**
+ * Keeps simulated pedal percentages after a pointer release. This is intentionally a runtime
+ * control: REAL PEDALS remain telemetry-authoritative, and disabling it immediately clears both
+ * virtual pedals so an old test value cannot silently remain applied.
+ */
+@Composable
+private fun SimulatedPedalLatchToggle(
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    scale: Float,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(scale.scaledDp(5)),
+        modifier = Modifier.padding(bottom = scale.scaledDp(6)),
+    ) {
+        Text(
+            text = "HOLD PEDALS",
+            color = if (enabled) Cyan else Muted,
+            fontSize = (11f * scale).sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = (0.8f * scale).sp,
+        )
+        Box(
+            modifier = Modifier
+                .width(scale.scaledDp(62))
+                .height(scale.scaledDp(28))
+                .clip(RoundedCornerShape(50))
+                .background(if (enabled) Cyan else Line)
+                .clickable(onClick = onToggle),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = scale.scaledDp(4))
+                    .offset(x = if (enabled) scale.scaledDp(30) else 0.dp)
+                    .size(scale.scaledDp(20))
+                    .clip(CircleShape)
+                    .background(White),
+            )
+        }
+    }
+}
+
 @Composable
 private fun StatusTag(text: String, color: Color) {
     Text(
@@ -839,6 +887,7 @@ private fun ClassicDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onToggleSimulatedPedalLatch: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
@@ -852,6 +901,13 @@ private fun ClassicDriveControls(
             ManualShiftButtons(
                 onUpshift = onManualUpshift,
                 onDownshift = onManualDownshift,
+                scale = CLASSIC_DRIVE_CONTROL_SCALE,
+            )
+        }
+        if (!state.inputSourceIsRealPedals) {
+            SimulatedPedalLatchToggle(
+                enabled = state.simulatedPedalsLatched,
+                onToggle = onToggleSimulatedPedalLatch,
                 scale = CLASSIC_DRIVE_CONTROL_SCALE,
             )
         }
@@ -977,6 +1033,7 @@ internal fun MixerDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onToggleSimulatedPedalLatch: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1000,6 +1057,13 @@ internal fun MixerDriveControls(
             ManualShiftButtons(
                 onUpshift = onManualUpshift,
                 onDownshift = onManualDownshift,
+                scale = MIXER_DRIVE_CONTROL_SCALE,
+            )
+        }
+        if (!state.inputSourceIsRealPedals) {
+            SimulatedPedalLatchToggle(
+                enabled = state.simulatedPedalsLatched,
+                onToggle = onToggleSimulatedPedalLatch,
                 scale = MIXER_DRIVE_CONTROL_SCALE,
             )
         }
