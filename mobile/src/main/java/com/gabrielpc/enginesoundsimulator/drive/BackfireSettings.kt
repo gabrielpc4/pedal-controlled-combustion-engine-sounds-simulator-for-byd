@@ -7,8 +7,6 @@ import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 data class BackfireSettings(
     /** Master switch for every backfire source, including the car's authored FMOD events. */
     val backfireAudioEnabled: Boolean = true,
-    /** App-owned trigger timing. When false, the car bank's backfire event is used. */
-    val overrideLogicEnabled: Boolean = true,
     /** Replace only the bank's selected source while keeping its trigger path. */
     val soundOnlyOverrideEnabled: Boolean = false,
     val armThrottle: Double = 0.40,
@@ -45,7 +43,6 @@ internal class BackfireSettingsRepository(context: Context) {
     fun load(): BackfireSettings {
         val defaults = BackfireSettings()
         return BackfireSettings(
-            overrideLogicEnabled = preferences.getBoolean("override_logic_enabled", defaults.overrideLogicEnabled),
             soundOnlyOverrideEnabled = preferences.getBoolean("sound_only_override", defaults.soundOnlyOverrideEnabled),
             armThrottle = preferences.getFloat("arm_throttle", defaults.armThrottle.toFloat()).toDouble(),
             releaseThrottle = preferences.getFloat("release_throttle", defaults.releaseThrottle.toFloat()).toDouble(),
@@ -62,7 +59,6 @@ internal class BackfireSettingsRepository(context: Context) {
     fun save(settings: BackfireSettings) {
         val value = settings.normalized()
         preferences.edit()
-            .putBoolean("override_logic_enabled", value.overrideLogicEnabled)
             .putBoolean("sound_only_override", value.soundOnlyOverrideEnabled)
             .putFloat("arm_throttle", value.armThrottle.toFloat())
             .putFloat("release_throttle", value.releaseThrottle.toFloat())

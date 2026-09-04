@@ -589,9 +589,6 @@ private fun BackfireSettingsPanel(
             color = Muted,
             fontSize = 14.sp,
         )
-        SettingsToggle("BACKFIRE OVERRIDE LOGIC", value.overrideLogicEnabled) {
-            onChange(value.copy(overrideLogicEnabled = !value.overrideLogicEnabled))
-        }
         SettingsToggle("OVERRIDE SOUNDS ONLY", value.soundOnlyOverrideEnabled) {
             onChange(value.copy(soundOnlyOverrideEnabled = !value.soundOnlyOverrideEnabled))
         }

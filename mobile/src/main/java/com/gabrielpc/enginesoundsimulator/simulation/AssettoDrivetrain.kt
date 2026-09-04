@@ -664,13 +664,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (!shiftThrottleCut && controlsGas > 0.10) {
             backfireSuppressedAfterShift = false
         }
-        val naturalBankBackfire = !backfire.overrideLogicEnabled && !shiftThrottleCut &&
-            !backfireSuppressedAfterShift && previousBackfireThrottle > 0.10 && controlsGas <= 0.10
-        if (!backfire.overrideLogicEnabled) {
-            backfireArmed = false
-            backfireReleaseTimer = 0.0
-        }
-        if (backfire.overrideLogicEnabled && controlsGas >= backfire.armThrottle) {
+        val naturalBankBackfire = false
+        if (controlsGas >= backfire.armThrottle) {
             backfireArmed = true
             backfireReleaseTimer = 0.0
             backfireSuppressedAfterShift = false
@@ -683,7 +678,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // This intentionally replaces the bank's per-car RPM/gas gates with one global policy:
         // a clear attempted run followed by a configurable lift-off delay is the user-facing
         // definition of backfire, independent of how a particular bank authored its thresholds.
-        val triggerBackfire = backfire.overrideLogicEnabled && !shiftThrottleCut && !backfireSuppressedAfterShift && backfireArmed &&
+        val triggerBackfire = !shiftThrottleCut && !backfireSuppressedAfterShift && backfireArmed &&
             controlsGas <= backfire.releaseThrottle &&
             rpm >= backfire.minimumRpm && rpm <= backfire.maximumRpm &&
             backfireReleaseTimer >= backfire.releaseDelaySeconds
