@@ -101,6 +101,10 @@ class EngineSimulation {
         drivetrain?.updateBackfireSettings(settings)
     }
 
+    internal fun setUseOriginalBackfire(enabled: Boolean) {
+        drivetrain?.setUseOriginalBackfire(enabled)
+    }
+
     internal fun updateAutoblipEnabled(enabled: Boolean) {
         drivetrain?.updateAutoblipEnabled(enabled)
     }

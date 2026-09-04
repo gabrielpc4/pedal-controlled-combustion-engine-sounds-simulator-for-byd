@@ -86,6 +86,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var backfireSettings = BackfireSettings()
     private var currentTransmissionPosition = TransmissionPosition.DRIVE
     private var nextBackfireSampleCursor = 0
+    private var useOriginalBackfire = false
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
     private var previousFmodWheelSpeed = 0.0
@@ -117,6 +118,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         backfireSuppressedAfterShift = false
         nextBackfireSampleCursor = 0
     }
+
+    fun setUseOriginalBackfire(enabled: Boolean) { useOriginalBackfire = enabled }
 
     fun updateAutoblipEnabled(enabled: Boolean) {
         autoblipEnabled = enabled
@@ -703,7 +706,15 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (!shiftThrottleCut && controlsGas > 0.10) {
             backfireSuppressedAfterShift = false
         }
-        val naturalBankBackfire = false
+        val authoredBackfire = physics.engine.backfire
+        if (useOriginalBackfire && !shiftThrottleCut && previousBackfireThrottle >= authoredBackfire.triggerGas && controlsGas < previousBackfireThrottle) {
+            backfireReleaseTimer = min(10.0, backfireReleaseTimer + dt)
+        }
+        val naturalBankBackfire = useOriginalBackfire && !shiftThrottleCut &&
+            previousBackfireThrottle >= authoredBackfire.triggerGas &&
+            controlsGas > 0.0 && controlsGas < authoredBackfire.maximumGas &&
+            rpm > authoredBackfire.minimumRpm && rpm <= authoredBackfire.maximumRpm &&
+            backfireReleaseTimer > 1.0
         if (overrideBackfireAllowed && controlsGas >= backfire.armThrottle) {
             backfireArmed = true
             backfireReleaseTimer = 0.0

@@ -206,6 +206,7 @@ class DriveController(context: Context) {
         transmissionSoundSettings.set(transmissionSoundSettingsRepository.load())
         carEffectModes.set(carEffectModesRepository.load(selectedProfile.get()))
         simulation.updateBackfireSettings(backfireSettings.get())
+        simulation.setUseOriginalBackfire(carEffectModes.get().popsAndBangsOriginal)
         simulation.updateAutoblipEnabled(autoblipEnabled.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
         audioEngine.setBackfireAudioEnabled(carEffectModes.get().popsAndBangsEnabled)
@@ -360,7 +361,10 @@ class DriveController(context: Context) {
         carEffectModes.set(updated)
         carEffectModesRepository.save(selectedProfile.get(), updated)
         when (kind) {
-            EffectSoundKind.POPS_AND_BANGS -> audioEngine.setBackfireUseOriginal(original)
+            EffectSoundKind.POPS_AND_BANGS -> {
+                audioEngine.setBackfireUseOriginal(original)
+                simulation.setUseOriginalBackfire(original)
+            }
             EffectSoundKind.SHIFT -> {
                 audioEngine.setShiftSoundOverride(!original)
                 shiftSoundSettings.set(ShiftSoundSettings(overrideEnabled = !original))
