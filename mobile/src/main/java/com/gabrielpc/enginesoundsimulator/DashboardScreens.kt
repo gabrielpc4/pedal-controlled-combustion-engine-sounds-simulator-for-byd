@@ -604,7 +604,7 @@ private fun BackfireSettingsPanel(
         BackfireSlider("MINIMUM RPM", value.minimumRpm, 0.0f..16000.0f, integer = true, steps = 31) {
             onChange(value.copy(minimumRpm = it.toDouble()))
         }
-        BackfireSlider("MAXIMUM RPM", value.maximumRpm, 500.0f..20000.0f, integer = true, steps = 38) {
+        BackfireSlider("MAXIMUM RPM", value.maximumRpm, 500.0f..12000.0f, integer = true, steps = 23) {
             onChange(value.copy(maximumRpm = it.toDouble()))
         }
         Text("ALFA ROMEO BACKFIRE SAMPLES", color = Cyan, fontSize = 16.sp, fontWeight = FontWeight.Black)

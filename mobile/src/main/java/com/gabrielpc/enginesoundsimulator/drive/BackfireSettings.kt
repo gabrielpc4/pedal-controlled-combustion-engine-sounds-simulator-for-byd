@@ -11,9 +11,9 @@ data class BackfireSettings(
     val soundOnlyOverrideEnabled: Boolean = false,
     val armThrottle: Double = 0.40,
     val releaseThrottle: Double = 0.10,
-    val releaseDelaySeconds: Double = 1.50,
-    val minimumRpm: Double = 1500.0,
-    val maximumRpm: Double = 12000.0,
+    val releaseDelaySeconds: Double = 0.0,
+    val minimumRpm: Double = 5500.0,
+    val maximumRpm: Double = 8000.0,
     val backfireGain: Float = 1.0f,
     /** The four Alfa Romeo bank-derived samples retained for the validated sound profile. */
     val allowedSamples: Set<Int> = AlfaBackfireSources.indices.toSet(),
@@ -23,7 +23,7 @@ data class BackfireSettings(
         releaseThrottle = releaseThrottle.coerceIn(0.0, 0.9),
         releaseDelaySeconds = releaseDelaySeconds.coerceIn(0.0, 5.0),
         minimumRpm = minimumRpm.coerceIn(0.0, 16000.0),
-        maximumRpm = maximumRpm.coerceIn(500.0, 20000.0),
+        maximumRpm = maximumRpm.coerceIn(500.0, 12000.0),
         backfireGain = backfireGain.coerceIn(1.0f, 10.0f),
         allowedSamples = allowedSamples.filter { it in AlfaBackfireSources.indices }.toSet().ifEmpty { setOf(1) },
     )
