@@ -113,7 +113,7 @@ internal fun MixerDashboardScreen(
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
-    onCategoryGains: (Float, Float, Float) -> Unit,
+    onCategoryGains: (Float, Float, Float, Float) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     soundPerspective: EngineSoundPerspective,
@@ -216,6 +216,7 @@ internal fun MixerDashboardScreen(
             transmissionGain = state.transmissionGain,
             gearShiftGain = state.gearShiftGain,
             turboGain = state.turboGain,
+            backfireGain = state.backfireGain,
             onChange = onCategoryGains,
         )
         Spacer(Modifier.height(10.dp))
@@ -327,7 +328,8 @@ private fun CategoryGainControls(
     transmissionGain: Float,
     gearShiftGain: Float,
     turboGain: Float,
-    onChange: (Float, Float, Float) -> Unit,
+    backfireGain: Float,
+    onChange: (Float, Float, Float, Float) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -339,9 +341,10 @@ private fun CategoryGainControls(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        GainControl("TRANSMISSION", transmissionGain) { onChange(it, gearShiftGain, turboGain) }
-        GainControl("GEAR SHIFT", gearShiftGain) { onChange(transmissionGain, it, turboGain) }
-        GainControl("TURBO", turboGain) { onChange(transmissionGain, gearShiftGain, it) }
+        GainControl("TRANSMISSION", transmissionGain) { onChange(it, gearShiftGain, turboGain, backfireGain) }
+        GainControl("GEAR SHIFT", gearShiftGain) { onChange(transmissionGain, it, turboGain, backfireGain) }
+        GainControl("TURBO", turboGain) { onChange(transmissionGain, gearShiftGain, it, backfireGain) }
+        GainControl("BACKFIRE", backfireGain) { onChange(transmissionGain, gearShiftGain, turboGain, it) }
     }
 }
 

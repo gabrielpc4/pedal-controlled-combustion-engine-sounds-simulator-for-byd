@@ -755,12 +755,13 @@ public:
         applyEventOverridesLocked();
     }
 
-    void setCategoryGains(float transmissionGain, float gearShiftGain, float turboGain) {
+    void setCategoryGains(float transmissionGain, float gearShiftGain, float turboGain, float backfireGain) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!active_) return;
         transmissionGain_ = std::max(0.0f, transmissionGain);
         gearShiftGain_ = std::max(0.0f, gearShiftGain);
         turboGain_ = std::max(0.0f, turboGain);
+        backfireGain_ = std::max(0.0f, backfireGain);
         applyEventOverridesLocked();
     }
 
@@ -1208,6 +1209,7 @@ private:
         if (name == "transmission" || name == "transmission_ext") return transmissionGain_;
         if (name == "gear_int" || name == "gear_ext" || name == "gear_grind") return gearShiftGain_;
         if (name == "turbo") return turboGain_;
+        if (name == "backfire_int" || name == "backfire_ext") return backfireGain_;
         return 1.0f;
     }
 
@@ -1638,6 +1640,7 @@ private:
     float transmissionGain_ = 1.0f;
     float gearShiftGain_ = 1.0f;
     float turboGain_ = 1.0f;
+    float backfireGain_ = 1.0f;
     std::unordered_map<std::string, RecentSource> recentSources_;
     // Debug-only start times make STOPPED records report the observed one-shot duration. The map
     // is untouched when diagnostics are disabled, keeping release callbacks on the existing path.
@@ -1871,9 +1874,9 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setHostGains(
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setCategoryGains(
-    JNIEnv*, jobject, jfloat transmission, jfloat gearShift, jfloat turbo
+    JNIEnv*, jobject, jfloat transmission, jfloat gearShift, jfloat turbo, jfloat backfire
 ) {
-    runtime.setCategoryGains(transmission, gearShift, turbo);
+    runtime.setCategoryGains(transmission, gearShift, turbo, backfire);
 }
 
 extern "C" JNIEXPORT void JNICALL

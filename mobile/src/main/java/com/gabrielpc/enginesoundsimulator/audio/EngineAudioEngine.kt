@@ -269,7 +269,7 @@ class EngineAudioEngine(context: Context) {
                 bridge.setHostGains(hostEngineGain.get(), hostEffectsGain.get())
                 val gains = categoryGains.get()
                 if (gains != sentCategoryGains) {
-                    bridge.setCategoryGains(gains.transmission, gains.gearShift, gains.turbo)
+                    bridge.setCategoryGains(gains.transmission, gains.gearShift, gains.turbo, gains.backfire)
                     sentCategoryGains = gains
                 }
                 if (clearNativeEventOverrides.getAndSet(false)) {

@@ -253,7 +253,7 @@ private fun MotorSoundDashboard(
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
-    onCategoryGains: (Float, Float, Float) -> Unit,
+    onCategoryGains: (Float, Float, Float, Float) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     onPreviousCar: () -> Unit,

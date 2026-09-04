@@ -64,6 +64,7 @@ data class DriveSnapshot(
     val transmissionGain: Float = 1.0f,
     val gearShiftGain: Float = 1.0f,
     val turboGain: Float = 1.0f,
+    val backfireGain: Float = 1.0f,
     val soundPerspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
@@ -165,6 +166,7 @@ class DriveController(context: Context) {
             transmissionGain = audioMixGains.get().transmission,
             gearShiftGain = audioMixGains.get().gearShift,
             turboGain = audioMixGains.get().turbo,
+            backfireGain = audioMixGains.get().backfire,
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
         )
@@ -228,10 +230,10 @@ class DriveController(context: Context) {
     }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
-    fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float) {
+    fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float) {
         // These trims are intentionally per-car and survive normal APK updates. Reset All is the
         // explicit opt-in that clears them, so selecting another car never carries a hidden mix.
-        val gains = AudioMixGains(transmission, gearShift, turbo)
+        val gains = AudioMixGains(transmission, gearShift, turbo, backfire)
         audioMixGains.set(gains)
         audioMixGainRepository.save(selectedProfile.get(), gains)
         audioEngine.setCategoryGains(gains)

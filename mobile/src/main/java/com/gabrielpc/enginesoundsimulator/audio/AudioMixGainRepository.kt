@@ -8,6 +8,7 @@ internal data class AudioMixGains(
     val transmission: Float = 1.0f,
     val gearShift: Float = 1.0f,
     val turbo: Float = 1.0f,
+    val backfire: Float = 1.0f,
 )
 
 internal class AudioMixGainRepository(context: Context) {
@@ -20,6 +21,7 @@ internal class AudioMixGainRepository(context: Context) {
         transmission = read(profile, "transmission"),
         gearShift = read(profile, "gear_shift"),
         turbo = read(profile, "turbo"),
+        backfire = read(profile, "backfire"),
     )
 
     fun save(profile: FmodBankProfile, gains: AudioMixGains) {
@@ -27,6 +29,7 @@ internal class AudioMixGainRepository(context: Context) {
             .putFloat(key(profile, "transmission"), gains.transmission.coerceAtLeast(0f))
             .putFloat(key(profile, "gear_shift"), gains.gearShift.coerceAtLeast(0f))
             .putFloat(key(profile, "turbo"), gains.turbo.coerceAtLeast(0f))
+            .putFloat(key(profile, "backfire"), gains.backfire.coerceAtLeast(0f))
             .commit()
     }
 
