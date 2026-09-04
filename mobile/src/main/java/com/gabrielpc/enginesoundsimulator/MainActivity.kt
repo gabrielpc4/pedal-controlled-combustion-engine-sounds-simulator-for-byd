@@ -1266,10 +1266,10 @@ internal fun MixerDriveControls(
     onManualDownshift: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    Column(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(16)),
-        verticalAlignment = Alignment.Bottom,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(10)),
     ) {
         // Keep the mixer diagnostics paired with the same live tachometer shown on the classic
         // dashboard, so the pedal test has an immediate RPM reference without leaving the mixer.
@@ -1281,27 +1281,31 @@ internal fun MixerDriveControls(
             upshiftRpm = state.drivetrain.automaticUpshiftRpm,
             modifier = Modifier.size(MIXER_DRIVE_CONTROL_SCALE.scaledDp(808)),
         )
-        if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
-            ManualShiftButtons(
-                onUpshift = onManualUpshift,
-                onDownshift = onManualDownshift,
-                scale = MIXER_DRIVE_CONTROL_SCALE,
-            )
-        }
-        if (!state.inputSourceIsRealPedals) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(6)),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                SimulatedPedalLatchToggle(
-                    enabled = state.simulatedPedalsLatched,
-                    onToggle = onToggleSimulatedPedalLatch,
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(16)),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            if (state.manualShiftModeEnabled && !state.inputSourceIsRealPedals) {
+                ManualShiftButtons(
+                    onUpshift = onManualUpshift,
+                    onDownshift = onManualDownshift,
                     scale = MIXER_DRIVE_CONTROL_SCALE,
                 )
-                SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, MIXER_DRIVE_CONTROL_SCALE)
             }
-        }
-        PedalControl(
+            if (!state.inputSourceIsRealPedals) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(MIXER_DRIVE_CONTROL_SCALE.scaledDp(6)),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    SimulatedPedalLatchToggle(
+                        enabled = state.simulatedPedalsLatched,
+                        onToggle = onToggleSimulatedPedalLatch,
+                        scale = MIXER_DRIVE_CONTROL_SCALE,
+                    )
+                    SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, MIXER_DRIVE_CONTROL_SCALE)
+                }
+            }
+            PedalControl(
             label = "BRAKE",
             value = state.brake,
             accent = Red,
@@ -1309,8 +1313,8 @@ internal fun MixerDriveControls(
             height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(154),
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
-        )
-        PedalControl(
+            )
+            PedalControl(
             label = "THROTTLE",
             value = state.throttle,
             accent = Green,
@@ -1318,13 +1322,14 @@ internal fun MixerDriveControls(
             height = MIXER_DRIVE_CONTROL_SCALE.scaledDp(202),
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onThrottle,
-        )
-        TransmissionShifter(
+            )
+            TransmissionShifter(
             position = state.transmissionPosition,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = MIXER_DRIVE_CONTROL_SCALE,
             onPositionSelected = if (state.inputSourceIsRealPedals) null else onTransmissionPositionChange,
-        )
+            )
+        }
     }
 }
 
