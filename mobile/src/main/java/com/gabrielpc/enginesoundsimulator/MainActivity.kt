@@ -1067,7 +1067,7 @@ private fun DashboardEngineRow(
         // below, which removes only the extra red-marked gap without collapsing the green gaps.
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("ENGINE", color = if (external) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(100.dp))
+        Text("ENGINE", color = if (external) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(115.dp))
         DashboardLabeledSwitch("EXTERNAL", external, onExternalChange)
         DashboardLabeledSwitch("PURE", pure, onPureChange)
         DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
