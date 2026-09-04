@@ -102,6 +102,7 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
+import com.gabrielpc.enginesoundsimulator.drive.EffectSoundKind
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
@@ -182,6 +183,8 @@ class MainActivity : ComponentActivity() {
                         onSelectRealPedals = controller::selectRealPedals,
                         onToggleInputSource = controller::toggleInputSource,
                         onToggleAudioMute = controller::toggleAudioMute,
+                        onEffectEnabledChange = controller::setEffectEnabled,
+                        onEffectOriginalChange = controller::setEffectOriginal,
                         onResetAllPreferences = controller::resetAllPreferences,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onManualUpshift = controller::requestManualUpshift,
@@ -266,6 +269,8 @@ private fun MotorSoundDashboard(
     onSelectRealPedals: () -> Unit,
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
+    onEffectEnabledChange: (EffectSoundKind, Boolean) -> Unit,
+    onEffectOriginalChange: (EffectSoundKind, Boolean) -> Unit,
     onResetAllPreferences: () -> Unit,
     onToggleManualShiftMode: () -> Unit,
     onManualUpshift: () -> Unit,
@@ -424,6 +429,13 @@ private fun MotorSoundDashboard(
                                     .padding(start = 4.dp, end = 4.dp),
                                 verticalAlignment = Alignment.Bottom,
                             ) {
+                                DashboardEffectControls(
+                                    state = state,
+                                    onEnabledChange = onEffectEnabledChange,
+                                    onOriginalChange = onEffectOriginalChange,
+                                    onCategoryGains = onCategoryGains,
+                                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp),
+                                )
                                 ClassicDriveControls(
                                     state = state,
                                     onThrottle = onThrottle,
@@ -942,6 +954,144 @@ private fun StatusTag(text: String, color: Color) {
             .border(1.dp, color.copy(alpha = 0.42f), RoundedCornerShape(50))
             .padding(horizontal = 12.dp, vertical = 6.dp),
     )
+}
+
+private data class DashboardEffectGainPreset(val label: String, val gain: Float)
+
+private val DASHBOARD_EFFECT_GAIN_PRESETS = listOf(
+    DashboardEffectGainPreset("LOWER", 0.5f),
+    DashboardEffectGainPreset("NORMAL", 1.0f),
+    DashboardEffectGainPreset("LOUD", 2.0f),
+    DashboardEffectGainPreset("LOUDER", 3.0f),
+)
+
+@Composable
+private fun DashboardEffectControls(
+    state: DriveSnapshot,
+    onEnabledChange: (EffectSoundKind, Boolean) -> Unit,
+    onOriginalChange: (EffectSoundKind, Boolean) -> Unit,
+    onCategoryGains: (Float, Float, Float, Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.width(950.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        DashboardEffectRow(
+            kind = EffectSoundKind.POPS_AND_BANGS,
+            label = "POPS & BANGS",
+            enabled = state.popsAndBangsEnabled,
+            original = state.popsAndBangsOriginal,
+            gain = state.backfireGain,
+            overrideAvailable = true,
+            onEnabledChange = onEnabledChange,
+            onOriginalChange = onOriginalChange,
+            onGainChange = { value -> onCategoryGains(state.transmissionGain, state.gearShiftGain, state.turboGain, value) },
+        )
+        DashboardEffectRow(
+            kind = EffectSoundKind.SHIFT,
+            label = "SHIFT SOUNDS",
+            enabled = state.shiftSoundsEnabled,
+            original = state.shiftSoundsOriginal,
+            gain = state.gearShiftGain,
+            overrideAvailable = true,
+            onEnabledChange = onEnabledChange,
+            onOriginalChange = onOriginalChange,
+            onGainChange = { value -> onCategoryGains(state.transmissionGain, value, state.turboGain, state.backfireGain) },
+        )
+        DashboardEffectRow(
+            kind = EffectSoundKind.TRANSMISSION,
+            label = "TRANSMISSION",
+            enabled = state.transmissionEnabled,
+            original = false,
+            gain = state.transmissionGain,
+            overrideAvailable = false,
+            onEnabledChange = onEnabledChange,
+            onOriginalChange = onOriginalChange,
+            onGainChange = { value -> onCategoryGains(value, state.gearShiftGain, state.turboGain, state.backfireGain) },
+        )
+        if (state.hasTurbo) {
+            DashboardEffectRow(
+                kind = EffectSoundKind.TURBO,
+                label = "TURBO",
+                enabled = state.turboEnabled,
+                original = false,
+                gain = state.turboGain,
+                overrideAvailable = false,
+                onEnabledChange = onEnabledChange,
+                onOriginalChange = onOriginalChange,
+                onGainChange = { value -> onCategoryGains(state.transmissionGain, state.gearShiftGain, value, state.backfireGain) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardEffectRow(
+    kind: EffectSoundKind,
+    label: String,
+    enabled: Boolean,
+    original: Boolean,
+    gain: Float,
+    overrideAvailable: Boolean,
+    onEnabledChange: (EffectSoundKind, Boolean) -> Unit,
+    onOriginalChange: (EffectSoundKind, Boolean) -> Unit,
+    onGainChange: (Float) -> Unit,
+) {
+    val accent = if (enabled) Cyan else Muted
+    Row(
+        modifier = Modifier.height(42.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(150.dp))
+        DashboardEffectSwitch(enabled) { onEnabledChange(kind, !enabled) }
+        if (overrideAvailable) {
+            DashboardOriginalSwitch(original) { onOriginalChange(kind, !original) }
+        } else {
+            // Keep the row geometry identical even when a category has no replacement source.
+            Spacer(Modifier.width(123.dp))
+        }
+        DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
+            val selected = kotlin.math.abs(gain - preset.gain) < 0.001f
+            Text(
+                text = preset.label,
+                color = if (selected) Night else accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .width(105.dp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (selected) Cyan else PanelBright)
+                    .border(1.dp, if (selected) Cyan else Line, RoundedCornerShape(6.dp))
+                    .clickable { onGainChange(preset.gain) }
+                    .padding(top = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardEffectSwitch(enabled: Boolean, onToggle: () -> Unit) {
+    Box(
+        modifier = Modifier.width(64.dp).height(32.dp).clip(RoundedCornerShape(50))
+            .background(if (enabled) Cyan else Line).clickable(onClick = onToggle),
+        contentAlignment = if (enabled) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(Modifier.padding(4.dp).size(24.dp).clip(CircleShape).background(White))
+    }
+}
+
+@Composable
+private fun DashboardOriginalSwitch(original: Boolean, onToggle: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("ORIGINAL", color = if (original) Cyan else Muted, fontSize = 10.sp,
+            fontWeight = FontWeight.Black)
+        DashboardEffectSwitch(original, onToggle)
+    }
 }
 
 private const val CLASSIC_DRIVE_CONTROL_SCALE = 0.7f

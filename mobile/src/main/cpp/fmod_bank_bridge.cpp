@@ -709,6 +709,7 @@ public:
                 ? "gear_ext"
                 : "gear_int";
             for (int pulse = 0; pulse < shiftStartedCount; ++pulse) {
+                if (!shiftSoundEnabled_) continue;
                 if (shiftSoundOverride_) {
                     playShiftSampleLocked(shiftDirection > 0);
                     continue;
@@ -727,9 +728,10 @@ public:
         }
 
         for (int pulse = 0; pulse < backfirePulseCount; ++pulse) {
+            if (!backfireAudioEnabled_) continue;
             if (!eitherBackfirePlayingLocked()) {
                 const std::string selected = perspectiveEventLocked("backfire_int", "backfire_ext");
-                if (backfireSampleIndex >= 1 && alfaBackfireSamplesLoaded_) {
+                if (!backfireUseOriginal_ && backfireSampleIndex >= 1 && alfaBackfireSamplesLoaded_) {
                     playAlfaBackfireSampleLocked(backfireSampleIndex);
                 } else {
                     // A disabled global policy means pure bank behavior: the app only sends the
@@ -822,6 +824,32 @@ public:
         if (!active_ || shiftSoundOverride_ == enabled) return;
         shiftSoundOverride_ = enabled;
         applyEventOverridesLocked();
+    }
+
+    void setShiftSoundEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (shiftSoundEnabled_ == enabled) return;
+        shiftSoundEnabled_ = enabled;
+        applyEventOverridesLocked();
+    }
+
+    void setTransmissionAudioEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (transmissionAudioEnabled_ == enabled) return;
+        transmissionAudioEnabled_ = enabled;
+        applyEventOverridesLocked();
+    }
+
+    void setTurboAudioEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (turboAudioEnabled_ == enabled) return;
+        turboAudioEnabled_ = enabled;
+        applyEventOverridesLocked();
+    }
+
+    void setBackfireUseOriginal(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        backfireUseOriginal_ = enabled;
     }
 
     void setExteriorPureAudio(bool enabled) {
@@ -1346,9 +1374,14 @@ private:
             const bool isEngine = pair.first == "engine_int" || pair.first == "engine_ext";
             const bool disabledShift = shiftSoundOverride_ &&
                 (pair.first == "gear_int" || pair.first == "gear_ext" || pair.first == "gear_grind");
+            const bool disabledShiftAudio = !shiftSoundEnabled_ &&
+                (pair.first == "gear_int" || pair.first == "gear_ext" || pair.first == "gear_grind");
+            const bool disabledTransmission = !transmissionAudioEnabled_ &&
+                (pair.first == "transmission" || pair.first == "transmission_ext");
+            const bool disabledTurbo = !turboAudioEnabled_ && pair.first == "turbo";
             const float baseGain = isEngine ? hostEngineGain_ : hostEffectsGain_;
             const float categoryGain = eventCategoryGain(pair.first);
-            pair.second->instance->setVolume((disabledBackfire || disabledShift || (!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
+            pair.second->instance->setVolume((disabledBackfire || disabledShift || disabledShiftAudio || disabledTransmission || disabledTurbo || (!protectedBackfire && (muted || soloed || excludedByBackfireOnly))) ? 0.0f : baseGain * categoryGain);
         }
     }
 
@@ -1835,7 +1868,11 @@ private:
     float backfireGain_ = 1.0f;
     bool backfireOnly_ = false;
     bool backfireAudioEnabled_ = true;
+    bool backfireUseOriginal_ = false;
     bool shiftSoundOverride_ = false;
+    bool shiftSoundEnabled_ = true;
+    bool transmissionAudioEnabled_ = true;
+    bool turboAudioEnabled_ = true;
     int backfireAllowedSamplesMask_ = 0x0F;
     std::array<FMOD::Sound*, 4> alfaBackfireSamples_{};
     FMOD::Channel* alfaBackfireChannel_ = nullptr;
@@ -2110,6 +2147,34 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftSound
     JNIEnv*, jobject, jboolean enabled
 ) {
     runtime.setShiftSoundOverride(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setShiftSoundEnabled(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setShiftSoundEnabled(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setTransmissionAudioEnabled(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setTransmissionAudioEnabled(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setTurboAudioEnabled(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setTurboAudioEnabled(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setBackfireUseOriginal(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setBackfireUseOriginal(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL

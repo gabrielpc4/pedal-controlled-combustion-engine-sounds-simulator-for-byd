@@ -18,6 +18,8 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRateRepository
 import com.gabrielpc.enginesoundsimulator.audio.ExteriorAudioModeRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGains
+import com.gabrielpc.enginesoundsimulator.audio.CarEffectModes
+import com.gabrielpc.enginesoundsimulator.audio.CarEffectModesRepository
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
 import com.gabrielpc.enginesoundsimulator.audio.SelectedCarRepository
 import com.gabrielpc.enginesoundsimulator.diagnostics.DebugScenarioOverride
@@ -76,6 +78,13 @@ data class DriveSnapshot(
     /** Global backfire policy, deliberately independent of each car bank's authored thresholds. */
     val backfireSettings: BackfireSettings = BackfireSettings(),
     val shiftSoundSettings: ShiftSoundSettings = ShiftSoundSettings(),
+    val popsAndBangsEnabled: Boolean = true,
+    val popsAndBangsOriginal: Boolean = false,
+    val shiftSoundsEnabled: Boolean = true,
+    val shiftSoundsOriginal: Boolean = true,
+    val transmissionEnabled: Boolean = true,
+    val turboEnabled: Boolean = true,
+    val hasTurbo: Boolean = false,
     val soundPerspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
@@ -109,6 +118,7 @@ class DriveController(context: Context) {
     private val exteriorAudioModeRepository = ExteriorAudioModeRepository(appContext)
     private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
     private val shiftSoundSettingsRepository = ShiftSoundSettingsRepository(appContext)
+    private val carEffectModesRepository = CarEffectModesRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
@@ -137,6 +147,7 @@ class DriveController(context: Context) {
     private val backfireOnly = AtomicBoolean(false)
     private val backfireSettings = AtomicReference(BackfireSettings())
     private val shiftSoundSettings = AtomicReference(ShiftSoundSettings())
+    private val carEffectModes = AtomicReference(CarEffectModes())
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
@@ -186,10 +197,15 @@ class DriveController(context: Context) {
         audioEngine.setCategoryGains(audioMixGains.get())
         backfireSettings.set(backfireSettingsRepository.load())
         shiftSoundSettings.set(shiftSoundSettingsRepository.load())
+        carEffectModes.set(carEffectModesRepository.load(selectedProfile.get()))
         simulation.updateBackfireSettings(backfireSettings.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
-        audioEngine.setBackfireAudioEnabled(backfireSettings.get().backfireAudioEnabled)
-        audioEngine.setShiftSoundOverride(shiftSoundSettings.get().overrideEnabled)
+        audioEngine.setBackfireAudioEnabled(backfireSettings.get().backfireAudioEnabled && carEffectModes.get().popsAndBangsEnabled)
+        audioEngine.setBackfireUseOriginal(carEffectModes.get().popsAndBangsOriginal)
+        audioEngine.setShiftSoundEnabled(carEffectModes.get().shiftSoundsEnabled)
+        audioEngine.setShiftSoundOverride(!carEffectModes.get().shiftSoundsOriginal)
+        audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
+        audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
     }
 
     fun isRunning(): Boolean = running.get()
@@ -218,6 +234,13 @@ class DriveController(context: Context) {
             backfireOnly = backfireOnly.get(),
             backfireSettings = backfireSettings.get(),
             shiftSoundSettings = shiftSoundSettings.get(),
+            popsAndBangsEnabled = carEffectModes.get().popsAndBangsEnabled,
+            popsAndBangsOriginal = carEffectModes.get().popsAndBangsOriginal,
+            shiftSoundsEnabled = carEffectModes.get().shiftSoundsEnabled,
+            shiftSoundsOriginal = carEffectModes.get().shiftSoundsOriginal,
+            transmissionEnabled = carEffectModes.get().transmissionEnabled,
+            turboEnabled = carEffectModes.get().turboEnabled,
+            hasTurbo = activePhysics.get()?.engine?.turbos?.isNotEmpty() == true,
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
@@ -301,14 +324,41 @@ class DriveController(context: Context) {
         exteriorAudioModeRepository.save(enabled)
         audioEngine.setExteriorPureAudio(enabled)
     }
+
+    fun setEffectEnabled(kind: EffectSoundKind, enabled: Boolean) {
+        val updated = carEffectModes.get().withEnabled(kind, enabled)
+        carEffectModes.set(updated)
+        carEffectModesRepository.save(selectedProfile.get(), updated)
+        when (kind) {
+            EffectSoundKind.POPS_AND_BANGS -> audioEngine.setBackfireAudioEnabled(enabled && backfireSettings.get().backfireAudioEnabled)
+            EffectSoundKind.SHIFT -> audioEngine.setShiftSoundEnabled(enabled)
+            EffectSoundKind.TRANSMISSION -> audioEngine.setTransmissionAudioEnabled(enabled)
+            EffectSoundKind.TURBO -> audioEngine.setTurboAudioEnabled(enabled)
+        }
+    }
+
+    fun setEffectOriginal(kind: EffectSoundKind, original: Boolean) {
+        val updated = carEffectModes.get().withOriginal(kind, original)
+        carEffectModes.set(updated)
+        carEffectModesRepository.save(selectedProfile.get(), updated)
+        when (kind) {
+            EffectSoundKind.POPS_AND_BANGS -> audioEngine.setBackfireUseOriginal(original)
+            EffectSoundKind.SHIFT -> {
+                audioEngine.setShiftSoundOverride(!original)
+                shiftSoundSettings.set(ShiftSoundSettings(overrideEnabled = !original))
+                shiftSoundSettingsRepository.save(shiftSoundSettings.get())
+            }
+            EffectSoundKind.TRANSMISSION, EffectSoundKind.TURBO -> Unit
+        }
+    }
     fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float) {
         // These trims are intentionally per-car and survive normal APK updates. Reset All is the
         // explicit opt-in that clears them, so selecting another car never carries a hidden mix.
         val gains = AudioMixGains(
-            transmission.coerceIn(1.0f, 10.0f),
-            gearShift.coerceIn(1.0f, 10.0f),
-            turbo.coerceIn(1.0f, 10.0f),
-            backfire.coerceIn(1.0f, 10.0f),
+            transmission.coerceIn(0.5f, 3.0f),
+            gearShift.coerceIn(0.5f, 3.0f),
+            turbo.coerceIn(0.5f, 3.0f),
+            backfire.coerceIn(0.5f, 3.0f),
         )
         audioMixGains.set(gains)
         audioMixGainRepository.save(selectedProfile.get(), gains)
@@ -326,7 +376,7 @@ class DriveController(context: Context) {
         backfireSettingsRepository.save(normalized)
         simulation.updateBackfireSettings(normalized)
         audioEngine.setBackfireAllowedSamples(normalized.allowedSamples)
-        audioEngine.setBackfireAudioEnabled(normalized.backfireAudioEnabled)
+        audioEngine.setBackfireAudioEnabled(normalized.backfireAudioEnabled && carEffectModes.get().popsAndBangsEnabled)
         val currentGains = audioMixGains.get()
         if (currentGains.backfire != normalized.backfireGain) {
             val updatedGains = currentGains.copy(backfire = normalized.backfireGain)
@@ -349,6 +399,7 @@ class DriveController(context: Context) {
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
         backfireSettingsRepository.reset()
         shiftSoundSettingsRepository.reset()
+        carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
         audioMixGains.set(AudioMixGains())
@@ -356,9 +407,15 @@ class DriveController(context: Context) {
         exteriorPureAudio.set(false)
         backfireSettings.set(BackfireSettings())
         shiftSoundSettings.set(ShiftSoundSettings())
+        carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
+        audioEngine.setBackfireAudioEnabled(true)
+        audioEngine.setBackfireUseOriginal(false)
+        audioEngine.setShiftSoundEnabled(true)
         audioEngine.setShiftSoundOverride(false)
+        audioEngine.setTransmissionAudioEnabled(true)
+        audioEngine.setTurboAudioEnabled(true)
         selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())
@@ -445,6 +502,14 @@ class DriveController(context: Context) {
             selectedCarRepository.save(profile)
             selectedPerspective.set(soundPerspectiveRepository.load(profile))
             audioMixGains.set(audioMixGainRepository.load(profile))
+            val modes = carEffectModesRepository.load(profile)
+            carEffectModes.set(modes)
+            audioEngine.setBackfireAudioEnabled(modes.popsAndBangsEnabled && backfireSettings.get().backfireAudioEnabled)
+            audioEngine.setBackfireUseOriginal(modes.popsAndBangsOriginal)
+            audioEngine.setShiftSoundEnabled(modes.shiftSoundsEnabled)
+            audioEngine.setShiftSoundOverride(!modes.shiftSoundsOriginal)
+            audioEngine.setTransmissionAudioEnabled(modes.transmissionEnabled)
+            audioEngine.setTurboAudioEnabled(modes.turboEnabled)
             // This is intentionally reset per car because it is a temporary listening filter,
             // not part of the authored mix or a persistent vehicle preference.
             setBackfireOnly(false)

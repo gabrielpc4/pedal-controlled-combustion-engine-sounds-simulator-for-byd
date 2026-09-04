@@ -60,6 +60,10 @@ class EngineAudioEngine(context: Context) {
     private val backfireAudioEnabled = AtomicBoolean(true)
     private val backfireAllowedSamplesMask = AtomicInteger(0b111111)
     private val shiftSoundOverride = AtomicBoolean(false)
+    private val shiftSoundEnabled = AtomicBoolean(true)
+    private val transmissionAudioEnabled = AtomicBoolean(true)
+    private val turboAudioEnabled = AtomicBoolean(true)
+    private val backfireUseOriginal = AtomicBoolean(false)
     private val exteriorPureAudio = AtomicBoolean(false)
     private var sentBackfireOnly = false
     private var sentExteriorPureAudio = false
@@ -129,6 +133,14 @@ class EngineAudioEngine(context: Context) {
     fun setBackfireAudioEnabled(enabled: Boolean) { backfireAudioEnabled.set(enabled) }
 
     fun setShiftSoundOverride(enabled: Boolean) { shiftSoundOverride.set(enabled) }
+
+    fun setShiftSoundEnabled(enabled: Boolean) { shiftSoundEnabled.set(enabled) }
+
+    fun setTransmissionAudioEnabled(enabled: Boolean) { transmissionAudioEnabled.set(enabled) }
+
+    fun setTurboAudioEnabled(enabled: Boolean) { turboAudioEnabled.set(enabled) }
+
+    fun setBackfireUseOriginal(enabled: Boolean) { backfireUseOriginal.set(enabled) }
 
     fun setExteriorPureAudio(enabled: Boolean) { exteriorPureAudio.set(enabled) }
 
@@ -273,6 +285,10 @@ class EngineAudioEngine(context: Context) {
         var sentBackfireAllowedSamplesMask = -1
         var sentBackfireAudioEnabled = true
         var sentShiftSoundOverride = false
+        var sentShiftSoundEnabled = true
+        var sentTransmissionAudioEnabled = true
+        var sentTurboAudioEnabled = true
+        var sentBackfireUseOriginal = false
         var sentNativeDiagnosticsEnabled = DebugTelemetry.nativeDiagnosticsEnabled()
         var eventCatalogCaptured = false
         var diagnosticBankSha256: String? = null
@@ -394,6 +410,26 @@ class EngineAudioEngine(context: Context) {
                 if (requestedShiftSoundOverride != sentShiftSoundOverride) {
                     bridge.setShiftSoundOverride(requestedShiftSoundOverride)
                     sentShiftSoundOverride = requestedShiftSoundOverride
+                }
+                val requestedShiftSoundEnabled = shiftSoundEnabled.get()
+                if (requestedShiftSoundEnabled != sentShiftSoundEnabled) {
+                    bridge.setShiftSoundEnabled(requestedShiftSoundEnabled)
+                    sentShiftSoundEnabled = requestedShiftSoundEnabled
+                }
+                val requestedTransmissionAudioEnabled = transmissionAudioEnabled.get()
+                if (requestedTransmissionAudioEnabled != sentTransmissionAudioEnabled) {
+                    bridge.setTransmissionAudioEnabled(requestedTransmissionAudioEnabled)
+                    sentTransmissionAudioEnabled = requestedTransmissionAudioEnabled
+                }
+                val requestedTurboAudioEnabled = turboAudioEnabled.get()
+                if (requestedTurboAudioEnabled != sentTurboAudioEnabled) {
+                    bridge.setTurboAudioEnabled(requestedTurboAudioEnabled)
+                    sentTurboAudioEnabled = requestedTurboAudioEnabled
+                }
+                val requestedBackfireUseOriginal = backfireUseOriginal.get()
+                if (requestedBackfireUseOriginal != sentBackfireUseOriginal) {
+                    bridge.setBackfireUseOriginal(requestedBackfireUseOriginal)
+                    sentBackfireUseOriginal = requestedBackfireUseOriginal
                 }
                 val requestedBackfireOnly = backfireOnly.get()
                 if (requestedBackfireOnly != sentBackfireOnly) {

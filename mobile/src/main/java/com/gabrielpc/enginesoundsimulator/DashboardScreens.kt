@@ -402,7 +402,7 @@ private fun GainControl(label: String, value: Float, onValueChange: (Float) -> U
             Text(label, color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Black)
             Text(String.format(Locale.US, "%.1fx", value), color = White, fontSize = 10.sp)
         }
-        Slider(value = value, onValueChange = onValueChange, valueRange = 1f..10f)
+        Slider(value = value, onValueChange = onValueChange, valueRange = 0.5f..3.0f)
     }
 }
 
