@@ -224,10 +224,12 @@ class EngineAudioEngine(context: Context) {
             org.fmod.FMOD.init(appContext)
             val bankFiles = bankResolver.bankFiles(profile)
             val physics = bankResolver.physics(profile)
+            val alfaBackfireDirectory = ensureAlfaBackfireSamples()
             val startupError = bridge.open(
                 commonStringsBankPath = bankFiles.commonStrings.absolutePath,
                 commonBankPath = bankFiles.common.absolutePath,
                 carBankPath = bankFiles.car.absolutePath,
+                alfaBackfireDirectory = alfaBackfireDirectory.absolutePath,
                 perspective = soundPerspective.get().ordinal,
                 hasTurbo = physics.engine.turbos.isNotEmpty(),
                 idleRpm = physics.engine.idleRpm.toFloat(),
@@ -312,6 +314,7 @@ class EngineAudioEngine(context: Context) {
                     shiftDirection = frame.shiftDirection,
                     shiftRejected = currentRejectedShift != consumedRejectedShift,
                     backfireTriggered = currentBackfirePulse != consumedBackfirePulse,
+                    backfireSampleIndex = frame.backfireSampleIndex,
                     tractionActive = frame.tractionLimitActive,
                     tractionPulse = currentTractionPulse != consumedTractionPulse,
                     simulationFrameId = frame.simulationFrameId,
@@ -391,6 +394,21 @@ class EngineAudioEngine(context: Context) {
 
     private fun reportLoadFailure(profileId: String, detail: String) {
         loadFailure.set(AudioLoadFailure(profileId, detail))
+    }
+
+    /** Copies the small shared Alfa one-shots once so the native FMOD core can load them for any car. */
+    private fun ensureAlfaBackfireSamples(): File {
+        val directory = File(appContext.filesDir, "alfa-backfire")
+        directory.mkdirs()
+        (1..4).forEach { sample ->
+            val destination = File(directory, "backfire_$sample.wav")
+            if (!destination.exists() || destination.length() == 0L) {
+                appContext.assets.open("backfire/alfa/backfire_$sample.wav").use { input ->
+                    destination.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+        return directory
     }
 
     /**

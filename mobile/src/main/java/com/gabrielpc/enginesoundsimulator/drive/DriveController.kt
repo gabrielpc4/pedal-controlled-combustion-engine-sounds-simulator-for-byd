@@ -68,6 +68,8 @@ data class DriveSnapshot(
     val backfireGain: Float = 1.0f,
     /** Session-only listening aid; when enabled native FMOD leaves only backfire events audible. */
     val backfireOnly: Boolean = false,
+    /** Global backfire policy, deliberately independent of each car bank's authored thresholds. */
+    val backfireSettings: BackfireSettings = BackfireSettings(),
     val soundPerspective: EngineSoundPerspective = EngineSoundPerspective.CABIN,
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
@@ -95,6 +97,7 @@ class DriveController(context: Context) {
     private val shiftModeRepository = ShiftModeRepository(appContext)
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
     private val audioMixGainRepository = AudioMixGainRepository(appContext)
+    private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
@@ -121,6 +124,7 @@ class DriveController(context: Context) {
     private val audioMuted = AtomicBoolean(false)
     // Deliberately session-only: this diagnostic/listening mode must never become a car preference.
     private val backfireOnly = AtomicBoolean(false)
+    private val backfireSettings = AtomicReference(BackfireSettings())
     private val audioMixGains = AtomicReference(AudioMixGains())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
@@ -163,6 +167,8 @@ class DriveController(context: Context) {
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
         audioMixGains.set(audioMixGainRepository.load(selectedProfile.get()))
         audioEngine.setCategoryGains(audioMixGains.get())
+        backfireSettings.set(backfireSettingsRepository.load())
+        simulation.updateBackfireSettings(backfireSettings.get())
     }
 
     fun isRunning(): Boolean = running.get()
@@ -181,6 +187,7 @@ class DriveController(context: Context) {
             turboGain = audioMixGains.get().turbo,
             backfireGain = audioMixGains.get().backfire,
             backfireOnly = backfireOnly.get(),
+            backfireSettings = backfireSettings.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
         )
@@ -268,12 +275,22 @@ class DriveController(context: Context) {
         audioEngine.setBackfireOnly(enabled)
     }
 
+    fun setBackfireSettings(updated: BackfireSettings) {
+        val normalized = updated.normalized()
+        backfireSettings.set(normalized)
+        backfireSettingsRepository.save(normalized)
+        simulation.updateBackfireSettings(normalized)
+    }
+
     fun resetAllPreferences() {
         audioMixGainRepository.resetAll()
         appContext.getSharedPreferences(AppPreferenceStores.SELECTED_CAR, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.SHIFT_MODE, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
+        backfireSettingsRepository.reset()
         audioMixGains.set(AudioMixGains())
+        backfireSettings.set(BackfireSettings())
+        simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
         selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)
         selectedPerspective.set(EngineSoundPerspective.CABIN)
@@ -372,8 +389,10 @@ class DriveController(context: Context) {
     private fun loadPhysics(profile: FmodBankProfile) {
         val physics = runCatching { bankResolver.physics(profile) }.getOrNull()
         activePhysics.set(physics)
-        if (physics != null) simulation.updateAssettoPhysics(physics)
-        else userMessage = UserVisibleMessage(
+        if (physics != null) {
+            simulation.updateAssettoPhysics(physics)
+            simulation.updateBackfireSettings(backfireSettings.get())
+        } else userMessage = UserVisibleMessage(
             id = SystemClock.elapsedRealtime(),
             title = "Car audio is not installed",
             detail = "Install the package group containing ${profile.displayName} in the audio installer.",
@@ -508,6 +527,7 @@ class DriveController(context: Context) {
                 shiftDirection = shiftDirection,
                 limiterPulse = drivetrain.limiterPulse,
                 backfireTriggered = drivetrain.backfireTriggered,
+                backfireSampleIndex = drivetrain.backfireSampleIndex,
                 shiftRejected = drivetrain.shiftRejected,
                 tractionLimitActive = drivetrain.tractionLimitActive,
                 tractionLimitPulse = drivetrain.tractionLimitPulse,

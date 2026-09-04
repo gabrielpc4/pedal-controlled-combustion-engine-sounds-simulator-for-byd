@@ -1,5 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
+import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -20,6 +21,8 @@ internal data class AssettoDrivetrainFrame(
     val bovDecaySeconds: Double,
     val limiterPulse: Boolean,
     val backfireTriggered: Boolean,
+    /** Shared Alfa sample selected for this one-shot, or -1 when no backfire fired. */
+    val backfireSampleIndex: Int = -1,
     val shiftStarted: Boolean,
     val shiftRejected: Boolean,
     val shifting: Boolean,
@@ -74,11 +77,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var boost = 0.0
     private var bov = 0.0
     private var bovDecay = 10.0
-    private var backfirePeakGas = 0.6
-    private var backfireArmLevel = physics.engine.backfire.triggerGas
-    private var backfireFireBelow = 0.25
     private var backfireArmed = false
-    private var backfireTimer = 0.0
+    private var backfireReleaseTimer = 0.0
+    private var backfireSettings = BackfireSettings()
+    private var nextBackfireSampleCursor = 0
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
     private var previousFmodWheelSpeed = 0.0
@@ -95,6 +97,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         boost = 0.0
         bov = 0.0
         bovDecay = 10.0
+    }
+
+    fun updateBackfireSettings(updated: BackfireSettings) {
+        backfireSettings = updated.normalized()
+        backfireArmed = false
+        backfireReleaseTimer = 0.0
+        nextBackfireSampleCursor = 0
     }
 
     fun reset(engineRunning: Boolean) {
@@ -126,11 +135,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         boost = 0.0
         bov = 0.0
         bovDecay = 10.0
-        backfirePeakGas = 0.6
-        backfireArmLevel = physics.engine.backfire.triggerGas
-        backfireFireBelow = 0.25
         backfireArmed = false
-        backfireTimer = 0.0
+        backfireReleaseTimer = 0.0
         limiterCounter = 0
         lastFrame = snapshot()
     }
@@ -344,6 +350,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             bovDecaySeconds = bovDecay,
             limiterPulse = engine.limiterActive,
             backfireTriggered = engine.backfire,
+            backfireSampleIndex = if (engine.backfire) chooseBackfireSample() else -1,
             shiftStarted = shiftStarted,
             shiftRejected = shiftRejected,
             shifting = shifting,
@@ -603,22 +610,30 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
     private fun engineTorque(dt: Double, controlsGas: Double, engineGas: Double): EngineTorqueFrame {
         val engine = physics.engine
-        val backfire = engine.backfire
-        if (controlsGas > backfirePeakGas && controlsGas != 0.0) {
-            backfirePeakGas = controlsGas
-            backfireArmLevel = backfire.triggerGas * controlsGas
-            backfireFireBelow = backfire.maximumGas * controlsGas
+        val backfire = backfireSettings
+        if (!backfire.enabled) {
+            backfireArmed = false
+            backfireReleaseTimer = 0.0
         }
-        if (controlsGas > backfireArmLevel) backfireArmed = true
-        // Once a sufficiently loaded run has armed the authored backfire logic, FMOD should be
-        // allowed to fire on the first fully closed-throttle sample as well. Requiring gas > 0
-        // made the event effectively impossible to trigger when the driver lifted completely.
-        val triggerBackfire = backfireArmed && controlsGas <= backfireFireBelow &&
-            rpm > backfire.minimumRpm && rpm <= backfire.maximumRpm && backfireTimer > 1.0
+        if (backfire.enabled && controlsGas >= backfire.armThrottle) {
+            backfireArmed = true
+            backfireReleaseTimer = 0.0
+        }
+        if (backfireArmed && controlsGas <= backfire.releaseThrottle) {
+            backfireReleaseTimer = min(10.0, backfireReleaseTimer + dt)
+        } else if (backfireArmed) {
+            backfireReleaseTimer = 0.0
+        }
+        // This intentionally replaces the bank's per-car RPM/gas gates with one global policy:
+        // a clear attempted run followed by a configurable lift-off delay is the user-facing
+        // definition of backfire, independent of how a particular bank authored its thresholds.
+        val triggerBackfire = backfire.enabled && backfireArmed &&
+            controlsGas <= backfire.releaseThrottle &&
+            rpm >= backfire.minimumRpm && rpm <= backfire.maximumRpm &&
+            backfireReleaseTimer >= backfire.releaseDelaySeconds
         if (triggerBackfire) {
             backfireArmed = false
-        } else if (backfireArmed) {
-            backfireTimer = min(10.0, backfireTimer + dt)
+            backfireReleaseTimer = 0.0
         }
 
         val mapped = interpolateAssettoCurve(engine.throttleCurve, engineGas)
@@ -659,6 +674,14 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         var torque = coast + effective * (power - coast)
         if (rpm < engine.idleRpm) torque = max(torque, 15.0)
         return EngineTorqueFrame(torque, effective, limiterActive, triggerBackfire)
+    }
+
+    private fun chooseBackfireSample(): Int {
+        val allowed = backfireSettings.allowedSamples.sorted()
+        if (allowed.isEmpty()) return -1
+        val sample = allowed[nextBackfireSampleCursor % allowed.size]
+        nextBackfireSampleCursor = (nextBackfireSampleCursor + 1) % allowed.size
+        return sample
     }
 
     private fun coastTorque(rpm: Double): Double {

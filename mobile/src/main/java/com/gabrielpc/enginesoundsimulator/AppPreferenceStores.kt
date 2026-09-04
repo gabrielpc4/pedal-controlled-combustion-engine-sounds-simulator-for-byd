@@ -9,4 +9,5 @@ internal object AppPreferenceStores {
     const val ENGINE_SOUND_PERSPECTIVE = "engine_sound_perspective"
     const val AUDIO_MIX_GAINS = "audio_mix_gains_v2"
     const val AUDIO_MIX_GAINS_LEGACY = "audio_mix_gains"
+    const val BACKFIRE_SETTINGS = "backfire_settings_v1"
 }

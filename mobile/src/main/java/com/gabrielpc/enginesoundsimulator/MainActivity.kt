@@ -100,10 +100,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
+import com.gabrielpc.enginesoundsimulator.audio.BackfirePreviewPlayer
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.ui.theme.EngineSoundsSimulatorTheme
@@ -136,6 +138,7 @@ class MainActivity : ComponentActivity() {
     private val choreographer by lazy(LazyThreadSafetyMode.NONE) { Choreographer.getInstance() }
     private var driveState by mutableStateOf<DriveSnapshot?>(null)
     private var uiMonitoringActive by mutableStateOf(false)
+    private val backfirePreviewPlayer by lazy(LazyThreadSafetyMode.NONE) { BackfirePreviewPlayer(this) }
 
     private val refreshUi = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -185,6 +188,8 @@ class MainActivity : ComponentActivity() {
                         onHostGains = controller::setFmodHostGains,
                         onCategoryGains = controller::setFmodCategoryGains,
                         onToggleBackfireOnly = controller::setBackfireOnly,
+                        onBackfireSettingsChange = controller::setBackfireSettings,
+                        onPreviewBackfireSample = backfirePreviewPlayer::play,
                         onEventMute = controller::setFmodEventMute,
                         onEventSolo = controller::setFmodEventSolo,
                         onPreviousCar = controller::selectPreviousCar,
@@ -223,6 +228,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        backfirePreviewPlayer.release()
         if (isFinishing) {
             (application as EngineSoundsApplication).shutdownEngine()
         }
@@ -261,6 +267,8 @@ private fun MotorSoundDashboard(
     onHostGains: (Float, Float) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
     onToggleBackfireOnly: (Boolean) -> Unit,
+    onBackfireSettingsChange: (BackfireSettings) -> Unit,
+    onPreviewBackfireSample: (Int) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
     onPreviousCar: () -> Unit,
@@ -446,6 +454,9 @@ private fun MotorSoundDashboard(
                         DashboardMainScreen.SETTINGS -> SettingsScreen(
                             onBack = { mainScreen = DashboardMainScreen.CLASSIC },
                             onResetAll = onResetAllPreferences,
+                            backfireSettings = state.backfireSettings,
+                            onBackfireSettingsChange = onBackfireSettingsChange,
+                            onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                     }
                 }

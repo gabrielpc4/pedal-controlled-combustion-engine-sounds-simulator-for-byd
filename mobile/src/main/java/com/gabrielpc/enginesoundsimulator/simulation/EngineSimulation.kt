@@ -1,5 +1,6 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
+import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 
 /**
@@ -56,6 +57,8 @@ data class DrivetrainState(
     val bovDecaySeconds: Double = 10.0,
     val limiterPulse: Boolean = false,
     val backfireTriggered: Boolean = false,
+    /** Shared Alfa sample selected by the global backfire policy, or -1 when idle. */
+    val backfireSampleIndex: Int = -1,
     val shiftStarted: Boolean = false,
     val shiftRejected: Boolean = false,
     val tractionLimitActive: Boolean = false,
@@ -92,6 +95,10 @@ class EngineSimulation {
         equalSpeedGearMapping = EqualSpeedGearMapping.from(updated)
         previousInputWasSimulated = null
         latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0)
+    }
+
+    internal fun updateBackfireSettings(settings: BackfireSettings) {
+        drivetrain?.updateBackfireSettings(settings)
     }
 
     fun reset() {
@@ -261,6 +268,7 @@ class EngineSimulation {
             bovDecaySeconds = frame.bovDecaySeconds,
             limiterPulse = frame.limiterPulse,
             backfireTriggered = frame.backfireTriggered,
+            backfireSampleIndex = frame.backfireSampleIndex,
             shiftStarted = frame.shiftStarted,
             shiftRejected = frame.shiftRejected,
             tractionLimitActive = frame.tractionLimitActive,

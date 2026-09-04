@@ -56,6 +56,8 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -77,6 +79,7 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.FmodEventSection
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
+import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
@@ -400,9 +403,16 @@ private fun GainControl(label: String, value: Float, onValueChange: (Float) -> U
 }
 
 @Composable
-internal fun SettingsScreen(onBack: () -> Unit, onResetAll: () -> Unit) {
+internal fun SettingsScreen(
+    onBack: () -> Unit,
+    onResetAll: () -> Unit,
+    backfireSettings: BackfireSettings,
+    onBackfireSettingsChange: (BackfireSettings) -> Unit,
+    onPreviewBackfireSample: (Int) -> Unit,
+) {
+    var backfireTab by remember { mutableStateOf(false) }
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -411,17 +421,138 @@ internal fun SettingsScreen(onBack: () -> Unit, onResetAll: () -> Unit) {
             Text("BACK", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black,
                 modifier = Modifier.clickable(onClick = onBack).padding(12.dp))
         }
-        Text(
-            "Mixer gains are saved independently for each car. Reset All clears saved car, perspective, shift mode, and audio gain preferences.",
-            color = Muted,
-            fontSize = 15.sp,
-        )
-        Button(
-            onClick = onResetAll,
-            colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
+        Row(
+            modifier = Modifier.fillMaxWidth().border(1.dp, Line, RoundedCornerShape(8.dp)),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("RESET ALL", color = White, fontWeight = FontWeight.Black)
+            SettingsTab("GENERAL", !backfireTab) { backfireTab = false }
+            SettingsTab("BACKFIRE", backfireTab) { backfireTab = true }
         }
+        if (!backfireTab) {
+            Text(
+                "Mixer gains are saved independently for each car. Reset All clears saved car, perspective, shift mode, audio gains, and backfire settings.",
+                color = Muted,
+                fontSize = 15.sp,
+            )
+            Button(
+                onClick = onResetAll,
+                colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
+            ) {
+                Text("RESET ALL", color = White, fontWeight = FontWeight.Black)
+            }
+        } else {
+            BackfireSettingsPanel(
+                settings = backfireSettings,
+                onChange = onBackfireSettingsChange,
+                onPreview = onPreviewBackfireSample,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (selected) Cyan else Muted,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Black,
+        modifier = Modifier
+            .fillMaxWidth(0.5f)
+            .clickable(onClick = onClick)
+            .background(if (selected) Cyan.copy(alpha = 0.14f) else Color.Transparent)
+            .padding(vertical = 12.dp),
+        textAlign = TextAlign.Center,
+    )
+}
+
+@Composable
+private fun BackfireSettingsPanel(
+    settings: BackfireSettings,
+    onChange: (BackfireSettings) -> Unit,
+    onPreview: (Int) -> Unit,
+) {
+    val value = settings.normalized()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("GLOBAL BACKFIRE POLICY", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Text(
+            "These rules apply to every car. A backfire arms after a clear throttle run, then fires only after the pedal is released for the selected delay.",
+            color = Muted,
+            fontSize = 14.sp,
+        )
+        SettingsToggle("BACKFIRE ENABLED", value.enabled) {
+            onChange(value.copy(enabled = !value.enabled))
+        }
+        BackfireSlider("ARM THROTTLE", value.armThrottle, 0.05f..1.0f) {
+            onChange(value.copy(armThrottle = it.toDouble()))
+        }
+        BackfireSlider("RELEASE THROTTLE", value.releaseThrottle, 0.0f..0.9f) {
+            onChange(value.copy(releaseThrottle = it.toDouble()))
+        }
+        BackfireSlider("RELEASE DELAY", value.releaseDelaySeconds, 0.0f..5.0f, suffix = "s") {
+            onChange(value.copy(releaseDelaySeconds = it.toDouble()))
+        }
+        BackfireSlider("MINIMUM RPM", value.minimumRpm, 0.0f..16000.0f, integer = true) {
+            onChange(value.copy(minimumRpm = it.toDouble()))
+        }
+        BackfireSlider("MAXIMUM RPM", value.maximumRpm, 500.0f..20000.0f, integer = true) {
+            onChange(value.copy(maximumRpm = it.toDouble()))
+        }
+        Text("ALFA ROMEO BACKFIRE SAMPLES", color = Cyan, fontSize = 16.sp, fontWeight = FontWeight.Black)
+        (1..4).forEach { sample ->
+            val allowed = sample in value.allowedSamples
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel)
+                    .border(1.dp, Line, RoundedCornerShape(6.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("BACKFIRE $sample", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("PLAY ▶", color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { onPreview(sample) }.padding(8.dp))
+                SettingsToggle("ALLOW", allowed, compact = true) {
+                    val next = if (allowed) value.allowedSamples - sample else value.allowedSamples + sample
+                    onChange(value.copy(allowedSamples = next))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggle(label: String, enabled: Boolean, compact: Boolean = false, onToggle: () -> Unit) {
+    Row(
+        modifier = (if (compact) Modifier.width(110.dp) else Modifier.fillMaxWidth()).clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(label, color = if (enabled) Cyan else Muted, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+        Box(
+            modifier = Modifier.width(58.dp).height(28.dp).clip(RoundedCornerShape(50))
+                .background(if (enabled) Cyan else Line).padding(4.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(Modifier.size(20.dp).offset(x = if (enabled) 30.dp else 0.dp).clip(CircleShape).background(White))
+        }
+    }
+}
+
+@Composable
+private fun BackfireSlider(
+    label: String,
+    value: Double,
+    range: ClosedFloatingPointRange<Float>,
+    suffix: String = "",
+    integer: Boolean = false,
+    onChange: (Float) -> Unit,
+) {
+    val shown = if (integer) String.format(Locale.US, "%.0f", value) else String.format(Locale.US, "%.2f", value)
+    Column {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = CyanSoft, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Text("$shown$suffix", color = White, fontSize = 12.sp)
+        }
+        Slider(value = value.toFloat().coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range)
     }
 }
 

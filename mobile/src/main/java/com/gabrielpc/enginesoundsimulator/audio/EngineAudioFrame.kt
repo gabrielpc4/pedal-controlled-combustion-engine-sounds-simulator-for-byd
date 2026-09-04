@@ -23,6 +23,7 @@ data class EngineAudioFrame(
     val shiftRejected: Boolean = false,
     val limiterPulse: Boolean = false,
     val backfireTriggered: Boolean = false,
+    val backfireSampleIndex: Int = -1,
     val tractionLimitActive: Boolean = false,
     val tractionLimitPulse: Boolean = false,
     val drivetrainSpeedRadiansPerSecond: Double = 0.0,

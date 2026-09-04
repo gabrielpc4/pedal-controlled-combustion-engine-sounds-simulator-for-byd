@@ -506,6 +506,7 @@ public:
         const std::string& commonStringsBankPath,
         const std::string& commonBankPath,
         const std::string& carBankPath,
+        const std::string& alfaBackfireDirectory,
         int perspective,
         bool hasTurbo,
         float idleRpm,
@@ -546,6 +547,8 @@ public:
         if (result != FMOD_OK) {
             return failAndCloseLocked(resultText(result, "Studio::System::initialize"));
         }
+
+        loadAlfaBackfireSamplesLocked(alfaBackfireDirectory);
 
         distanceFilter_ = createDistanceFilterDescriptor();
         result = studio_->registerPlugin(&distanceFilter_);
@@ -631,6 +634,7 @@ public:
         int shiftDirection,
         bool shiftRejected,
         bool backfireTriggered,
+        int backfireSampleIndex,
         bool tractionActive,
         bool tractionPulse,
         std::uint64_t simulationFrameId
@@ -719,7 +723,11 @@ public:
 
         if (backfireTriggered && !eitherBackfirePlayingLocked()) {
             const std::string selected = perspectiveEventLocked("backfire_int", "backfire_ext");
-            startEventLocked(selected);
+            if (alfaBackfireSamplesLoaded_) {
+                playAlfaBackfireSampleLocked(backfireSampleIndex);
+            } else {
+                startEventLocked(selected);
+            }
         }
 
         (void)tractionActive;
@@ -749,6 +757,7 @@ public:
         const float effects = std::max(0.0f, effectsGain);
         hostEngineGain_ = engine;
         hostEffectsGain_ = effects;
+        if (alfaBackfireChannel_ != nullptr) alfaBackfireChannel_->setVolume(hostEffectsGain_ * backfireGain_);
         applyEventOverridesLocked();
     }
 
@@ -759,6 +768,7 @@ public:
         gearShiftGain_ = std::max(0.0f, gearShiftGain);
         turboGain_ = std::max(0.0f, turboGain);
         backfireGain_ = std::max(0.0f, backfireGain);
+        if (alfaBackfireChannel_ != nullptr) alfaBackfireChannel_->setVolume(hostEffectsGain_ * backfireGain_);
         applyEventOverridesLocked();
     }
 
@@ -949,6 +959,41 @@ public:
     }
 
 private:
+    void loadAlfaBackfireSamplesLocked(const std::string& directory) {
+        if (core_ == nullptr || directory.empty()) return;
+        bool allLoaded = true;
+        for (int index = 0; index < 4; ++index) {
+            const std::string path = directory + "/backfire_" + std::to_string(index + 1) + ".wav";
+            const FMOD_RESULT result = core_->createSound(path.c_str(), FMOD_DEFAULT, nullptr, &alfaBackfireSamples_[index]);
+            if (result != FMOD_OK || alfaBackfireSamples_[index] == nullptr) {
+                allLoaded = false;
+                if (alfaBackfireSamples_[index] != nullptr) {
+                    alfaBackfireSamples_[index]->release();
+                    alfaBackfireSamples_[index] = nullptr;
+                }
+            }
+        }
+        alfaBackfireSamplesLoaded_ = allLoaded;
+    }
+
+    void playAlfaBackfireSampleLocked(int sampleIndex) {
+        if (!alfaBackfireSamplesLoaded_ || core_ == nullptr || sampleIndex < 1 || sampleIndex > 4) return;
+        FMOD::Channel* channel = nullptr;
+        const FMOD_RESULT result = core_->playSound(
+            alfaBackfireSamples_[sampleIndex - 1],
+            nullptr,
+            true,
+            &channel
+        );
+        if (result != FMOD_OK || channel == nullptr) return;
+        channel->setMode(FMOD_2D);
+        // Core one-shots use the same effects host gain and per-category trim as their Studio
+        // counterparts, while the sample itself remains an unprocessed Alfa recording.
+        channel->setVolume(hostEffectsGain_ * backfireGain_);
+        channel->setPaused(false);
+        alfaBackfireChannel_ = channel;
+    }
+
     void updateTraceContextLocked(
         float rpm,
         float drivetrainSpeed,
@@ -1246,6 +1291,17 @@ private:
     }
 
     void closeLocked() {
+        if (alfaBackfireChannel_ != nullptr) {
+            alfaBackfireChannel_->stop();
+            alfaBackfireChannel_ = nullptr;
+        }
+        for (FMOD::Sound*& sound : alfaBackfireSamples_) {
+            if (sound != nullptr) {
+                sound->release();
+                sound = nullptr;
+            }
+        }
+        alfaBackfireSamplesLoaded_ = false;
         for (auto& pair : slots_) {
             if (pair.second->instance != nullptr) {
                 pair.second->instance->setCallback(nullptr, 0);
@@ -1658,6 +1714,9 @@ private:
     float turboGain_ = 1.0f;
     float backfireGain_ = 1.0f;
     bool backfireOnly_ = false;
+    std::array<FMOD::Sound*, 4> alfaBackfireSamples_{};
+    FMOD::Channel* alfaBackfireChannel_ = nullptr;
+    bool alfaBackfireSamplesLoaded_ = false;
     std::unordered_map<std::string, RecentSource> recentSources_;
     // Debug-only start times make STOPPED records report the observed one-shot duration. The map
     // is untouched when diagnostics are disabled, keeping release callbacks on the existing path.
@@ -1752,6 +1811,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_open(
     jstring commonStringsBankPath,
     jstring commonBankPath,
     jstring carBankPath,
+    jstring alfaBackfireDirectory,
     jint perspective,
     jboolean hasTurbo,
     jfloat idleRpm,
@@ -1764,6 +1824,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_open(
             utfString(environment, commonStringsBankPath),
             utfString(environment, commonBankPath),
             utfString(environment, carBankPath),
+            utfString(environment, alfaBackfireDirectory),
             perspective,
             hasTurbo == JNI_TRUE,
             idleRpm,
@@ -1795,6 +1856,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jint shiftDirection,
     jboolean shiftRejected,
     jboolean backfireTriggered,
+    jint backfireSampleIndex,
     jboolean tractionActive,
     jboolean tractionPulse,
     jlong simulationFrameId
@@ -1820,6 +1882,7 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             shiftDirection,
             shiftRejected == JNI_TRUE,
             backfireTriggered == JNI_TRUE,
+            backfireSampleIndex,
             tractionActive == JNI_TRUE,
             tractionPulse == JNI_TRUE,
             static_cast<std::uint64_t>(std::max<jlong>(0, simulationFrameId))
