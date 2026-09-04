@@ -674,14 +674,10 @@ public:
 
         for (const char* name : {"engine_int", "engine_ext"}) {
             setParameterQuietly(slotInstance(name), "rpms", cleanRpm);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
-        for (const char* name : {"backfire_int", "backfire_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", kBackfireAudioThrottle);
-        }
+        applyAudioThrottlePolicyLocked();
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", drivetrainSpeed);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
 
         EventSlot* turbo = slot("turbo");
@@ -1408,22 +1404,30 @@ private:
     void initializeParametersLocked() {
         for (const char* name : {"engine_int", "engine_ext"}) {
             setParameterQuietly(slotInstance(name), "rpms", idleRpm_);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
-        for (const char* name : {"backfire_int", "backfire_ext"}) {
-            setParameterQuietly(slotInstance(name), "throttle", kBackfireAudioThrottle);
-        }
+        applyAudioThrottlePolicyLocked();
         for (const char* name : {"gear_int", "gear_ext"}) {
             setParameterQuietly(slotInstance(name), "state", 1.0f);
         }
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", 0.0f);
-            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
         }
         for (const char* name : {"tractioncontrol_int", "tractioncontrol_ext"}) {
             setParameterQuietly(slotInstance(name), "decay", tractionDecay_);
         }
         setParameterQuietly(slotInstance("limiter"), "decay", limiterDecay_);
+    }
+
+    void applyAudioThrottlePolicyLocked() {
+        // These values are deliberately not the physical pedal. They select each authored
+        // event's 0 dB endpoint so the app never adds throttle-dependent attenuation. The engine
+        // and transmission stay at their load endpoint; backfire uses its lift-off endpoint.
+        for (const char* name : {"engine_int", "engine_ext", "transmission", "transmission_ext"}) {
+            setParameterQuietly(slotInstance(name), "throttle", kFullLoadAudioThrottle);
+        }
+        for (const char* name : {"backfire_int", "backfire_ext"}) {
+            setParameterQuietly(slotInstance(name), "throttle", kBackfireAudioThrottle);
+        }
     }
 
     void startSelectedContinuousEventsLocked() {
