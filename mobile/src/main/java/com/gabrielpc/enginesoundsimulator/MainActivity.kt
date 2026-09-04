@@ -112,6 +112,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import java.util.Locale
 
 private val Night = Color(0xFF060606)
 private val Navy = Color(0xFF071321)
@@ -170,6 +171,7 @@ class MainActivity : ComponentActivity() {
                         uiMonitoringActive = uiMonitoringActive,
                         onThrottle = controller::setSimulatedPedalThrottle,
                         onBrake = controller::setSimulatedPedalBrake,
+                        onSimulatedRegen = controller::setSimulatedRegen,
                         onToggleSimulatedPedalLatch = controller::setSimulatedPedalsLatched,
                         onSelectSimulatedPedals = controller::selectSimulatedPedals,
                         onSelectRealPedals = controller::selectRealPedals,
@@ -243,6 +245,7 @@ private fun MotorSoundDashboard(
     uiMonitoringActive: Boolean,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: (Boolean) -> Unit,
     onSelectSimulatedPedals: () -> Unit,
     onSelectRealPedals: () -> Unit,
@@ -400,6 +403,7 @@ private fun MotorSoundDashboard(
                                     state = state,
                                     onThrottle = onThrottle,
                                     onBrake = onBrake,
+                                    onSimulatedRegen = onSimulatedRegen,
                                     onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
@@ -417,6 +421,7 @@ private fun MotorSoundDashboard(
                             state = state,
                             onThrottle = onThrottle,
                             onBrake = onBrake,
+                            onSimulatedRegen = onSimulatedRegen,
                             onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
                             onSelectCar = onSelectCar,
                             soundPerspective = state.soundPerspective,
@@ -862,6 +867,31 @@ private fun SimulatedPedalLatchToggle(
 }
 
 @Composable
+private fun SimulatedRegenControl(
+    value: Double,
+    onValue: (Double) -> Unit,
+    scale: Float,
+) {
+    Column(
+        modifier = Modifier.width(scale.scaledDp(118)).padding(bottom = scale.scaledDp(4)),
+        verticalArrangement = Arrangement.spacedBy(scale.scaledDp(2)),
+    ) {
+        Text(
+            text = "REGEN ${"%.0f".format(Locale.US, value * 100.0)}%",
+            color = CyanSoft,
+            fontSize = (10f * scale).sp,
+            fontWeight = FontWeight.Black,
+        )
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValue(it.toDouble()) },
+            valueRange = 0f..1f,
+            modifier = Modifier.height(scale.scaledDp(30)),
+        )
+    }
+}
+
+@Composable
 private fun StatusTag(text: String, color: Color) {
     Text(
         text = text,
@@ -887,6 +917,7 @@ private fun ClassicDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -920,6 +951,9 @@ private fun ClassicDriveControls(
             contentScale = CLASSIC_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
+        if (!state.inputSourceIsRealPedals) {
+            SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, CLASSIC_DRIVE_CONTROL_SCALE)
+        }
         PedalControl(
             label = "THROTTLE",
             value = state.throttle,
@@ -1033,6 +1067,7 @@ internal fun MixerDriveControls(
     state: DriveSnapshot,
     onThrottle: (Double) -> Unit,
     onBrake: (Double) -> Unit,
+    onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: () -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -1076,6 +1111,9 @@ internal fun MixerDriveControls(
             contentScale = MIXER_DRIVE_CONTROL_SCALE,
             onValue = onBrake,
         )
+        if (!state.inputSourceIsRealPedals) {
+            SimulatedRegenControl(state.simulatedRegen, onSimulatedRegen, MIXER_DRIVE_CONTROL_SCALE)
+        }
         PedalControl(
             label = "THROTTLE",
             value = state.throttle,

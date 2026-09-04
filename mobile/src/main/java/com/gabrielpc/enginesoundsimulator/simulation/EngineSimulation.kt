@@ -14,6 +14,8 @@ import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 data class DriverInput(
     val throttle: Double = 0.0,
     val brake: Double = 0.0,
+    /** Virtual regenerative braking request used only by SIMULATED PEDALS. */
+    val simulatedRegen: Double = 0.0,
     /** True only for the app's touch-pedal scenario; real BYD speed remains authoritative. */
     val simulatedPedals: Boolean = false,
     val realReportedRawSpeedKmh: Double? = null,
@@ -124,6 +126,7 @@ class EngineSimulation {
             bydSealSimulatedPedalsMotion.step(
                 throttle = input.throttle,
                 brake = input.brake,
+                simulatedRegen = input.simulatedRegen,
                 transmissionPosition = input.transmissionPosition,
                 deltaSeconds = dt,
                 initialDocumentedContinuousSpeedKmh = documentedModelSeedSpeedKmh,

@@ -52,6 +52,7 @@ data class DriveSnapshot(
     val inputSourceFaded: Boolean,
     val throttle: Double,
     val brake: Double,
+    val simulatedRegen: Double = 0.0,
     val transmissionPosition: TransmissionPosition,
     val engineSoundEnabled: Boolean,
     val audioMuted: Boolean = false,
@@ -110,6 +111,7 @@ class DriveController(context: Context) {
     private val generation = AtomicLong(0L)
     private val simulatedPedals = AtomicReference(SimulatedPedalInput())
     private val simulatedPedalsLatched = AtomicBoolean(false)
+    private val simulatedRegen = AtomicReference(0.0)
     private val inputMode = AtomicReference(InputMode.RealPedals)
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val uiActive = AtomicBoolean(false)
@@ -133,6 +135,7 @@ class DriveController(context: Context) {
         inputSourceFaded = false,
         throttle = 0.0,
         brake = 0.0,
+        simulatedRegen = 0.0,
         transmissionPosition = TransmissionPosition.DRIVE,
         engineSoundEnabled = false,
         selectedCarId = selectedProfile.get().id,
@@ -208,6 +211,7 @@ class DriveController(context: Context) {
             vehicleReader.stop()
             audioEngine.stop()
             simulatedPedals.set(SimulatedPedalInput())
+            simulatedRegen.set(0.0)
             simulatedPedalsLatched.set(false)
         }
     }
@@ -228,6 +232,8 @@ class DriveController(context: Context) {
         if (clamped == 0.0 && simulatedPedalsLatched.get()) return
         simulatedPedals.updateAndGet { it.copy(brake = clamped) }
     }
+
+    fun setSimulatedRegen(value: Double) { simulatedRegen.set(value.coerceIn(0.0, 1.0)) }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
     fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float) {
@@ -414,6 +420,7 @@ class DriveController(context: Context) {
                 simulatedPedals = input.usesSimulatedPedals,
                 realReportedRawSpeedKmh = input.realReportedRawSpeedKmh,
                 transmissionPosition = transmission.position,
+                simulatedRegen = simulatedRegen.get(),
             ),
             dt,
         )
@@ -493,6 +500,7 @@ class DriveController(context: Context) {
                 inputSourceFaded = sourceUi.faded,
                 throttle = input.throttle,
                 brake = input.brake,
+                simulatedRegen = simulatedRegen.get(),
                 transmissionPosition = transmission.position,
                 engineSoundEnabled = audioEngine.isAudioActive(),
                 audioMuted = audioMuted.get(),

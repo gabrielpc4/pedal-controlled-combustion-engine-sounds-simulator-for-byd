@@ -19,6 +19,7 @@ internal class BydSealSimulatedPedalsMotion {
     fun step(
         throttle: Double,
         brake: Double,
+        simulatedRegen: Double = 0.0,
         transmissionPosition: TransmissionPosition,
         deltaSeconds: Double,
         initialDocumentedContinuousSpeedKmh: Double? = null,
@@ -47,7 +48,10 @@ internal class BydSealSimulatedPedalsMotion {
             0.0
         }
         val serviceBrake = MAXIMUM_BRAKE_DECELERATION_KMH_PER_SECOND * brakePedal
-        val accelerationKmhPerSecond = propulsion - coast - serviceBrake
+        // This is a SIM-only approximation of the Seal's lift-off energy recovery. It changes
+        // road speed, not the authored FMOD drivetrain parameters, and remains user-adjustable.
+        val regenerativeBrake = MAXIMUM_REGEN_DECELERATION_KMH_PER_SECOND * simulatedRegen.coerceIn(0.0, 1.0)
+        val accelerationKmhPerSecond = propulsion - coast - serviceBrake - regenerativeBrake
         documentedContinuousSpeedKmh = (
             documentedContinuousSpeedKmh + accelerationKmhPerSecond * dt
             ).coerceIn(0.0, TOP_SPEED_KMH)
@@ -94,6 +98,7 @@ internal class BydSealSimulatedPedalsMotion {
     private companion object {
         const val TOP_SPEED_KMH = 190.0
         const val MAXIMUM_BRAKE_DECELERATION_KMH_PER_SECOND = 28.0
+        const val MAXIMUM_REGEN_DECELERATION_KMH_PER_SECOND = 5.0
 
         // Digitized from the supplied Seal AWD trace. Its integral reaches 100 km/h in ~3.97 s.
         val FULL_THROTTLE_ACCELERATION_KMH_PER_SECOND = listOf(
