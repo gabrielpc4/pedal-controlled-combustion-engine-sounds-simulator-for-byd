@@ -1086,7 +1086,7 @@ private fun DashboardEmptyControlCell(height: Dp) {
 
 @Composable
 private fun DashboardColumnTextCell(label: String, active: Boolean, height: Dp) {
-    Box(Modifier.width(78.dp).height(height), contentAlignment = Alignment.CenterEnd) {
+    Box(Modifier.height(height), contentAlignment = Alignment.CenterEnd) {
         Text(label, color = if (active) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
     }
 }
