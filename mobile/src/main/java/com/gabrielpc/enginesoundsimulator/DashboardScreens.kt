@@ -34,9 +34,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,7 +84,6 @@ import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
-import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
@@ -474,38 +473,37 @@ private fun FmodUpdateRateControl(
             Column(modifier = Modifier.weight(1f)) {
                 Text("FMOD CONTROL RATE", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
                 Text(
-                    "Physics and FMOD use this cadence together. 100 Hz is the default; 60 Hz is recommended for a 60 Hz screen, while 30 Hz is the economy limit.",
+                    "Physics and FMOD use this cadence together. 60 Hz is the default and recommended for this 60 Hz screen; 30 Hz is the economy mode.",
                     color = Muted,
                     fontSize = 12.sp,
                 )
             }
             Text(
-                if (rateHz == FmodUpdateRate.MAX_HZ) "MAX" else "$rateHz Hz",
+                "$rateHz Hz",
                 color = White,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
             )
         }
-        Slider(
-            value = rateHz.coerceIn(FmodUpdateRate.MIN_HZ, FmodUpdateRate.MAX_SLIDER_HZ).toFloat(),
-            onValueChange = { raw ->
-                onRateChange(FmodUpdateRate.normalize(raw.roundToInt()))
-            },
-            valueRange = FmodUpdateRate.MIN_HZ.toFloat()..FmodUpdateRate.MAX_SLIDER_HZ.toFloat(),
-            steps = 29,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("30", color = Muted, fontSize = 11.sp)
-            Spacer(Modifier.weight(1f))
-            Button(
-                onClick = { onRateChange(FmodUpdateRate.MAX_HZ) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (rateHz == FmodUpdateRate.MAX_HZ) Cyan else PanelBright,
-                ),
-            ) {
-                Text("MAX", color = if (rateHz == FmodUpdateRate.MAX_HZ) Night else White, fontWeight = FontWeight.Black)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            listOf(FmodUpdateRate.ECONOMY_HZ, FmodUpdateRate.STANDARD_HZ).forEach { optionHz ->
+                Button(
+                    onClick = { onRateChange(optionHz) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (rateHz == optionHz) Cyan else PanelBright,
+                    ),
+                ) {
+                    Text(
+                        text = "$optionHz Hz",
+                        color = if (rateHz == optionHz) Night else White,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
             }
-            Text("333", color = Muted, fontSize = 11.sp)
         }
     }
 }

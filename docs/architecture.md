@@ -86,8 +86,8 @@ authoring, app policy, runtime observation, or unresolved evidence.
 
 Cabin and exterior switch the authored interior/exterior engine event and listener. The switch is
 performed inside the active FMOD system without a host-side crossfade or restart. The drivetrain
-and FMOD control/update worker share a persisted global cadence (100 Hz by default, 30..330 Hz in
-10 Hz steps, or 333 Hz with MAX). This changes control/simulation timing only; FMOD's native
+and FMOD control/update worker share a persisted global cadence (60 Hz by default, with an
+optional 30 Hz economy mode). This changes control/simulation timing only; FMOD's native
 mixer and DSP sample rate remain unchanged.
 
 ## Mixer
