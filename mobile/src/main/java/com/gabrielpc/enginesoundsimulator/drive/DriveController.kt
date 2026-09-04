@@ -78,6 +78,7 @@ data class DriveSnapshot(
     /** Global backfire policy, deliberately independent of each car bank's authored thresholds. */
     val backfireSettings: BackfireSettings = BackfireSettings(),
     val shiftSoundSettings: ShiftSoundSettings = ShiftSoundSettings(),
+    val transmissionSoundSettings: TransmissionSoundSettings = TransmissionSoundSettings(),
     val popsAndBangsEnabled: Boolean = true,
     val popsAndBangsOriginal: Boolean = false,
     val shiftSoundsEnabled: Boolean = true,
@@ -118,6 +119,7 @@ class DriveController(context: Context) {
     private val exteriorAudioModeRepository = ExteriorAudioModeRepository(appContext)
     private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
     private val shiftSoundSettingsRepository = ShiftSoundSettingsRepository(appContext)
+    private val transmissionSoundSettingsRepository = TransmissionSoundSettingsRepository(appContext)
     private val carEffectModesRepository = CarEffectModesRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
@@ -147,6 +149,7 @@ class DriveController(context: Context) {
     private val backfireOnly = AtomicBoolean(false)
     private val backfireSettings = AtomicReference(BackfireSettings())
     private val shiftSoundSettings = AtomicReference(ShiftSoundSettings())
+    private val transmissionSoundSettings = AtomicReference(TransmissionSoundSettings())
     private val carEffectModes = AtomicReference(CarEffectModes())
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
@@ -197,6 +200,7 @@ class DriveController(context: Context) {
         audioEngine.setCategoryGains(audioMixGains.get())
         backfireSettings.set(backfireSettingsRepository.load())
         shiftSoundSettings.set(shiftSoundSettingsRepository.load())
+        transmissionSoundSettings.set(transmissionSoundSettingsRepository.load())
         carEffectModes.set(carEffectModesRepository.load(selectedProfile.get()))
         simulation.updateBackfireSettings(backfireSettings.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
@@ -205,6 +209,7 @@ class DriveController(context: Context) {
         audioEngine.setShiftSoundEnabled(carEffectModes.get().shiftSoundsEnabled)
         audioEngine.setShiftSoundOverride(!carEffectModes.get().shiftSoundsOriginal)
         audioEngine.setShiftOverrideGain(shiftSoundSettings.get().overrideGain)
+        audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
     }
@@ -235,6 +240,7 @@ class DriveController(context: Context) {
             backfireOnly = backfireOnly.get(),
             backfireSettings = backfireSettings.get(),
             shiftSoundSettings = shiftSoundSettings.get(),
+            transmissionSoundSettings = transmissionSoundSettings.get(),
             popsAndBangsEnabled = carEffectModes.get().popsAndBangsEnabled,
             popsAndBangsOriginal = carEffectModes.get().popsAndBangsOriginal,
             shiftSoundsEnabled = carEffectModes.get().shiftSoundsEnabled,
@@ -394,6 +400,13 @@ class DriveController(context: Context) {
         audioEngine.setShiftOverrideGain(updated.overrideGain)
     }
 
+    fun setTransmissionSoundSettings(updated: TransmissionSoundSettings) {
+        val normalized = updated.copy(globalGain = updated.globalGain.coerceIn(0.25f, 1.0f))
+        transmissionSoundSettings.set(normalized)
+        transmissionSoundSettingsRepository.save(normalized)
+        audioEngine.setGlobalTransmissionGain(normalized.globalGain)
+    }
+
     fun resetAllPreferences() {
         audioMixGainRepository.resetAll()
         appContext.getSharedPreferences(AppPreferenceStores.SELECTED_CAR, Context.MODE_PRIVATE).edit().clear().apply()
@@ -401,6 +414,7 @@ class DriveController(context: Context) {
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
         backfireSettingsRepository.reset()
         shiftSoundSettingsRepository.reset()
+        transmissionSoundSettingsRepository.reset()
         carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
@@ -409,6 +423,7 @@ class DriveController(context: Context) {
         exteriorPureAudio.set(false)
         backfireSettings.set(BackfireSettings())
         shiftSoundSettings.set(ShiftSoundSettings())
+        transmissionSoundSettings.set(TransmissionSoundSettings())
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
@@ -416,6 +431,7 @@ class DriveController(context: Context) {
         audioEngine.setBackfireUseOriginal(false)
         audioEngine.setShiftSoundEnabled(true)
         audioEngine.setShiftSoundOverride(false)
+        audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(true)
         audioEngine.setTurboAudioEnabled(true)
         selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)

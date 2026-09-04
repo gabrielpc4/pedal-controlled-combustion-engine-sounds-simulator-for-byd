@@ -61,8 +61,9 @@ python3 tools/build_fmod_bank_packs.py --force
 
 Install the dashboard, install the installer, and select the desired pack group. The installer can
 remove all published packs with **DELETE ALL**. The mixer is diagnostic; temporary mute/solo
-controls reset when the car changes or the app starts, while the per-car transmission, gear-shift,
-and turbo trims remain user preferences until they are reset in Settings.
+controls reset when the car changes or the app starts. Per-car transmission, gear-shift, and turbo
+trims remain user preferences until reset, while Settings also has a global transmission multiplier
+that defaults to 0.5x and is applied before the per-car transmission trim.
 
 ## Documents
 

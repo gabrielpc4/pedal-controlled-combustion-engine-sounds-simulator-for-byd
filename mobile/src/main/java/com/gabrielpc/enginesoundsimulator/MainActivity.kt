@@ -102,6 +102,7 @@ import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
+import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.EffectSoundKind
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
@@ -197,6 +198,7 @@ class MainActivity : ComponentActivity() {
                         onToggleBackfireOnly = controller::setBackfireOnly,
                         onBackfireSettingsChange = controller::setBackfireSettings,
                         onShiftSoundSettingsChange = controller::setShiftSoundSettings,
+                        onTransmissionSoundSettingsChange = controller::setTransmissionSoundSettings,
                         onPreviewBackfireSample = backfirePreviewPlayer::play,
                         onEventMute = controller::setFmodEventMute,
                         onEventSolo = controller::setFmodEventSolo,
@@ -283,6 +285,7 @@ private fun MotorSoundDashboard(
     onToggleBackfireOnly: (Boolean) -> Unit,
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
     onShiftSoundSettingsChange: (ShiftSoundSettings) -> Unit,
+    onTransmissionSoundSettingsChange: (TransmissionSoundSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
@@ -487,6 +490,8 @@ private fun MotorSoundDashboard(
                             onBackfireSettingsChange = onBackfireSettingsChange,
                             shiftSoundSettings = state.shiftSoundSettings,
                             onShiftSoundSettingsChange = onShiftSoundSettingsChange,
+                            transmissionSoundSettings = state.transmissionSoundSettings,
+                            onTransmissionSoundSettingsChange = onTransmissionSoundSettingsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                     }

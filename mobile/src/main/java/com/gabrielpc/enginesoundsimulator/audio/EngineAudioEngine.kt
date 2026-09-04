@@ -64,6 +64,7 @@ class EngineAudioEngine(context: Context) {
     private val backfireAllowedSamplesMask = AtomicInteger(0b111111)
     private val shiftSoundOverride = AtomicBoolean(false)
     private val shiftOverrideGain = AtomicReference(0.5f)
+    private val globalTransmissionGain = AtomicReference(0.5f)
     private val shiftSoundEnabled = AtomicBoolean(true)
     private val transmissionAudioEnabled = AtomicBoolean(true)
     private val turboAudioEnabled = AtomicBoolean(true)
@@ -138,6 +139,9 @@ class EngineAudioEngine(context: Context) {
 
     fun setShiftSoundOverride(enabled: Boolean) { shiftSoundOverride.set(enabled) }
     fun setShiftOverrideGain(gain: Float) { shiftOverrideGain.set(gain.coerceIn(0.25f, 1.0f)) }
+
+    /** Applies the persistent driver preference before a car's per-profile transmission trim. */
+    fun setGlobalTransmissionGain(gain: Float) { globalTransmissionGain.set(gain.coerceIn(0.25f, 1.0f)) }
 
     fun setShiftSoundEnabled(enabled: Boolean) { shiftSoundEnabled.set(enabled) }
 
@@ -408,7 +412,13 @@ class EngineAudioEngine(context: Context) {
                     sentHostEffectsGain = requestedHostEffectsGain
                     hostGainCalls = 1
                 }
-                val gains = categoryGains.get()
+                val configuredGains = categoryGains.get()
+                // The global transmission preference is deliberately multiplied here, after the
+                // bank's authored automation and before native routing. It never rewrites a bank
+                // curve and preserves the per-car mixer gain as an independent second control.
+                val gains = configuredGains.copy(
+                    transmission = configuredGains.transmission * globalTransmissionGain.get(),
+                )
                 if (gains != sentCategoryGains) {
                     bridge.setCategoryGains(gains.transmission, gains.gearShift, gains.turbo, gains.backfire)
                     sentCategoryGains = gains

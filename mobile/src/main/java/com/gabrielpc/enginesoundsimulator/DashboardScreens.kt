@@ -84,6 +84,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
+import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -410,6 +411,8 @@ internal fun SettingsScreen(
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
     shiftSoundSettings: ShiftSoundSettings,
     onShiftSoundSettingsChange: (ShiftSoundSettings) -> Unit,
+    transmissionSoundSettings: TransmissionSoundSettings,
+    onTransmissionSoundSettingsChange: (TransmissionSoundSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -432,7 +435,7 @@ internal fun SettingsScreen(
         }
         if (!backfireTab) {
             Text(
-                "Mixer gains are saved independently for each car. Reset All clears saved car, perspective, shift mode, audio gains, backfire settings, and the FMOD control rate.",
+                "Mixer gains are saved independently for each car. Transmission attenuation is global. Reset All clears saved car, perspective, shift mode, audio gains, sound settings, and the FMOD control rate.",
                 color = Muted,
                 fontSize = 15.sp,
             )
@@ -452,6 +455,16 @@ internal fun SettingsScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = if (shiftSoundSettings.overrideGain == gain) Cyan else PanelBright),
                         modifier = Modifier.weight(1f),
                     ) { Text("${gain}x", color = if (shiftSoundSettings.overrideGain == gain) Night else White) }
+                }
+            }
+            Text("TRANSMISSION GLOBAL GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
+                    Button(
+                        onClick = { onTransmissionSoundSettingsChange(transmissionSoundSettings.copy(globalGain = gain)) },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (transmissionSoundSettings.globalGain == gain) Cyan else PanelBright),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("${gain}x", color = if (transmissionSoundSettings.globalGain == gain) Night else White) }
                 }
             }
             Button(
