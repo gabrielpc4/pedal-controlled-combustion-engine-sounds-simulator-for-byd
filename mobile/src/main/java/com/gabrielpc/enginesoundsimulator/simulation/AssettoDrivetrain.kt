@@ -45,8 +45,8 @@ internal class AssettoDrivetrainFrame(
  * equal-speed gear mapping possible without changing the bank's authored RPM thresholds.
  */
 internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
-    // Explicit app preference; off by default to preserve the current no-autoblip behavior.
-    private var autoblipEnabled = false
+    // Explicit app preference; enabled by default because it is the authored car behavior.
+    private var autoblipEnabled = true
     private var rpm = physics.engine.idleRpm
     private var speedMetersPerSecond = 0.0
     private var gear = 1

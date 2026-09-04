@@ -91,7 +91,7 @@ data class DriveSnapshot(
     val carAudioReady: Boolean = false,
     val manualShiftModeEnabled: Boolean = false,
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
-    val autoblipEnabled: Boolean = false,
+    val autoblipEnabled: Boolean = true,
     val exteriorPureAudio: Boolean = false,
     val userMessage: UserVisibleMessage? = null,
 )
@@ -437,8 +437,8 @@ class DriveController(context: Context) {
         backfireSettings.set(BackfireSettings())
         shiftSoundSettings.set(ShiftSoundSettings())
         transmissionSoundSettings.set(TransmissionSoundSettings())
-        autoblipEnabled.set(false)
-        simulation.updateAutoblipEnabled(false)
+        autoblipEnabled.set(true)
+        simulation.updateAutoblipEnabled(true)
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)

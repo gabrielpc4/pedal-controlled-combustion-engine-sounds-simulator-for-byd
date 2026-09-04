@@ -52,7 +52,14 @@ internal class BydSealSimulatedPedalsMotion {
         val serviceBrake = MAXIMUM_BRAKE_DECELERATION_KMH_PER_SECOND * brakePedal
         // This is a SIM-only approximation of the Seal's lift-off energy recovery. It changes
         // road speed, not the authored FMOD drivetrain parameters, and remains user-adjustable.
-        val regenerativeBrake = MAXIMUM_REGEN_DECELERATION_KMH_PER_SECOND * simulatedRegen.coerceIn(0.0, 1.0)
+        // Regeneration is a lift-off effect: a partially pressed accelerator keeps propulsion
+        // active and must not simultaneously apply regenerative braking. This mirrors the real
+        // pedal contract and prevents the regen slider from fighting the requested throttle.
+        val regenerativeBrake = if (pedal <= 0.0) {
+            MAXIMUM_REGEN_DECELERATION_KMH_PER_SECOND * simulatedRegen.coerceIn(0.0, 1.0)
+        } else {
+            0.0
+        }
         val accelerationKmhPerSecond = propulsion - coast - serviceBrake - regenerativeBrake
         documentedContinuousSpeedKmh = (
             documentedContinuousSpeedKmh + accelerationKmhPerSecond * dt
