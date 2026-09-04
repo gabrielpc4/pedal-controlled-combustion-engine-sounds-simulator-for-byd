@@ -376,6 +376,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         // now cuts torque without ever producing an above-limiter RPM sample.
         if (physics.engine.limiterRpm > 0.0) {
             rpm = rpm.coerceAtMost(physics.engine.limiterRpm)
+            // In P/N there is no drivetrain load to absorb the limiter cut. Holding the
+            // authored boundary while the pedal remains down prevents the repeated cut/coast
+            // cycle from making a free-revving engine audibly bounce below redline.
+            if (transmissionPosition != TransmissionPosition.DRIVE && rawGas > 0.0 && limiterCounter > 0) {
+                rpm = physics.engine.limiterRpm
+            }
         }
         previousFmodWheelSpeed = wheelSpeed
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
