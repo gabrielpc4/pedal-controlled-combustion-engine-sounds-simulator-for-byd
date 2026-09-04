@@ -11,18 +11,19 @@ python3 tools/build_fmod_bank_packs.py --force
 python3 tools/validate_car_audio.py
 ```
 
-The generated index must contain 23 active `original_cars_pack` entries, each with its own bank,
-preview, and physics metadata. It currently also contains 33 independently installable modded
-entries; they are outside the original-bank validation sweep. Confirm that the selected group
-publishes only verified packages and that selecting a missing pack reports an error.
+The generated index currently contains 111 active `original_cars_pack` car entries plus two shared
+dependencies, each car with its own bank, preview, and physics metadata. It also contains 35
+independently installable modded entries; they are outside the original-bank validation sweep.
+Confirm that the selected group publishes only verified packages and that selecting a missing pack
+reports an error.
 
 ## Android manual cycle
 
-Install the dashboard and installer on the target emulator or head unit, install the original pack,
-and open each car in both CABIN and EXTERIOR. The former tuning and override controls are removed;
-use the natural automatic mode. For each car, accelerate until about two authored gear changes occur,
-release the throttle, and observe the RPM returning to the authored idle. Record only aggregate
-observations needed to reproduce a failure.
+Install the dashboard through its USB APK route, copy the original bank batches through the BYD
+file manager, and open each car in both CABIN and EXTERIOR. The former tuning and override controls
+are removed; use the natural automatic mode. For each car, accelerate until about two authored gear
+changes occur, release the throttle, and observe the RPM returning to the authored idle. Record
+only aggregate observations needed to reproduce a failure.
 
 Useful runtime evidence is available through the debug-only ADB capture: selected profile,
 raw/presentation speed, RPM, gear, physical FMOD parameters, active event/source names,
@@ -52,10 +53,11 @@ imports them only after validating the exact profile, bank SHA-256, and complete
 catalog. Valid events from a shared original dependency bank are checked against the global GUID
 map and excluded from the selected car's source attribution.
 
-The first controlled sweep imported one capture for each of the 23 original profiles. It found no
-exact-zero PCM stream in the direct bank audit; a voice with zero audibility was therefore
-classified as virtual, route-zero, or authored automation rather than automatically reported as a
-missing sample. The persistent findings and their evidence boundary are in
+The first controlled sweep imported one capture for each of the 23 original profiles that existed
+when that audit was performed. It found no exact-zero PCM stream in the direct bank audit; a voice
+with zero audibility was therefore classified as virtual, route-zero, or authored automation rather
+than automatically reported as a missing sample. The remaining newer profiles have not inherited
+that evidence. The persistent findings and their evidence boundary are in
 `docs/original-cars-exceptions.md`.
 
 For CPU measurements, the debug receiver also accepts `PERF_START`, `PERF_STATUS`, and

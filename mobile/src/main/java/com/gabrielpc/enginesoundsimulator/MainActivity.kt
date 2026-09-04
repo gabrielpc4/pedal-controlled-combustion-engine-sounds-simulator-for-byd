@@ -105,6 +105,7 @@ import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.EffectSoundKind
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
+import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessageSeverity
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
@@ -133,6 +134,7 @@ private val Amber = Color(0xFFFFC456)
 private val White = Color(0xFFF5FAFD)
 private val Muted = Color(0xFF88A2B2)
 private val ErrorBannerBody = Color(0xFF6E1018)
+private val InfoBannerBody = Color(0xFF0B4545)
 
 class MainActivity : ComponentActivity() {
     private val controller: DriveController
@@ -228,9 +230,10 @@ class MainActivity : ComponentActivity() {
         stopService(EngineRuntimeService.stopIntent(this))
         controller.setUiActive(true)
         uiMonitoringActive = true
-        if (!controller.isRunning()) {
-            controller.start()
-        }
+        // start() is intentionally idempotent. Calling it after the activity returns from the
+        // BYD file manager lets DriveController notice staged FMOD packages even when the
+        // background engine service kept the simulation alive while this screen was closed.
+        controller.start()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         choreographer.removeFrameCallback(refreshUi)
         choreographer.postFrameCallback(refreshUi)
@@ -1666,11 +1669,15 @@ private fun DismissableUserMessageBanner(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val (bodyColor, borderColor) = when (message.severity) {
+        UserVisibleMessageSeverity.INFO -> InfoBannerBody to Green
+        UserVisibleMessageSeverity.ERROR -> ErrorBannerBody to Red
+    }
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(ErrorBannerBody.copy(alpha = 0.94f))
-            .border(1.dp, Red.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .background(bodyColor.copy(alpha = 0.94f))
+            .border(1.dp, borderColor.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

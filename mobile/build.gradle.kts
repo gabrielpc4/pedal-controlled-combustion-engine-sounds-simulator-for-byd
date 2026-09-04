@@ -183,8 +183,23 @@ android {
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
     }
 
+    signingConfigs {
+        // DiLink 3 runs Android 10 and accepts APK Signature Scheme v2. The Android Gradle
+        // Plugin omits legacy v1/JAR signing for this minSdk 25 package, so v2 is the actual
+        // compatibility contract verified for every USB-sideload artifact below.
+        getByName("debug") {
+            enableV2Signing = true
+        }
+    }
+
     buildTypes {
         release {
+            // This is a privately sideloaded vehicle build, not a Play-distributed artifact.
+            // Reuse the stable local debug certificate so it can update the earlier dashboard
+            // builds already installed on the DiLink unit. More importantly, a release APK must
+            // be signed at all; an unsigned archive is rejected by Android before minSdk/ABI
+            // compatibility is considered.
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = false
             }

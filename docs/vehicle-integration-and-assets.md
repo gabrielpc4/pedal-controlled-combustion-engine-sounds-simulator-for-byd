@@ -61,16 +61,16 @@ The original-car catalog uses only source FMOD banks and preview images from
 `modded_cars` directory supplies the independently installable modded group; it is not a source for
 the original-car inventory. Source files are intentionally ignored because their redistribution
 rights have not been established. `tools/build_fmod_bank_packs.py` copies each selected bank unchanged into a
-verified installer package; this is both a reproducibility rule and a licensing guardrail.
+verified file-manager archive; this is both a reproducibility rule and a licensing guardrail.
 
 The dashboard needs the FMOD Android SDK to build and an installed source bank to play. It has no
 procedural-synth, decoded-audio, or unrelated-car fallback. Game installation is not needed after
-the companion installer has copied a verified bank into the dashboard's private storage.
+the dashboard has imported a verified bank copied through the vehicle file manager.
 
 When using third-party recordings:
 
 - Confirm the user has the right to use the material in this private installation.
-- Keep raw banks, generated installer packages, game files, reference APKs, and previews out of Git.
+- Keep raw banks, generated file-manager packages, game files, reference APKs, and previews out of Git.
 - Preserve the bank's authored stereo event graph, parameter ranges, effects, and RPM domain.
 - Use the authored `engine_ext` event only when it exists; otherwise the runtime intentionally
   retains the same bank's `engine_int` event rather than inventing an exterior source.

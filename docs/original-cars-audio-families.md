@@ -53,8 +53,8 @@ payload behind the scenes.
 
 Do not delete the lower trims yet. The exact duplicates prove that their FMOD
 audio payload is redundant, but they do not prove that their physics metadata
-or intended selectable identity is redundant. We can reduce the installer
-size safely by deduplicating identical bank bytes while retaining all catalog
+or intended selectable identity is redundant. We can reduce generated package
+storage safely by deduplicating identical bank bytes while retaining all catalog
 entries. If the goal is fewer selectable cars, the representatives above are
 reasonable candidates for a follow-up, but that would be a visible catalog
 change rather than an audio-correctness fix.

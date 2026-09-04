@@ -12,6 +12,7 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspectiveRepository
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
+import com.gabrielpc.enginesoundsimulator.audio.FmodBankImportResult
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRateRepository
@@ -150,6 +151,7 @@ class DriveController(context: Context) {
     private val transmissionPosition = AtomicReference(TransmissionPosition.DRIVE)
     private val uiActive = AtomicBoolean(false)
     private val audioInterrupted = AtomicBoolean(false)
+    private val stagedBankImportRunning = AtomicBoolean(false)
     private val audioMuted = AtomicBoolean(false)
     // Deliberately session-only: this diagnostic/listening mode must never become a car preference.
     private val backfireOnly = AtomicBoolean(false)
@@ -267,8 +269,15 @@ class DriveController(context: Context) {
 
     fun start() {
         synchronized(lifecycleLock) {
-            if (running.get() && loopThread?.isAlive == true) return
+            if (running.get() && loopThread?.isAlive == true) {
+                // Android can retain the driving service while its activity is closed. A user may
+                // copy packs through the file manager in that interval, then reopen the app; do
+                // not require a process restart before the staged files can be discovered.
+                if (bankResolver.hasStagedPacks()) importStagedBankPacksAsync()
+                return
+            }
             refreshInstalledProfileCache()
+            val stagedPacksPending = bankResolver.hasStagedPacks()
             loopThread?.let { thread ->
                 thread.interrupt()
                 joinLoop(thread)
@@ -279,8 +288,12 @@ class DriveController(context: Context) {
             loopThread = thread
             try {
                 vehicleReader.start()
-                if (!audioMuted.get()) audioEngine.start()
+                // Starting FMOD before a staged shared bank is published makes the control worker
+                // stop permanently on its first missing-bank error. Let the background importer
+                // finish first, then start FMOD from completeStagedBankImport.
+                if (!audioMuted.get() && !stagedPacksPending) audioEngine.start()
                 thread.start()
+                if (stagedPacksPending) importStagedBankPacksAsync()
             } catch (error: Throwable) {
                 running.set(false)
                 generation.incrementAndGet()
@@ -551,7 +564,10 @@ class DriveController(context: Context) {
         applySelectedCar(installed[(current + offset).mod(installed.size)])
     }
 
-    private fun applySelectedCar(profile: FmodBankProfile) {
+    private fun applySelectedCar(
+        profile: FmodBankProfile,
+        forceAudioReload: Boolean = false,
+    ) {
         synchronized(lifecycleLock) {
             selectedProfile.set(profile)
             selectedCarRepository.save(profile)
@@ -571,7 +587,11 @@ class DriveController(context: Context) {
             audioEngine.setCategoryGains(audioMixGains.get())
             loadPhysics(profile)
             simulation.reset()
-            audioEngine.setSoundProgram(profile, selectedPerspective.get())
+            audioEngine.setSoundProgram(
+                profile = profile,
+                perspective = selectedPerspective.get(),
+                forceReload = forceAudioReload,
+            )
         }
     }
 
@@ -584,7 +604,65 @@ class DriveController(context: Context) {
         } else userMessage = UserVisibleMessage(
             id = SystemClock.elapsedRealtime(),
             title = "Car audio is not installed",
-            detail = "Install the package group containing ${profile.displayName} in the audio installer.",
+            detail = "Copy its bank package to Internal storage/Android/data/com.gabrielpc.enginesoundsimulator/files/fmod-bank-import/, then reopen the app.",
+        )
+    }
+
+    /**
+     * File-manager bank imports run off the UI and audio-control threads because a complete car
+     * catalog is multi-gigabyte. Importing uses the same checksum and atomic publication path as
+     * the retired companion installer, then refreshes the selectable catalog only once it ends.
+     */
+    private fun importStagedBankPacksAsync() {
+        if (!stagedBankImportRunning.compareAndSet(false, true)) return
+        Thread({
+            val result = bankResolver.importStagedPacks()
+            synchronized(lifecycleLock) {
+                stagedBankImportRunning.set(false)
+                if (!running.get()) return@synchronized
+                completeStagedBankImport(result)
+            }
+        }, "fmod-bank-file-import").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun completeStagedBankImport(result: FmodBankImportResult) {
+        if (!result.foundPacks) return
+        refreshInstalledProfileCache()
+        val selected = selectedProfile.get()
+        val target = installedProfiles().firstOrNull { it.id == selected.id }
+            ?: installedProfiles().firstOrNull()
+        // A staged package may replace the currently selected car or a shared bank without
+        // changing its profile ID. Force a fresh FMOD load so the audio worker cannot retain the
+        // old file handles after verified publication to private storage.
+        target?.let { profile ->
+            applySelectedCar(
+                profile = profile,
+                forceAudioReload = result.importedPackCount > 0,
+            )
+        }
+        if (target != null && !audioMuted.get() && !audioEngine.isAudioActive()) {
+            audioEngine.start()
+        }
+        userMessage = UserVisibleMessage(
+            id = SystemClock.elapsedRealtime(),
+            title = if (result.failures.isEmpty()) "Car audio import complete" else "Car audio import needs attention",
+            detail = buildString {
+                append("Imported ${result.importedPackCount} package(s)")
+                if (result.alreadyInstalledPackCount > 0) {
+                    append("; ${result.alreadyInstalledPackCount} already matched")
+                }
+                result.failures.firstOrNull()?.let { failure ->
+                    append(". First error: $failure")
+                }
+            },
+            severity = if (result.failures.isEmpty()) {
+                UserVisibleMessageSeverity.INFO
+            } else {
+                UserVisibleMessageSeverity.ERROR
+            },
         )
     }
 

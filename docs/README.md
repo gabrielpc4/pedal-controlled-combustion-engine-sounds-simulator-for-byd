@@ -6,16 +6,18 @@ engine and drivetrain sound. The app never controls the vehicle.
 
 ## Current product boundary
 
-The current catalog contains all usable official cars sourced from
-`assetto_corsa_installation/content/cars`, including the Nissan Skyline GT-R R34. The separate
-`modded_car_packs` group contains the user-supplied cars discovered under `modded_cars`. Both groups can be installed
+The current catalog contains 111 usable official cars sourced from
+`assetto_corsa_installation/content/cars`, including the Nissan Skyline GT-R R34, plus two shared
+original-bank dependencies. The separate `modded_car_packs` group contains 35 user-supplied cars
+discovered under `modded_cars`. Both groups can be installed
 independently and the dashboard only exposes profiles whose verified package is actually
 installed. The original and modded inventories are independent evidence sets: a limitation in one
 must never cause a fallback to a similarly named car in the other.
 
-The dashboard APK contains the runtime and previews. The separate `audio-installer` APK carries
-the generated bank packages and publishes them atomically into the dashboard's private storage.
-See [FMOD bank installation](fmod-bank-installation.md).
+The dashboard APK contains the runtime and previews. Car-bank archives are copied through the
+BYD file manager into the dashboard's app-specific external-storage staging folder; the dashboard
+then verifies and atomically imports them into private storage itself. No companion installer APK
+is required. See [FMOD bank installation](fmod-bank-installation.md).
 
 ## Source of truth
 
@@ -51,16 +53,20 @@ continuous presentation speed instead of resetting the dashboard to zero.
 ## Build and release
 
 The local FMOD 2.03.14 SDK is supplied through `fmod.sdk.dir`. Build the bank packages first, then
-assemble the dashboard and installer. The dashboard build number is incremented on an APK build.
-Generated packages and APKs are ignored by Git.
+assemble the signed dashboard and export the file-manager bundles. The dashboard build number is
+incremented on an APK build. Generated packages, bundles, and APKs are ignored by Git.
 
 ```sh
 python3 tools/build_fmod_bank_packs.py --force
-./gradlew :mobile:assembleDebug :audio-installer:assembleDebug --no-daemon -PcarApk=true
+./gradlew :mobile:assembleRelease --no-daemon -PcarApk=true
+python3 tools/export_file_manager_car_packs.py --groups all
 ```
 
-Install the dashboard, install the installer, and select the desired pack group. The installer can
-remove all published packs with **DELETE ALL**. The mixer is diagnostic; temporary mute/solo
+Install the dashboard APK from `manual_car_pack_bundles/DASHBOARD_APK` through the vehicle's
+enabled USB APK route. Then copy one `fmod-bank-import` batch at a time from
+`AUDIO_PACKS/*/BATCH_*` to the exact path documented inside its
+`COPY_TO_BYD_INTERNAL_STORAGE.txt`, and open the dashboard while parked. The dashboard imports and
+deletes verified staging archives automatically. The mixer is diagnostic; temporary mute/solo
 controls reset when the car changes or the app starts. Per-car transmission, gear-shift, and turbo
 trims remain user preferences until reset, while Settings also has a global transmission multiplier
 that defaults to 0.5x and is applied before the per-car transmission trim.
@@ -70,7 +76,7 @@ that defaults to 0.5x and is applied before the per-car transmission trim.
 - [Architecture](architecture.md): runtime boundaries and FMOD ownership.
 - [Vehicle integration and assets](vehicle-integration-and-assets.md): local input and asset rules.
 - [FMOD bank calibration](fmod-bank-calibration.md): reference-bank inspection workflow.
-- [FMOD bank installation](fmod-bank-installation.md): two-group package format and installer.
+- [FMOD bank installation](fmod-bank-installation.md): two-group package format and file-manager delivery.
 - [Car audio validation](car-audio-validation.md): manual validation procedure and evidence.
 - [Original-car audio inventory](original-cars-audio-inventory.md): generated authored-bank and
   runtime-audit reference for all usable official profiles.

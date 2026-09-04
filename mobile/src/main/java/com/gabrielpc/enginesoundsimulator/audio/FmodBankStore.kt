@@ -12,12 +12,23 @@ import java.io.InputStreamReader
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 
+internal data class FmodBankImportResult(
+    val importedPackCount: Int,
+    val alreadyInstalledPackCount: Int,
+    val failures: List<String>,
+) {
+    val foundPacks: Boolean get() = importedPackCount > 0 || alreadyInstalledPackCount > 0 || failures.isNotEmpty()
+}
+
 /**
- * Atomically publishes installer-provided FMOD Studio banks. Runtime playback
+ * Atomically publishes file-manager-staged FMOD Studio banks. Runtime playback
  * only receives an already verified on-disk bank path; it never reads archives
  * or decodes audio on its control thread.
  */
-internal class FmodBankStore(filesDirectory: File) {
+internal class FmodBankStore(
+    filesDirectory: File,
+    private val stagedImportDirectory: File? = null,
+) {
     private val packsDirectory = File(filesDirectory, "fmod-banks")
 
     fun installedPackIds(): Set<String> = packsDirectory.listFiles()
@@ -57,6 +68,80 @@ internal class FmodBankStore(filesDirectory: File) {
         val path = manifest.files.firstOrNull { it.path.startsWith("preview/") }?.path ?: return null
         safeDestination(directory, path).takeIf(File::isFile)
     }.getOrNull()
+
+    fun hasStagedPacks(): Boolean = stagedImportDirectory
+        ?.takeIf(File::isDirectory)
+        ?.listFiles()
+        .orEmpty()
+        .filter(File::isDirectory)
+        .filter { it.name in SUPPORTED_IMPORT_GROUPS }
+        .any { groupDirectory ->
+            groupDirectory.listFiles()
+                .orEmpty()
+                .any { archive -> archive.isFile && archive.extension.equals(ARCHIVE_EXTENSION, ignoreCase = true) }
+        }
+
+    /**
+     * Consumes `.bydbank` archives copied to the app-specific external-storage staging folder.
+     *
+     * This deliberately replaces the companion installer as the normal vehicle workflow. The
+     * files remain user-copyable through a file manager, but are still SHA-256-validated and
+     * atomically published into private app storage before FMOD can load them. Successfully
+     * consumed archives are removed to avoid keeping a second multi-gigabyte copy on the head
+     * unit.
+     */
+    @Synchronized
+    fun importStagedPacks(): FmodBankImportResult {
+        val root = stagedImportDirectory?.takeIf(File::isDirectory)
+            ?: return FmodBankImportResult(0, 0, emptyList())
+        var imported = 0
+        var alreadyInstalled = 0
+        val failures = mutableListOf<String>()
+        root.listFiles()
+            .orEmpty()
+            .filter(File::isDirectory)
+            .sortedBy { it.name }
+            .forEach { groupDirectory ->
+                if (groupDirectory.name !in SUPPORTED_IMPORT_GROUPS) return@forEach
+                groupDirectory.listFiles()
+                    .orEmpty()
+                    .filter { it.isFile && it.extension.equals(ARCHIVE_EXTENSION, ignoreCase = true) }
+                    .sortedBy { it.name }
+                    .forEach { archive ->
+                        runCatching {
+                            val archiveManifest = ZipFile(archive).use { zip ->
+                                val manifestEntry = requireNotNull(zip.getEntry(MANIFEST_NAME)) {
+                                    "FMOD bank package has no manifest"
+                                }
+                                zip.getInputStream(manifestEntry).use(::readManifest)
+                            }
+                            require(archiveManifest.group == groupDirectory.name) {
+                                "Archive group does not match ${groupDirectory.name}"
+                            }
+                            val existingManifest = installedDirectory(
+                                archiveManifest.group,
+                                archiveManifest.id,
+                            )?.let { directory ->
+                                File(directory, MANIFEST_NAME).inputStream().use(::readManifest)
+                            }
+                            if (existingManifest == archiveManifest) {
+                                alreadyInstalled++
+                            } else {
+                                FileInputStream(archive).use { source ->
+                                    install(archiveManifest.group, archiveManifest.id, source)
+                                }
+                                imported++
+                            }
+                            // The Mac/source copy remains the recovery artifact. The car-side
+                            // staging copy is disposable once it has been verified and published.
+                            archive.delete()
+                        }.onFailure { error ->
+                            failures += "${groupDirectory.name}/${archive.name}: ${error.message ?: error::class.java.simpleName}"
+                        }
+                    }
+            }
+        return FmodBankImportResult(imported, alreadyInstalled, failures)
+    }
 
     private fun bankFile(group: String, packId: String, displayName: String): File {
         val directory = requireNotNull(installedDirectory(group, packId)) {
@@ -157,7 +242,7 @@ internal class FmodBankStore(filesDirectory: File) {
         }
         reader.endObject()
         require(schema == SCHEMA) {
-            "This is an old or unsupported audio pack. Use DELETE ALL in the audio installer, then reinstall the current packs."
+            "This is an old or unsupported audio pack. Replace the staged fmod-bank-import folder with a current bundle and reopen the app."
         }
         require(SAFE_PACK_ID.matches(requireNotNull(id))) { "Invalid FMOD bank id" }
         require(SAFE_PACK_ID.matches(requireNotNull(group))) { "Invalid FMOD bank group" }
@@ -237,16 +322,28 @@ internal class FmodBankStore(filesDirectory: File) {
 
     private companion object {
         const val MANIFEST_NAME = "manifest.json"
+        const val ARCHIVE_EXTENSION = "bydbank"
         const val SCHEMA = "byd-fmod-bank-pack-v3"
         const val COPY_BUFFER_BYTES = 256 * 1024
         val SAFE_PACK_ID = Regex("^[a-z0-9][a-z0-9._-]{0,95}$")
         val SHA256 = Regex("^[0-9a-f]{64}$")
+        val SUPPORTED_IMPORT_GROUPS = setOf(
+            FmodBankProfiles.originalCarsPackId,
+            FmodBankProfiles.moddedCarsPackId,
+        )
     }
 }
 
 internal class FmodBankResolver(context: Context) {
     private val appContext = context.applicationContext
-    private val store = FmodBankStore(appContext.filesDir)
+    private val store = FmodBankStore(
+        filesDirectory = appContext.filesDir,
+        stagedImportDirectory = appContext.getExternalFilesDir(null)?.resolve(STAGED_IMPORT_DIRECTORY_NAME),
+    )
+
+    fun importStagedPacks(): FmodBankImportResult = store.importStagedPacks()
+
+    fun hasStagedPacks(): Boolean = store.hasStagedPacks()
 
     fun bankFiles(profile: FmodBankProfile): FmodBankFiles = FmodBankFiles(
         commonStrings = store.sharedBankFile(FmodBankProfiles.commonStringsPackId),
@@ -285,6 +382,12 @@ internal class FmodBankResolver(context: Context) {
         return runCatching { appContext.assets.open(profile.previewAssetName) }.getOrNull()
     }
 }
+
+/**
+ * File-manager destination below the shared internal-storage Android/data directory. Android
+ * grants the owning app access without asking for broad storage permission, including on DiLink.
+ */
+internal const val STAGED_IMPORT_DIRECTORY_NAME = "fmod-bank-import"
 
 internal data class FmodBankFiles(
     val commonStrings: File,

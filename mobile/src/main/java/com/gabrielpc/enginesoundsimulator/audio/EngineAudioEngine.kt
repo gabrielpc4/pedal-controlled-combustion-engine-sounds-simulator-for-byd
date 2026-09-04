@@ -221,11 +221,12 @@ class EngineAudioEngine(context: Context) {
     internal fun setSoundProgram(
         profile: FmodBankProfile,
         perspective: EngineSoundPerspective,
+        forceReload: Boolean = false,
     ) {
         synchronized(lifecycleLock) {
             val profileChanged = selectedProfile.getAndSet(profile).id != profile.id
             val perspectiveChanged = soundPerspective.getAndSet(perspective) != perspective
-            if (!profileChanged) {
+            if (!profileChanged && !forceReload) {
                 if (perspectiveChanged) {
                     // Mixer cards are rebuilt for the new listener/event topology. Reset their
                     // host-only mute/solo state too, so no invisible override crosses cabin and
@@ -236,6 +237,10 @@ class EngineAudioEngine(context: Context) {
                 }
                 return
             }
+
+            // File-manager imports can replace a verified package in place, leaving the profile
+            // ID unchanged. A forced reload is therefore intentional: FMOD must reopen the new
+            // bank files rather than continue with old native file handles.
 
             loadedBankProfileId.set(null)
             nativeSources.set(emptyList())

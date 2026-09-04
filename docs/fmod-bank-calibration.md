@@ -10,7 +10,7 @@ compatibility and presentation-drive task, not an export or loop-calibration tas
    unchanged bank, preview, and required physics metadata; the generated original-car inventory
    reads the official shared `GUIDs.txt` separately to resolve authored event paths. A shared
    package is allowed only after comparing source-bank SHA-256.
-3. Keep the original `common.strings.bank` and `common.bank` installer packages available. They
+3. Keep the original `common.strings.bank` and `common.bank` generated packages available. They
    provide event names and shared FMOD dependencies for official banks that ship without a local
    `GUIDs.txt`. Open the car bank with Audio Lab or the Android validation test and confirm
    `engine_int` exists. `engine_ext`, transmission, turbo, limiter, gear, backfire, and start are

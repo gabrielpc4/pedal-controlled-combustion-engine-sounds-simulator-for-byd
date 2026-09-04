@@ -21,17 +21,20 @@ experiments.
 
 ## Build
 
-The dashboard module is `mobile`; `audio-installer` is the separate installer that transfers the
-user-owned original FMOD banks into the dashboard's private storage. Set `fmod.sdk.dir` in
-`local.properties` to the supplied Android FMOD Studio API. Generate the installer payloads from
-the local source-bank folders first:
+The dashboard module is `mobile`. User-owned FMOD banks are transferred through the vehicle file
+manager and imported by the dashboard itself; no companion installer APK is required. Set
+`fmod.sdk.dir` in `local.properties` to the supplied Android FMOD Studio API. Generate the
+file-manager payloads from the local source-bank folders first:
 
 ```sh
 python3 tools/build_fmod_bank_packs.py
-./gradlew :mobile:assembleDebug :audio-installer:assembleDebug --no-daemon
+./gradlew :mobile:assembleRelease --no-daemon -PcarApk=true
+python3 tools/export_file_manager_car_packs.py --groups all
 ```
 
-Assembly produces the locally numbered dashboard APK and an FMOD-bank installer APK.
+Assembly produces a signed, locally numbered dashboard APK. The exporter creates one delivery
+folder containing that APK plus 512 MiB original/modded file-manager batches, each with its own
+exact copy-path instructions.
 
 ## Install
 
@@ -39,12 +42,13 @@ For the `Simple_Automotive` emulator or another dedicated test device:
 
 ```powershell
 adb install --bypass-low-target-sdk-block -r mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<number>-debug.apk
-adb install --bypass-low-target-sdk-block -r audio-installer/build/outputs/apk/debug/engine-sounds-audio-installer-debug.apk
-adb shell am start -n com.gabrielpc.enginesoundsinstaller/.AudioInstallerActivity
 ```
 
-Tap **INSTALL ALL**, wait for the progress bar to complete, then start the dashboard. The dashboard
-contains no alternate audio fallback and remains silent until the selected native bank is installed.
+Install `manual_car_pack_bundles/DASHBOARD_APK` through the vehicle's enabled USB APK route, then
+copy the `fmod-bank-import` folder from `AUDIO_PACKS/*/BATCH_*` to the exact Android/data path
+stated in its `COPY_TO_BYD_INTERNAL_STORAGE.txt`. Import one batch at a time and wait for the
+completion message before continuing. The dashboard contains no alternate audio fallback and
+remains silent until the selected native bank is imported.
 
 Use the app only while parked or in a controlled environment. Its audio can mask navigation,
 alerts, and other safety cues.

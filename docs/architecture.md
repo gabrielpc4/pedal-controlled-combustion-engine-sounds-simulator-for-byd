@@ -115,8 +115,9 @@ event while the source cards remain diagnostic observations of each raw name.
 
 ## Packaging and failure behavior
 
-The installer publishes `byd-fmod-bank-pack-v3` packages under the selected original or modded
-group. Common Assetto banks load before the selected car bank. Missing or invalid packages fail
-closed with an install message; a modified or old pack is never silently substituted. Original and
-modded packages are independently installable, while the current audit scope remains the 23
-official profiles.
+The dashboard's file-manager importer publishes `byd-fmod-bank-pack-v3` packages from app-specific
+external storage under the selected original or modded group. Common Assetto banks load before the
+selected car bank. Missing or invalid packages fail closed with an import message; a modified or
+old pack is never silently substituted. Original and modded packages are independently importable.
+The documented original-bank audit covers the earlier 23-profile sweep; it is not evidence that
+all 111 current original profiles have received the same runtime pass.

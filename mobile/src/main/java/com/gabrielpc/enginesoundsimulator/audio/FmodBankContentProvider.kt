@@ -7,7 +7,12 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 
-/** Open local bridge used by the companion installer to publish verified FMOD banks. */
+/**
+ * Legacy local bridge retained only for already-installed companion packages.
+ *
+ * New vehicle deliveries use the dashboard's file-manager staging importer instead, so this
+ * provider is not part of the supported on-car installation path.
+ */
 class FmodBankContentProvider : ContentProvider() {
     private lateinit var store: FmodBankStore
 
