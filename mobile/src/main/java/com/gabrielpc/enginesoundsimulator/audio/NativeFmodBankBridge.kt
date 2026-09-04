@@ -36,14 +36,14 @@ internal class NativeFmodBankBridge {
         isShifting: Boolean,
         shiftProgress: Float,
         shiftSerial: Long,
-        limiterPulse: Boolean,
-        shiftStarted: Boolean,
+        limiterPulseCount: Int,
+        shiftStartedCount: Int,
         shiftDirection: Int,
-        shiftRejected: Boolean,
-        backfireTriggered: Boolean,
+        shiftRejectedCount: Int,
+        backfirePulseCount: Int,
         backfireSampleIndex: Int,
         tractionActive: Boolean,
-        tractionPulse: Boolean,
+        tractionPulseCount: Int,
         simulationFrameId: Long,
     ): String?
 
@@ -64,9 +64,7 @@ internal class NativeFmodBankBridge {
 
     external fun setBackfireOnly(enabled: Boolean)
 
-    external fun setEventMute(eventName: String, muted: Boolean)
-    external fun setEventSolo(eventName: String, solo: Boolean)
-    external fun clearEventOverrides()
+    external fun setEventOverrides(mutedEvents: Array<String>, soloEvents: Array<String>)
 
     external fun close()
 }

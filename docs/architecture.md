@@ -85,7 +85,10 @@ used only when present. The generated original-car inventory labels every behavi
 authoring, app policy, runtime observation, or unresolved evidence.
 
 Cabin and exterior switch the authored interior/exterior engine event and listener. The switch is
-performed inside the active FMOD system without a host-side crossfade or restart.
+performed inside the active FMOD system without a host-side crossfade or restart. The drivetrain
+and FMOD control/update worker share a persisted global cadence (100 Hz by default, 30..330 Hz in
+10 Hz steps, or 333 Hz with MAX). This changes control/simulation timing only; FMOD's native
+mixer and DSP sample rate remain unchanged.
 
 ## Mixer
 
@@ -94,9 +97,9 @@ sound-start/stop callbacks and Core channel ownership associate each active voic
 event path and raw sound name. Cards report state, voice count, FMOD audibility, and route gain;
 identical event/source pairs may be aggregated, but sources from different event paths never share a
 card. The same card-level mute/solo applies to every raw sample that FMOD rotates through that
-event/source identity, rather than only to whichever sample name is visible at one instant. UI
-polling is separate from the 3 ms audio-control loop, so no mixer allocations occur on the realtime
-path.
+event/source identity, rather than only to whichever sample name is visible at one instant. Voice
+polling runs on a background worker only while Mixer is visible; it is not part of the FMOD control
+loop and is not performed on other screens.
 
 ### Debug voice trace
 

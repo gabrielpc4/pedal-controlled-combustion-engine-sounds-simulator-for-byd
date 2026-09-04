@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.drive
 
 import android.content.Context
+import android.os.Debug
 import android.os.Process
 import android.os.SystemClock
 import com.gabrielpc.enginesoundsimulator.audio.AudioFocusEvent
@@ -12,6 +13,8 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfile
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
+import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
+import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRateRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGains
 import com.gabrielpc.enginesoundsimulator.AppPreferenceStores
@@ -30,6 +33,7 @@ import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
 import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
 import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
@@ -74,6 +78,7 @@ data class DriveSnapshot(
     val transmissionLockedToVehicle: Boolean = false,
     val carAudioReady: Boolean = false,
     val manualShiftModeEnabled: Boolean = false,
+    val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
     val userMessage: UserVisibleMessage? = null,
 )
 
@@ -89,14 +94,15 @@ class DriveController(context: Context) {
     private val selectedCarRepository = SelectedCarRepository(appContext)
     private val bankResolver = FmodBankResolver(appContext)
     // Package manifests are immutable while this controller is running. Keeping the installed
-    // catalog out of the 3 ms simulation step prevents dozens of disk reads and JSON parses per
-    // frame, which otherwise makes simulated acceleration run behind wall-clock time.
+    // catalog out of the fixed-step simulation prevents disk reads and JSON parses on every
+    // physical frame, which otherwise makes simulated acceleration run behind wall-clock time.
     private val installedProfileCache = AtomicReference(
         FmodBankProfiles.all.filter(bankResolver::isInstalled),
     )
     private val shiftModeRepository = ShiftModeRepository(appContext)
     private val soundPerspectiveRepository = EngineSoundPerspectiveRepository(appContext)
     private val audioMixGainRepository = AudioMixGainRepository(appContext)
+    private val fmodUpdateRateRepository = FmodUpdateRateRepository(appContext)
     private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
@@ -126,6 +132,7 @@ class DriveController(context: Context) {
     private val backfireOnly = AtomicBoolean(false)
     private val backfireSettings = AtomicReference(BackfireSettings())
     private val audioMixGains = AtomicReference(AudioMixGains())
+    private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
     private var consumedDebugScenarioShiftSerial = 0L
@@ -134,6 +141,7 @@ class DriveController(context: Context) {
 
     @Volatile private var loopThread: Thread? = null
     @Volatile private var userMessage: UserVisibleMessage? = null
+    private var nextUiSnapshotNanos = 0L
     @Volatile private var latest = DriveSnapshot(
         drivetrain = simulation.state,
         inputSourcePrimary = InputMode.SimulatedPedals.primaryLabel,
@@ -164,6 +172,7 @@ class DriveController(context: Context) {
         loadPhysics(selectedProfile.get())
         simulation.manualShiftEnabled = manualShiftEnabled.get()
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
+        audioEngine.setFmodUpdateRateHz(fmodUpdateRateHz.get())
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
         audioMixGains.set(audioMixGainRepository.load(selectedProfile.get()))
         audioEngine.setCategoryGains(audioMixGains.get())
@@ -175,19 +184,28 @@ class DriveController(context: Context) {
 
     fun setUiActive(active: Boolean) { uiActive.set(active) }
 
+    fun setMixerDiagnosticsActive(active: Boolean) {
+        audioEngine.setMixerDiagnosticsActive(active)
+    }
+
     fun snapshot(): DriveSnapshot {
         val base = latest
         return base.copy(
             engineSoundEnabled = audioEngine.isAudioActive(),
             audioMuted = audioMuted.get(),
             manualShiftModeEnabled = manualShiftEnabled.get(),
-            fmodSources = if (uiActive.get()) audioEngine.sourceSnapshots() else emptyList(),
+            fmodSources = if (uiActive.get() && audioEngine.isMixerDiagnosticsActive()) {
+                audioEngine.sourceSnapshots()
+            } else {
+                emptyList()
+            },
             transmissionGain = audioMixGains.get().transmission,
             gearShiftGain = audioMixGains.get().gearShift,
             turboGain = audioMixGains.get().turbo,
             backfireGain = audioMixGains.get().backfire,
             backfireOnly = backfireOnly.get(),
             backfireSettings = backfireSettings.get(),
+            fmodUpdateRateHz = fmodUpdateRateHz.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
         )
@@ -255,6 +273,13 @@ class DriveController(context: Context) {
 
     fun setSimulatedRegen(value: Double) { simulatedRegen.set(value.coerceIn(0.0, 1.0)) }
 
+    fun setFmodUpdateRateHz(rateHz: Int) {
+        val normalized = FmodUpdateRate.normalize(rateHz)
+        fmodUpdateRateHz.set(normalized)
+        fmodUpdateRateRepository.save(normalized)
+        audioEngine.setFmodUpdateRateHz(normalized)
+    }
+
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
     fun setFmodCategoryGains(transmission: Float, gearShift: Float, turbo: Float, backfire: Float) {
         // These trims are intentionally per-car and survive normal APK updates. Reset All is the
@@ -288,13 +313,16 @@ class DriveController(context: Context) {
         appContext.getSharedPreferences(AppPreferenceStores.SHIFT_MODE, Context.MODE_PRIVATE).edit().clear().apply()
         appContext.getSharedPreferences(AppPreferenceStores.ENGINE_SOUND_PERSPECTIVE, Context.MODE_PRIVATE).edit().clear().apply()
         backfireSettingsRepository.reset()
+        fmodUpdateRateRepository.reset()
         audioMixGains.set(AudioMixGains())
+        fmodUpdateRateHz.set(FmodUpdateRate.DEFAULT_HZ)
         backfireSettings.set(BackfireSettings())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
         selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())
+        audioEngine.setFmodUpdateRateHz(FmodUpdateRate.DEFAULT_HZ)
         simulation.reset()
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
     }
@@ -419,11 +447,14 @@ class DriveController(context: Context) {
             val elapsed = ((now - previousNanos) / 1_000_000_000.0).coerceIn(0.0, 0.050)
             previousNanos = now
             accumulatorSeconds += elapsed
-            while (accumulatorSeconds >= FIXED_STEP_SECONDS && isCurrent(runId)) {
-                step(FIXED_STEP_SECONDS)
-                accumulatorSeconds -= FIXED_STEP_SECONDS
+            val simulationRateHz = fmodUpdateRateHz.get()
+            val simulationStepSeconds = FmodUpdateRate.stepSeconds(simulationRateHz)
+            val simulationStepNanos = FmodUpdateRate.periodNanos(simulationRateHz)
+            while (accumulatorSeconds >= simulationStepSeconds && isCurrent(runId)) {
+                step(simulationStepSeconds)
+                accumulatorSeconds -= simulationStepSeconds
             }
-            val remaining = FIXED_STEP_NANOS - (SystemClock.elapsedRealtimeNanos() - now)
+            val remaining = simulationStepNanos - (SystemClock.elapsedRealtimeNanos() - now)
             if (remaining > 0) LockSupport.parkNanos(remaining)
         }
     }
@@ -460,6 +491,9 @@ class DriveController(context: Context) {
                 -1 -> simulation.requestManualDownshift()
             }
         }
+        val measurePerformance = DebugTelemetry.performanceEnabled()
+        val simulationWallStartedNanos = if (measurePerformance) System.nanoTime() else 0L
+        val simulationCpuStartedNanos = if (measurePerformance) Debug.threadCpuTimeNanos() else 0L
         val drivetrain = simulation.update(
             DriverInput(
                 throttle = input.throttle,
@@ -471,6 +505,12 @@ class DriveController(context: Context) {
             ),
             dt,
         )
+        if (measurePerformance) {
+            DebugTelemetry.recordSimulationPerformance(
+                cpuNanos = Debug.threadCpuTimeNanos() - simulationCpuStartedNanos,
+                wallNanos = System.nanoTime() - simulationWallStartedNanos,
+            )
+        }
         val simulationFrameId = simulationFrameSerial.incrementAndGet()
         val shiftDirection = when (drivetrain.shiftDirection) {
             ShiftDirection.UP -> 1
@@ -541,7 +581,7 @@ class DriveController(context: Context) {
         )
         val selected = selectedProfile.get()
         val sourceUi = resolveInputSourceUi(mode, telemetry.vehicleDriveSignalsAvailable())
-        if (uiActive.get()) {
+        if (uiActive.get() && frameTimestampNanos >= nextUiSnapshotNanos) {
             latest = DriveSnapshot(
                 drivetrain = drivetrain,
                 inputSourcePrimary = sourceUi.primaryLabel,
@@ -565,6 +605,7 @@ class DriveController(context: Context) {
                 carAudioReady = audioEngine.loadedBankProfileId() == selected.id,
                 userMessage = userMessage,
             )
+            nextUiSnapshotNanos = frameTimestampNanos + UI_SNAPSHOT_PERIOD_NANOS
         }
         handleAudioLoadFailures()
     }
@@ -662,8 +703,7 @@ class DriveController(context: Context) {
     private data class SimulatedPedalInput(val throttle: Double = 0.0, val brake: Double = 0.0)
 
     private companion object {
-        const val FIXED_STEP_SECONDS = 0.003
-        const val FIXED_STEP_NANOS = 3_000_000L
+        const val UI_SNAPSHOT_PERIOD_NANOS = 16_666_667L
         const val INTERRUPTED_IDLE_NANOS = 50_000_000L
     }
 }

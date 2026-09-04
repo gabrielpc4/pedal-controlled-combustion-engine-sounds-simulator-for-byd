@@ -629,14 +629,14 @@ public:
         bool isShifting,
         float shiftProgress,
         std::uint64_t shiftSerial,
-        bool limiterPulse,
-        bool shiftStarted,
+        int limiterPulseCount,
+        int shiftStartedCount,
         int shiftDirection,
-        bool shiftRejected,
-        bool backfireTriggered,
+        int shiftRejectedCount,
+        int backfirePulseCount,
         int backfireSampleIndex,
         bool tractionActive,
-        bool tractionPulse,
+        int tractionPulseCount,
         std::uint64_t simulationFrameId
     ) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -659,12 +659,12 @@ public:
             isShifting,
             shiftProgress,
             shiftSerial,
-            shiftStarted,
+            shiftStartedCount > 0,
             shiftDirection,
-            limiterPulse,
-            backfireTriggered,
+            limiterPulseCount > 0,
+            backfirePulseCount > 0,
             tractionActive,
-            tractionPulse,
+            tractionPulseCount > 0,
             simulationFrameId
         );
         // Intentional lift-off policy: the authored engine event keeps its full-load
@@ -679,7 +679,6 @@ public:
         for (const char* name : {"engine_int", "engine_ext"}) {
             setParameterQuietly(slotInstance(name), "rpms", cleanRpm);
         }
-        applyAudioThrottlePolicyLocked();
         for (const char* name : {"transmission", "transmission_ext"}) {
             setParameterQuietly(slotInstance(name), "drivetrain_speed", drivetrainSpeed);
         }
@@ -692,7 +691,7 @@ public:
         }
 
         limiterDecay_ += cleanDt;
-        if (limiterPulse) {
+        if (limiterPulseCount > 0) {
             limiterDecay_ = 0.0f;
         }
         EventSlot* limiter = slot("limiter");
@@ -707,31 +706,37 @@ public:
             }
         }
 
-        if (shiftStarted && shiftDirection != 0) {
+        if (shiftStartedCount > 0 && shiftDirection != 0) {
             const std::string selected = perspective_ == kPerspectiveExterior
                 ? "gear_ext"
                 : "gear_int";
-            if (slot(selected) != nullptr && !isPlayingLocked(slotInstance(selected))) {
-                stopEventLocked(selected, FMOD_STUDIO_STOP_ALLOWFADEOUT);
-                setParameterQuietly(slotInstance(selected), "state", shiftDirection > 0 ? 1.0f : 0.0f);
-                startEventLocked(selected);
+            for (int pulse = 0; pulse < shiftStartedCount; ++pulse) {
+                if (slot(selected) != nullptr && !isPlayingLocked(slotInstance(selected))) {
+                    stopEventLocked(selected, FMOD_STUDIO_STOP_ALLOWFADEOUT);
+                    setParameterQuietly(slotInstance(selected), "state", shiftDirection > 0 ? 1.0f : 0.0f);
+                    startEventLocked(selected);
+                }
             }
         }
-        if (shiftRejected && !isPlayingLocked(slotInstance("gear_grind"))) {
-            startEventLocked("gear_grind");
+        for (int pulse = 0; pulse < shiftRejectedCount; ++pulse) {
+            if (!isPlayingLocked(slotInstance("gear_grind"))) {
+                startEventLocked("gear_grind");
+            }
         }
 
-        if (backfireTriggered && !eitherBackfirePlayingLocked()) {
-            const std::string selected = perspectiveEventLocked("backfire_int", "backfire_ext");
-            if (alfaBackfireSamplesLoaded_) {
-                playAlfaBackfireSampleLocked(backfireSampleIndex);
-            } else {
-                startEventLocked(selected);
+        for (int pulse = 0; pulse < backfirePulseCount; ++pulse) {
+            if (!eitherBackfirePlayingLocked()) {
+                const std::string selected = perspectiveEventLocked("backfire_int", "backfire_ext");
+                if (alfaBackfireSamplesLoaded_) {
+                    playAlfaBackfireSampleLocked(backfireSampleIndex);
+                } else {
+                    startEventLocked(selected);
+                }
             }
         }
 
         (void)tractionActive;
-        (void)tractionPulse;
+        (void)tractionPulseCount;
         // Intentional audio policy: drivetrain traction limiting remains part of
         // the physics, but its authored sound is disabled because this simulator
         // should not announce the internal correction as a driver-event effect.
@@ -755,6 +760,7 @@ public:
         if (!active_) return;
         const float engine = std::max(0.0f, engineGain);
         const float effects = std::max(0.0f, effectsGain);
+        if (engine == hostEngineGain_ && effects == hostEffectsGain_) return;
         hostEngineGain_ = engine;
         hostEffectsGain_ = effects;
         if (alfaBackfireChannel_ != nullptr) alfaBackfireChannel_->setVolume(hostEffectsGain_ * backfireGain_);
@@ -764,10 +770,20 @@ public:
     void setCategoryGains(float transmissionGain, float gearShiftGain, float turboGain, float backfireGain) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!active_) return;
-        transmissionGain_ = std::max(0.0f, transmissionGain);
-        gearShiftGain_ = std::max(0.0f, gearShiftGain);
-        turboGain_ = std::max(0.0f, turboGain);
-        backfireGain_ = std::max(0.0f, backfireGain);
+        const float transmission = std::max(0.0f, transmissionGain);
+        const float gearShift = std::max(0.0f, gearShiftGain);
+        const float turbo = std::max(0.0f, turboGain);
+        const float backfire = std::max(0.0f, backfireGain);
+        if (
+            transmission == transmissionGain_ &&
+            gearShift == gearShiftGain_ &&
+            turbo == turboGain_ &&
+            backfire == backfireGain_
+        ) return;
+        transmissionGain_ = transmission;
+        gearShiftGain_ = gearShift;
+        turboGain_ = turbo;
+        backfireGain_ = backfire;
         if (alfaBackfireChannel_ != nullptr) alfaBackfireChannel_->setVolume(hostEffectsGain_ * backfireGain_);
         applyEventOverridesLocked();
     }
@@ -775,19 +791,21 @@ public:
     void setBackfireOnly(bool enabled) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!active_) return;
+        if (backfireOnly_ == enabled) return;
         backfireOnly_ = enabled;
         applyEventOverridesLocked();
     }
 
-    void setEventMute(const std::string& name, bool muted) {
+    void setEventOverrides(
+        const std::vector<std::string>& mutedEvents,
+        const std::vector<std::string>& soloEvents
+    ) {
         std::lock_guard<std::mutex> lock(mutex_);
-        mutedEvents_[name] = muted;
-        applyEventOverridesLocked();
-    }
-
-    void setEventSolo(const std::string& name, bool solo) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        soloEvents_[name] = solo;
+        if (!active_) return;
+        mutedEvents_.clear();
+        soloEvents_.clear();
+        for (const std::string& name : mutedEvents) mutedEvents_[name] = true;
+        for (const std::string& name : soloEvents) soloEvents_[name] = true;
         applyEventOverridesLocked();
     }
 
@@ -843,13 +861,6 @@ public:
     void setDiagnosticsEnabled(bool enabled) {
         std::lock_guard<std::mutex> lock(mutex_);
         setDiagnosticsEnabledLocked(enabled);
-    }
-
-    void clearEventOverrides() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        mutedEvents_.clear();
-        soloEvents_.clear();
-        applyEventOverridesLocked();
     }
 
     std::vector<std::string> diagnosticRecords() {
@@ -1785,6 +1796,19 @@ jobjectArray toJavaStringArray(JNIEnv* environment, const std::vector<std::strin
     return result;
 }
 
+std::vector<std::string> stringArray(JNIEnv* environment, jobjectArray values) {
+    std::vector<std::string> result;
+    if (values == nullptr) return result;
+    const jsize count = environment->GetArrayLength(values);
+    result.reserve(static_cast<std::size_t>(count));
+    for (jsize index = 0; index < count; ++index) {
+        auto* value = static_cast<jstring>(environment->GetObjectArrayElement(values, index));
+        result.push_back(utfString(environment, value));
+        environment->DeleteLocalRef(value);
+    }
+    return result;
+}
+
 jstring resultString(JNIEnv* environment, const std::string& result) {
     if (result.empty()) {
         return nullptr;
@@ -1851,14 +1875,14 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
     jboolean isShifting,
     jfloat shiftProgress,
     jlong shiftSerial,
-    jboolean limiterPulse,
-    jboolean shiftStarted,
+    jint limiterPulseCount,
+    jint shiftStartedCount,
     jint shiftDirection,
-    jboolean shiftRejected,
-    jboolean backfireTriggered,
+    jint shiftRejectedCount,
+    jint backfirePulseCount,
     jint backfireSampleIndex,
     jboolean tractionActive,
-    jboolean tractionPulse,
+    jint tractionPulseCount,
     jlong simulationFrameId
 ) {
     return resultString(
@@ -1877,14 +1901,14 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_update(
             isShifting == JNI_TRUE,
             shiftProgress,
             static_cast<std::uint64_t>(std::max<jlong>(0, shiftSerial)),
-            limiterPulse == JNI_TRUE,
-            shiftStarted == JNI_TRUE,
+            limiterPulseCount,
+            shiftStartedCount,
             shiftDirection,
-            shiftRejected == JNI_TRUE,
-            backfireTriggered == JNI_TRUE,
+            shiftRejectedCount,
+            backfirePulseCount,
             backfireSampleIndex,
             tractionActive == JNI_TRUE,
-            tractionPulse == JNI_TRUE,
+            tractionPulseCount,
             static_cast<std::uint64_t>(std::max<jlong>(0, simulationFrameId))
         )
     );
@@ -1924,25 +1948,10 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setDiagnostic
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setEventMute(
-    JNIEnv* environment, jobject, jstring eventName, jboolean muted
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setEventOverrides(
+    JNIEnv* environment, jobject, jobjectArray mutedEvents, jobjectArray soloEvents
 ) {
-    runtime.setEventMute(utfString(environment, eventName), muted == JNI_TRUE);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setEventSolo(
-    JNIEnv* environment, jobject, jstring eventName, jboolean solo
-) {
-    runtime.setEventSolo(utfString(environment, eventName), solo == JNI_TRUE);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_clearEventOverrides(
-    JNIEnv*,
-    jobject
-) {
-    runtime.clearEventOverrides();
+    runtime.setEventOverrides(stringArray(environment, mutedEvents), stringArray(environment, soloEvents));
 }
 
 extern "C" JNIEXPORT void JNICALL

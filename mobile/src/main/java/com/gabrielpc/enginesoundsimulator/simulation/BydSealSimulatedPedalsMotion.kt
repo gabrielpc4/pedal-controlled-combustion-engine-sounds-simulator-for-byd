@@ -10,6 +10,7 @@ package com.gabrielpc.enginesoundsimulator.simulation
 internal class BydSealSimulatedPedalsMotion {
     /** Continuous speed generated from the documented BYD Seal acceleration envelope. */
     private var documentedContinuousSpeedKmh = 0.0
+    private val motionFrame = BydSealMotionFrame()
 
     fun reset(initialDocumentedContinuousSpeedKmh: Double = 0.0) {
         documentedContinuousSpeedKmh = initialDocumentedContinuousSpeedKmh
@@ -29,9 +30,10 @@ internal class BydSealSimulatedPedalsMotion {
         }
         if (transmissionPosition == TransmissionPosition.PARK) {
             documentedContinuousSpeedKmh = 0.0
-            return BydSealMotionFrame(documentedContinuousSpeedKmh)
+            motionFrame.documentedContinuousSpeedKmh = documentedContinuousSpeedKmh
+            return motionFrame
         }
-        val dt = deltaSeconds.coerceIn(0.001, 0.020)
+        val dt = deltaSeconds.coerceIn(0.001, 0.050)
         val pedal = throttle.coerceIn(0.0, 1.0)
         val brakePedal = brake.coerceIn(0.0, 1.0)
         val canDrive = transmissionPosition == TransmissionPosition.DRIVE
@@ -55,7 +57,8 @@ internal class BydSealSimulatedPedalsMotion {
         documentedContinuousSpeedKmh = (
             documentedContinuousSpeedKmh + accelerationKmhPerSecond * dt
             ).coerceIn(0.0, TOP_SPEED_KMH)
-        return BydSealMotionFrame(documentedContinuousSpeedKmh)
+        motionFrame.documentedContinuousSpeedKmh = documentedContinuousSpeedKmh
+        return motionFrame
     }
 
     /** Linear interpolation keeps acceleration continuous as speed crosses a curve sample. */
@@ -79,9 +82,17 @@ internal class BydSealSimulatedPedalsMotion {
         if (documentedContinuousSpeedKmh >= points.last().documentedSpeedKmh) {
             return points.last().documentedCurveValue
         }
-        val upperIndex = points.indexOfFirst {
-            documentedContinuousSpeedKmh <= it.documentedSpeedKmh
-        }.coerceAtLeast(1)
+        var low = 1
+        var high = points.lastIndex
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (points[middle].documentedSpeedKmh < documentedContinuousSpeedKmh) {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        val upperIndex = low
         val lower = points[upperIndex - 1]
         val upper = points[upperIndex]
         val fraction = (documentedContinuousSpeedKmh - lower.documentedSpeedKmh) /
@@ -130,6 +141,6 @@ internal class BydSealSimulatedPedalsMotion {
     }
 }
 
-internal data class BydSealMotionFrame(
-    val documentedContinuousSpeedKmh: Double,
+internal class BydSealMotionFrame(
+    var documentedContinuousSpeedKmh: Double = 0.0,
 )

@@ -78,11 +78,13 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective
 import com.gabrielpc.enginesoundsimulator.audio.FmodEventSection
 import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
+import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
+import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
@@ -406,6 +408,8 @@ private fun GainControl(label: String, value: Float, onValueChange: (Float) -> U
 internal fun SettingsScreen(
     onBack: () -> Unit,
     onResetAll: () -> Unit,
+    fmodUpdateRateHz: Int,
+    onFmodUpdateRateChange: (Int) -> Unit,
     backfireSettings: BackfireSettings,
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
@@ -430,9 +434,13 @@ internal fun SettingsScreen(
         }
         if (!backfireTab) {
             Text(
-                "Mixer gains are saved independently for each car. Reset All clears saved car, perspective, shift mode, audio gains, and backfire settings.",
+                "Mixer gains are saved independently for each car. Reset All clears saved car, perspective, shift mode, audio gains, backfire settings, and the FMOD control rate.",
                 color = Muted,
                 fontSize = 15.sp,
+            )
+            FmodUpdateRateControl(
+                rateHz = fmodUpdateRateHz,
+                onRateChange = onFmodUpdateRateChange,
             )
             Button(
                 onClick = onResetAll,
@@ -446,6 +454,58 @@ internal fun SettingsScreen(
                 onChange = onBackfireSettingsChange,
                 onPreview = onPreviewBackfireSample,
             )
+        }
+    }
+}
+
+@Composable
+private fun FmodUpdateRateControl(
+    rateHz: Int,
+    onRateChange: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().border(1.dp, Line, RoundedCornerShape(8.dp)).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("FMOD CONTROL RATE", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text(
+                    "Physics and FMOD use this cadence together. 100 Hz is the default; 60 Hz is recommended for a 60 Hz screen, while 30 Hz is the economy limit.",
+                    color = Muted,
+                    fontSize = 12.sp,
+                )
+            }
+            Text(
+                if (rateHz == FmodUpdateRate.MAX_HZ) "MAX" else "$rateHz Hz",
+                color = White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Slider(
+            value = rateHz.coerceIn(FmodUpdateRate.MIN_HZ, FmodUpdateRate.MAX_SLIDER_HZ).toFloat(),
+            onValueChange = { raw ->
+                onRateChange(FmodUpdateRate.normalize(raw.roundToInt()))
+            },
+            valueRange = FmodUpdateRate.MIN_HZ.toFloat()..FmodUpdateRate.MAX_SLIDER_HZ.toFloat(),
+            steps = 29,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("30", color = Muted, fontSize = 11.sp)
+            Spacer(Modifier.weight(1f))
+            Button(
+                onClick = { onRateChange(FmodUpdateRate.MAX_HZ) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (rateHz == FmodUpdateRate.MAX_HZ) Cyan else PanelBright,
+                ),
+            ) {
+                Text("MAX", color = if (rateHz == FmodUpdateRate.MAX_HZ) Night else White, fontWeight = FontWeight.Black)
+            }
+            Text("333", color = Muted, fontSize = 11.sp)
         }
     }
 }

@@ -57,3 +57,8 @@ exact-zero PCM stream in the direct bank audit; a voice with zero audibility was
 classified as virtual, route-zero, or authored automation rather than automatically reported as a
 missing sample. The persistent findings and their evidence boundary are in
 `docs/original-cars-exceptions.md`.
+
+For CPU measurements, the debug receiver also accepts `PERF_START`, `PERF_STATUS`, and
+`PERF_STOP`. These report simulation and FMOD worker CPU time, control duration, setter batches,
+and mixer snapshot cost without enabling the full trace. Measure the Android process with
+`adb shell top -H` and the emulator/QEMU process separately on the host.

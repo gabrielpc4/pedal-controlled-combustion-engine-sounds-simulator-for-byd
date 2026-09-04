@@ -21,8 +21,9 @@ while read -r serial; do
   fi
 done < <($ADB_BIN devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1 }')
 
-# Use the supported SwiftShader renderer explicitly. The previous implicit/legacy
-# renderer selection could emit FrameBuffer "Failed to find ColorBuffer" errors
-# while the window was being recreated; this keeps the test AVD on one stable
-# software graphics path and does not affect FMOD's audio device.
-exec "$EMULATOR_BIN" -avd "$AVD_NAME" -no-boot-anim -gpu swiftshader
+# Prefer the host Metal-backed renderer on this Mac. SwiftShader makes the QEMU process consume
+# several whole CPU cores while rendering the 1920x1080 Compose dashboard. The explicit override
+# keeps the old software path available if a host GPU driver ever regresses:
+#   BYD_EMULATOR_GPU=swiftshader ./run.sh
+GPU_MODE="${BYD_EMULATOR_GPU:-host}"
+exec "$EMULATOR_BIN" -avd "$AVD_NAME" -no-boot-anim -gpu "$GPU_MODE"

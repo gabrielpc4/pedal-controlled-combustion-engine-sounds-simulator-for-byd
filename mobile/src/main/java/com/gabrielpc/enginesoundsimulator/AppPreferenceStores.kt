@@ -10,4 +10,5 @@ internal object AppPreferenceStores {
     const val AUDIO_MIX_GAINS = "audio_mix_gains_v2"
     const val AUDIO_MIX_GAINS_LEGACY = "audio_mix_gains"
     const val BACKFIRE_SETTINGS = "backfire_settings_v1"
+    const val FMOD_UPDATE_RATE = "fmod_update_rate_v1"
 }

@@ -186,6 +186,8 @@ class MainActivity : ComponentActivity() {
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
+                        onFmodUpdateRateChange = controller::setFmodUpdateRateHz,
+                        onMixerDiagnosticsActive = controller::setMixerDiagnosticsActive,
                         onCategoryGains = controller::setFmodCategoryGains,
                         onToggleBackfireOnly = controller::setBackfireOnly,
                         onBackfireSettingsChange = controller::setBackfireSettings,
@@ -221,6 +223,7 @@ class MainActivity : ComponentActivity() {
         releaseManualControls()
         uiMonitoringActive = false
         controller.setUiActive(false)
+        controller.setMixerDiagnosticsActive(false)
         choreographer.removeFrameCallback(refreshUi)
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         startService(EngineRuntimeService.startIntent(this))
@@ -265,6 +268,8 @@ private fun MotorSoundDashboard(
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
+    onFmodUpdateRateChange: (Int) -> Unit,
+    onMixerDiagnosticsActive: (Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
     onToggleBackfireOnly: (Boolean) -> Unit,
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
@@ -288,6 +293,9 @@ private fun MotorSoundDashboard(
     }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    LaunchedEffect(mainScreen) {
+        onMixerDiagnosticsActive(mainScreen == DashboardMainScreen.MIXER)
+    }
     Surface(
         modifier = Modifier
             .fillMaxSize()
@@ -454,6 +462,8 @@ private fun MotorSoundDashboard(
                         DashboardMainScreen.SETTINGS -> SettingsScreen(
                             onBack = { mainScreen = DashboardMainScreen.CLASSIC },
                             onResetAll = onResetAllPreferences,
+                            fmodUpdateRateHz = state.fmodUpdateRateHz,
+                            onFmodUpdateRateChange = onFmodUpdateRateChange,
                             backfireSettings = state.backfireSettings,
                             onBackfireSettingsChange = onBackfireSettingsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,

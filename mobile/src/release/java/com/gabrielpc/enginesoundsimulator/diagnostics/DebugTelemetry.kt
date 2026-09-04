@@ -6,6 +6,31 @@ import com.gabrielpc.enginesoundsimulator.audio.EngineAudioFrame
 internal object DebugTelemetry {
     fun isCaptureActive(): Boolean = false
 
+    fun performanceEnabled(): Boolean = false
+
+    @Suppress("UnusedParameter")
+    fun recordSimulationPerformance(cpuNanos: Long, wallNanos: Long) = Unit
+
+    @Suppress("UnusedParameter")
+    fun recordAudioPerformance(
+        cpuNanos: Long,
+        wallNanos: Long,
+        hostGainCalls: Int,
+        categoryGainCalls: Int,
+        overrideBatchCalls: Int,
+        simulationFrameId: Long,
+        previousSimulationFrameId: Long,
+        limiterPulseCount: Int,
+        shiftPulseCount: Int,
+        rejectedShiftPulseCount: Int,
+        backfirePulseCount: Int,
+        tractionPulseCount: Int,
+        deadlineMissed: Boolean,
+    ) = Unit
+
+    @Suppress("UnusedParameter")
+    fun recordMixerSnapshotPerformance(cpuNanos: Long, wallNanos: Long) = Unit
+
     fun nativeDiagnosticsEnabled(): Boolean = false
 
     fun scenarioOverride(timestampNanos: Long): DebugScenarioOverride? = null

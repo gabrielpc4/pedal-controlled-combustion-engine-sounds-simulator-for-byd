@@ -553,6 +553,8 @@ internal class QuantizedPresentationSpeedEstimator {
         const val MINIMUM_RESPONSE_SECONDS = 0.04
         const val MAXIMUM_RESPONSE_SECONDS = 0.80
         const val MINIMUM_STEP_SECONDS = 1.0 / 1_000.0
-        const val MAXIMUM_STEP_SECONDS = 1.0 / 20.0
+        // Shared cadence supports 30 Hz, whose nominal step is 33 ms. A 20 ms cap would
+        // undercount predicted motion whenever the economy rate is selected.
+        const val MAXIMUM_STEP_SECONDS = 0.050
     }
 }

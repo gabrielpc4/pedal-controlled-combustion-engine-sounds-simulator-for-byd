@@ -324,13 +324,18 @@ private fun Map<String, Any?>.vector(key: String): AssettoVector3 {
 internal fun interpolateAssettoCurve(points: List<AssettoCurvePoint>, x: Double): Double {
     require(points.isNotEmpty()) { "Assetto curve has no points" }
     if (x <= points.first().x) return points.first().y
-    for (index in 1 until points.size) {
-        val previous = points[index - 1]
-        val next = points[index]
-        if (x <= next.x) {
-            val span = next.x - previous.x
-            return if (span <= 0.0) next.y else previous.y + (next.y - previous.y) * ((x - previous.x) / span)
-        }
+    if (x >= points.last().x) return points.last().y
+
+    // Curves are evaluated hundreds of times per second. Locate the first point at or above x
+    // with a lower-bound search instead of scanning every authored point for each simulation step.
+    var low = 1
+    var high = points.lastIndex
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (points[middle].x < x) low = middle + 1 else high = middle
     }
-    return points.last().y
+    val previous = points[low - 1]
+    val next = points[low]
+    val span = next.x - previous.x
+    return if (span <= 0.0) next.y else previous.y + (next.y - previous.y) * ((x - previous.x) / span)
 }

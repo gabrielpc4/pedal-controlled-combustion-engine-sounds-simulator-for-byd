@@ -112,7 +112,10 @@ class EngineSimulation {
     fun update(input: DriverInput, deltaSeconds: Double): DrivetrainState {
         val activePhysics = physics ?: return latestState
         val activeDrivetrain = drivetrain ?: return latestState
-        val dt = deltaSeconds.coerceIn(0.001, 0.020)
+        // The selected FMOD cadence also drives physics. At the economy limit (30 Hz) one
+        // physical step is 33 ms; clamping back to 20 ms would make the virtual car run slower
+        // than wall clock, so the safety cap matches the slowest supported cadence.
+        val dt = deltaSeconds.coerceIn(0.001, 0.050)
         val realReportedRawSpeedKmh = input.realReportedRawSpeedKmh
             ?.coerceAtLeast(0.0)
             ?.let(::truncateRawSpeedKmh)

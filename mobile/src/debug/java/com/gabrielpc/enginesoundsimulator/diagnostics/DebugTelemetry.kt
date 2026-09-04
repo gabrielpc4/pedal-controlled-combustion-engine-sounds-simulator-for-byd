@@ -29,10 +29,53 @@ internal object DebugTelemetry {
     private const val MAX_EXPORTS = 12
 
     private val session = AtomicReference<CaptureSession?>(null)
+    private val performance = AtomicReference<PerformanceSession?>(null)
     private val exportSerial = AtomicLong(0L)
     private val scenario = AtomicReference<DeterministicScenario?>(null)
 
     fun isCaptureActive(): Boolean = session.get() != null
+
+    fun performanceEnabled(): Boolean = performance.get() != null
+
+    fun recordSimulationPerformance(cpuNanos: Long, wallNanos: Long) {
+        performance.get()?.recordSimulation(cpuNanos, wallNanos)
+    }
+
+    fun recordAudioPerformance(
+        cpuNanos: Long,
+        wallNanos: Long,
+        hostGainCalls: Int,
+        categoryGainCalls: Int,
+        overrideBatchCalls: Int,
+        simulationFrameId: Long,
+        previousSimulationFrameId: Long,
+        limiterPulseCount: Int,
+        shiftPulseCount: Int,
+        rejectedShiftPulseCount: Int,
+        backfirePulseCount: Int,
+        tractionPulseCount: Int,
+        deadlineMissed: Boolean,
+    ) {
+        performance.get()?.recordAudio(
+            cpuNanos,
+            wallNanos,
+            hostGainCalls,
+            categoryGainCalls,
+            overrideBatchCalls,
+            simulationFrameId,
+            previousSimulationFrameId,
+            limiterPulseCount,
+            shiftPulseCount,
+            rejectedShiftPulseCount,
+            backfirePulseCount,
+            tractionPulseCount,
+            deadlineMissed,
+        )
+    }
+
+    fun recordMixerSnapshotPerformance(cpuNanos: Long, wallNanos: Long) {
+        performance.get()?.recordMixerSnapshot(cpuNanos, wallNanos)
+    }
 
     /** Native callbacks and source walks are only armed while a capture session exists. */
     fun nativeDiagnosticsEnabled(): Boolean = isCaptureActive()
@@ -121,7 +164,8 @@ internal object DebugTelemetry {
 
     /**
      * Native records are drained only at the snapshot cadence. The String allocation happens
-     * after FMOD has left its callback/update path and is therefore absent from the 3 ms path.
+     * after FMOD has left its callback/update path and is therefore absent from the realtime
+     * physics and audio-control paths.
      */
     fun recordNativeRecords(timestampNanos: Long, rows: Array<String>) {
         val active = session.get() ?: return
@@ -153,6 +197,20 @@ internal object DebugTelemetry {
                 session.get()?.clear()
                 "capture cleared"
             }
+
+            "PERF_START" -> {
+                performance.set(PerformanceSession())
+                "performance capture started"
+            }
+
+            "PERF_STOP" -> {
+                val stopped = performance.getAndSet(null)
+                val result = stopped?.status() ?: "performance capture off"
+                writePerformanceStatus(context, result)
+                result
+            }
+
+            "PERF_STATUS" -> performance.get()?.status() ?: "performance capture off"
 
             "SCENARIO" -> {
                 val profileId = extras?.getString(EXTRA_PROFILE_ID)?.trim().orEmpty()
@@ -217,7 +275,7 @@ internal object DebugTelemetry {
             }
 
             "STATUS" -> session.get()?.status() ?: "capture off"
-            else -> "unknown command '$command'; use START, CLEAR, SCENARIO, BACKFIRE, BACKFIRE_ONLY, CANCEL_SCENARIO, DUMP, STOP, or STATUS"
+            else -> "unknown command '$command'; use START, CLEAR, PERF_START, PERF_STOP, PERF_STATUS, SCENARIO, BACKFIRE, BACKFIRE_ONLY, CANCEL_SCENARIO, DUMP, STOP, or STATUS"
         }
         writeStatus(context, result)
         return result
@@ -257,6 +315,99 @@ internal object DebugTelemetry {
         val directory = context.getExternalFilesDir("fmod-diagnostics") ?: File(context.filesDir, "fmod-diagnostics")
         directory.mkdirs()
         File(directory, "status.txt").writeText("${SystemClock.elapsedRealtimeNanos()} $value\n")
+    }
+
+    private fun writePerformanceStatus(context: Context, value: String) {
+        val directory = context.getExternalFilesDir("fmod-diagnostics") ?: File(context.filesDir, "fmod-diagnostics")
+        directory.mkdirs()
+        File(directory, "performance.txt").writeText("${SystemClock.elapsedRealtimeNanos()} $value\n")
+    }
+
+    private class PerformanceSession {
+        private val startedNanos = SystemClock.elapsedRealtimeNanos()
+        private val simulationCount = AtomicLong(0L)
+        private val simulationCpuNanos = AtomicLong(0L)
+        private val simulationWallNanos = AtomicLong(0L)
+        private val audioCount = AtomicLong(0L)
+        private val audioCpuNanos = AtomicLong(0L)
+        private val audioWallNanos = AtomicLong(0L)
+        private val mixerSnapshotCount = AtomicLong(0L)
+        private val mixerSnapshotCpuNanos = AtomicLong(0L)
+        private val mixerSnapshotWallNanos = AtomicLong(0L)
+        private val hostGainCalls = AtomicLong(0L)
+        private val categoryGainCalls = AtomicLong(0L)
+        private val overrideBatchCalls = AtomicLong(0L)
+        private val simulationFramesSkipped = AtomicLong(0L)
+        private val limiterPulsesConsumed = AtomicLong(0L)
+        private val shiftPulsesConsumed = AtomicLong(0L)
+        private val rejectedShiftPulsesConsumed = AtomicLong(0L)
+        private val backfirePulsesConsumed = AtomicLong(0L)
+        private val tractionPulsesConsumed = AtomicLong(0L)
+        private val audioDeadlinesMissed = AtomicLong(0L)
+
+        fun recordSimulation(cpuNanos: Long, wallNanos: Long) {
+            simulationCount.incrementAndGet()
+            simulationCpuNanos.addAndGet(cpuNanos.coerceAtLeast(0L))
+            simulationWallNanos.addAndGet(wallNanos.coerceAtLeast(0L))
+        }
+
+        fun recordAudio(
+            cpuNanos: Long,
+            wallNanos: Long,
+            hostCalls: Int,
+            categoryCalls: Int,
+            overrideCalls: Int,
+            simulationFrameId: Long,
+            previousSimulationFrameId: Long,
+            limiterPulseCount: Int,
+            shiftPulseCount: Int,
+            rejectedShiftPulseCount: Int,
+            backfirePulseCount: Int,
+            tractionPulseCount: Int,
+            deadlineMissed: Boolean,
+        ) {
+            audioCount.incrementAndGet()
+            audioCpuNanos.addAndGet(cpuNanos.coerceAtLeast(0L))
+            audioWallNanos.addAndGet(wallNanos.coerceAtLeast(0L))
+            hostGainCalls.addAndGet(hostCalls.toLong())
+            categoryGainCalls.addAndGet(categoryCalls.toLong())
+            overrideBatchCalls.addAndGet(overrideCalls.toLong())
+            simulationFramesSkipped.addAndGet(
+                (simulationFrameId - previousSimulationFrameId - 1L).coerceAtLeast(0L),
+            )
+            limiterPulsesConsumed.addAndGet(limiterPulseCount.toLong())
+            shiftPulsesConsumed.addAndGet(shiftPulseCount.toLong())
+            rejectedShiftPulsesConsumed.addAndGet(rejectedShiftPulseCount.toLong())
+            backfirePulsesConsumed.addAndGet(backfirePulseCount.toLong())
+            tractionPulsesConsumed.addAndGet(tractionPulseCount.toLong())
+            if (deadlineMissed) audioDeadlinesMissed.incrementAndGet()
+        }
+
+        fun recordMixerSnapshot(cpuNanos: Long, wallNanos: Long) {
+            mixerSnapshotCount.incrementAndGet()
+            mixerSnapshotCpuNanos.addAndGet(cpuNanos.coerceAtLeast(0L))
+            mixerSnapshotWallNanos.addAndGet(wallNanos.coerceAtLeast(0L))
+        }
+
+        fun status(): String {
+            val elapsedSeconds = ((SystemClock.elapsedRealtimeNanos() - startedNanos).coerceAtLeast(1L)) / 1_000_000_000.0
+            fun average(total: Long, count: Long): String =
+                "%.3f".format(java.util.Locale.US, total / count.coerceAtLeast(1L) / 1_000_000.0)
+            return "performance active=${"%.2f".format(java.util.Locale.US, elapsedSeconds)}s " +
+                "simulation=${simulationCount.get()} cpuMs=${simulationCpuNanos.get() / 1_000_000} " +
+                "simAvgMs=${average(simulationCpuNanos.get(), simulationCount.get())} " +
+                "audio=${audioCount.get()} cpuMs=${audioCpuNanos.get() / 1_000_000} " +
+                "audioAvgMs=${average(audioCpuNanos.get(), audioCount.get())} " +
+                "audioWallAvgMs=${average(audioWallNanos.get(), audioCount.get())} " +
+                "mixerSnapshots=${mixerSnapshotCount.get()} mixerCpuMs=${mixerSnapshotCpuNanos.get() / 1_000_000} " +
+                "hostGainCalls=${hostGainCalls.get()} categoryGainCalls=${categoryGainCalls.get()} " +
+                "overrideBatchCalls=${overrideBatchCalls.get()} " +
+                "skippedSimulationFrames=${simulationFramesSkipped.get()} " +
+                "limiterPulses=${limiterPulsesConsumed.get()} shiftPulses=${shiftPulsesConsumed.get()} " +
+                "rejectedShiftPulses=${rejectedShiftPulsesConsumed.get()} " +
+                "backfirePulses=${backfirePulsesConsumed.get()} tractionPulses=${tractionPulsesConsumed.get()} " +
+                "audioDeadlinesMissed=${audioDeadlinesMissed.get()}"
+        }
     }
 
     private class CaptureSession(frameCapacity: Int, nativeRecordCapacity: Int) {

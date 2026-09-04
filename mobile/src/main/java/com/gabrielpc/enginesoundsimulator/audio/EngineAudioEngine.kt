@@ -2,6 +2,7 @@ package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
 import android.media.AudioManager
+import android.os.Debug
 import android.os.Process
 import android.util.Log
 import com.gabrielpc.enginesoundsimulator.diagnostics.DebugTelemetry
@@ -10,6 +11,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
@@ -39,7 +41,10 @@ class EngineAudioEngine(context: Context) {
     private val loadFailure = AtomicReference<AudioLoadFailure?>(null)
     private val focusHeld = AtomicBoolean(false)
     private val controlThread = AtomicReference<Thread?>(null)
+    private val snapshotThread = AtomicReference<Thread?>(null)
     private val nativeSources = AtomicReference<List<FmodSourceState>>(emptyList())
+    private val mixerDiagnosticsActive = AtomicBoolean(false)
+    private val fmodUpdateRateHz = AtomicInteger(FmodUpdateRate.DEFAULT_HZ)
     private val limiterPulseSerial = AtomicLong(0L)
     private val backfirePulseSerial = AtomicLong(0L)
     private val rejectedShiftSerial = AtomicLong(0L)
@@ -49,8 +54,8 @@ class EngineAudioEngine(context: Context) {
     private val categoryGains = AtomicReference(AudioMixGains())
     private val nativeEventMutes = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private val nativeEventSolos = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
-    /** Set by lifecycle/UI code; consumed only by the serialized native control worker. */
-    private val clearNativeEventOverrides = AtomicBoolean(false)
+    /** Incremented only when the UI changes an override; the worker sends the batch once. */
+    private val nativeEventOverridesVersion = AtomicLong(0L)
     private val backfireOnly = AtomicBoolean(false)
     private var sentBackfireOnly = false
 
@@ -83,6 +88,18 @@ class EngineAudioEngine(context: Context) {
 
     fun sourceSnapshots(): List<FmodSourceState> = nativeSources.get()
 
+    fun setFmodUpdateRateHz(rateHz: Int) {
+        fmodUpdateRateHz.set(FmodUpdateRate.normalize(rateHz))
+    }
+
+    fun fmodUpdateRateHz(): Int = fmodUpdateRateHz.get()
+
+    fun setMixerDiagnosticsActive(active: Boolean) {
+        mixerDiagnosticsActive.set(active)
+    }
+
+    fun isMixerDiagnosticsActive(): Boolean = mixerDiagnosticsActive.get()
+
     fun setHostGains(engine: Float, effects: Float) {
         hostEngineGain.set(engine.coerceAtLeast(0f))
         hostEffectsGain.set(effects.coerceAtLeast(0f))
@@ -92,9 +109,15 @@ class EngineAudioEngine(context: Context) {
         categoryGains.set(gains)
     }
 
-    fun setEventMute(eventName: String, muted: Boolean) { nativeEventMutes[eventName] = muted }
+    fun setEventMute(eventName: String, muted: Boolean) {
+        if (muted) nativeEventMutes[eventName] = true else nativeEventMutes.remove(eventName)
+        nativeEventOverridesVersion.incrementAndGet()
+    }
 
-    fun setEventSolo(eventName: String, solo: Boolean) { nativeEventSolos[eventName] = solo }
+    fun setEventSolo(eventName: String, solo: Boolean) {
+        if (solo) nativeEventSolos[eventName] = true else nativeEventSolos.remove(eventName)
+        nativeEventOverridesVersion.incrementAndGet()
+    }
 
     fun setBackfireOnly(enabled: Boolean) { backfireOnly.set(enabled) }
 
@@ -144,7 +167,7 @@ class EngineAudioEngine(context: Context) {
                     // exterior views while the authored FMOD mix itself stays untouched.
                     nativeEventMutes.clear()
                     nativeEventSolos.clear()
-                    clearNativeEventOverrides.set(true)
+                    nativeEventOverridesVersion.incrementAndGet()
                 }
                 return
             }
@@ -164,6 +187,7 @@ class EngineAudioEngine(context: Context) {
         val profile = selectedProfile.get()
         nativeEventMutes.clear()
         nativeEventSolos.clear()
+        nativeEventOverridesVersion.incrementAndGet()
         if (!runCatching(::requestFocus).getOrDefault(false)) {
             reportLoadFailure(profile.id, "Audio focus was not granted by the system.")
             return
@@ -194,6 +218,7 @@ class EngineAudioEngine(context: Context) {
     private fun stopLocked() {
         running.set(false)
         generation.incrementAndGet()
+        stopSnapshotThread()
         val thread = controlThread.get()
         thread?.interrupt()
         if (thread != null && thread !== Thread.currentThread()) joinThread(thread, CONTROL_JOIN_TIMEOUT_MS)
@@ -209,7 +234,7 @@ class EngineAudioEngine(context: Context) {
         val bridge = NativeFmodBankBridge()
         var opened = false
         var lastTickNanos = System.nanoTime()
-        var nextSnapshotNanos = lastTickNanos
+        var nextControlNanos = lastTickNanos
         var lastShiftSerial = 0L
         var controlTickId = 0L
         var lastConsumedSimulationFrameId = 0L
@@ -218,9 +243,11 @@ class EngineAudioEngine(context: Context) {
         var consumedRejectedShift = rejectedShiftSerial.get()
         var consumedTractionPulse = tractionPulseSerial.get()
         var sentCategoryGains: AudioMixGains? = null
+        var sentHostEngineGain: Float? = null
+        var sentHostEffectsGain: Float? = null
+        var sentNativeEventOverridesVersion = -1L
         var sentNativeDiagnosticsEnabled = DebugTelemetry.nativeDiagnosticsEnabled()
         var eventCatalogCaptured = false
-        var nextDiagnosticsDrainNanos = lastTickNanos
         var diagnosticBankSha256: String? = null
 
         try {
@@ -248,9 +275,21 @@ class EngineAudioEngine(context: Context) {
             opened = true
             loadedBankProfileId.set(profile.id)
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+            lastTickNanos = System.nanoTime()
+            nextControlNanos = lastTickNanos
+            startSnapshotThread(runId, bridge)
 
             while (isCurrent(runId)) {
                 val now = System.nanoTime()
+                val controlPeriodNanos = FmodUpdateRate.periodNanos(fmodUpdateRateHz.get())
+                if (now < nextControlNanos) {
+                    LockSupport.parkNanos(nextControlNanos - now)
+                    continue
+                }
+                val deadlineMissed = now > nextControlNanos + CONTROL_DEADLINE_TOLERANCE_NANOS
+                // Do not run catch-up bursts when the process was descheduled. FMOD receives the
+                // newest physics frame once and gets the real elapsed interval as dt.
+                nextControlNanos = now + controlPeriodNanos
                 val dt = ((now - lastTickNanos).coerceAtLeast(1L) / 1_000_000_000.0)
                     .coerceIn(MIN_CONTROL_STEP_SECONDS, MAX_CONTROL_STEP_SECONDS)
                 lastTickNanos = now
@@ -275,29 +314,61 @@ class EngineAudioEngine(context: Context) {
                 }
 
                 val frame = parameters.get()
-                bridge.setHostGains(hostEngineGain.get(), hostEffectsGain.get())
+                val measurePerformance = DebugTelemetry.performanceEnabled()
+                var hostGainCalls = 0
+                var categoryGainCalls = 0
+                var overrideBatchCalls = 0
+                val requestedHostEngineGain = hostEngineGain.get()
+                val requestedHostEffectsGain = hostEffectsGain.get()
+                if (
+                    requestedHostEngineGain != sentHostEngineGain ||
+                    requestedHostEffectsGain != sentHostEffectsGain
+                ) {
+                    bridge.setHostGains(requestedHostEngineGain, requestedHostEffectsGain)
+                    sentHostEngineGain = requestedHostEngineGain
+                    sentHostEffectsGain = requestedHostEffectsGain
+                    hostGainCalls = 1
+                }
                 val gains = categoryGains.get()
                 if (gains != sentCategoryGains) {
                     bridge.setCategoryGains(gains.transmission, gains.gearShift, gains.turbo, gains.backfire)
                     sentCategoryGains = gains
+                    categoryGainCalls = 1
                 }
-                if (clearNativeEventOverrides.getAndSet(false)) {
-                    // The native runtime owns independent event maps. Clearing only Kotlin's
-                    // maps would leave a removed M/S control silently applied in FMOD.
-                    bridge.clearEventOverrides()
+                val requestedNativeEventOverridesVersion = nativeEventOverridesVersion.get()
+                if (requestedNativeEventOverridesVersion != sentNativeEventOverridesVersion) {
+                    // Send the complete immutable meaning of the UI maps once per change. The
+                    // native side applies all event volumes in one pass instead of reapplying the
+                    // whole bank once for every card on every audio tick.
+                    bridge.setEventOverrides(
+                        mutedEvents = nativeEventMutes.keys.toTypedArray(),
+                        soloEvents = nativeEventSolos.keys.toTypedArray(),
+                    )
+                    sentNativeEventOverridesVersion = requestedNativeEventOverridesVersion
+                    overrideBatchCalls = 1
                 }
                 val requestedBackfireOnly = backfireOnly.get()
                 if (requestedBackfireOnly != sentBackfireOnly) {
                     bridge.setBackfireOnly(requestedBackfireOnly)
                     sentBackfireOnly = requestedBackfireOnly
                 }
-                nativeEventMutes.forEach { (name, value) -> bridge.setEventMute(name, value) }
-                nativeEventSolos.forEach { (name, value) -> bridge.setEventSolo(name, value) }
                 val currentLimiterPulse = limiterPulseSerial.get()
                 val currentBackfirePulse = backfirePulseSerial.get()
                 val currentRejectedShift = rejectedShiftSerial.get()
                 val currentTractionPulse = tractionPulseSerial.get()
+                val limiterPulseCount = (currentLimiterPulse - consumedLimiterPulse)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                val backfirePulseCount = (currentBackfirePulse - consumedBackfirePulse)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                val rejectedShiftCount = (currentRejectedShift - consumedRejectedShift)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                val tractionPulseCount = (currentTractionPulse - consumedTractionPulse)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                val shiftStartedCount = (frame.shiftSerial - lastShiftSerial)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                 val maximumBoost = frame.maximumBoost.coerceAtLeast(0.001)
+                val audioWallStartedNanos = if (measurePerformance) System.nanoTime() else 0L
+                val audioCpuStartedNanos = if (measurePerformance) Debug.threadCpuTimeNanos() else 0L
                 val error = bridge.update(
                     dt = dt.toFloat(),
                     rpm = frame.rpm.coerceAtLeast(1.0).toFloat(),
@@ -312,16 +383,33 @@ class EngineAudioEngine(context: Context) {
                     isShifting = frame.isShifting,
                     shiftProgress = frame.shiftProgress.coerceIn(0.0, 1.0).toFloat(),
                     shiftSerial = frame.shiftSerial,
-                    limiterPulse = currentLimiterPulse != consumedLimiterPulse,
-                    shiftStarted = frame.shiftSerial != lastShiftSerial,
+                    limiterPulseCount = limiterPulseCount,
+                    shiftStartedCount = shiftStartedCount,
                     shiftDirection = frame.shiftDirection,
-                    shiftRejected = currentRejectedShift != consumedRejectedShift,
-                    backfireTriggered = currentBackfirePulse != consumedBackfirePulse,
+                    shiftRejectedCount = rejectedShiftCount,
+                    backfirePulseCount = backfirePulseCount,
                     backfireSampleIndex = frame.backfireSampleIndex,
                     tractionActive = frame.tractionLimitActive,
-                    tractionPulse = currentTractionPulse != consumedTractionPulse,
+                    tractionPulseCount = tractionPulseCount,
                     simulationFrameId = frame.simulationFrameId,
                 )
+                if (measurePerformance) {
+                    DebugTelemetry.recordAudioPerformance(
+                        cpuNanos = Debug.threadCpuTimeNanos() - audioCpuStartedNanos,
+                        wallNanos = System.nanoTime() - audioWallStartedNanos,
+                        hostGainCalls = hostGainCalls,
+                        categoryGainCalls = categoryGainCalls,
+                        overrideBatchCalls = overrideBatchCalls,
+                        simulationFrameId = frame.simulationFrameId,
+                        previousSimulationFrameId = lastConsumedSimulationFrameId,
+                        limiterPulseCount = limiterPulseCount,
+                        shiftPulseCount = shiftStartedCount,
+                        rejectedShiftPulseCount = rejectedShiftCount,
+                        backfirePulseCount = backfirePulseCount,
+                        tractionPulseCount = tractionPulseCount,
+                        deadlineMissed = deadlineMissed,
+                    )
+                }
                 controlTickId += 1L
                 DebugTelemetry.recordAudioConsumption(
                     timestampNanos = now,
@@ -341,22 +429,13 @@ class EngineAudioEngine(context: Context) {
                     reportLoadFailure(profile.id, error)
                     return
                 }
-
-                if (now >= nextSnapshotNanos) {
-                    nativeSources.set(parseNativeVoiceSnapshots(bridge.voiceSnapshots()))
-                    nextSnapshotNanos = now + SNAPSHOT_PERIOD_NANOS
-                }
-                if (sentNativeDiagnosticsEnabled && now >= nextDiagnosticsDrainNanos) {
-                    DebugTelemetry.recordNativeRecords(now, bridge.diagnosticRecords())
-                    nextDiagnosticsDrainNanos = now + DIAGNOSTIC_DRAIN_PERIOD_NANOS
-                }
-                sleepUntilNextControlTick(now)
             }
         } catch (throwable: Throwable) {
             Log.e(TAG, "FMOD bank control stopped for ${profile.id}", throwable)
             reportLoadFailure(profile.id, throwable.message ?: throwable::class.java.simpleName)
         } finally {
             loadedBankProfileId.set(null)
+            stopSnapshotThread()
             if (opened) bridge.close()
             runCatching { org.fmod.FMOD.close() }
             nativeSources.set(emptyList())
@@ -370,9 +449,53 @@ class EngineAudioEngine(context: Context) {
 
     private fun isCurrent(runId: Long): Boolean = running.get() && generation.get() == runId
 
-    private fun sleepUntilNextControlTick(tickStartedNanos: Long) {
-        val remaining = CONTROL_PERIOD_NANOS - (System.nanoTime() - tickStartedNanos)
-        if (remaining > 0L) LockSupport.parkNanos(remaining)
+    private fun startSnapshotThread(runId: Long, bridge: NativeFmodBankBridge) {
+        val thread = Thread({ mixerSnapshotLoop(runId, bridge) }, "fmod-mixer-snapshot").apply {
+            isDaemon = true
+        }
+        snapshotThread.set(thread)
+        runCatching(thread::start).onFailure {
+            snapshotThread.compareAndSet(thread, null)
+            Log.w(TAG, "Could not start FMOD mixer snapshot worker", it)
+        }
+    }
+
+    private fun mixerSnapshotLoop(runId: Long, bridge: NativeFmodBankBridge) {
+        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+        var nextSnapshotNanos = 0L
+        var nextDiagnosticsDrainNanos = 0L
+        while (isCurrent(runId)) {
+            if (!mixerDiagnosticsActive.get() && !DebugTelemetry.nativeDiagnosticsEnabled()) {
+                LockSupport.parkNanos(INACTIVE_SNAPSHOT_PARK_NANOS)
+                continue
+            }
+
+            val now = System.nanoTime()
+            if (mixerDiagnosticsActive.get() && now >= nextSnapshotNanos) {
+                val measurePerformance = DebugTelemetry.performanceEnabled()
+                val snapshotWallStartedNanos = if (measurePerformance) System.nanoTime() else 0L
+                val snapshotCpuStartedNanos = if (measurePerformance) Debug.threadCpuTimeNanos() else 0L
+                nativeSources.set(parseNativeVoiceSnapshots(bridge.voiceSnapshots()))
+                if (measurePerformance) {
+                    DebugTelemetry.recordMixerSnapshotPerformance(
+                        cpuNanos = Debug.threadCpuTimeNanos() - snapshotCpuStartedNanos,
+                        wallNanos = System.nanoTime() - snapshotWallStartedNanos,
+                    )
+                }
+                nextSnapshotNanos = now + SNAPSHOT_PERIOD_NANOS
+            }
+            if (DebugTelemetry.nativeDiagnosticsEnabled() && now >= nextDiagnosticsDrainNanos) {
+                DebugTelemetry.recordNativeRecords(now, bridge.diagnosticRecords())
+                nextDiagnosticsDrainNanos = now + DIAGNOSTIC_DRAIN_PERIOD_NANOS
+            }
+            LockSupport.parkNanos(SNAPSHOT_WORKER_PARK_NANOS)
+        }
+    }
+
+    private fun stopSnapshotThread() {
+        val thread = snapshotThread.getAndSet(null) ?: return
+        thread.interrupt()
+        if (thread !== Thread.currentThread()) joinThread(thread, SNAPSHOT_JOIN_TIMEOUT_MS)
     }
 
     @Suppress("DEPRECATION")
@@ -433,10 +556,13 @@ class EngineAudioEngine(context: Context) {
 
     private companion object {
         const val TAG = "EngineAudioEngine"
-        const val CONTROL_PERIOD_NANOS = 3_000_000L
         const val SNAPSHOT_PERIOD_NANOS = 50_000_000L
         const val DIAGNOSTIC_DRAIN_PERIOD_NANOS = 40_000_000L
         const val CONTROL_JOIN_TIMEOUT_MS = 1_000L
+        const val SNAPSHOT_JOIN_TIMEOUT_MS = 500L
+        const val SNAPSHOT_WORKER_PARK_NANOS = 5_000_000L
+        const val INACTIVE_SNAPSHOT_PARK_NANOS = 250_000_000L
+        const val CONTROL_DEADLINE_TOLERANCE_NANOS = 500_000L
         const val MIN_CONTROL_STEP_SECONDS = 1.0 / 1_000.0
         const val MAX_CONTROL_STEP_SECONDS = 0.040
         const val DEBUG_DIGEST_BUFFER_BYTES = 256 * 1024

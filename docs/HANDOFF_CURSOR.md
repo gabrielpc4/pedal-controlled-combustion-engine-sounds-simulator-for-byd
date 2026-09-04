@@ -166,10 +166,10 @@ The current 33 IDs are the `modded-...` entries in `FmodBankProfile.kt` and the 
 
 ```text
 BYD telemetry or touch pedals
-        -> DriveController (fixed 3 ms simulation loop)
+        -> DriveController (persisted fixed-step loop, 100 Hz by default)
         -> EngineSimulation / AssettoDrivetrain
         -> DriveSnapshot + EngineAudioFrame
-        -> EngineAudioEngine (3 ms FMOD control loop)
+        -> EngineAudioEngine (same persisted FMOD control cadence)
         -> JNI native FMOD Studio bank playback
 ```
 
@@ -240,7 +240,7 @@ context, not a mandate:
    truncated integer bins, predicts continuously between boundaries, seeds low-speed motion
    from pedals, cancels on brake/direction change, and settles at exact zero. It must remain
    presentation-only.
-4. The user asked repeatedly for Audio Lab parity: 3 ms physics, authored throttle/load logic,
+4. The user asked repeatedly for Audio Lab parity: fixed-step physics, authored throttle/load logic,
    native FMOD event lifecycle, neutral/P free revving, turbo/BOV, limiter, shift, backfire, and
    transmission behavior. Some later requests intentionally deviated from pure Lab behavior for
    simulated pedals (BYD Seal response and equal 190 km/h gear bands).

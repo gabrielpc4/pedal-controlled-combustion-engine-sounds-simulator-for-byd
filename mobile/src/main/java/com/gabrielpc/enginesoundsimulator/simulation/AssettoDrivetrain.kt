@@ -7,33 +7,33 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-internal data class AssettoDrivetrainFrame(
-    val rpm: Double,
-    val speedMetersPerSecond: Double,
-    val gear: Int,
-    val drivetrainSpeedRadiansPerSecond: Double,
-    val driverThrottle: Double,
-    val effectiveThrottle: Double,
-    val brake: Double,
-    val clutch: Double,
-    val boost: Double,
-    val bov: Double,
-    val bovDecaySeconds: Double,
-    val limiterPulse: Boolean,
-    val backfireTriggered: Boolean,
+internal class AssettoDrivetrainFrame(
+    var rpm: Double,
+    var speedMetersPerSecond: Double,
+    var gear: Int,
+    var drivetrainSpeedRadiansPerSecond: Double,
+    var driverThrottle: Double,
+    var effectiveThrottle: Double,
+    var brake: Double,
+    var clutch: Double,
+    var boost: Double,
+    var bov: Double,
+    var bovDecaySeconds: Double,
+    var limiterPulse: Boolean,
+    var backfireTriggered: Boolean,
     /** Shared Alfa sample selected for this one-shot, or -1 when no backfire fired. */
-    val backfireSampleIndex: Int = -1,
-    val shiftStarted: Boolean,
-    val shiftRejected: Boolean,
-    val shifting: Boolean,
-    val shiftDirection: Int,
-    val shiftProgress: Double,
-    val authoredShiftDurationSeconds: Double = 0.0,
-    val effectiveShiftDurationSeconds: Double = 0.0,
-    val authoredClutchDurationSeconds: Double = 0.0,
-    val effectiveClutchDurationSeconds: Double = 0.0,
-    val tractionLimitActive: Boolean,
-    val tractionLimitPulse: Boolean,
+    var backfireSampleIndex: Int = -1,
+    var shiftStarted: Boolean,
+    var shiftRejected: Boolean,
+    var shifting: Boolean,
+    var shiftDirection: Int,
+    var shiftProgress: Double,
+    var authoredShiftDurationSeconds: Double = 0.0,
+    var effectiveShiftDurationSeconds: Double = 0.0,
+    var authoredClutchDurationSeconds: Double = 0.0,
+    var effectiveClutchDurationSeconds: Double = 0.0,
+    var tractionLimitActive: Boolean,
+    var tractionLimitPulse: Boolean,
 )
 
 /**
@@ -84,10 +84,15 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
     private var previousFmodWheelSpeed = 0.0
-    private var lastFrame = snapshot()
+    private var driven = drivenAxle(physics.drivetrain.vehicle)
+    private var aeroDrag = 0.0
+    private var downforce = 0.0
+    private val engineTorqueResult = EngineTorqueFrame()
+    private val lastFrame = snapshot()
 
     fun updatePhysics(updated: AssettoPhysics) {
         physics = updated
+        driven = drivenAxle(updated.drivetrain.vehicle)
         rpm = rpm.coerceIn(0.0, updated.engine.limiterRpm)
         gear = gear.coerceIn(0, updated.drivetrain.forwardRatios.size)
         landingRpmByGear = DoubleArray(updated.drivetrain.forwardRatios.size + 1)
@@ -138,7 +143,31 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         backfireArmed = false
         backfireReleaseTimer = 0.0
         limiterCounter = 0
-        lastFrame = snapshot()
+        lastFrame.rpm = rpm
+        lastFrame.speedMetersPerSecond = speedMetersPerSecond
+        lastFrame.gear = gear
+        lastFrame.drivetrainSpeedRadiansPerSecond = 0.0
+        lastFrame.driverThrottle = 0.0
+        lastFrame.effectiveThrottle = 0.0
+        lastFrame.brake = 0.0
+        lastFrame.clutch = clutchSignal
+        lastFrame.boost = boost
+        lastFrame.bov = bov
+        lastFrame.bovDecaySeconds = bovDecay
+        lastFrame.limiterPulse = false
+        lastFrame.backfireTriggered = false
+        lastFrame.backfireSampleIndex = -1
+        lastFrame.shiftStarted = false
+        lastFrame.shiftRejected = false
+        lastFrame.shifting = shifting
+        lastFrame.shiftDirection = shiftDirection
+        lastFrame.shiftProgress = 0.0
+        lastFrame.authoredShiftDurationSeconds = 0.0
+        lastFrame.effectiveShiftDurationSeconds = 0.0
+        lastFrame.authoredClutchDurationSeconds = 0.0
+        lastFrame.effectiveClutchDurationSeconds = 0.0
+        lastFrame.tractionLimitActive = false
+        lastFrame.tractionLimitPulse = false
     }
 
     fun requestShift(direction: Int): Boolean {
@@ -156,7 +185,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         fmodDrivetrainSpeedMetersPerSecond: Double?,
         deltaSeconds: Double,
     ): AssettoDrivetrainFrame {
-        val dt = f32(deltaSeconds.coerceIn(0.0001, 0.020))
+        val dt = f32(deltaSeconds.coerceIn(0.0001, 0.050))
         sessionElapsedMilliseconds += dt * 1_000.0
         externalVehicleSpeedMetersPerSecond?.let(::anchorVehicleSpeed)
         // In P/N the engine must remain a free-revving authored event. D is the only position
@@ -189,7 +218,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         var eventDirection = if (shifting) shiftDirection else 0
         val rawGas = throttle.coerceIn(0.0, 1.0)
         val cleanBrake = brake.coerceIn(0.0, 1.0)
-        val (aeroDrag, downforce) = aeroForSpeed(speedMetersPerSecond)
+        updateAeroForSpeed(speedMetersPerSecond)
 
         val clutch = autoclutchStep(dt, rawGas, cleanBrake)
         var controlsGas = rawGas
@@ -265,7 +294,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val vehicle = physics.drivetrain.vehicle
         val frontRadius = vehicle.frontWheelRadiusMeters.coerceAtLeast(1e-6)
         val rearRadius = vehicle.rearWheelRadiusMeters.coerceAtLeast(1e-6)
-        val driven = drivenAxle(vehicle)
         // Road forces use the physical speed, but engine-to-wheel coupling uses the FMOD speed.
         // This lets 19 km/h of vehicle motion reach an authored 8,000 RPM shift point when the
         // equal-speed mapping says that first gear should occupy 0..19 km/h.
@@ -332,43 +360,44 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val tractionActive = engine.effectiveThrottle > 0.0 && tractionTorqueLimited
         val tractionPulse = tractionActive && !previousTractionLimit
         previousTractionLimit = tractionActive
-        lastFrame = AssettoDrivetrainFrame(
-            rpm = rpm,
-            speedMetersPerSecond = speedMetersPerSecond,
-            // Do not expose the internal neutral interval as gear 0 during a
-            // normal shift; effects still use shiftStarted below.
-            gear = if (shifting) shiftTarget else gear,
-            // Native FMOD receives this internal angular speed. The public vehicle speed remains
-            // available separately through DrivetrainState.fmodDrivetrainSpeedKmh.
-            drivetrainSpeedRadiansPerSecond = this.fmodDrivetrainSpeedMetersPerSecond / driven.radius,
-            driverThrottle = rawGas,
-            effectiveThrottle = engine.effectiveThrottle,
-            brake = cleanBrake,
-            clutch = clutch,
-            boost = boost,
-            bov = bov,
-            bovDecaySeconds = bovDecay,
-            limiterPulse = engine.limiterActive,
-            backfireTriggered = engine.backfire,
-            backfireSampleIndex = if (engine.backfire) chooseBackfireSample() else -1,
-            shiftStarted = shiftStarted,
-            shiftRejected = shiftRejected,
-            shifting = shifting,
-            shiftDirection = if (shiftStarted || shiftCompleted || shifting) eventDirection else 0,
-            // Preserve a final 1.0 sample so presentation code can finish a gear-ratio
-            // crossfade without reintroducing an audible one-frame pitch step.
-            shiftProgress = when {
-                shifting -> (shiftElapsed / shiftDuration.coerceAtLeast(dt)).coerceIn(0.0, 1.0)
-                shiftCompleted -> 1.0
-                else -> 0.0
-            },
-            authoredShiftDurationSeconds = authoredShiftDuration,
-            effectiveShiftDurationSeconds = shiftDuration,
-            authoredClutchDurationSeconds = authoredClutchDuration,
-            effectiveClutchDurationSeconds = effectiveClutchDuration,
-            tractionLimitActive = tractionActive,
-            tractionLimitPulse = tractionPulse,
-        )
+        // Reuse the frame object. The simulation has one consumer, so publishing these fields
+        // in place removes one large allocation from every fixed-step update without changing
+        // values.
+        lastFrame.rpm = rpm
+        lastFrame.speedMetersPerSecond = speedMetersPerSecond
+        // Do not expose the internal neutral interval as gear 0 during a normal shift; effects
+        // still use shiftStarted below.
+        lastFrame.gear = if (shifting) shiftTarget else gear
+        // Native FMOD receives this internal angular speed. The public vehicle speed remains
+        // available separately through DrivetrainState.fmodDrivetrainSpeedKmh.
+        lastFrame.drivetrainSpeedRadiansPerSecond = this.fmodDrivetrainSpeedMetersPerSecond / driven.radius
+        lastFrame.driverThrottle = rawGas
+        lastFrame.effectiveThrottle = engine.effectiveThrottle
+        lastFrame.brake = cleanBrake
+        lastFrame.clutch = clutch
+        lastFrame.boost = boost
+        lastFrame.bov = bov
+        lastFrame.bovDecaySeconds = bovDecay
+        lastFrame.limiterPulse = engine.limiterActive
+        lastFrame.backfireTriggered = engine.backfire
+        lastFrame.backfireSampleIndex = if (engine.backfire) chooseBackfireSample() else -1
+        lastFrame.shiftStarted = shiftStarted
+        lastFrame.shiftRejected = shiftRejected
+        lastFrame.shifting = shifting
+        lastFrame.shiftDirection = if (shiftStarted || shiftCompleted || shifting) eventDirection else 0
+        // Preserve a final 1.0 sample so presentation code can finish a gear-ratio crossfade
+        // without reintroducing an audible one-frame pitch step.
+        lastFrame.shiftProgress = when {
+            shifting -> (shiftElapsed / shiftDuration.coerceAtLeast(dt)).coerceIn(0.0, 1.0)
+            shiftCompleted -> 1.0
+            else -> 0.0
+        }
+        lastFrame.authoredShiftDurationSeconds = authoredShiftDuration
+        lastFrame.effectiveShiftDurationSeconds = shiftDuration
+        lastFrame.authoredClutchDurationSeconds = authoredClutchDuration
+        lastFrame.effectiveClutchDurationSeconds = effectiveClutchDuration
+        lastFrame.tractionLimitActive = tractionActive
+        lastFrame.tractionLimitPulse = tractionPulse
         return lastFrame
     }
 
@@ -467,8 +496,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 // it with the same normalized wheel quantity. Comparing raw m/s to rad/s here
                 // would make every positive road speed look like a deceleration and would allow
                 // the landing-RPM rule to chatter through every gear under full throttle.
-                val currentFmodWheelSpeed =
-                    fmodDrivetrainSpeedMetersPerSecond / drivenAxle(physics.drivetrain.vehicle).radius
+                val currentFmodWheelSpeed = fmodDrivetrainSpeedMetersPerSecond / driven.radius
                 val fmodDrivetrainSpeedDecreasing =
                     currentFmodWheelSpeed < previousFmodWheelSpeed - 1e-4
                 if (
@@ -594,7 +622,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         dt: Double,
     ): Double {
         val spec = physics.drivetrain
-        val wheelSpeed = fmodDrivetrainSpeedMetersPerSecond / drivenAxle(spec.vehicle).radius
+        val wheelSpeed = fmodDrivetrainSpeedMetersPerSecond / driven.radius
         val wheelAcceleration = max(0.0, (wheelSpeed - previousFmodWheelSpeed) / dt.coerceAtLeast(1e-9))
         // Match downshift protection to the effective fixed transition, otherwise the
         // protection calculation would still predict using the bank's slower timing.
@@ -653,7 +681,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val effective = if (limiterActive) 0.0 else mapped
 
         if (engine.turbos.isNotEmpty()) {
-            boost = engine.turbos.mapIndexed { index, turbo ->
+            var totalBoost = 0.0
+            for (index in engine.turbos.indices) {
+                val turbo = engine.turbos[index]
                 val input = (effective * rpm / turbo.referenceRpm.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)
                 val target = input.pow(turbo.gamma)
                 var q = turboQs[index]
@@ -663,8 +693,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     q = turbo.wastegate / turbo.maximumBoost.coerceAtLeast(0.001)
                 }
                 turboQs[index] = q
-                turbo.maximumBoost * q
-            }.sum()
+                totalBoost += turbo.maximumBoost * q
+            }
+            boost = totalBoost
             bov = if (boost * (1.0 - effective) > engine.turbos.first().bovThreshold) 1.0 else 0.0
             bovDecay = if (bov > 0.0) 0.0 else min(10.0, bovDecay + dt)
         }
@@ -673,7 +704,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         val coast = coastTorque(rpm)
         var torque = coast + effective * (power - coast)
         if (rpm < engine.idleRpm) torque = max(torque, 15.0)
-        return EngineTorqueFrame(torque, effective, limiterActive, triggerBackfire)
+        engineTorqueResult.torque = torque
+        engineTorqueResult.effectiveThrottle = effective
+        engineTorqueResult.limiterActive = limiterActive
+        engineTorqueResult.backfire = triggerBackfire
+        return engineTorqueResult
     }
 
     private fun chooseBackfireSample(): Int {
@@ -695,7 +730,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return linear * delta - quadratic * delta * delta
     }
 
-    private fun aeroForSpeed(speed: Double): Pair<Double, Double> {
+    private fun updateAeroForSpeed(speed: Double) {
         val vehicle = physics.drivetrain.vehicle
         val speedKmh = speed * 3.6
         val pressure = 0.5 * vehicle.airDensityKgM3 * speed * speed
@@ -711,7 +746,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             dragArea += area * surface.dragGain * interpolateAssettoCurve(surface.dragCurve, angle)
             liftArea += area * surface.liftGain * interpolateAssettoCurve(surface.liftCurve, angle)
         }
-        return max(0.0, pressure * dragArea) to max(0.0, pressure * liftArea)
+        aeroDrag = max(0.0, pressure * dragArea)
+        downforce = max(0.0, pressure * liftArea)
     }
 
     private fun drivenAxle(vehicle: AssettoVehicleSpec): DrivenAxle = when {
@@ -756,11 +792,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         tractionLimitPulse = false,
     )
 
-    private data class EngineTorqueFrame(
-        val torque: Double,
-        val effectiveThrottle: Double,
-        val limiterActive: Boolean,
-        val backfire: Boolean,
+    private class EngineTorqueFrame(
+        var torque: Double = 0.0,
+        var effectiveThrottle: Double = 0.0,
+        var limiterActive: Boolean = false,
+        var backfire: Boolean = false,
     )
 
     private data class DrivenAxle(val radius: Double, val normalFraction: Double, val grip: Double)
