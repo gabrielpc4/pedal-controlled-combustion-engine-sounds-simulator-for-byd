@@ -101,6 +101,7 @@ data class DriveSnapshot(
     /** Display-only scale applied to the complete Compose dashboard. */
     val uiScale: Float = UiScaleRepository.DEFAULT,
     val tachometerScale: Float = TachometerScaleRepository.DEFAULT,
+    val canvasAspectRatio: Float = CanvasAspectRatioRepository.DEFAULT,
     val userMessage: UserVisibleMessage? = null,
 )
 
@@ -172,6 +173,8 @@ class DriveController(context: Context) {
     private val uiScale = AtomicReference(uiScaleRepository.load())
     private val tachometerScaleRepository = TachometerScaleRepository(appContext)
     private val tachometerScale = AtomicReference(tachometerScaleRepository.load())
+    private val canvasAspectRatioRepository = CanvasAspectRatioRepository(appContext)
+    private val canvasAspectRatio = AtomicReference(canvasAspectRatioRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
@@ -390,6 +393,12 @@ class DriveController(context: Context) {
         tachometerScaleRepository.save(normalized)
     }
 
+    fun setCanvasAspectRatio(value: Float) {
+        val normalized = value.coerceIn(CanvasAspectRatioRepository.MINIMUM, CanvasAspectRatioRepository.MAXIMUM)
+        canvasAspectRatio.set(normalized)
+        canvasAspectRatioRepository.save(normalized)
+    }
+
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
 
     fun setExteriorPureAudio(enabled: Boolean) {
@@ -491,6 +500,7 @@ class DriveController(context: Context) {
         exteriorAudioModeRepository.reset()
         uiScaleRepository.reset()
         tachometerScaleRepository.reset()
+        canvasAspectRatioRepository.reset()
         audioMixGains.set(AudioMixGains())
         fmodUpdateRateHz.set(FmodUpdateRate.DEFAULT_HZ)
         exteriorPureAudio.set(false)
@@ -500,6 +510,7 @@ class DriveController(context: Context) {
         autoblipEnabled.set(true)
         uiScale.set(UiScaleRepository.DEFAULT)
         tachometerScale.set(TachometerScaleRepository.DEFAULT)
+        canvasAspectRatio.set(CanvasAspectRatioRepository.DEFAULT)
         simulation.updateAutoblipEnabled(true)
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
@@ -874,6 +885,7 @@ class DriveController(context: Context) {
                 autoblipEnabled = autoblipEnabled.get(),
                 uiScale = uiScale.get(),
                 tachometerScale = tachometerScale.get(),
+                canvasAspectRatio = canvasAspectRatio.get(),
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = audioEngine.loadedBankProfileId() == selected.id,
                 userMessage = userMessage,

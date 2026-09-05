@@ -219,6 +219,7 @@ class MainActivity : ComponentActivity() {
                             onAutoblipEnabledChange = controller::setAutoblipEnabled,
                             onUiScaleChange = controller::setUiScale,
                             onTachometerScaleChange = controller::setTachometerScale,
+                            onCanvasAspectRatioChange = controller::setCanvasAspectRatio,
                         onExteriorPureAudioChange = controller::setExteriorPureAudio,
                         onMixerDiagnosticsActive = controller::setMixerDiagnosticsActive,
                         onCategoryGains = controller::setFmodCategoryGains,
@@ -313,6 +314,7 @@ private fun MotorSoundDashboard(
     onAutoblipEnabledChange: (Boolean) -> Unit,
     onUiScaleChange: (Float) -> Unit,
     onTachometerScaleChange: (Float) -> Unit,
+    onCanvasAspectRatioChange: (Float) -> Unit,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     onMixerDiagnosticsActive: (Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
@@ -389,11 +391,11 @@ private fun MotorSoundDashboard(
                 .then(if (mainScreen == DashboardMainScreen.CALIBRATION) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)),
             contentAlignment = Alignment.TopCenter,
         ) {
-            val heightForFullWidth = maxWidth * (990f / 1920f)
+            val heightForFullWidth = maxWidth / state.canvasAspectRatio
             val (dashboardWidth, dashboardHeight) = if (heightForFullWidth <= maxHeight) {
                 maxWidth to heightForFullWidth
             } else {
-                (maxHeight * (1920f / 990f)) to maxHeight
+                (maxHeight * state.canvasAspectRatio) to maxHeight
             }
 
             Box(
@@ -545,6 +547,8 @@ private fun MotorSoundDashboard(
                             onUiScaleChange = onUiScaleChange,
                             tachometerScale = state.tachometerScale,
                             onTachometerScaleChange = onTachometerScaleChange,
+                            canvasAspectRatio = state.canvasAspectRatio,
+                            onCanvasAspectRatioChange = onCanvasAspectRatioChange,
                             exteriorPureAudio = state.exteriorPureAudio,
                             onExteriorPureAudioChange = onExteriorPureAudioChange,
                             backfireSettings = state.backfireSettings,

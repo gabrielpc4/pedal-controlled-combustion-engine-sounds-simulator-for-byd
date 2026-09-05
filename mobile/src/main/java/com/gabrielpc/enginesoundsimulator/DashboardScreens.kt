@@ -445,6 +445,8 @@ internal fun SettingsScreen(
     onUiScaleChange: (Float) -> Unit,
     tachometerScale: Float,
     onTachometerScaleChange: (Float) -> Unit,
+    canvasAspectRatio: Float,
+    onCanvasAspectRatioChange: (Float) -> Unit,
     exteriorPureAudio: Boolean,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
@@ -486,6 +488,7 @@ internal fun SettingsScreen(
             AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
             UiScaleControl(scale = uiScale, onScaleChange = onUiScaleChange)
             TachometerScaleControl(scale = tachometerScale, onScaleChange = onTachometerScaleChange)
+            CanvasAspectRatioControl(ratio = canvasAspectRatio, onRatioChange = onCanvasAspectRatioChange)
             Button(
                 onClick = onOpenCalibration,
                 colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
@@ -538,6 +541,12 @@ private fun TachometerScaleControl(scale: Float, onScaleChange: (Float) -> Unit)
         valueRange = 0.6f..1.0f,
         steps = 7,
     )
+}
+
+@Composable
+private fun CanvasAspectRatioControl(ratio: Float, onRatioChange: (Float) -> Unit) {
+    Text("CANVAS ASPECT RATIO  ${"%.2f".format(ratio)}:1", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+    Slider(value = ratio, onValueChange = onRatioChange, valueRange = 1.4f..2.4f, steps = 19)
 }
 
 @Composable
