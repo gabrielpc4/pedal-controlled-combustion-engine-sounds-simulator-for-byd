@@ -14,41 +14,51 @@ The durable context for a future developer or LLM is in [docs/README.md](docs/RE
 
 - [Architecture](docs/architecture.md)
 - [Vehicle integration and local assets](docs/vehicle-integration-and-assets.md)
+- [FMOD bank installation](docs/fmod-bank-installation.md)
 
 Those documents state the project boundaries and point back to the code as the source of truth.
-They deliberately avoid mirroring volatile car profiles, tuning values, UI details, and historical
-experiments.
 
 ## Build
 
-The dashboard module is `mobile`. User-owned FMOD banks are transferred through the vehicle file
-manager and imported by the dashboard itself; no companion installer APK is required. Set
-`fmod.sdk.dir` in `local.properties` to the supplied Android FMOD Studio API. Generate the
-file-manager payloads from the local source-bank folders first:
+Set `fmod.sdk.dir` in `local.properties` to the supplied Android FMOD Studio API. Generate bank
+packages first:
 
 ```sh
 python3 tools/build_fmod_bank_packs.py
-./gradlew :mobile:assembleRelease --no-daemon -PcarApk=true
+```
+
+### Standalone Original / Modded apps (bundled banks)
+
+Each APK contains its full catalog. No file-manager import is required.
+
+```sh
+./gradlew :mobile:assembleOriginalRelease :mobile:assembleModdedRelease --no-daemon
+```
+
+- Original: `com.gabrielpc.enginesoundsimulator.original`
+- Modded: `com.gabrielpc.enginesoundsimulator.modded`
+
+To build the same app IDs without embedded banks (external import workflow):
+
+```sh
+./gradlew :mobile:assembleOriginalRelease :mobile:assembleModdedRelease -PbankDelivery=external --no-daemon
+```
+
+### Separate-catalog dashboard (legacy two-group UI)
+
+```sh
+./gradlew :mobile:assembleSeparateRelease --no-daemon
 python3 tools/export_file_manager_car_packs.py --groups all
 ```
 
-Assembly produces a signed, locally numbered dashboard APK. The exporter creates one delivery
-folder containing that APK plus 512 MiB original/modded file-manager batches, each with its own
-exact copy-path instructions.
-
-## Install
-
-For the `Simple_Automotive` emulator or another dedicated test device:
-
-```powershell
-adb install --bypass-low-target-sdk-block -r mobile/build/outputs/apk/debug/engine-sounds-simulator-build-<number>-debug.apk
-```
-
 Install `manual_car_pack_bundles/DASHBOARD_APK` through the vehicle's enabled USB APK route, then
-copy the `fmod-bank-import` folder from `AUDIO_PACKS/*/BATCH_*` to the exact Android/data path
-stated in its `COPY_TO_BYD_INTERNAL_STORAGE.txt`. Import one batch at a time and wait for the
-completion message before continuing. The dashboard contains no alternate audio fallback and
-remains silent until the selected native bank is imported.
+copy each `AUDIO_PACKS/*/BATCH_*` folder to the path in its `COPY_TO_BYD_INTERNAL_STORAGE.txt`.
+
+## Install (emulator / test device)
+
+```sh
+adb install --bypass-low-target-sdk-block -r mobile/build/outputs/apk/<flavor>/<type>/engine-sounds-simulator-build-<number>-<variant>.apk
+```
 
 Use the app only while parked or in a controlled environment. Its audio can mask navigation,
 alerts, and other safety cues.

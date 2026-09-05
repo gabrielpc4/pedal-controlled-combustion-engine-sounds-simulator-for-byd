@@ -11,11 +11,7 @@ internal class SelectedCarRepository(context: Context) {
 
     fun load(): FmodBankProfile {
         val savedId = preferences.getString("profile_id", null)
-        return if (savedId == null) {
-            FmodBankProfiles.find("alfa-romeo-4c")
-        } else {
-            FmodBankProfiles.find(savedId)
-        }
+        return FmodBankProfiles.find(savedId)
     }
 
     fun save(profile: FmodBankProfile) {

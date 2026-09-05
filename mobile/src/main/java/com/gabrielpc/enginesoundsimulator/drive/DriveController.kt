@@ -1,6 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.drive
 
 import android.content.Context
+import com.gabrielpc.enginesoundsimulator.BuildConfig
 import android.os.Debug
 import android.os.Process
 import android.os.SystemClock
@@ -80,6 +81,7 @@ data class DriveSnapshot(
     val fmodSources: List<FmodSourceState> = emptyList(),
     /** Host-level engine trim applied before category routing. */
     val engineHostGain: Float = 1.0f,
+    val effectsHostGain: Float = 1.0f,
     val transmissionGain: Float = 1.0f,
     val gearShiftGain: Float = 1.0f,
     val turboGain: Float = 1.0f,
@@ -105,6 +107,7 @@ data class DriveSnapshot(
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
     val virtualForwardGearCount: Int = VirtualGearProfile.DEFAULT_VIRTUAL_GEARS,
     val exteriorPureAudio: Boolean = false,
+    val forceFullLoadAudioThrottle: Boolean = true,
     val favoriteCarIds: Set<String> = emptySet(),
     val userMessage: UserVisibleMessage? = null,
 )
@@ -138,16 +141,8 @@ class DriveController(context: Context) {
     private val exteriorPureAudioSettingsRepository = ExteriorPureAudioSettingsRepository(appContext)
     private val carEffectModesRepository = CarEffectModesRepository(appContext)
     private val virtualGearCountRepository = VirtualGearCountRepository(appContext)
-    private val selectedProfile = AtomicReference(
-        selectedCarRepository.load().takeIf { candidate ->
-            installedProfileCache.get().any { it.id == candidate.id }
-        }
-            // Modded cars are the preferred catalog for a fresh install; fall back to originals
-            // only when no modded bank has been imported yet.
-            ?: installedProfileCache.get().firstOrNull { it.packGroup == FmodBankProfiles.moddedCarsPackId }
-            ?: installedProfileCache.get().firstOrNull()
-            ?: FmodBankProfiles.default,
-    )
+    private val forceFullLoadAudioThrottleRepository = ForceFullLoadAudioThrottleRepository(appContext)
+    private val selectedProfile = AtomicReference(resolveInitialProfile())
     private val selectedPerspective = AtomicReference(soundPerspectiveRepository.load(selectedProfile.get()))
     private val manualShiftEnabled = AtomicBoolean(shiftModeRepository.isManualEnabled())
     private val mediaShiftButtonCoordinator = MediaShiftButtonCoordinator(appContext) { keyCode ->
@@ -180,6 +175,7 @@ class DriveController(context: Context) {
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val virtualForwardGearCount = AtomicInteger(virtualGearCountRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
+    private val forceFullLoadAudioThrottle = AtomicBoolean(forceFullLoadAudioThrottleRepository.load())
     private val favoriteCarIds = AtomicReference(carFavoritesRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
@@ -248,6 +244,7 @@ class DriveController(context: Context) {
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
         setExteriorPureAudio(exteriorPureAudio.get())
+        audioEngine.setForceFullLoadAudioThrottle(forceFullLoadAudioThrottle.get())
         applyManualShiftSoundOverrideCoupling(manualShiftEnabled.get())
     }
 
@@ -272,6 +269,7 @@ class DriveController(context: Context) {
             },
             transmissionGain = audioMixGains.get().transmission,
             engineHostGain = audioEngine.hostEngineGain(),
+            effectsHostGain = audioEngine.hostEffectsGain(),
             gearShiftGain = audioMixGains.get().gearShift,
             turboGain = audioMixGains.get().turbo,
             backfireGain = audioMixGains.get().backfire,
@@ -290,6 +288,7 @@ class DriveController(context: Context) {
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
             virtualForwardGearCount = virtualForwardGearCount.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
+            forceFullLoadAudioThrottle = forceFullLoadAudioThrottle.get(),
             favoriteCarIds = favoriteCarIds.get(),
             carAudioReady = isSelectedCarAudioReady(selectedProfile.get().id),
             userMessage = userMessage,
@@ -403,6 +402,15 @@ class DriveController(context: Context) {
     }
 
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
+
+    fun setForceFullLoadAudioThrottle(enabled: Boolean) {
+        forceFullLoadAudioThrottle.set(enabled)
+        forceFullLoadAudioThrottleRepository.save(enabled)
+        audioEngine.setForceFullLoadAudioThrottle(enabled)
+        if (!enabled && audioEngine.hostEffectsGain() == 2.0f) {
+            audioEngine.setHostGains(audioEngine.hostEngineGain(), 1.0f)
+        }
+    }
 
     fun setExteriorPureAudio(enabled: Boolean) {
         if (!enabled) {
@@ -518,6 +526,7 @@ class DriveController(context: Context) {
         transmissionSoundSettingsRepository.reset()
         exteriorPureAudioSettingsRepository.reset()
         virtualGearCountRepository.reset()
+        forceFullLoadAudioThrottleRepository.reset()
         carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
@@ -529,6 +538,7 @@ class DriveController(context: Context) {
         transmissionSoundSettings.set(TransmissionSoundSettings())
         exteriorPureAudioSettings.set(ExteriorPureAudioSettings())
         virtualForwardGearCount.set(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
+        forceFullLoadAudioThrottle.set(true)
         simulation.updateVirtualGearCount(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
@@ -541,15 +551,13 @@ class DriveController(context: Context) {
         audioEngine.setExteriorPureGlobalGain(exteriorPureAudioSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(true)
         audioEngine.setTurboAudioEnabled(true)
-        selectedProfile.set(
-            installedProfiles().firstOrNull { it.packGroup == FmodBankProfiles.moddedCarsPackId }
-                ?: installedProfiles().firstOrNull()
-                ?: FmodBankProfiles.default,
-        )
+        selectedProfile.set(defaultInstalledProfile())
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())
         audioEngine.setFmodUpdateRateHz(FmodUpdateRate.DEFAULT_HZ)
         audioEngine.setExteriorPureAudio(false)
+        audioEngine.setForceFullLoadAudioThrottle(true)
+        audioEngine.setHostGains(1.0f, 1.0f)
         simulation.reset()
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
     }
@@ -747,8 +755,8 @@ class DriveController(context: Context) {
             simulation.updateBackfireSettings(backfireSettings.get())
         } else userMessage = UserVisibleMessage(
             id = SystemClock.elapsedRealtime(),
-            title = "Car audio is not installed",
-            detail = "Copy its bank package to Internal storage/Android/data/com.gabrielpc.enginesoundsimulator/files/fmod-bank-import/, then reopen the app.",
+            title = if (BuildConfig.EMBEDDED_BANKS) "Bundled car audio is unavailable" else "Car audio is not installed",
+            detail = if (BuildConfig.EMBEDDED_BANKS) "Reinstall this app to restore its bundled car data." else "Copy its bank package to Internal storage/Android/data/${appContext.packageName}/files/fmod-bank-import/, then reopen the app.",
         )
     }
 
@@ -822,6 +830,27 @@ class DriveController(context: Context) {
 
     private fun installedProfiles(): List<FmodBankProfile> =
         installedProfileCache.get()
+
+    private fun resolveInitialProfile(): FmodBankProfile {
+        refreshInstalledProfileCache()
+        return defaultInstalledProfile()
+    }
+
+    private fun defaultInstalledProfile(): FmodBankProfile {
+        val installed = installedProfiles()
+        val saved = selectedCarRepository.load()
+        if (installed.any { it.id == saved.id }) {
+            return saved
+        }
+
+        FmodBankProfiles.catalogGroup?.let { group ->
+            installed.firstOrNull { it.packGroup == group }?.let { return it }
+        }
+
+        return installed.firstOrNull { it.packGroup == FmodBankProfiles.moddedCarsPackId }
+            ?: installed.firstOrNull()
+            ?: FmodBankProfiles.default
+    }
 
     private fun refreshInstalledProfileCache() {
         installedProfileCache.set(FmodBankProfiles.all.filter(bankResolver::isInstalled))

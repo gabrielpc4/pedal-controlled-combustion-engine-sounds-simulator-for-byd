@@ -226,8 +226,8 @@ internal fun MixerDashboardScreen(
             onToggleCarFavorite = onToggleCarFavorite,
         )
         Spacer(Modifier.height(6.dp))
-        var engineGain by remember { mutableStateOf(1.0f) }
-        var effectsGain by remember { mutableStateOf(2.0f) }
+        var engineGain by remember(state.engineHostGain) { mutableStateOf(state.engineHostGain) }
+        var effectsGain by remember(state.effectsHostGain) { mutableStateOf(state.effectsHostGain) }
         MixerPerspectiveSelector(
             perspective = soundPerspective,
             onPerspectiveSelected = onSoundPerspectiveChange,
@@ -429,6 +429,8 @@ internal fun SettingsScreen(
     onExteriorPureAudioSettingsChange: (ExteriorPureAudioSettings) -> Unit,
     virtualForwardGearCount: Int,
     onVirtualForwardGearCountChange: (Int) -> Unit,
+    forceFullLoadAudioThrottle: Boolean,
+    onForceFullLoadAudioThrottleChange: (Boolean) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -487,6 +489,10 @@ internal fun SettingsScreen(
             VirtualForwardGearCountControl(
                 gearCount = virtualForwardGearCount,
                 onGearCountChange = onVirtualForwardGearCountChange,
+            )
+            ForceFullLoadAudioThrottleControl(
+                enabled = forceFullLoadAudioThrottle,
+                onEnabledChange = onForceFullLoadAudioThrottleChange,
             )
             Button(
                 onClick = onResetAll,
@@ -586,30 +592,14 @@ private fun VirtualForwardGearCountControl(
                 fontWeight = FontWeight.Black,
             )
         }
-        Text(
-            "Global gear-band mapping for every car. At 10 gears, 60 km/h stays anchored in 4th gear.",
-            color = Muted,
-            fontSize = 11.sp,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                "${VirtualGearProfile.MIN_VIRTUAL_GEARS}",
-                color = Muted,
-                fontSize = 11.sp,
-            )
-            Text(
-                "${VirtualGearProfile.MAX_VIRTUAL_GEARS}",
-                color = Muted,
-                fontSize = 11.sp,
-            )
-        }
         Slider(
             value = gearCount.toFloat(),
             onValueChange = { value ->
-                onGearCountChange(value.roundToInt())
+                val selectedCount = value.roundToInt()
+
+                if (selectedCount != gearCount) {
+                    onGearCountChange(selectedCount)
+                }
             },
             valueRange = VirtualGearProfile.MIN_VIRTUAL_GEARS.toFloat()..VirtualGearProfile.MAX_VIRTUAL_GEARS.toFloat(),
             steps = VirtualGearProfile.MAX_VIRTUAL_GEARS - VirtualGearProfile.MIN_VIRTUAL_GEARS - 1,
@@ -619,103 +609,26 @@ private fun VirtualForwardGearCountControl(
 }
 
 @Composable
-private fun VirtualGearDistributionChart(
-    gearCount: Int,
-    modifier: Modifier = Modifier.fillMaxWidth(),
+private fun ForceFullLoadAudioThrottleControl(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
 ) {
-    val boundaries = remember(gearCount) {
-        VirtualGearProfile.physicalBoundarySpeedsKmh(gearCount)
-    }
-    val topSpeedKmh = boundaries.last()
-
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "SPEED BANDS BY GEAR",
-            color = CyanSoft,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Black,
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .border(1.dp, Line, RoundedCornerShape(6.dp)),
-        ) {
-            for (gear in 1..gearCount) {
-                val lowKmh = boundaries[gear - 1]
-                val highKmh = boundaries[gear]
-                val spanKmh = (highKmh - lowKmh).coerceAtLeast(0.1)
-                val spanWeight = (spanKmh / topSpeedKmh).toFloat().coerceAtLeast(0.01f)
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .weight(spanWeight)
-                        .background(virtualGearBandColor(gear))
-                        .border(0.5.dp, Night.copy(alpha = 0.35f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (spanWeight >= 0.06f) {
-                        Text(
-                            text = gear.toString(),
-                            color = Night,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("0 km/h", color = Muted, fontSize = 10.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text("FORCE THROTTLE 1.0", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
             Text(
-                "${topSpeedKmh.roundToInt()} km/h",
+                "Keeps engine and transmission FMOD events at full load so pedal position does not reduce volume. Turn off to let the bank attenuate with throttle.",
                 color = Muted,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (gear in 1..gearCount) {
-                val lowKmh = boundaries[gear - 1]
-                val highKmh = boundaries[gear]
-                Text(
-                    text = "G$gear: ${formatGearBandSpeedKmh(lowKmh)} – ${formatGearBandSpeedKmh(highKmh)} km/h",
-                    color = Muted,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-    }
-}
-
-private fun virtualGearBandColor(gear: Int): Color {
-    val palette = listOf(
-        Color(0xFF00D7E8),
-        Color(0xFF33E0EE),
-        Color(0xFF66E9F3),
-        Color(0xFF99F1F7),
-        Color(0xFF00B8CC),
-        Color(0xFF0099AA),
-        Color(0xFF007A88),
-        Color(0xFF005C66),
-        Color(0xFF003D44),
-        Color(0xFF00262B),
-    )
-    return palette[(gear - 1).coerceIn(0, palette.lastIndex)]
-}
-
-private fun formatGearBandSpeedKmh(speedKmh: Double): String {
-    return if (speedKmh >= 100.0) {
-        speedKmh.roundToInt().toString()
-    } else {
-        String.format(Locale.US, "%.1f", speedKmh)
+        Switch(checked = enabled, onCheckedChange = onEnabledChange)
     }
 }
 
@@ -1082,7 +995,7 @@ private fun CarDropdownSelector(
             CarPreviewThumbnail(
                 profile = FmodBankProfiles.find(selectedCarId),
                 audioAssetResolver = audioAssetResolver,
-                contentDescription = selectedCarName,
+                contentDescription = CarDisplayNameFormatter.format(selectedCarName),
                 isFavorite = isFavorite,
                 onToggleFavorite = onToggleFavorite,
                 modifier = Modifier
@@ -1103,7 +1016,7 @@ private fun CarDropdownSelector(
                 ) {
                     Text("SIMULATED CAR", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text(
-                        text = selectedCarName,
+                        text = CarDisplayNameFormatter.format(selectedCarName),
                         color = White,
                         fontSize = 16.sp,
                         lineHeight = 20.sp,
@@ -1182,10 +1095,10 @@ internal fun CarGridSelectionDialog(
     val pickerPreferences = remember(context) {
         context.getSharedPreferences(AppPreferenceStores.CAR_PICKER_GROUP, android.content.Context.MODE_PRIVATE)
     }
-    val installedProfiles = FmodBankProfiles.all.filter(resolver::isInstalled)
+    val installedProfiles = remember(resolver) { FmodBankProfiles.all.filter(resolver::isInstalled) }
     var selectedGroup by remember {
         mutableStateOf(
-            pickerPreferences.getString(
+            FmodBankProfiles.catalogGroup ?: pickerPreferences.getString(
                 "selected",
                 FmodBankProfiles.moddedCarsPackId,
             )?.takeIf { it == FmodBankProfiles.moddedCarsPackId || it == FmodBankProfiles.originalCarsPackId }
@@ -1215,7 +1128,8 @@ internal fun CarGridSelectionDialog(
                     listOf(
                         FmodBankProfiles.moddedCarsPackId to "MODDED CARS",
                         FmodBankProfiles.originalCarsPackId to "ORIGINAL CARS",
-                    ).forEach { (group, label) ->
+                    ).filter { FmodBankProfiles.catalogGroup == null || it.first == FmodBankProfiles.catalogGroup }
+                        .forEach { (group, label) ->
                         Surface(
                             color = if (selectedGroup == group) Cyan.copy(alpha = 0.24f) else Panel,
                             shape = RoundedCornerShape(6.dp),
@@ -1260,7 +1174,7 @@ internal fun CarGridSelectionDialog(
                             CarPreviewThumbnail(
                                 profile = profile,
                                 audioAssetResolver = resolver,
-                                contentDescription = profile.displayName,
+                                contentDescription = CarDisplayNameFormatter.format(profile.displayName),
                                 isFavorite = profile.id in favoriteCarIds,
                                 onToggleFavorite = { onToggleFavorite(profile.id) },
                                 modifier = Modifier
@@ -1269,7 +1183,7 @@ internal fun CarGridSelectionDialog(
                                     .clip(RoundedCornerShape(6.dp)),
                             )
                             Text(
-                                text = profile.displayName,
+                                text = CarDisplayNameFormatter.format(profile.displayName),
                                 color = White,
                                 fontSize = 15.sp,
                                 lineHeight = 18.sp,

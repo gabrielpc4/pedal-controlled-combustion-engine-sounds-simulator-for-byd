@@ -1,8 +1,52 @@
 # FMOD bank installation
 
-The dashboard APK contains runtime code and previews. Two companion installer APKs carry the bank
-payloads: one for original cars and one for modded cars. Each installer copies its embedded banks
-through the dashboard provider, which validates and atomically publishes them before FMOD sees them.
+## Standalone apps
+
+The `original` and `modded` dashboard variants each contain their complete car catalog and the two
+shared FMOD dependencies. Install one APK to use that catalog offline; both apps can coexist:
+
+| Variant | Application ID | Cars |
+| --- | --- | --- |
+| Original | `com.gabrielpc.enginesoundsimulator.original` | 105 original cars |
+| Modded | `com.gabrielpc.enginesoundsimulator.modded` | 36 modded-catalog cars, including the Skyline R34 |
+
+```sh
+python3 tools/build_fmod_bank_packs.py
+./gradlew :mobile:assembleOriginalRelease :mobile:assembleModdedRelease --no-daemon
+```
+
+The signed APKs are in `mobile/build/outputs/apk/original/release/` and
+`mobile/build/outputs/apk/modded/release/`. Payload preparation checks that the selected catalog
+exactly matches the current archives, verifies every payload checksum, and checks each physics
+profile ID before packaging. The app reads the catalog and selected car's small physics metadata
+at startup. The audio worker unpacks and verifies only that car and the shared dependencies into
+`no_backup/embedded-audio/fmod-banks/`, then opens those three banks in FMOD. Other cars remain
+inside the APK until selected. Previews are separate small assets and never trigger bank extraction.
+Verified extracted banks are reused; an APK update replaces a cached pack when its manifest changes.
+The APK remains on disk alongside the extracted banks for cars used so far, so allow additional
+storage beyond the APK's size. Interrupted preparation leaves no published partial bank.
+
+Each app filters every selection path to its catalog. The picker opens with that catalog selected;
+a saved car outside it is replaced by its first available car (Alfa Romeo 4C for Original, Aston Martin
+DBS for Modded). Shared banks are dependencies and never appear as cars.
+
+## Switching to external banks
+
+Build the same app identity with `-PbankDelivery=external` to omit embedded assets in a later update:
+
+```sh
+./gradlew :mobile:assembleOriginalRelease :mobile:assembleModdedRelease -PbankDelivery=external --no-daemon
+```
+
+Keep the same signing certificate and increase the version code. These variants retain their
+catalog filters, but discover banks through the existing verified external importer. Stage bank
+archives beneath `Android/data/<application-id>/files/fmod-bank-import/`, using the application ID
+above. Previously extracted embedded banks live separately and are not treated as externally
+installed packs. Deliver the external packs when switching modes; a car becomes available once its
+own pack and both shared dependencies have been imported.
+
+The `separate` variant retains the original dashboard identity and exposes both externally installed
+groups. Build it with `:mobile:assembleSeparateRelease`; the file-manager exporter selects this APK.
 
 ## Package groups
 
@@ -25,7 +69,7 @@ committed.
 
 ```sh
 python3 tools/build_fmod_bank_packs.py --force
-./gradlew :mobile:assembleRelease --no-daemon -PcarApk=true
+./gradlew :mobile:assembleSeparateRelease --no-daemon
 python3 tools/export_file_manager_car_packs.py --groups all
 ```
 

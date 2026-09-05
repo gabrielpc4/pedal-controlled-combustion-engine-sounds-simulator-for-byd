@@ -689,11 +689,15 @@ public:
             tractionPulseCount > 0,
             simulationFrameId
         );
-        // Intentional lift-off policy: the authored engine event keeps its full-load
-        // input while the drivetrain RPM falls naturally. This preserves the same
-        // LOAD/COAST layer balance on deceleration as on acceleration; the pedal
-        // still affects physics, but it is not allowed to mute or remap FMOD layers.
-        (void)cleanThrottle;
+        // Intentional lift-off policy when full-load audio throttle is forced: the authored engine
+        // event keeps its full-load input while the drivetrain RPM falls naturally. When the
+        // driver disables that policy, the pedal drives each continuous event's throttle
+        // parameter directly so FMOD can apply its authored load/coast attenuation.
+        if (forceFullLoadAudioThrottle_) {
+            (void)cleanThrottle;
+        } else {
+            applyPedalAudioThrottleLocked(cleanThrottle);
+        }
         if (perspective != perspective_) {
             switchPerspectiveLocked(perspective);
         }
@@ -786,9 +790,12 @@ public:
                 if (!backfireUseOriginal_ && backfireSampleIndex >= 1 && alfaBackfireSamplesLoaded_) {
                     playAlfaBackfireSampleLocked(backfireSampleIndex);
                 } else {
-                    // A disabled global policy means pure bank behavior: the app only sends the
-                    // lift-off edge and lets the authored FMOD event choose its own sources.
-                    setParameterQuietly(selected, "throttle", kBackfireAudioThrottle);
+                    // When full-load audio throttle is forced, backfire receives the authored
+                    // lift-off endpoint so the one-shot stays audible. With the policy disabled,
+                    // the bank keeps control of its own throttle automation.
+                    if (forceFullLoadAudioThrottle_) {
+                        setParameterQuietly(selected, "throttle", kBackfireAudioThrottle);
+                    }
                     startEventLocked(selected);
                 }
             }
@@ -915,6 +922,18 @@ public:
         exteriorPureAudio_ = enabled;
         applySpatialAttributesLocked();
         setListenerLocked();
+    }
+
+    void setForceFullLoadAudioThrottle(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (forceFullLoadAudioThrottle_ == enabled) return;
+        forceFullLoadAudioThrottle_ = enabled;
+        if (!active_) return;
+        if (forceFullLoadAudioThrottle_) {
+            applyAudioThrottlePolicyLocked();
+        } else {
+            applyPedalAudioThrottleLocked(traceThrottle_);
+        }
     }
 
     void setEventOverrides(
@@ -1839,7 +1858,19 @@ private:
         if (!selectedTransmission.empty()) setParameterQuietly(selectedTransmission, "drivetrain_speed", 0.0f);
     }
 
+    void applyPedalAudioThrottleLocked(float throttle) {
+        const std::string selectedEngine = perspectiveEventLocked("engine_int", "engine_ext");
+        const std::string selectedTransmission = perspectiveEventLocked("transmission", "transmission_ext");
+        const float clamped = std::clamp(throttle, 0.0f, 1.0f);
+        if (!selectedEngine.empty()) setParameterQuietly(selectedEngine, "throttle", clamped);
+        if (!selectedTransmission.empty()) setParameterQuietly(selectedTransmission, "throttle", clamped);
+    }
+
     void applyAudioThrottlePolicyLocked() {
+        if (!forceFullLoadAudioThrottle_) {
+            applyPedalAudioThrottleLocked(traceThrottle_);
+            return;
+        }
         // These values are deliberately not the physical pedal. They select each authored
         // event's 0 dB endpoint so the app never adds throttle-dependent attenuation. The engine
         // and transmission stay at their load endpoint. Backfire receives its lift-off endpoint
@@ -2249,7 +2280,7 @@ private:
     std::unordered_map<std::string, bool> mutedEvents_;
     std::unordered_map<std::string, bool> soloEvents_;
     float hostEngineGain_ = 1.0f;
-    float hostEffectsGain_ = 2.0f;
+    float hostEffectsGain_ = 1.0f;
     float transmissionGain_ = 1.0f;
     float gearShiftGain_ = 1.0f;
     float turboGain_ = 1.0f;
@@ -2283,6 +2314,7 @@ private:
     int perspective_ = 0;
     bool active_ = false;
     bool exteriorPureAudio_ = false;
+    bool forceFullLoadAudioThrottle_ = true;
     bool hasTurbo_ = false;
     float idleRpm_ = 1000.0f;
     bool limiterRunning_ = false;
@@ -2577,6 +2609,13 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setExteriorPu
     JNIEnv*, jobject, jboolean enabled
 ) {
     runtime.setExteriorPureAudio(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setForceFullLoadAudioThrottle(
+    JNIEnv*, jobject, jboolean enabled
+) {
+    runtime.setForceFullLoadAudioThrottle(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

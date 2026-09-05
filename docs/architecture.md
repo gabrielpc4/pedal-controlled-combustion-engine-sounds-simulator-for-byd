@@ -115,6 +115,13 @@ event while the source cards remain diagnostic observations of each raw name.
 
 ## Packaging and failure behavior
 
+Standalone variants package one catalog each. Build-time validation checks archives against the
+catalog and verifies payload hashes. Startup discovers only small APK metadata; the audio worker
+materializes the selected car and two common banks on demand. The native bridge still opens just
+those banks. A build-time delivery switch selects the existing external store instead, independently
+of the catalog flavor and application identity. See [bank installation](fmod-bank-installation.md).
+
+
 The dashboard's file-manager importer publishes `byd-fmod-bank-pack-v3` packages from app-specific
 external storage under the selected original or modded group. Common Assetto banks load before the
 selected car bank. Missing or invalid packages fail closed with an import message; a modified or

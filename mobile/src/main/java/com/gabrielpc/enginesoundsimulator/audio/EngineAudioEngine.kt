@@ -53,7 +53,7 @@ class EngineAudioEngine(context: Context) {
     private val rejectedShiftSerial = AtomicLong(0L)
     private val tractionPulseSerial = AtomicLong(0L)
     private val hostEngineGain = AtomicReference(1.0f)
-    private val hostEffectsGain = AtomicReference(2.0f)
+    private val hostEffectsGain = AtomicReference(1.0f)
     private val categoryGains = AtomicReference(AudioMixGains())
     private val nativeEventMutes = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private val nativeEventSolos = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
@@ -71,9 +71,11 @@ class EngineAudioEngine(context: Context) {
     private val turboAudioEnabled = AtomicBoolean(true)
     private val backfireUseOriginal = AtomicBoolean(true)
     private val exteriorPureAudio = AtomicBoolean(false)
+    private val forceFullLoadAudioThrottle = AtomicBoolean(true)
     private val engineSampleDataReady = AtomicBoolean(false)
     private var sentBackfireOnly: Boolean? = null
     private var sentExteriorPureAudio: Boolean? = null
+    private var sentForceFullLoadAudioThrottle: Boolean? = null
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -123,6 +125,8 @@ class EngineAudioEngine(context: Context) {
 
     fun hostEngineGain(): Float = hostEngineGain.get()
 
+    fun hostEffectsGain(): Float = hostEffectsGain.get()
+
     fun engineSampleDataReady(): Boolean = engineSampleDataReady.get()
 
     internal fun setCategoryGains(gains: AudioMixGains) {
@@ -171,6 +175,8 @@ class EngineAudioEngine(context: Context) {
     fun setBackfireUseOriginal(enabled: Boolean) { backfireUseOriginal.set(enabled) }
 
     fun setExteriorPureAudio(enabled: Boolean) { exteriorPureAudio.set(enabled) }
+
+    fun setForceFullLoadAudioThrottle(enabled: Boolean) { forceFullLoadAudioThrottle.set(enabled) }
 
     fun setBackfireAllowedSamples(samples: Set<Int>) {
         val mask = samples.fold(0) { result, sample ->
@@ -293,6 +299,7 @@ class EngineAudioEngine(context: Context) {
         // must be resent rather than assumed to equal the C++ field initializer.
         sentBackfireOnly = null
         sentExteriorPureAudio = null
+        sentForceFullLoadAudioThrottle = null
         running.set(true)
         val runId = generation.incrementAndGet()
         val thread = Thread(
@@ -329,6 +336,7 @@ class EngineAudioEngine(context: Context) {
     private fun controlLoop(runId: Long, profile: FmodBankProfile) {
         val bridge = NativeFmodBankBridge()
         var opened = false
+        var fmodInitialized = false
         var lastTickNanos = System.nanoTime()
         var nextControlNanos = lastTickNanos
         var controlTickId = 0L
@@ -354,8 +362,11 @@ class EngineAudioEngine(context: Context) {
         var diagnosticBankSha256: String? = null
 
         try {
-            org.fmod.FMOD.init(appContext)
             val bankFiles = bankResolver.bankFiles(profile)
+            if (!isCurrent(runId)) return
+
+            org.fmod.FMOD.init(appContext)
+            fmodInitialized = true
             val physics = bankResolver.physics(profile)
             val alfaBackfireDirectory = ensureAlfaBackfireSamples()
             val startupError = bridge.open(
@@ -388,6 +399,9 @@ class EngineAudioEngine(context: Context) {
             val requestedExteriorPureAudio = exteriorPureAudio.get()
             bridge.setExteriorPureAudio(requestedExteriorPureAudio)
             sentExteriorPureAudio = requestedExteriorPureAudio
+            val requestedForceFullLoadAudioThrottle = forceFullLoadAudioThrottle.get()
+            bridge.setForceFullLoadAudioThrottle(requestedForceFullLoadAudioThrottle)
+            sentForceFullLoadAudioThrottle = requestedForceFullLoadAudioThrottle
 
             while (isCurrent(runId)) {
                 val now = System.nanoTime()
@@ -514,6 +528,11 @@ class EngineAudioEngine(context: Context) {
                     bridge.setExteriorPureAudio(requestedExteriorPureAudio)
                     sentExteriorPureAudio = requestedExteriorPureAudio
                 }
+                val requestedForceFullLoadAudioThrottle = forceFullLoadAudioThrottle.get()
+                if (requestedForceFullLoadAudioThrottle != sentForceFullLoadAudioThrottle) {
+                    bridge.setForceFullLoadAudioThrottle(requestedForceFullLoadAudioThrottle)
+                    sentForceFullLoadAudioThrottle = requestedForceFullLoadAudioThrottle
+                }
                 engineSampleDataReady.set(bridge.engineSampleDataReady())
                 val currentLimiterPulse = limiterPulseSerial.get()
                 val currentBackfirePulse = backfirePulseSerial.get()
@@ -602,14 +621,18 @@ class EngineAudioEngine(context: Context) {
             }
         } catch (throwable: Throwable) {
             Log.e(TAG, "FMOD bank control stopped for ${profile.id}", throwable)
-            reportLoadFailure(profile.id, throwable.message ?: throwable::class.java.simpleName)
+            if (isCurrent(runId)) {
+                reportLoadFailure(profile.id, throwable.message ?: throwable::class.java.simpleName)
+            }
         } finally {
-            loadedBankProfileId.set(null)
-            engineSampleDataReady.set(false)
-            stopSnapshotThread()
+            if (controlThread.get() === Thread.currentThread()) {
+                loadedBankProfileId.set(null)
+                engineSampleDataReady.set(false)
+                stopSnapshotThread()
+                nativeSources.set(emptyList())
+            }
             if (opened) bridge.close()
-            runCatching { org.fmod.FMOD.close() }
-            nativeSources.set(emptyList())
+            if (fmodInitialized) runCatching { org.fmod.FMOD.close() }
             controlThread.compareAndSet(Thread.currentThread(), null)
             if (generation.get() == runId) {
                 running.set(false)

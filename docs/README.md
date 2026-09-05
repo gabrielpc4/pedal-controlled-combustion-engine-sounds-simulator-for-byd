@@ -6,19 +6,16 @@ engine and drivetrain sound. The app never controls the vehicle.
 
 ## Current product boundary
 
-The current catalog contains 111 usable official cars sourced from
-`assetto_corsa_installation/content/cars`, including the Nissan Skyline GT-R R34, plus two shared
-original-bank dependencies. The separate `modded_car_packs` group contains 35 user-supplied cars
-discovered under `modded_cars`. Both groups can be installed
-independently and the dashboard only exposes profiles whose verified package is actually
-installed. The original and modded inventories are independent evidence sets: a limitation in one
-must never cause a fallback to a similarly named car in the other.
+The current catalog contains 105 original cars sourced from
+`assetto_corsa_installation/content/cars` and 36 modded-catalog cars. The Skyline GT-R R34 uses its
+original installation bank but belongs to the Modded catalog. Two shared original banks are
+runtime dependencies, not selectable cars.
 
-The dashboard APK contains the runtime and previews. Car-bank archives can be copied through the
-BYD file manager into the dashboard's app-specific external-storage staging folder; the dashboard
-then verifies and atomically imports them into private storage itself. Two companion installer APKs
-are also available, one embedding the original group and one embedding the modded group. See [FMOD bank
-installation](fmod-bank-installation.md).
+Original and Modded are separate standalone apps, each containing its full catalog and shared banks.
+Only the selected car's banks are extracted and loaded; the picker reads small bundled previews.
+The external-bank delivery mode remains available as a build option with the same app identities,
+and the `separate` variant retains the original two-group dashboard. See
+[FMOD bank installation](fmod-bank-installation.md) for builds, storage, and mode switching.
 
 ## Source of truth
 
@@ -54,20 +51,17 @@ continuous presentation speed instead of resetting the dashboard to zero.
 ## Build and release
 
 The local FMOD 2.03.14 SDK is supplied through `fmod.sdk.dir`. Build the bank packages first, then
-assemble the signed dashboard and export the file-manager bundles. The dashboard build number is
+assemble the two signed standalone dashboards. The dashboard build number is
 incremented on an APK build. Generated packages, bundles, and APKs are ignored by Git.
 
 ```sh
-python3 tools/build_fmod_bank_packs.py --force
-./gradlew :mobile:assembleRelease --no-daemon -PcarApk=true
-python3 tools/export_file_manager_car_packs.py --groups all
+python3 tools/build_fmod_bank_packs.py
+./gradlew :mobile:assembleOriginalRelease :mobile:assembleModdedRelease --no-daemon
 ```
 
-Install the dashboard APK and, when preferred, the original and/or modded installer APK through the vehicle's
-enabled USB APK route. Then copy one `fmod-bank-import` batch at a time from
-`AUDIO_PACKS/*/BATCH_*` to the exact path documented inside its
-`COPY_TO_BYD_INTERNAL_STORAGE.txt`, and open the dashboard while parked. The dashboard imports and
-deletes verified staging archives automatically. The mixer is diagnostic; temporary mute/solo
+Install the desired Original or Modded APK through the vehicle's enabled USB APK route.
+
+The mixer is diagnostic; temporary mute/solo
 controls reset when the car changes or the app starts. Per-car transmission, gear-shift, and turbo
 trims remain user preferences until reset, while Settings also has a global transmission multiplier
 that defaults to 0.5x and is applied before the per-car transmission trim.

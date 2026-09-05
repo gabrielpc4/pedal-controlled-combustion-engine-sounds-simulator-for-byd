@@ -1,6 +1,8 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
 import android.content.Context
+import android.content.res.AssetManager
+import com.gabrielpc.enginesoundsimulator.BuildConfig
 import android.util.JsonReader
 import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysics
 import com.gabrielpc.enginesoundsimulator.simulation.AssettoPhysicsLoader
@@ -9,6 +11,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.io.InterruptedIOException
+import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 
@@ -162,10 +166,25 @@ internal class FmodBankStore(
         val groupDirectory = File(packsDirectory, group).apply { mkdirs() }
         val incoming = File.createTempFile(".$packId-", ".bydbank", groupDirectory)
         try {
-            FileOutputStream(incoming).use { output -> source.copyTo(output, COPY_BUFFER_BYTES) }
+            FileOutputStream(incoming).use { output -> copyInterruptibly(source, output) }
             installArchive(group, packId, incoming)
         } finally {
             incoming.delete()
+        }
+    }
+
+    @Synchronized
+    fun prepareEmbeddedPack(group: String, packId: String, assets: AssetManager, assetRoot: String) {
+        val expected = assets.open("$assetRoot/$MANIFEST_NAME").use(::readManifest)
+        require(expected.group == group && expected.id == packId) { "Embedded bank identity mismatch" }
+        val directory = installedDirectory(group, packId)
+        val matches = directory != null && runCatching {
+            File(directory, MANIFEST_NAME).inputStream().use(::readManifest) == expected &&
+                expected.files.all { safeDestination(directory, it.path).length() == it.bytes }
+        }.getOrDefault(false)
+
+        if (!matches) {
+            assets.open("$assetRoot/payload.bydbank").use { install(group, packId, it) }
         }
     }
 
@@ -189,7 +208,7 @@ internal class FmodBankStore(
                     val destination = safeDestination(stage, entry.path)
                     destination.parentFile?.mkdirs()
                     zip.getInputStream(sourceEntry).use { source ->
-                        FileOutputStream(destination).use { output -> source.copyTo(output, COPY_BUFFER_BYTES) }
+                        FileOutputStream(destination).use { output -> copyInterruptibly(source, output) }
                     }
                     require(destination.length() == entry.bytes) { "FMOD bank file length differs: ${entry.path}" }
                     require(sha256(destination) == entry.sha256) { "FMOD bank checksum differs: ${entry.path}" }
@@ -198,7 +217,7 @@ internal class FmodBankStore(
                     "FMOD bank package must contain exactly one bank"
                 }
                 zip.getInputStream(manifestEntry).use { source ->
-                    FileOutputStream(File(stage, MANIFEST_NAME)).use { output -> source.copyTo(output, COPY_BUFFER_BYTES) }
+                    FileOutputStream(File(stage, MANIFEST_NAME)).use { output -> copyInterruptibly(source, output) }
                 }
             }
 
@@ -299,11 +318,22 @@ internal class FmodBankStore(
         path.isNotBlank() && !path.startsWith('/') && !path.contains("\\") &&
             path.split('/').all { it.isNotBlank() && it != "." && it != ".." }
 
+    private fun copyInterruptibly(source: InputStream, output: OutputStream) {
+        val buffer = ByteArray(COPY_BUFFER_BYTES)
+        while (true) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Bank preparation cancelled")
+            val count = source.read(buffer)
+            if (count < 0) break
+            output.write(buffer, 0, count)
+        }
+    }
+
     private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         FileInputStream(file).use { input ->
             val buffer = ByteArray(COPY_BUFFER_BYTES)
             while (true) {
+                if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Bank verification cancelled")
                 val count = input.read(buffer)
                 if (count < 0) break
                 digest.update(buffer, 0, count)
@@ -341,40 +371,54 @@ internal class FmodBankResolver(context: Context) {
         stagedImportDirectory = appContext.getExternalFilesDir(null)?.resolve(STAGED_IMPORT_DIRECTORY_NAME),
     )
 
-    fun importStagedPacks(): FmodBankImportResult = store.importStagedPacks()
+    private val embedded = if (BuildConfig.EMBEDDED_BANKS) EmbeddedFmodBanks(appContext) else null
 
-    fun hasStagedPacks(): Boolean = store.hasStagedPacks()
+    fun importStagedPacks(): FmodBankImportResult = if (embedded == null) {
+        store.importStagedPacks()
+    } else FmodBankImportResult(0, 0, emptyList())
 
-    fun bankFiles(profile: FmodBankProfile): FmodBankFiles = FmodBankFiles(
-        commonStrings = store.sharedBankFile(FmodBankProfiles.commonStringsPackId),
-        common = store.sharedBankFile(FmodBankProfiles.commonPackId),
-        car = store.bankFile(profile),
-        physics = store.physicsFile(profile),
-    )
+    fun hasStagedPacks(): Boolean = embedded == null && store.hasStagedPacks()
+
+    fun bankFiles(profile: FmodBankProfile): FmodBankFiles {
+        require(profile in FmodBankProfiles.all) { "Car is outside this app catalog" }
+
+        return embedded?.bankFiles(profile) ?: FmodBankFiles(
+            commonStrings = store.sharedBankFile(FmodBankProfiles.commonStringsPackId),
+            common = store.sharedBankFile(FmodBankProfiles.commonPackId),
+            car = store.bankFile(profile),
+            physics = store.physicsFile(profile),
+        )
+    }
 
     /**
      * A package is only selectable when its immutable physics contract belongs to the same
      * profile as its bank.  File presence alone is not sufficient: accepting a different car's
      * valid `physics.json` here would make the selected bank run with unrelated drivetrain data.
      */
-    fun isInstalled(profile: FmodBankProfile): Boolean = runCatching {
-        store.bankFile(profile)
-        store.sharedBankFile(FmodBankProfiles.commonStringsPackId)
-        store.sharedBankFile(FmodBankProfiles.commonPackId)
-        physics(profile)
-    }.isSuccess
+    fun isInstalled(profile: FmodBankProfile): Boolean {
+        if (profile !in FmodBankProfiles.all) return false
+        embedded?.let { return it.contains(profile) }
+
+        return runCatching {
+            store.bankFile(profile)
+            store.sharedBankFile(FmodBankProfiles.commonStringsPackId)
+            store.sharedBankFile(FmodBankProfiles.commonPackId)
+            physics(profile)
+        }.isSuccess
+    }
 
     fun physics(profile: FmodBankProfile): AssettoPhysics =
-        AssettoPhysicsLoader.load(store.physicsFile(profile)).also { physics ->
+        (embedded?.physics(profile) ?: AssettoPhysicsLoader.load(store.physicsFile(profile))).also { physics ->
             require(physics.profileId == profile.id) {
                 "Installed ${profile.displayName} package has physics for ${physics.profileId}, not ${profile.id}."
             }
         }
 
-    fun previewFile(profile: FmodBankProfile): File? = store.previewFile(profile)
+    fun previewFile(profile: FmodBankProfile): File? = if (embedded == null) store.previewFile(profile) else null
 
     /** Installed bank previews win. Only official cars may fall back to APK-bundled artwork. */
     fun openCarPreviewInput(profile: FmodBankProfile): InputStream? {
+        embedded?.let { return it.openPreview(profile) }
         previewFile(profile)?.let { return FileInputStream(it) }
         if (profile.packGroup != FmodBankProfiles.originalCarsPackId) {
             return null

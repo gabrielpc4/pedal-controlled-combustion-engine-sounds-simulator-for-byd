@@ -162,8 +162,10 @@ internal data class AssettoAeroSurfaceSpec(
 internal data class AssettoCurvePoint(val x: Double, val y: Double)
 
 internal object AssettoPhysicsLoader {
-    fun load(file: File): AssettoPhysics {
-        val root = file.inputStream().use { input ->
+    fun load(file: File): AssettoPhysics = load(file.inputStream())
+
+    fun load(input: java.io.InputStream): AssettoPhysics {
+        val root = input.use { input ->
             JsonReader(InputStreamReader(input, Charsets.UTF_8)).use(::readValue).asObject()
         }
         require(root.string("schema") == "byd-assetto-physics-v1") { "Unsupported Assetto physics format" }

@@ -24,7 +24,7 @@
         android:usesCleartextTraffic="false">
         <provider
             android:name=".audio.FmodBankContentProvider"
-            android:authorities="com.gabrielpc.enginesoundsimulator.fmodbanks"
+            android:authorities="${applicationId}.fmodbanks"
             android:exported="true"
             android:grantUriPermissions="false" />
         <activity

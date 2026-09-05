@@ -216,6 +216,7 @@ class MainActivity : ComponentActivity() {
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onMediaShiftButton = controller::handleMediaShiftButton,
                         onVirtualForwardGearCountChange = controller::setVirtualForwardGearCount,
+                        onForceFullLoadAudioThrottleChange = controller::setForceFullLoadAudioThrottle,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
@@ -311,6 +312,7 @@ private fun MotorSoundDashboard(
     onToggleManualShiftMode: () -> Unit,
     onMediaShiftButton: (Int) -> Boolean,
     onVirtualForwardGearCountChange: (Int) -> Unit,
+    onForceFullLoadAudioThrottleChange: (Boolean) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
@@ -547,6 +549,8 @@ private fun MotorSoundDashboard(
                             onExteriorPureAudioSettingsChange = onExteriorPureAudioSettingsChange,
                             virtualForwardGearCount = state.virtualForwardGearCount,
                             onVirtualForwardGearCountChange = onVirtualForwardGearCountChange,
+                            forceFullLoadAudioThrottle = state.forceFullLoadAudioThrottle,
+                            onForceFullLoadAudioThrottleChange = onForceFullLoadAudioThrottleChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                     }
@@ -1115,7 +1119,11 @@ private fun DashboardEffectControls(
                     val selected = kotlin.math.abs(rowGain - preset.gain) < 0.001f
                     DashboardGainButton(preset, selected, if (selected) Night else Cyan, Line) {
                         when (row.second) {
-                            EffectSoundKind.TRANSMISSION -> if (row.first == "ENGINE") onHostGains(preset.gain, 2.0f) else onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
+                            EffectSoundKind.TRANSMISSION -> if (row.first == "ENGINE") {
+                                onHostGains(preset.gain, state.effectsHostGain)
+                            } else {
+                                onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
+                            }
                             EffectSoundKind.POPS_AND_BANGS -> onCategoryGains(state.transmissionGain, state.gearShiftGain, state.turboGain, preset.gain)
                             EffectSoundKind.SHIFT -> onCategoryGains(state.transmissionGain, preset.gain, state.turboGain, state.backfireGain)
                             EffectSoundKind.TURBO -> onCategoryGains(state.transmissionGain, state.gearShiftGain, preset.gain, state.backfireGain)
@@ -1505,7 +1513,7 @@ private fun CarStage(
                 .padding(start = 28.dp, top = 26.dp),
         ) {
             Text(
-                text = state.selectedCarName.uppercase(),
+                text = CarDisplayNameFormatter.format(state.selectedCarName).uppercase(),
                 color = White,
                 fontSize = 34.sp,
                 lineHeight = 42.sp,
@@ -1554,7 +1562,7 @@ private fun CarStage(
             ) {
                 Image(
                     bitmap = preview,
-                    contentDescription = state.selectedCarName,
+                    contentDescription = CarDisplayNameFormatter.format(state.selectedCarName),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1582,7 +1590,7 @@ private fun CarStage(
             ) {
                 Image(
                     painter = painterResource(R.drawable.apex_v10_car),
-                    contentDescription = state.selectedCarName,
+                    contentDescription = CarDisplayNameFormatter.format(state.selectedCarName),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )

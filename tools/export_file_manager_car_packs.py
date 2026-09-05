@@ -17,7 +17,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "fmod_bank_packs"
 OUTPUT = ROOT / "manual_car_pack_bundles"
-RELEASE_APK_DIRECTORY = ROOT / "mobile" / "build" / "outputs" / "apk" / "release"
+RELEASE_APK_DIRECTORY = ROOT / "mobile" / "build" / "outputs" / "apk" / "separate" / "release"
+STANDALONE_RELEASE_DIRECTORIES = {
+    "original": ROOT / "mobile" / "build" / "outputs" / "apk" / "original" / "release",
+    "modded": ROOT / "mobile" / "build" / "outputs" / "apk" / "modded" / "release",
+}
+STANDALONE_APPLICATION_IDS = {
+    "original": "com.gabrielpc.enginesoundsimulator.original",
+    "modded": "com.gabrielpc.enginesoundsimulator.modded",
+}
 ORIGINAL_GROUP = "original_cars_pack"
 MODDED_GROUP = "modded_car_packs"
 ANDROID_IMPORT_PATH = (
@@ -167,7 +175,7 @@ def resolve_dashboard_apk(configured_path: Path | None) -> Path:
     candidates = sorted(RELEASE_APK_DIRECTORY.glob("*.apk"), key=lambda path: path.stat().st_mtime)
     if not candidates:
         raise RuntimeError(
-            "No release APK found. Run ./gradlew :mobile:assembleRelease -PcarApk=true first, "
+            "No release APK found. Run ./gradlew :mobile:assembleSeparateRelease first, "
             "or pass --dashboard-apk PATH."
         )
     return candidates[-1]
@@ -204,6 +212,43 @@ def copy_dashboard_apk(apk: Path) -> Path:
     return copied_apk
 
 
+def copy_standalone_apks() -> list[Path]:
+    destination = OUTPUT / "STANDALONE_APKS"
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    for flavor, directory in STANDALONE_RELEASE_DIRECTORIES.items():
+        candidates = sorted(directory.glob("*.apk"), key=lambda path: path.stat().st_mtime)
+        if not candidates:
+            raise RuntimeError(
+                f"No {flavor} release APK found. Run "
+                f"./gradlew :mobile:assemble{flavor.capitalize()}Release first."
+            )
+        apk = candidates[-1]
+        copied_apk = destination / apk.name
+        shutil.copy2(apk, copied_apk)
+        copied.append(copied_apk)
+    (destination / "INSTALL_STANDALONE_APKS.txt").write_text(
+        "\n".join(
+            [
+                "ENGINE SOUNDS STANDALONE APKS",
+                "",
+                "Install only one catalog app, or install both if you want both catalogs.",
+                "Each APK is self-contained and does not require file-manager bank imports.",
+                "",
+                f"Original cars: {STANDALONE_APPLICATION_IDS['original']}",
+                f"Modded cars: {STANDALONE_APPLICATION_IDS['modded']}",
+                "",
+                "Use the BYD third-party-app installation route enabled on your vehicle.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return copied
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -223,6 +268,11 @@ def main() -> int:
         type=Path,
         help="Release APK to include; defaults to the newest mobile release APK",
     )
+    parser.add_argument(
+        "--include-standalone-apks",
+        action="store_true",
+        help="Also copy Original and Modded standalone release APKs into STANDALONE_APKS/",
+    )
     arguments = parser.parse_args()
     if arguments.batch_size_mib <= 0:
         parser.error("--batch-size-mib must be positive")
@@ -237,6 +287,9 @@ def main() -> int:
         if obsolete_directory.exists():
             shutil.rmtree(obsolete_directory)
     dashboard_apk = copy_dashboard_apk(resolve_dashboard_apk(arguments.dashboard_apk))
+    standalone_apks: list[Path] = []
+    if arguments.include_standalone_apks:
+        standalone_apks = copy_standalone_apks()
     groups = {
         "all": (ORIGINAL_GROUP, MODDED_GROUP),
         "original": (ORIGINAL_GROUP,),
@@ -250,10 +303,19 @@ def main() -> int:
         "AUDIO_PACKS/ORIGINAL_CARS or AUDIO_PACKS/MODDED_CARS, begin at BATCH_01, and follow the "
         "COPY_TO_BYD_INTERNAL_STORAGE.txt in every batch. To install both catalogs, complete both "
         "sets of batches. Each batch is deliberately capped so it can be deleted after import "
-        "instead of requiring the whole catalog twice on the BYD storage volume.\n",
+        "instead of requiring the whole catalog twice on the BYD storage volume."
+        + (
+            " STANDALONE_APKS/ contains self-contained Original and Modded dashboards when "
+            "--include-standalone-apks was used."
+            if standalone_apks
+            else ""
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(f"Prepared dashboard APK: {dashboard_apk}")
+    for copied_apk in standalone_apks:
+        print(f"Prepared standalone APK: {copied_apk}")
     for destination, batch_count, pack_count, total_bytes in results:
         print(
             f"Prepared {destination}: {batch_count} batches, {pack_count} archives, "

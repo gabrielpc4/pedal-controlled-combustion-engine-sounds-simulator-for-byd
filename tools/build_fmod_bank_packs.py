@@ -330,7 +330,7 @@ def archive_matches_source(source: CarSource, physics: dict[str, object] | None,
             bank_archive_path = f"bank/{source.bank_path.name}"
             if file_entries.get(bank_archive_path, {}).get("sha256") != sha256(source.bank_path):
                 return False
-            if source.group == MODDED_GROUP:
+            if source.source_directory.is_relative_to(MODDED_CARS):
                 guids_path = source.source_directory / "sfx" / "GUIDs.txt"
                 if not guids_path.is_file() or file_entries.get("bank/GUIDs.txt", {}).get("sha256") != sha256(guids_path):
                     return False
@@ -376,7 +376,7 @@ def build_archive(source: CarSource, physics: dict[str, object] | None, force: b
         bank_copy.parent.mkdir(parents=True)
         shutil.copy2(source.bank_path, bank_copy)
         files = [file_entry(bank_copy, f"bank/{bank_copy.name}")]
-        if source.group == MODDED_GROUP:
+        if source.source_directory.is_relative_to(MODDED_CARS):
             # Modded banks do not share the original Assetto `common.strings.bank`.
             # The native bridge uses this immutable source-side GUID map to resolve
             # each EventDescription by ID when FMOD cannot return its string path.

@@ -1,5 +1,7 @@
 package com.gabrielpc.enginesoundsimulator.audio
 
+import com.gabrielpc.enginesoundsimulator.BuildConfig
+
 /** A selectable car is metadata only; all engine and gearbox values come from its physics pack. */
 internal data class FmodBankProfile(
     val id: String,
@@ -16,10 +18,12 @@ internal object FmodBankProfiles {
     const val commonStringsPackId = "assetto-common-strings"
     const val commonPackId = "assetto-common"
 
-    val default = profile("alfa-romeo-4c", "Alfa Romeo 4C")
+    val catalogGroup: String? = BuildConfig.CAR_CATALOG_GROUP.takeIf(String::isNotEmpty)
+    val default: FmodBankProfile get() = all.first()
+
 
     val all: List<FmodBankProfile> = listOf(
-        default,
+        profile("alfa-romeo-4c", "Alfa Romeo 4C"),
         profile("assetto-alfa-romeo-giulietta-qv", "Alfa Romeo Giulietta Qv"),
         profile("assetto-alfa-romeo-giulietta-qv-le", "Alfa Romeo Giulietta Qv Le"),
         profile("assetto-audi-r8-lms-2016", "Audi R8 LMS 2016"),
@@ -30,8 +34,6 @@ internal object FmodBankProfiles {
         profile("assetto-bmw-m3-gt2", "Bmw M3 Gt2"),
         profile("assetto-bmw-m4", "BMW M4"),
         profile("assetto-bmw-z4-gt3", "Bmw Z4 Gt3"),
-        profile("assetto-common", "Assetto Corsa shared audio"),
-        profile("assetto-common-strings", "Assetto Corsa event strings"),
         profile("assetto-corvette-c7-stingray", "Chevrolet Corvette C7 Stingray"),
         profile("assetto-ferrari-458-gt2", "Ferrari 458 GT2"),
         profile("assetto-ferrari-458-s3", "Ferrari 458 S3"),
@@ -162,7 +164,7 @@ internal object FmodBankProfiles {
         profile("modded-porsche-911-turbo-s", "Porsche 911 Turbo S", moddedCarsPackId),
         profile("modded-porsche-carrera-gt-rs", "Porsche Carrera GT", moddedCarsPackId),
         profile("modded-toyota-supra-wangan", "Toyota Supra", moddedCarsPackId),
-    )
+    ).filter { catalogGroup == null || it.packGroup == catalogGroup }
 
     fun find(id: String?): FmodBankProfile = all.firstOrNull { it.id == id } ?: default
 

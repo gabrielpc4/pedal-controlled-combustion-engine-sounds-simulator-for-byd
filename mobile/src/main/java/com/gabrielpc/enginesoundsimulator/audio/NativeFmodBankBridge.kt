@@ -83,6 +83,9 @@ internal class NativeFmodBankBridge {
     /** Neutralizes exterior 3D distance/pan while preserving authored Studio events and DSP. */
     external fun setExteriorPureAudio(enabled: Boolean)
 
+    /** When enabled, continuous FMOD events stay at their authored full-load throttle endpoint. */
+    external fun setForceFullLoadAudioThrottle(enabled: Boolean)
+
     external fun setEventOverrides(mutedEvents: Array<String>, soloEvents: Array<String>)
 
     /** True once the car bank's sample data has finished loading into memory. */
