@@ -75,6 +75,24 @@ internal class QuantizedPresentationSpeedEstimator {
         opposingTelemetryDirection = 0.0
     }
 
+    fun seed(
+        initialPresentationSpeedKmh: Double,
+        initialVelocityKmhPerSecond: Double = 0.0,
+    ) {
+        reset()
+        val speed = initialPresentationSpeedKmh.coerceAtLeast(0.0)
+        if (speed <= 0.0) {
+            return
+        }
+
+        estimateKmh = speed
+        predictedKmh = speed
+        estimateVelocityKmhPerSecond = initialVelocityKmhPerSecond
+        observedVelocityKmhPerSecond = initialVelocityKmhPerSecond
+        previousMeasurementKmh = floor(speed)
+        initialized = true
+    }
+
     fun update(
         measurementKmh: Double,
         throttle: Double,

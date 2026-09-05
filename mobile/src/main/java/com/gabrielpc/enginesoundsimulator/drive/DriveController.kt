@@ -30,6 +30,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.DriverInput
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
+import com.gabrielpc.enginesoundsimulator.simulation.SimulationMotionContinuity
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile
 import com.gabrielpc.enginesoundsimulator.simulation.resolveDriveInput
@@ -295,7 +296,7 @@ class DriveController(context: Context) {
             autoblipEnabled = autoblipEnabled.get(),
             virtualForwardGearCount = virtualForwardGearCount.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
-            carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
+            carAudioReady = isSelectedCarAudioReady(selectedProfile.get().id),
             userMessage = userMessage,
         )
     }
@@ -679,8 +680,18 @@ class DriveController(context: Context) {
             // not part of the authored mix or a persistent vehicle preference.
             setBackfireOnly(false)
             audioEngine.setCategoryGains(audioMixGains.get())
-            loadPhysics(profile)
-            simulation.reset()
+            val telemetry = vehicleReader.snapshot()
+            val driveInput = resolveDriveInput(
+                mode = inputMode.get(),
+                telemetry = telemetry,
+                simulatedPedalThrottle = simulatedPedals.get().throttle,
+                simulatedPedalBrake = simulatedPedals.get().brake,
+            )
+            val preserveMotion = simulation.captureMotionContinuity(
+                usesSimulatedPedals = driveInput.usesSimulatedPedals,
+                transmissionPosition = transmissionPosition.get(),
+            )
+            loadPhysics(profile, preserveMotion)
             audioEngine.setSoundProgram(
                 profile = profile,
                 perspective = selectedPerspective.get(),
@@ -689,11 +700,14 @@ class DriveController(context: Context) {
         }
     }
 
-    private fun loadPhysics(profile: FmodBankProfile) {
+    private fun loadPhysics(
+        profile: FmodBankProfile,
+        preserveMotion: SimulationMotionContinuity? = null,
+    ) {
         val physics = runCatching { bankResolver.physics(profile) }.getOrNull()
         activePhysics.set(physics)
         if (physics != null) {
-            simulation.updateAssettoPhysics(physics)
+            simulation.updateAssettoPhysics(physics, preserveMotion)
             simulation.updateBackfireSettings(backfireSettings.get())
         } else userMessage = UserVisibleMessage(
             id = SystemClock.elapsedRealtime(),
@@ -758,6 +772,10 @@ class DriveController(context: Context) {
                 UserVisibleMessageSeverity.ERROR
             },
         )
+    }
+
+    private fun isSelectedCarAudioReady(profileId: String): Boolean {
+        return audioEngine.loadedBankProfileId() == profileId && audioEngine.engineSampleDataReady()
     }
 
     private fun installedProfiles(): List<FmodBankProfile> =
@@ -940,7 +958,7 @@ class DriveController(context: Context) {
                 tachometerScale = tachometerScale.get(),
                 canvasAspectRatio = canvasAspectRatio.get(),
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
-                carAudioReady = audioEngine.loadedBankProfileId() == selected.id,
+                carAudioReady = isSelectedCarAudioReady(selected.id),
                 userMessage = userMessage,
             )
             nextUiSnapshotNanos = frameTimestampNanos + UI_SNAPSHOT_PERIOD_NANOS

@@ -71,6 +71,7 @@ class EngineAudioEngine(context: Context) {
     private val turboAudioEnabled = AtomicBoolean(true)
     private val backfireUseOriginal = AtomicBoolean(true)
     private val exteriorPureAudio = AtomicBoolean(false)
+    private val engineSampleDataReady = AtomicBoolean(false)
     private var sentBackfireOnly: Boolean? = null
     private var sentExteriorPureAudio: Boolean? = null
 
@@ -121,6 +122,8 @@ class EngineAudioEngine(context: Context) {
     }
 
     fun hostEngineGain(): Float = hostEngineGain.get()
+
+    fun engineSampleDataReady(): Boolean = engineSampleDataReady.get()
 
     internal fun setCategoryGains(gains: AudioMixGains) {
         categoryGains.set(gains)
@@ -259,6 +262,7 @@ class EngineAudioEngine(context: Context) {
             // bank files rather than continue with old native file handles.
 
             loadedBankProfileId.set(null)
+            engineSampleDataReady.set(false)
             nativeSources.set(emptyList())
             clearPendingShiftPulses()
             if (running.get() || controlThread.get()?.isAlive == true) {
@@ -315,6 +319,7 @@ class EngineAudioEngine(context: Context) {
         if (thread != null && thread !== Thread.currentThread()) joinThread(thread, CONTROL_JOIN_TIMEOUT_MS)
         if (thread == null || !thread.isAlive) controlThread.compareAndSet(thread, null)
             loadedBankProfileId.set(null)
+            engineSampleDataReady.set(false)
             nativeSources.set(emptyList())
             nativeEventMutes.clear()
             nativeEventSolos.clear()
@@ -372,6 +377,7 @@ class EngineAudioEngine(context: Context) {
             }
             opened = true
             loadedBankProfileId.set(profile.id)
+            engineSampleDataReady.set(bridge.engineSampleDataReady())
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             lastTickNanos = System.nanoTime()
             nextControlNanos = lastTickNanos
@@ -508,6 +514,7 @@ class EngineAudioEngine(context: Context) {
                     bridge.setExteriorPureAudio(requestedExteriorPureAudio)
                     sentExteriorPureAudio = requestedExteriorPureAudio
                 }
+                engineSampleDataReady.set(bridge.engineSampleDataReady())
                 val currentLimiterPulse = limiterPulseSerial.get()
                 val currentBackfirePulse = backfirePulseSerial.get()
                 val currentRejectedShift = rejectedShiftSerial.get()
@@ -598,6 +605,7 @@ class EngineAudioEngine(context: Context) {
             reportLoadFailure(profile.id, throwable.message ?: throwable::class.java.simpleName)
         } finally {
             loadedBankProfileId.set(null)
+            engineSampleDataReady.set(false)
             stopSnapshotThread()
             if (opened) bridge.close()
             runCatching { org.fmod.FMOD.close() }

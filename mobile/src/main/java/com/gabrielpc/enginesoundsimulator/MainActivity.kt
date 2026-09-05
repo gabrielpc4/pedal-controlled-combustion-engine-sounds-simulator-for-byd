@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -1286,6 +1287,7 @@ private fun DashboardOverrideSwitch(override: Boolean, onToggle: () -> Unit) {
 
 private const val CLASSIC_DRIVE_CONTROL_SCALE = 0.7f
 private const val MIXER_DRIVE_CONTROL_SCALE = 0.60f
+private const val CAR_ENGINE_AUDIO_LOAD_TIMEOUT_MS = 15_000L
 
 private fun Float.scaledDp(base: Int): Dp = (base * this).dp
 
@@ -1524,6 +1526,42 @@ internal fun MixerDriveControls(
 }
 
 @Composable
+private fun CarPreviewLoadingOverlay(
+    visible: Boolean,
+    onOpenCarPicker: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) {
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.62f))
+            .clickable(onClick = onOpenCarPicker),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            CircularProgressIndicator(
+                color = Cyan,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(36.dp),
+            )
+            Text(
+                text = "LOADING ENGINE",
+                color = CyanSoft,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.1.sp,
+            )
+        }
+    }
+}
+
+@Composable
 private fun CarStage(
     state: DriveSnapshot,
     onPreviousCar: () -> Unit,
@@ -1560,6 +1598,23 @@ private fun CarStage(
         }
 
         val context = LocalContext.current
+        var loadingTimedOut by remember(state.selectedCarId) { mutableStateOf(false) }
+        LaunchedEffect(state.selectedCarId, state.carAudioReady) {
+            if (state.carAudioReady) {
+                loadingTimedOut = false
+                return@LaunchedEffect
+            }
+
+            loadingTimedOut = false
+            delay(CAR_ENGINE_AUDIO_LOAD_TIMEOUT_MS)
+            loadingTimedOut = true
+        }
+        val showCarAudioLoading = !state.carAudioReady && !loadingTimedOut
+        val carPreviewModifier = Modifier
+            .fillMaxWidth(0.88f)
+            .fillMaxHeight(0.65f)
+            .align(Alignment.Center)
+            .offset(y = (-46).dp)
         val audioResolver = remember(context) { FmodBankResolver(context.applicationContext) }
         val installedPreviewPath = audioResolver.previewFile(selectedProfile)?.path
         val preview = remember(state.selectedCarId, installedPreviewPath) {
@@ -1570,29 +1625,42 @@ private fun CarStage(
             }.getOrNull()
         }
         if (preview != null) {
-            Image(
-                bitmap = preview,
-                contentDescription = state.selectedCarName,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxWidth(0.88f)
-                    .fillMaxHeight(0.65f)
-                    .align(Alignment.Center)
-                    .offset(y = (-46).dp)
-                    .clickable { carPickerExpanded = true },
-            )
+            Box(
+                modifier = carPreviewModifier.clickable { carPickerExpanded = true },
+            ) {
+                Image(
+                    bitmap = preview,
+                    contentDescription = state.selectedCarName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                CarPreviewLoadingOverlay(
+                    visible = showCarAudioLoading,
+                    onOpenCarPicker = { carPickerExpanded = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         } else {
-            Image(
-                painter = painterResource(R.drawable.apex_v10_car),
-                contentDescription = state.selectedCarName,
-                contentScale = ContentScale.Fit,
+            Box(
                 modifier = Modifier
                     .fillMaxWidth(0.84f)
                     .fillMaxHeight(0.62f)
                     .align(Alignment.Center)
                     .offset(y = (-46).dp)
                     .clickable { carPickerExpanded = true },
-            )
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.apex_v10_car),
+                    contentDescription = state.selectedCarName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                CarPreviewLoadingOverlay(
+                    visible = showCarAudioLoading,
+                    onOpenCarPicker = { carPickerExpanded = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         if (carPickerExpanded) {

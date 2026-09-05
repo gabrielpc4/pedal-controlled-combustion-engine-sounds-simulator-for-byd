@@ -85,5 +85,8 @@ internal class NativeFmodBankBridge {
 
     external fun setEventOverrides(mutedEvents: Array<String>, soloEvents: Array<String>)
 
+    /** True once the car bank's sample data has finished loading into memory. */
+    external fun engineSampleDataReady(): Boolean
+
     external fun close()
 }

@@ -70,6 +70,15 @@ data class DrivetrainState(
     val automaticDownshiftRpm: Double = 0.0,
 )
 
+/** Motion snapshot preserved when swapping bank physics without stopping the vehicle. */
+internal data class SimulationMotionContinuity(
+    val presentationSpeedKmh: Double,
+    val realOrDocumentedRawSpeedKmh: Double,
+    val presentationVelocityKmhPerSecond: Double,
+    val usesSimulatedPedals: Boolean,
+    val transmissionPosition: TransmissionPosition,
+)
+
 /**
  * Thin adapter around the authored Assetto Corsa drivetrain. It owns no
  * ignition state, synthetic torque, gear-speed table, or user calibration.
@@ -89,14 +98,90 @@ class EngineSimulation {
 
     val state: DrivetrainState get() = latestState
 
-    internal fun updateAssettoPhysics(updated: AssettoPhysics) {
+    fun captureMotionContinuity(
+        usesSimulatedPedals: Boolean,
+        transmissionPosition: TransmissionPosition,
+    ): SimulationMotionContinuity {
+        return SimulationMotionContinuity(
+            presentationSpeedKmh = latestState.presentationSpeedKmh,
+            realOrDocumentedRawSpeedKmh = latestState.realOrDocumentedRawSpeedKmh,
+            presentationVelocityKmhPerSecond = latestState.presentationAccelerationKmhPerSecond,
+            usesSimulatedPedals = usesSimulatedPedals,
+            transmissionPosition = transmissionPosition,
+        )
+    }
+
+    internal fun updateAssettoPhysics(
+        updated: AssettoPhysics,
+        preserveMotion: SimulationMotionContinuity? = null,
+    ) {
         physics = updated
         rebuildGearMapping(updated)
-        drivetrain = AssettoDrivetrain(updated, virtualGearProfile!!).also { it.reset(engineRunning = true) }
-        presentationSpeedEstimator.reset()
-        bydSealSimulatedPedalsMotion.reset()
-        previousInputWasSimulated = null
-        latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0)
+        drivetrain = AssettoDrivetrain(updated, virtualGearProfile!!)
+        if (preserveMotion != null && shouldPreserveMotion(preserveMotion)) {
+            reapplyMotionContinuity(updated, preserveMotion)
+        } else {
+            drivetrain!!.reset(engineRunning = true)
+            presentationSpeedEstimator.reset()
+            bydSealSimulatedPedalsMotion.reset()
+            previousInputWasSimulated = null
+            latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0)
+        }
+    }
+
+    private fun shouldPreserveMotion(motion: SimulationMotionContinuity): Boolean {
+        if (motion.transmissionPosition != TransmissionPosition.DRIVE) {
+            return false
+        }
+
+        return motion.presentationSpeedKmh > 0.0 || motion.realOrDocumentedRawSpeedKmh > 0.0
+    }
+
+    private fun reapplyMotionContinuity(
+        activePhysics: AssettoPhysics,
+        motion: SimulationMotionContinuity,
+    ) {
+        val presentationSpeedKmh = motion.presentationSpeedKmh.coerceAtLeast(0.0)
+        val rawSpeedKmh = motion.realOrDocumentedRawSpeedKmh.coerceAtLeast(0.0)
+        val audibleSpeedKmh = presentationSpeedKmh.coerceAtLeast(rawSpeedKmh)
+        val drivetrainRoadSpeedKmh = if (motion.usesSimulatedPedals) {
+            truncateRawSpeedKmh(audibleSpeedKmh)
+        } else {
+            rawSpeedKmh
+        }
+
+        if (motion.usesSimulatedPedals) {
+            bydSealSimulatedPedalsMotion.reset(audibleSpeedKmh)
+        } else {
+            bydSealSimulatedPedalsMotion.reset()
+        }
+
+        presentationSpeedEstimator.seed(
+            initialPresentationSpeedKmh = audibleSpeedKmh,
+            initialVelocityKmhPerSecond = motion.presentationVelocityKmhPerSecond,
+        )
+        previousInputWasSimulated = motion.usesSimulatedPedals
+
+        val fmodDrivetrainSpeedKmh = if (motion.transmissionPosition == TransmissionPosition.DRIVE) {
+            equalSpeedGearMapping?.fmodDrivetrainSpeedKmh(audibleSpeedKmh) ?: 0.0
+        } else {
+            0.0
+        }
+
+        drivetrain!!.seedFromRoadMotion(
+            roadSpeedKmh = drivetrainRoadSpeedKmh,
+            fmodDrivetrainSpeedKmh = fmodDrivetrainSpeedKmh,
+            transmissionPosition = motion.transmissionPosition,
+        )
+
+        latestState = buildState(
+            activePhysics = activePhysics,
+            frame = drivetrain!!.frame(),
+            presentationSpeedKmh = audibleSpeedKmh,
+            presentationAccelerationKmhPerSecond = motion.presentationVelocityKmhPerSecond,
+            realOrDocumentedRawSpeedKmh = drivetrainRoadSpeedKmh,
+            fmodDrivetrainSpeedKmh = fmodDrivetrainSpeedKmh,
+        )
     }
 
     internal fun updateVirtualGearCount(count: Int) {

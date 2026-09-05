@@ -217,6 +217,101 @@ internal class AssettoDrivetrain(
         lastFrame.tractionLimitPulse = false
     }
 
+    /**
+     * Reconcile gear and RPM after the bank physics profile changes while the vehicle is still
+     * moving. Road speed stays authoritative; gear is chosen from the virtual profile bands and
+     * RPM follows the mapped FMOD speed in that gear.
+     */
+    fun seedFromRoadMotion(
+        roadSpeedKmh: Double,
+        fmodDrivetrainSpeedKmh: Double,
+        transmissionPosition: TransmissionPosition,
+    ) {
+        currentTransmissionPosition = transmissionPosition
+        if (transmissionPosition != TransmissionPosition.DRIVE) {
+            reset(engineRunning = true)
+            return
+        }
+
+        val cleanRoadKmh = roadSpeedKmh.coerceAtLeast(0.0)
+        if (cleanRoadKmh <= 0.0) {
+            reset(engineRunning = true)
+            return
+        }
+
+        shiftDirection = 0
+        shiftTarget = 1
+        shiftElapsed = 0.0
+        shiftDuration = 0.0
+        shiftStartRpm = physics.engine.idleRpm
+        authoredShiftDuration = 0.0
+        authoredClutchDuration = 0.0
+        effectiveClutchDuration = 0.0
+        automaticDownshiftCooldownSeconds = 0.0
+        shiftWasAutomatic = false
+        manualShiftRequest = 0
+        clutchSignal = 0.0
+        clutchSequence = emptyList()
+        clutchSequenceElapsed = 0.0
+        autoblipStartMilliseconds = null
+        automaticGasCutoff = 0.0
+        engineCutoff = 0.0
+        resetLaunchControl()
+
+        speedMetersPerSecond = cleanRoadKmh / 3.6
+        fmodDrivetrainSpeedMetersPerSecond = fmodDrivetrainSpeedKmh.coerceAtLeast(0.0) / 3.6
+        previousFmodWheelSpeed = fmodDrivetrainSpeedMetersPerSecond / driven.radius
+
+        val targetGear = virtualGearProfile.gearForRoadSpeedKmh(cleanRoadKmh)
+            .coerceIn(1, virtualGearProfile.virtualForwardGearCount)
+        gear = targetGear
+        shiftTarget = targetGear
+
+        landingRpmByGear.fill(0.0)
+        val upshiftRpm = upshiftTriggerRpmForGear()
+        for (indexedGear in 2..targetGear) {
+            landingRpmByGear[indexedGear] = landingRpmAfterUpshift(
+                fromGear = indexedGear - 1,
+                upshiftRpm = upshiftRpm,
+            )
+        }
+
+        rpm = if (shouldLockRpmToMappedRoadSpeed()) {
+            coupledRpmForGear(gear)
+        } else {
+            physics.engine.idleRpm
+        }
+        if (physics.engine.limiterRpm > 0.0) {
+            rpm = rpm.coerceAtMost(physics.engine.limiterRpm)
+        }
+
+        lastFrame.rpm = rpm
+        lastFrame.speedMetersPerSecond = speedMetersPerSecond
+        lastFrame.gear = gear
+        lastFrame.drivetrainSpeedRadiansPerSecond = fmodDrivetrainSpeedMetersPerSecond / driven.radius
+        lastFrame.driverThrottle = 0.0
+        lastFrame.effectiveThrottle = 0.0
+        lastFrame.brake = 0.0
+        lastFrame.clutch = clutchSignal
+        lastFrame.boost = boost
+        lastFrame.bov = bov
+        lastFrame.bovDecaySeconds = bovDecay
+        lastFrame.limiterPulse = false
+        lastFrame.backfireTriggered = false
+        lastFrame.backfireSampleIndex = -1
+        lastFrame.shiftStarted = false
+        lastFrame.shiftRejected = false
+        lastFrame.shifting = false
+        lastFrame.shiftDirection = 0
+        lastFrame.shiftProgress = 0.0
+        lastFrame.authoredShiftDurationSeconds = 0.0
+        lastFrame.effectiveShiftDurationSeconds = 0.0
+        lastFrame.authoredClutchDurationSeconds = 0.0
+        lastFrame.effectiveClutchDurationSeconds = 0.0
+        lastFrame.tractionLimitActive = false
+        lastFrame.tractionLimitPulse = false
+    }
+
     fun requestShift(direction: Int): Boolean {
         if (direction !in -1..1 || direction == 0 || shifting) return false
         manualShiftRequest = direction

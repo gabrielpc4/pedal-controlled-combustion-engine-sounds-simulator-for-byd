@@ -591,6 +591,15 @@ public:
             return failAndCloseLocked(resultText(result, "load car bank"));
         }
 
+        result = commonBank_->loadSampleData();
+        if (result != FMOD_OK) {
+            return failAndCloseLocked(resultText(result, "load common bank sample data"));
+        }
+        result = bank_->loadSampleData();
+        if (result != FMOD_OK) {
+            return failAndCloseLocked(resultText(result, "load car bank sample data"));
+        }
+
         discoverEventsLocked(carBankPath);
         if (events_.find("engine_int") == events_.end() || events_.find("engine_ext") == events_.end()) {
             return failAndCloseLocked("The installed bank has no engine_int/engine_ext event pair.");
@@ -997,6 +1006,11 @@ public:
     void close() {
         std::lock_guard<std::mutex> lock(mutex_);
         closeLocked();
+    }
+
+    bool engineSampleDataReady() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return engineSampleDataReadyLocked();
     }
 
     void onSoundCallback(EventSlot& event, FMOD_STUDIO_EVENT_CALLBACK_TYPE type, FMOD::Sound* sound) {
@@ -2203,6 +2217,19 @@ private:
         }
     }
 
+    bool engineSampleDataReadyLocked() const {
+        if (!active_ || bank_ == nullptr) {
+            return false;
+        }
+
+        FMOD_STUDIO_LOADING_STATE state = FMOD_STUDIO_LOADING_STATE_UNLOADED;
+        if (bank_->getSampleLoadingState(&state) != FMOD_OK) {
+            return false;
+        }
+
+        return state == FMOD_STUDIO_LOADING_STATE_LOADED;
+    }
+
     std::mutex mutex_;
     std::mutex callbackMutex_;
     FMOD::Studio::System* studio_ = nullptr;
@@ -2550,6 +2577,14 @@ Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_setExteriorPu
     JNIEnv*, jobject, jboolean enabled
 ) {
     runtime.setExteriorPureAudio(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_gabrielpc_enginesoundsimulator_audio_NativeFmodBankBridge_engineSampleDataReady(
+    JNIEnv*,
+    jobject
+) {
+    return runtime.engineSampleDataReady() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL

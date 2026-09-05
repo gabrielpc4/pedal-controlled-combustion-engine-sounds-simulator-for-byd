@@ -43,6 +43,23 @@ internal data class VirtualGearProfile(
         return synthesizedRatios[gear - 1]
     }
 
+    /** Forward gear implied by documented road speed and the non-uniform physical bands. */
+    fun gearForRoadSpeedKmh(roadSpeedKmh: Double): Int {
+        val speed = roadSpeedKmh.coerceAtLeast(0.0)
+        if (speed <= 0.0) {
+            return 1
+        }
+
+        val boundaries = physicalBoundarySpeedsKmh
+        if (speed >= boundaries.last()) {
+            return virtualForwardGearCount
+        }
+
+        val lowerBoundaryIndex = boundaries.indexOfLast { it <= speed }
+            .coerceIn(0, boundaries.lastIndex - 1)
+        return (lowerBoundaryIndex + 1).coerceIn(1, virtualForwardGearCount)
+    }
+
     companion object {
         const val MIN_VIRTUAL_GEARS = 6
         const val MAX_VIRTUAL_GEARS = 10
