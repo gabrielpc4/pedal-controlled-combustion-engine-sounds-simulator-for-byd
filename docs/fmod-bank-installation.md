@@ -50,6 +50,11 @@ counts, and SHA-256 hashes, then atomically publishes every valid archive into p
 Successful staging archives are deleted from the car to avoid retaining a second multi-gigabyte
 copy. A broken archive remains in the staging folder and is reported in the dashboard message.
 
+For a single-copy USB delivery, the same `fmod-bank-import` tree may be placed directly under
+`Android/data/com.gabrielpc.enginesoundsimulator/files/` before copying the whole `Android`
+folder to the root of the vehicle's Internal storage. The dashboard accepts all active archives
+in one pass; no installer APK or batch folders are required.
+
 Do not copy files to `/data/user/0`; that is private Android storage and is inaccessible to a normal
 file manager. The `Android/data/.../files` destination is the app-owned portion of shared internal
 storage and needs no broad storage permission.
