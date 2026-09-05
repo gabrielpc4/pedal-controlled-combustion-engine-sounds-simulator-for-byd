@@ -218,6 +218,7 @@ class MainActivity : ComponentActivity() {
                         onFmodUpdateRateChange = controller::setFmodUpdateRateHz,
                             onAutoblipEnabledChange = controller::setAutoblipEnabled,
                             onUiScaleChange = controller::setUiScale,
+                            onTachometerScaleChange = controller::setTachometerScale,
                         onExteriorPureAudioChange = controller::setExteriorPureAudio,
                         onMixerDiagnosticsActive = controller::setMixerDiagnosticsActive,
                         onCategoryGains = controller::setFmodCategoryGains,
@@ -311,6 +312,7 @@ private fun MotorSoundDashboard(
     onFmodUpdateRateChange: (Int) -> Unit,
     onAutoblipEnabledChange: (Boolean) -> Unit,
     onUiScaleChange: (Float) -> Unit,
+    onTachometerScaleChange: (Float) -> Unit,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     onMixerDiagnosticsActive: (Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
@@ -460,7 +462,12 @@ private fun MotorSoundDashboard(
                                     modifier = Modifier
                                         .weight(0.88f)
                                         .fillMaxHeight()
-                                        .padding(start = 16.dp, bottom = 6.dp),
+                                        .padding(start = 16.dp, bottom = 6.dp)
+                                        .graphicsLayer {
+                                            // Display-only control: the dashboard layout remains stable while the gauge is resized.
+                                            scaleX = state.tachometerScale
+                                            scaleY = state.tachometerScale
+                                        },
                                 )
                             }
                             Row(
@@ -536,6 +543,8 @@ private fun MotorSoundDashboard(
                             onAutoblipEnabledChange = onAutoblipEnabledChange,
                             uiScale = state.uiScale,
                             onUiScaleChange = onUiScaleChange,
+                            tachometerScale = state.tachometerScale,
+                            onTachometerScaleChange = onTachometerScaleChange,
                             exteriorPureAudio = state.exteriorPureAudio,
                             onExteriorPureAudioChange = onExteriorPureAudioChange,
                             backfireSettings = state.backfireSettings,

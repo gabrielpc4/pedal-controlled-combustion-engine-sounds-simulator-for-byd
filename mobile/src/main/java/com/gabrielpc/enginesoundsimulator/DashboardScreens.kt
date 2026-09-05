@@ -443,6 +443,8 @@ internal fun SettingsScreen(
     onAutoblipEnabledChange: (Boolean) -> Unit,
     uiScale: Float,
     onUiScaleChange: (Float) -> Unit,
+    tachometerScale: Float,
+    onTachometerScaleChange: (Float) -> Unit,
     exteriorPureAudio: Boolean,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
@@ -483,6 +485,7 @@ internal fun SettingsScreen(
             )
             AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
             UiScaleControl(scale = uiScale, onScaleChange = onUiScaleChange)
+            TachometerScaleControl(scale = tachometerScale, onScaleChange = onTachometerScaleChange)
             Button(
                 onClick = onOpenCalibration,
                 colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
@@ -524,6 +527,17 @@ internal fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun TachometerScaleControl(scale: Float, onScaleChange: (Float) -> Unit) {
+    Text("TACHOMETER SIZE  ${"%.2f".format(scale)}x", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+    Slider(
+        value = scale,
+        onValueChange = onScaleChange,
+        valueRange = 0.6f..1.0f,
+        steps = 7,
+    )
 }
 
 @Composable
