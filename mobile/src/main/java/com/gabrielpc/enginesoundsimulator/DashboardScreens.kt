@@ -91,6 +91,7 @@ import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.drive.ExteriorPureAudioSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
+import com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile
 import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -458,6 +459,8 @@ internal fun SettingsScreen(
     onTransmissionSoundSettingsChange: (TransmissionSoundSettings) -> Unit,
     exteriorPureAudioSettings: ExteriorPureAudioSettings,
     onExteriorPureAudioSettingsChange: (ExteriorPureAudioSettings) -> Unit,
+    virtualForwardGearCount: Int,
+    onVirtualForwardGearCountChange: (Int) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -489,6 +492,10 @@ internal fun SettingsScreen(
                 onRateChange = onFmodUpdateRateChange,
             )
             AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
+            VirtualForwardGearCountControl(
+                gearCount = virtualForwardGearCount,
+                onGearCountChange = onVirtualForwardGearCountChange,
+            )
             UiScaleControl(scale = uiScale, onScaleChange = onUiScaleChange)
             TachometerScaleControl(scale = tachometerScale, onScaleChange = onTachometerScaleChange)
             CanvasAspectRatioControl(ratio = canvasAspectRatio, onRatioChange = onCanvasAspectRatioChange)
@@ -613,6 +620,56 @@ private fun AutoblipControl(
             )
         }
         Switch(checked = enabled, onCheckedChange = onEnabledChange)
+    }
+}
+
+@Composable
+private fun VirtualForwardGearCountControl(
+    gearCount: Int,
+    onGearCountChange: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("VIRTUAL FORWARD GEARS", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Text(
+            "Global gear-band mapping for every car. At 10 gears, 60 km/h stays anchored in 4th gear.",
+            color = Muted,
+            fontSize = 12.sp,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Button(
+                onClick = { onGearCountChange(gearCount - 1) },
+                enabled = gearCount > VirtualGearProfile.MIN_VIRTUAL_GEARS,
+                colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("-", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            }
+            Text(
+                text = gearCount.toString(),
+                color = White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            Button(
+                onClick = { onGearCountChange(gearCount + 1) },
+                enabled = gearCount < VirtualGearProfile.MAX_VIRTUAL_GEARS,
+                colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("+", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            }
+        }
     }
 }
 

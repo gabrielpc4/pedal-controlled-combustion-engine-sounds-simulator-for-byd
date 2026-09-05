@@ -231,7 +231,6 @@ class DriveController(context: Context) {
         simulation.manualShiftEnabled = manualShiftEnabled.get()
         audioEngine.setFocusChangeListener(::handleAudioFocusChange)
         audioEngine.setFmodUpdateRateHz(fmodUpdateRateHz.get())
-        audioEngine.setExteriorPureAudio(exteriorPureAudio.get())
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
         audioMixGains.set(audioMixGainRepository.load(selectedProfile.get()))
         audioEngine.setCategoryGains(audioMixGains.get())
@@ -258,6 +257,7 @@ class DriveController(context: Context) {
         audioEngine.setExteriorPureGlobalGain(exteriorPureAudioSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
+        setExteriorPureAudio(exteriorPureAudio.get())
         applyManualShiftSoundOverrideCoupling(manualShiftEnabled.get())
     }
 
@@ -439,10 +439,20 @@ class DriveController(context: Context) {
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
 
     fun setExteriorPureAudio(enabled: Boolean) {
-        val normalized = enabled && selectedPerspective.get() == EngineSoundPerspective.EXTERIOR
-        exteriorPureAudio.set(normalized)
-        exteriorAudioModeRepository.save(normalized)
-        audioEngine.setExteriorPureAudio(normalized)
+        if (!enabled) {
+            exteriorPureAudio.set(false)
+            exteriorAudioModeRepository.save(false)
+            audioEngine.setExteriorPureAudio(false)
+            return
+        }
+
+        if (selectedPerspective.get() != EngineSoundPerspective.EXTERIOR) {
+            setSoundPerspective(EngineSoundPerspective.EXTERIOR)
+        }
+
+        exteriorPureAudio.set(true)
+        exteriorAudioModeRepository.save(true)
+        audioEngine.setExteriorPureAudio(true)
     }
 
     fun setExteriorPureAudioSettings(updated: ExteriorPureAudioSettings) {
@@ -822,6 +832,12 @@ class DriveController(context: Context) {
     }
 
     private fun isSelectedCarAudioReady(profileId: String): Boolean {
+        // Muting stops FMOD and clears native load state. That is intentional silence, not a car
+        // bank still loading, so the dashboard must not show the engine loading overlay.
+        if (audioMuted.get()) {
+            return true
+        }
+
         return audioEngine.loadedBankProfileId() == profileId && audioEngine.engineSampleDataReady()
     }
 

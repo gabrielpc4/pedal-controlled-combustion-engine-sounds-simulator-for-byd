@@ -205,14 +205,7 @@ class MainActivity : ComponentActivity() {
                         onEffectEnabledChange = controller::setEffectEnabled,
                         onEffectOverrideChange = controller::setEffectOverride,
                         onEngineExternalChange = { enabled -> controller.setSoundPerspective(if (enabled) com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR else com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.CABIN) },
-                        onEnginePureChange = { enabled ->
-                            // Pure audio is an exterior-only presentation, so enabling it must
-                            // also select External; disabling it leaves the user's perspective unchanged.
-                            if (enabled) {
-                                controller.setSoundPerspective(com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR)
-                            }
-                            controller.setExteriorPureAudio(enabled)
-                        },
+                        onEnginePureChange = controller::setExteriorPureAudio,
                         onResetAllPreferences = controller::resetAllPreferences,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onMediaShiftButton = controller::handleMediaShiftButton,
@@ -431,7 +424,6 @@ private fun MotorSoundDashboard(
                         onToggleInputSource = onToggleInputSource,
                         onToggleAudioMute = onToggleAudioMute,
                         onToggleManualShiftMode = onToggleManualShiftMode,
-                        onVirtualForwardGearCountChange = onVirtualForwardGearCountChange,
                         onOpenSettings = { mainScreen = DashboardMainScreen.SETTINGS },
                     )
 
@@ -569,6 +561,8 @@ private fun MotorSoundDashboard(
                             onTransmissionSoundSettingsChange = onTransmissionSoundSettingsChange,
                             exteriorPureAudioSettings = state.exteriorPureAudioSettings,
                             onExteriorPureAudioSettingsChange = onExteriorPureAudioSettingsChange,
+                            virtualForwardGearCount = state.virtualForwardGearCount,
+                            onVirtualForwardGearCountChange = onVirtualForwardGearCountChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                         DashboardMainScreen.CALIBRATION -> Unit
@@ -591,7 +585,6 @@ private fun DashboardHeader(
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
     onToggleManualShiftMode: () -> Unit,
-    onVirtualForwardGearCountChange: (Int) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     var memoryLabels by remember {
@@ -728,10 +721,6 @@ private fun DashboardHeader(
             manualEnabled = state.manualShiftModeEnabled,
             onToggle = onToggleManualShiftMode,
         )
-        VirtualGearCountHeaderControl(
-            gearCount = state.virtualForwardGearCount,
-            onGearCountChange = onVirtualForwardGearCountChange,
-        )
         MasterMuteHeaderControl(
             muted = state.audioMuted,
             onToggle = onToggleAudioMute,
@@ -821,56 +810,6 @@ private fun ManualShiftHeaderControl(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun VirtualGearCountHeaderControl(
-    gearCount: Int,
-    onGearCountChange: (Int) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .height(52.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Panel)
-            .border(1.dp, Line, RoundedCornerShape(12.dp))
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = "GEARS",
-            color = Muted,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp,
-        )
-        IconButton(
-            onClick = {
-                onGearCountChange(gearCount - 1)
-            },
-            enabled = gearCount > com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile.MIN_VIRTUAL_GEARS,
-            modifier = Modifier.size(32.dp),
-        ) {
-            Text("-", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
-        }
-        Text(
-            text = gearCount.toString(),
-            color = White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(horizontal = 2.dp),
-        )
-        IconButton(
-            onClick = {
-                onGearCountChange(gearCount + 1)
-            },
-            enabled = gearCount < com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile.MAX_VIRTUAL_GEARS,
-            modifier = Modifier.size(32.dp),
-        ) {
-            Text("+", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
-        }
     }
 }
 
@@ -1168,10 +1107,8 @@ private fun DashboardEffectControls(
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
         Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
-            DashboardSwitchCell(rowHeight, state.exteriorPureAudio && external, if (external) Line else Muted) {
-                if (external) {
-                    onEnginePureChange(!state.exteriorPureAudio)
-                }
+            DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) {
+                onEnginePureChange(!state.exteriorPureAudio)
             }
             rows.drop(1).forEach { row ->
                 val override = when (row.second) {
