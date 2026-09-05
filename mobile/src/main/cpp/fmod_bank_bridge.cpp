@@ -2229,7 +2229,7 @@ private:
     float backfireGain_ = 1.0f;
     bool backfireOnly_ = false;
     bool backfireAudioEnabled_ = true;
-    bool backfireUseOriginal_ = false;
+    bool backfireUseOriginal_ = true;
     bool shiftSoundOverride_ = false;
     float shiftOverrideGain_ = 0.5f;
     bool shiftSoundEnabled_ = true;

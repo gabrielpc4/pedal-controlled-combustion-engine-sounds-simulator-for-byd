@@ -68,7 +68,7 @@ class EngineAudioEngine(context: Context) {
     private val shiftSoundEnabled = AtomicBoolean(true)
     private val transmissionAudioEnabled = AtomicBoolean(true)
     private val turboAudioEnabled = AtomicBoolean(true)
-    private val backfireUseOriginal = AtomicBoolean(false)
+    private val backfireUseOriginal = AtomicBoolean(true)
     private val exteriorPureAudio = AtomicBoolean(false)
     private var sentBackfireOnly: Boolean? = null
     private var sentExteriorPureAudio: Boolean? = null

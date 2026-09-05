@@ -47,11 +47,10 @@ internal class AssettoDrivetrainFrame(
  */
 internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     /**
-     * Test branch behavior: keep the normal shift/clutch presentation, but once the clutch is
-     * re-engaged and the new gear is selected, lock RPM to the coupled wheel speed so post-shift
-     * clutch-slip integration cannot make the tachometer or FMOD pitch oscillate around the fit.
+     * Test branch behavior: keep the clutch disengaged in D so clutch-slip physics never fights
+     * the driver, and always derive RPM from the mapped FMOD road speed in the current gear.
      */
-    private val simplifiedStableCoupledRpm = SIMPLIFIED_STABLE_COUPLED_RPM
+    private val simplifiedDisengagedClutch = SIMPLIFIED_DISENGAGED_CLUTCH
     // Explicit app preference; enabled by default because it is the authored car behavior.
     private var autoblipEnabled = true
     private var rpm = physics.engine.idleRpm
@@ -68,6 +67,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var shiftTarget = 1
     private var shiftElapsed = 0.0
     private var shiftDuration = 0.0
+    private var shiftStartRpm = 0.0
     private var authoredShiftDuration = 0.0
     private var authoredClutchDuration = 0.0
     private var effectiveClutchDuration = 0.0
@@ -93,7 +93,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     private var backfireSettings = BackfireSettings()
     private var currentTransmissionPosition = TransmissionPosition.DRIVE
     private var nextBackfireSampleCursor = 0
-    private var useOriginalBackfire = false
+    private var useOriginalBackfire = true
     private var limiterCounter = 0
     private var fmodDrivetrainSpeedMetersPerSecond = 0.0
     private var previousFmodWheelSpeed = 0.0
@@ -160,6 +160,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftTarget = 1
         shiftElapsed = 0.0
         shiftDuration = 0.0
+        shiftStartRpm = if (engineRunning) physics.engine.idleRpm else 0.0
         authoredShiftDuration = 0.0
         authoredClutchDuration = 0.0
         effectiveClutchDuration = 0.0
@@ -402,9 +403,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             if (oldSpeed <= 0.0 && driveForce <= resistingForce) speedMetersPerSecond = 0.0
         }
         rpm = max(0.0, engineOmega * RPM_PER_RADIAN_SECOND)
-        if (shouldStabilizeCoupledRpm(clutch)) {
-            snapRpmToCurrentGear()
-        }
         // LIMITER is a hard upper bound for the value sent to FMOD and the tachometer. This
         // applies equally to automatic and manual transmission: holding a gear at the limiter
         // now cuts torque without ever producing an above-limiter RPM sample.
@@ -418,6 +416,9 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             }
         }
         updateLaunchControlRpm(dt, rawGas)
+        if (shouldLockRpmToMappedRoadSpeed()) {
+            applyMappedRoadSpeedRpm()
+        }
         if (physics.engine.limiterRpm > 0.0) {
             rpm = rpm.coerceAtMost(physics.engine.limiterRpm)
         }
@@ -487,12 +488,23 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         shiftTarget = target
         shiftElapsed = 0.0
         shiftDuration = 0.0
+        shiftStartRpm = rpm
         authoredShiftDuration = 0.0
         authoredClutchDuration = 0.0
         effectiveClutchDuration = 0.0
     }
 
     private fun autoclutchStep(dt: Double, gas: Double, brake: Double): Double {
+        if (
+            simplifiedDisengagedClutch &&
+            currentTransmissionPosition == TransmissionPosition.DRIVE
+        ) {
+            clutchSequence = emptyList()
+            clutchSequenceElapsed = 0.0
+            clutchSignal = 0.0
+            return 0.0
+        }
+
         // In automatic D, a firm brake at walking speed means the driver is holding the car
         // stopped. The authored autoclutch rate is intentionally gentle for normal launches, but
         // letting that rate continue all the way to zero would keep the engine mechanically tied
@@ -551,11 +563,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             return 0
         }
         var request = 0
-        if (clutch > 0.99 || gear == 0) {
-            // Upshifts remain bank-authored except for the explicitly restored main-branch 1→2
-            // partial-throttle rule. The equal-speed layer changes only speed-to-RPM conversion.
+        if (simplifiedDisengagedClutch || clutch > 0.99 || gear == 0) {
+            // Upshifts use the bank-authored automatic threshold. The equal-speed layer changes
+            // only speed-to-RPM conversion.
             val shiftRpm = rpm
-            val upshiftRpm = upshiftTriggerRpmForGear(gear, gas)
+            val upshiftRpm = upshiftTriggerRpmForGear()
             if (
                 shiftRpm >= upshiftRpm &&
                 gear < physics.drivetrain.forwardRatios.size &&
@@ -580,7 +592,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     currentFmodWheelSpeed < previousFmodWheelSpeed - 1e-4
                 if (
                     shiftRpm < downshiftRpm &&
-                    gear > 1 && clutch > 0.85 &&
+                    gear > 1 && (simplifiedDisengagedClutch || clutch > 0.85) &&
                     (gas <= 0.2 || fmodDrivetrainSpeedDecreasing) &&
                     downshiftAllowed(gear - 1, dt) &&
                     automaticGasCutoff <= 0.0 &&
@@ -605,6 +617,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
         shiftDirection = direction
         shiftTarget = target
+        shiftStartRpm = rpm
         shiftElapsed = 0.0
         authoredShiftDuration = if (direction > 0) physics.drivetrain.gearUpTimeSeconds
         else physics.drivetrain.gearDownTimeSeconds
@@ -615,7 +628,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         if (direction > 0) {
             landingRpmByGear[target] = landingRpmAfterUpshift(
                 fromGear = gear,
-                upshiftRpm = upshiftTriggerRpmForGear(gear, gas),
+                upshiftRpm = upshiftTriggerRpmForGear(),
             )
         }
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
@@ -627,7 +640,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             physics.drivetrain.autoclutchDownshiftProfile
         }
         authoredClutchDuration = authoredProfile.maxOfOrNull { it.x } ?: 0.0
-        if (physics.drivetrain.autoclutchOnChanges && clutch > 0.01) {
+        if (physics.drivetrain.autoclutchOnChanges && clutch > 0.01 && !simplifiedDisengagedClutch) {
             // The authored downshift curve can keep the clutch open for ~1.5 s. Use a
             // compact equivalent curve so the drivetrain catches the new gear promptly;
             // this changes only host clutch timing, not FMOD gear/lift-off/turbo events.
@@ -635,12 +648,15 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             clutchSequence = fixedClutchSequence(effectiveClutchDuration)
             clutchSequenceElapsed = 0.0
         }
-        if (direction < 0 && clutch > 1.0 / PI) autoblipStartMilliseconds = sessionElapsedMilliseconds
+        if (direction < 0 && (simplifiedDisengagedClutch || clutch > 1.0 / PI)) {
+            autoblipStartMilliseconds = sessionElapsedMilliseconds
+        }
         return true
     }
 
-    private fun shouldStabilizeCoupledRpm(clutch: Double): Boolean {
-        if (!simplifiedStableCoupledRpm) {
+    /** True when RPM must follow mapped FMOD road speed in the current gear. */
+    private fun shouldLockRpmToMappedRoadSpeed(): Boolean {
+        if (!simplifiedDisengagedClutch) {
             return false
         }
 
@@ -648,58 +664,96 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             return false
         }
 
-        if (gear < 1 || shifting || clutchSequence.isNotEmpty()) {
-            return false
-        }
-
-        return clutch >= COUPLED_RPM_STABILIZE_CLUTCH
+        return gear >= 1
     }
 
-    /** Locks engine speed to the current gear ratio at the internal FMOD wheel speed. */
-    private fun snapRpmToCurrentGear() {
-        val ratio = abs(ratioForGear(gear) * physics.drivetrain.finalDrive)
-        if (ratio <= 0.0) {
-            return
+    /**
+     * RPM locked to mapped FMOD speed within the current gear band. Gear 1 starts at authored
+     * idle when fmod speed is zero and rises immediately with road speed instead of staying at
+     * idle until the raw ratio formula would exceed idle on its own.
+     */
+    private fun coupledRpmForGear(currentGear: Int): Double {
+        if (currentGear < 1) {
+            return physics.engine.idleRpm
         }
 
-        val wheelSpeed = fmodDrivetrainSpeedMetersPerSecond / driven.radius
-        rpm = (wheelSpeed * ratio * RPM_PER_RADIAN_SECOND).coerceAtLeast(physics.engine.idleRpm)
+        val idle = physics.engine.idleRpm
+        val upshiftRpm = upshiftTriggerRpmForGear()
+        val forwardGearCount = physics.drivetrain.forwardRatios.size
+        val fmodMps = fmodDrivetrainSpeedMetersPerSecond
+
+        val lowerFmodMps = if (currentGear == 1) {
+            0.0
+        } else {
+            fmodDrivetrainSpeedMpsAtRpm(upshiftRpm, currentGear - 1)
+        }
+
+        val upperRpm = if (currentGear >= forwardGearCount) {
+            physics.engine.limiterRpm.coerceAtLeast(upshiftRpm)
+        } else {
+            upshiftRpm
+        }
+        val upperFmodMps = fmodDrivetrainSpeedMpsAtRpm(upperRpm, currentGear)
+
+        val lowerRpm = if (currentGear == 1) {
+            idle
+        } else {
+            landingRpmAfterUpshift(fromGear = currentGear - 1, upshiftRpm = upshiftRpm)
+        }
+
+        val fmodSpan = upperFmodMps - lowerFmodMps
+        if (fmodSpan <= 1e-9) {
+            return lowerRpm
+        }
+
+        // Do not clamp the lower end: when FMOD speed falls below this gear's band the RPM must
+        // be allowed to drop under the landing value so automatic downshifts can fire.
+        val fraction = (fmodMps - lowerFmodMps) / fmodSpan
+        val interpolated = lowerRpm + fraction * (upperRpm - lowerRpm)
+        return interpolated.coerceAtLeast(idle).let { rpm ->
+            if (physics.engine.limiterRpm > 0.0) {
+                rpm.coerceAtMost(physics.engine.limiterRpm)
+            } else {
+                rpm
+            }
+        }
+    }
+
+    /**
+     * Follow mapped road speed exactly while driving. During a shift, linearly blend from the
+     * RPM at shift request time to the target gear's coupled value over the shift duration.
+     */
+    private fun applyMappedRoadSpeedRpm() {
+        if (shifting) {
+            val target = coupledRpmForGear(shiftTarget)
+            val progress = (shiftElapsed / shiftDuration.coerceAtLeast(1e-9)).coerceIn(0.0, 1.0)
+            rpm = shiftStartRpm + (target - shiftStartRpm) * progress
+        } else {
+            rpm = coupledRpmForGear(gear)
+        }
+
         if (physics.engine.limiterRpm > 0.0) {
             rpm = rpm.coerceAtMost(physics.engine.limiterRpm)
         }
     }
 
-    /**
-     * The old main-branch behavior intentionally made 1→2 happen earlier at partial throttle.
-     * Keep that one exception while every other upshift remains at the bank-authored threshold.
-     * During a launch, or with a strong first-gear throttle request, the authored threshold wins;
-     * the partial-throttle shortcut must not cut staging or acceleration short.
-     */
-    private fun upshiftTriggerRpmForGear(currentGear: Int, gas: Double): Double {
+    /** Internal FMOD wheel speed that would produce [rpm] in [gearForRatio]. */
+    private fun fmodDrivetrainSpeedMpsAtRpm(rpm: Double, gearForRatio: Int): Double {
+        val ratio = abs(ratioForGear(gearForRatio) * physics.drivetrain.finalDrive)
+        if (ratio <= 0.0) {
+            return 0.0
+        }
+
+        return rpm * driven.radius / (ratio * RPM_PER_RADIAN_SECOND)
+    }
+
+    /** Bank-authored automatic upshift RPM, clamped to the hard limiter when one exists. */
+    private fun upshiftTriggerRpmForGear(): Double {
         val authored = physics.drivetrain.automaticUpshiftRpm.toDouble()
-        val launchActive = launchControlPhase != LaunchControlPhase.INACTIVE
-        val strongFirstGearThrottle = gas >= STRONG_FIRST_GEAR_THROTTLE_THRESHOLD
-        val requested = if (
-            currentGear == 1 &&
-            !launchActive &&
-            !strongFirstGearThrottle &&
-            gas < MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD
-        ) {
-            (MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM - customShiftAdvanceRpm())
-                .coerceAtMost(authored)
-                .coerceAtLeast(physics.engine.idleRpm + 500.0)
+        return if (physics.engine.limiterRpm > 0.0) {
+            authored.coerceAtMost(physics.engine.limiterRpm)
         } else {
             authored
-        }
-        // A few imported profiles contain an automatic UP value a little above LIMITER. The
-        // bank can still author a distinct shift-light/redline relationship, but the app must
-        // never request a shift after the engine has already crossed its hard limiter. This
-        // clamp is only a safety bound; it does not raise profiles such as the LFA Concept's
-        // authored 6,800-RPM UP point to the 9,000-RPM limiter.
-        return if (physics.engine.limiterRpm > 0.0) {
-            requested.coerceAtMost(physics.engine.limiterRpm)
-        } else {
-            requested
         }
     }
 
@@ -712,29 +766,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     }
 
     private fun downshiftRpmForCurrentGear(): Double {
-        if (gear == 2) {
-            // This is the explicit main-branch 2→1 exception, retained as a fixed RPM rule.
-            return (MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM - customShiftAdvanceRpm())
-                .coerceAtLeast(physics.engine.idleRpm + 100.0)
-        }
         return landingRpmByGear.getOrNull(gear)
             ?.takeIf { it > 0.0 }
             ?: landingRpmAfterUpshift(
                 fromGear = gear - 1,
                 upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble(),
             )
-    }
-
-    /**
-     * The requested early-shift behavior is limited to 8,000-RPM cars. It moves only the two
-     * legacy 1↔2 thresholds; authored thresholds and all other gears remain untouched.
-     */
-    private fun customShiftAdvanceRpm(): Double {
-        return if (abs(physics.engine.limiterRpm - EIGHT_THOUSAND_RPM) <= RPM_MATCH_TOLERANCE) {
-            TWO_THOUSAND_RPM
-        } else {
-            0.0
-        }
     }
 
     private fun downshiftAllowed(target: Int, dt: Double): Boolean {
@@ -848,7 +885,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                     // During a gear change the authored drivetrain ratio and the app's fixed
                     // clutch profile remain authoritative; the tach animation resumes in first.
                     val target = if (shiftDirection > 0) {
-                        rpm.coerceAtMost(upshiftTriggerRpmForGear(gear, rawThrottle))
+                        rpm.coerceAtMost(upshiftTriggerRpmForGear())
                     } else {
                         rpm.coerceAtMost(physics.engine.limiterRpm)
                     }
@@ -1086,24 +1123,14 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val GRAVITY = 9.81
         const val STOPPED_CLUTCH_RELEASE_BRAKE = 0.2
         const val STOPPED_CLUTCH_RELEASE_SPEED_MPS = 1.0
-        /** Main-branch 1→2 rule: partial throttle shifted at 6,400 RPM. */
-        const val MAIN_FIRST_TO_SECOND_PARTIAL_UPSHIFT_RPM = 6_400.0
-        /** Main-branch 2→1 rule: return to 1st below 4,000 RPM. */
-        const val MAIN_SECOND_TO_FIRST_DOWNSHIFT_RPM = 4_000.0
-        const val MAIN_FULL_THROTTLE_UPSHIFT_THRESHOLD = 0.98
-        const val EIGHT_THOUSAND_RPM = 8_000.0
-        const val TWO_THOUSAND_RPM = 2_000.0
-        const val STRONG_FIRST_GEAR_THROTTLE_THRESHOLD = 0.80
-        const val RPM_MATCH_TOLERANCE = 25.0
         // A brief automatic-only gap keeps hard braking audible as separate shifts instead of
         // chaining two downshifts immediately after one another. Authored shift duration is kept.
         const val AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS = 0.12
         const val FIXED_UPSHIFT_SECONDS = 0.10
         const val FIXED_DOWNSHIFT_SECONDS = 0.15
-        const val COUPLED_RPM_STABILIZE_CLUTCH = 0.99
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
-        const val SIMPLIFIED_STABLE_COUPLED_RPM = true
+        const val SIMPLIFIED_DISENGAGED_CLUTCH = true
     }
 }
 

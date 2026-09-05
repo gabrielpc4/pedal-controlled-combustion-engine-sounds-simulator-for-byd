@@ -85,9 +85,9 @@ data class DriveSnapshot(
     val shiftSoundSettings: ShiftSoundSettings = ShiftSoundSettings(),
     val transmissionSoundSettings: TransmissionSoundSettings = TransmissionSoundSettings(),
     val popsAndBangsEnabled: Boolean = true,
-    val popsAndBangsOriginal: Boolean = false,
+    val popsAndBangsOverride: Boolean = false,
     val shiftSoundsEnabled: Boolean = true,
-    val shiftSoundsOriginal: Boolean = true,
+    val shiftSoundsOverride: Boolean = false,
     val transmissionEnabled: Boolean = true,
     val turboEnabled: Boolean = true,
     val hasTurbo: Boolean = false,
@@ -225,14 +225,18 @@ class DriveController(context: Context) {
         shiftSoundSettings.set(shiftSoundSettingsRepository.load())
         transmissionSoundSettings.set(transmissionSoundSettingsRepository.load())
         carEffectModes.set(carEffectModesRepository.load(selectedProfile.get()))
+        val modes = carEffectModes.get()
+        shiftSoundSettings.set(
+            shiftSoundSettingsRepository.load().copy(overrideEnabled = modes.shiftSoundsOverride),
+        )
         simulation.updateBackfireSettings(backfireSettings.get())
-        simulation.setUseOriginalBackfire(carEffectModes.get().popsAndBangsOriginal)
+        simulation.setUseOriginalBackfire(!modes.popsAndBangsOverride)
         simulation.updateAutoblipEnabled(autoblipEnabled.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
-        audioEngine.setBackfireAudioEnabled(carEffectModes.get().popsAndBangsEnabled)
-        audioEngine.setBackfireUseOriginal(carEffectModes.get().popsAndBangsOriginal)
-        audioEngine.setShiftSoundEnabled(carEffectModes.get().shiftSoundsEnabled)
-        audioEngine.setShiftSoundOverride(!carEffectModes.get().shiftSoundsOriginal)
+        audioEngine.setBackfireAudioEnabled(modes.popsAndBangsEnabled)
+        audioEngine.setBackfireUseOriginal(!modes.popsAndBangsOverride)
+        audioEngine.setShiftSoundEnabled(modes.shiftSoundsEnabled)
+        audioEngine.setShiftSoundOverride(modes.shiftSoundsOverride)
         audioEngine.setShiftOverrideGain(shiftSoundSettings.get().overrideGain)
         audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
@@ -267,9 +271,9 @@ class DriveController(context: Context) {
             shiftSoundSettings = shiftSoundSettings.get(),
             transmissionSoundSettings = transmissionSoundSettings.get(),
             popsAndBangsEnabled = carEffectModes.get().popsAndBangsEnabled,
-            popsAndBangsOriginal = carEffectModes.get().popsAndBangsOriginal,
+            popsAndBangsOverride = carEffectModes.get().popsAndBangsOverride,
             shiftSoundsEnabled = carEffectModes.get().shiftSoundsEnabled,
-            shiftSoundsOriginal = carEffectModes.get().shiftSoundsOriginal,
+            shiftSoundsOverride = carEffectModes.get().shiftSoundsOverride,
             transmissionEnabled = carEffectModes.get().transmissionEnabled,
             turboEnabled = carEffectModes.get().turboEnabled,
             hasTurbo = activePhysics.get()?.engine?.turbos?.isNotEmpty() == true,
@@ -419,18 +423,19 @@ class DriveController(context: Context) {
         }
     }
 
-    fun setEffectOriginal(kind: EffectSoundKind, original: Boolean) {
-        val updated = carEffectModes.get().withOriginal(kind, original)
+    fun setEffectOverride(kind: EffectSoundKind, override: Boolean) {
+        val updated = carEffectModes.get().withOverride(kind, override)
         carEffectModes.set(updated)
         carEffectModesRepository.save(selectedProfile.get(), updated)
         when (kind) {
             EffectSoundKind.POPS_AND_BANGS -> {
-                audioEngine.setBackfireUseOriginal(original)
-                simulation.setUseOriginalBackfire(original)
+                audioEngine.setBackfireUseOriginal(!override)
+                simulation.setUseOriginalBackfire(!override)
             }
             EffectSoundKind.SHIFT -> {
-                audioEngine.setShiftSoundOverride(!original)
-                shiftSoundSettings.set(ShiftSoundSettings(overrideEnabled = !original))
+                audioEngine.setShiftSoundOverride(override)
+                val current = shiftSoundSettings.get()
+                shiftSoundSettings.set(current.copy(overrideEnabled = override))
                 shiftSoundSettingsRepository.save(shiftSoundSettings.get())
             }
             EffectSoundKind.TRANSMISSION, EffectSoundKind.TURBO -> Unit
@@ -516,7 +521,7 @@ class DriveController(context: Context) {
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
         audioEngine.setBackfireAudioEnabled(true)
-        audioEngine.setBackfireUseOriginal(false)
+        audioEngine.setBackfireUseOriginal(true)
         audioEngine.setShiftSoundEnabled(true)
         audioEngine.setShiftSoundOverride(false)
         audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
@@ -617,10 +622,14 @@ class DriveController(context: Context) {
             audioMixGains.set(audioMixGainRepository.load(profile))
             val modes = carEffectModesRepository.load(profile)
             carEffectModes.set(modes)
+            shiftSoundSettings.set(
+                shiftSoundSettingsRepository.load().copy(overrideEnabled = modes.shiftSoundsOverride),
+            )
             audioEngine.setBackfireAudioEnabled(modes.popsAndBangsEnabled)
-            audioEngine.setBackfireUseOriginal(modes.popsAndBangsOriginal)
+            audioEngine.setBackfireUseOriginal(!modes.popsAndBangsOverride)
+            simulation.setUseOriginalBackfire(!modes.popsAndBangsOverride)
             audioEngine.setShiftSoundEnabled(modes.shiftSoundsEnabled)
-            audioEngine.setShiftSoundOverride(!modes.shiftSoundsOriginal)
+            audioEngine.setShiftSoundOverride(modes.shiftSoundsOverride)
             audioEngine.setTransmissionAudioEnabled(modes.transmissionEnabled)
             audioEngine.setTurboAudioEnabled(modes.turboEnabled)
             // This is intentionally reset per car because it is a temporary listening filter,
@@ -965,9 +974,10 @@ class DriveController(context: Context) {
             val restoredModes = carEffectModesRepository.load(selectedProfile.get())
             carEffectModes.set(restoredModes)
             audioEngine.setBackfireAudioEnabled(restoredModes.popsAndBangsEnabled)
-            audioEngine.setBackfireUseOriginal(restoredModes.popsAndBangsOriginal)
+            audioEngine.setBackfireUseOriginal(!restoredModes.popsAndBangsOverride)
+            simulation.setUseOriginalBackfire(!restoredModes.popsAndBangsOverride)
             audioEngine.setShiftSoundEnabled(restoredModes.shiftSoundsEnabled)
-            audioEngine.setShiftSoundOverride(!restoredModes.shiftSoundsOriginal)
+            audioEngine.setShiftSoundOverride(restoredModes.shiftSoundsOverride)
             audioEngine.setTransmissionAudioEnabled(restoredModes.transmissionEnabled)
             audioEngine.setTurboAudioEnabled(restoredModes.turboEnabled)
         }

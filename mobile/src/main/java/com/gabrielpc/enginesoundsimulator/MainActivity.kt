@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity() {
                         onToggleInputSource = controller::toggleInputSource,
                         onToggleAudioMute = controller::toggleAudioMute,
                         onEffectEnabledChange = controller::setEffectEnabled,
-                        onEffectOriginalChange = controller::setEffectOriginal,
+                        onEffectOverrideChange = controller::setEffectOverride,
                         onEngineExternalChange = { enabled -> controller.setSoundPerspective(if (enabled) com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR else com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.CABIN) },
                         onEnginePureChange = { enabled ->
                             // Pure audio is an exterior-only presentation, so enabling it must
@@ -302,7 +302,7 @@ private fun MotorSoundDashboard(
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
     onEffectEnabledChange: (EffectSoundKind, Boolean) -> Unit,
-    onEffectOriginalChange: (EffectSoundKind, Boolean) -> Unit,
+    onEffectOverrideChange: (EffectSoundKind, Boolean) -> Unit,
     onEngineExternalChange: (Boolean) -> Unit,
     onEnginePureChange: (Boolean) -> Unit,
     onResetAllPreferences: () -> Unit,
@@ -482,7 +482,7 @@ private fun MotorSoundDashboard(
                                 DashboardEffectControls(
                                     state = state,
                                     onEnabledChange = onEffectEnabledChange,
-                                    onOriginalChange = onEffectOriginalChange,
+                                    onOverrideChange = onEffectOverrideChange,
                                     onCategoryGains = onCategoryGains,
                                     onHostGains = onHostGains,
                                     onEngineExternalChange = onEngineExternalChange,
@@ -1040,7 +1040,7 @@ private val DASHBOARD_EFFECT_GAIN_PRESETS = listOf(
 private fun DashboardEffectControls(
     state: DriveSnapshot,
     onEnabledChange: (EffectSoundKind, Boolean) -> Unit,
-    onOriginalChange: (EffectSoundKind, Boolean) -> Unit,
+    onOverrideChange: (EffectSoundKind, Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
     onHostGains: (Float, Float) -> Unit,
     onEngineExternalChange: (Boolean) -> Unit,
@@ -1095,21 +1095,21 @@ private fun DashboardEffectControls(
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
             DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
-            DashboardOriginalColumnCell(state.popsAndBangsOriginal, true, { onOriginalChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOriginal) }, rowHeight)
-            DashboardOriginalColumnCell(state.shiftSoundsOriginal, true, { onOriginalChange(EffectSoundKind.SHIFT, !state.shiftSoundsOriginal) }, rowHeight)
+            DashboardOverrideColumnCell(state.popsAndBangsOverride, true, { onOverrideChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOverride) }, rowHeight)
+            DashboardOverrideColumnCell(state.shiftSoundsOverride, true, { onOverrideChange(EffectSoundKind.SHIFT, !state.shiftSoundsOverride) }, rowHeight)
             DashboardEmptyControlCell(rowHeight)
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
         Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
             DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) { onEnginePureChange(!state.exteriorPureAudio) }
             rows.drop(1).forEach { row ->
-                val original = when (row.second) {
-                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOriginal
-                    EffectSoundKind.SHIFT -> state.shiftSoundsOriginal
+                val override = when (row.second) {
+                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOverride
+                    EffectSoundKind.SHIFT -> state.shiftSoundsOverride
                     else -> false
                 }
                 if (row.second == EffectSoundKind.POPS_AND_BANGS || row.second == EffectSoundKind.SHIFT) {
-                    DashboardSwitchCell(rowHeight, original, Line) { onOriginalChange(row.second, !original) }
+                    DashboardSwitchCell(rowHeight, override, Line) { onOverrideChange(row.second, !override) }
                 } else DashboardEmptyControlCell(rowHeight)
             }
         }
@@ -1151,14 +1151,14 @@ private fun DashboardSwitchCell(height: Dp, checked: Boolean, borderColor: Color
 }
 
 @Composable
-private fun DashboardOriginalColumnCell(
-    original: Boolean,
+private fun DashboardOverrideColumnCell(
+    override: Boolean,
     available: Boolean,
     onToggle: () -> Unit,
     height: Dp,
 ) {
     if (available) {
-        DashboardColumnTextCell("ORIGINAL", original, height)
+        DashboardColumnTextCell("OVERRIDE", override, height)
     } else {
         DashboardEmptyControlCell(height)
     }
@@ -1203,11 +1203,11 @@ private fun DashboardEffectSwitch(enabled: Boolean, onToggle: () -> Unit, border
 }
 
 @Composable
-private fun DashboardOriginalSwitch(original: Boolean, onToggle: () -> Unit) {
+private fun DashboardOverrideSwitch(override: Boolean, onToggle: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("ORIGINAL", color = if (original) Cyan else Muted, fontSize = 10.sp,
+        Text("OVERRIDE", color = if (override) Cyan else Muted, fontSize = 10.sp,
             fontWeight = FontWeight.Black)
-        DashboardEffectSwitch(original, onToggle)
+        DashboardEffectSwitch(override, onToggle)
     }
 }
 
