@@ -369,7 +369,7 @@ private fun MotorSoundDashboard(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .then(if (mainScreen == DashboardMainScreen.CALIBRATION) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)),
             contentAlignment = Alignment.TopCenter,
         ) {
             val heightForFullWidth = maxWidth * (990f / 1920f)
@@ -380,11 +380,17 @@ private fun MotorSoundDashboard(
             }
 
             Box(
-                modifier = Modifier
-                    .width(dashboardWidth)
-                    .height(dashboardHeight),
+                modifier = if (mainScreen == DashboardMainScreen.CALIBRATION) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.width(dashboardWidth).height(dashboardHeight)
+                },
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
+                // Calibration is deliberately a true full-screen surface: it must cover the
+                // dashboard header so its (0,0) pixel origin is the actual display origin.
+                if (mainScreen == DashboardMainScreen.CALIBRATION) {
+                    CalibrationScreen(onBack = { mainScreen = DashboardMainScreen.SETTINGS })
+                } else Column(modifier = Modifier.fillMaxSize()) {
                     DashboardHeader(
                         state = state,
                         uiMonitoringActive = uiMonitoringActive,
@@ -523,9 +529,7 @@ private fun MotorSoundDashboard(
                             onTransmissionSoundSettingsChange = onTransmissionSoundSettingsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
-                        DashboardMainScreen.CALIBRATION -> CalibrationScreen(
-                            onBack = { mainScreen = DashboardMainScreen.SETTINGS },
-                        )
+                        DashboardMainScreen.CALIBRATION -> Unit
                     }
                 }
 
