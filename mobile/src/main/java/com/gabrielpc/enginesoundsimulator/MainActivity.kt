@@ -115,6 +115,7 @@ import com.gabrielpc.enginesoundsimulator.drive.InputMode
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.CarSubtitleCatalog
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
+import com.gabrielpc.enginesoundsimulator.audio.MediaShiftButtonCoordinator
 import com.gabrielpc.enginesoundsimulator.audio.BackfirePreviewPlayer
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
@@ -214,6 +215,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onResetAllPreferences = controller::resetAllPreferences,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
+                        onMediaShiftButton = controller::handleMediaShiftButton,
                         onVirtualForwardGearCountChange = controller::setVirtualForwardGearCount,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -311,6 +313,7 @@ private fun MotorSoundDashboard(
     onEnginePureChange: (Boolean) -> Unit,
     onResetAllPreferences: () -> Unit,
     onToggleManualShiftMode: () -> Unit,
+    onMediaShiftButton: (Int) -> Boolean,
     onVirtualForwardGearCountChange: (Int) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -373,18 +376,18 @@ private fun MotorSoundDashboard(
                     android.view.KeyEvent.KEYCODE_MEDIA_NEXT,
                     android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
                     -> {
-                        if (pressed && state.manualShiftModeEnabled) {
-                            onManualUpshift()
+                        if (pressed) {
+                            onMediaShiftButton(event.nativeKeyEvent.keyCode)
                         }
-                        state.manualShiftModeEnabled
+                        MediaShiftButtonCoordinator.isMediaShiftKeyCode(event.nativeKeyEvent.keyCode)
                     }
                     android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS,
                     android.view.KeyEvent.KEYCODE_DPAD_LEFT,
                     -> {
-                        if (pressed && state.manualShiftModeEnabled) {
-                            onManualDownshift()
+                        if (pressed) {
+                            onMediaShiftButton(event.nativeKeyEvent.keyCode)
                         }
-                        state.manualShiftModeEnabled
+                        MediaShiftButtonCoordinator.isMediaShiftKeyCode(event.nativeKeyEvent.keyCode)
                     }
                     else -> false
                 }

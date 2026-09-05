@@ -256,6 +256,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.media)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(files(File(fmodSdkDirectory, "api/core/lib/fmod.jar")))
 }

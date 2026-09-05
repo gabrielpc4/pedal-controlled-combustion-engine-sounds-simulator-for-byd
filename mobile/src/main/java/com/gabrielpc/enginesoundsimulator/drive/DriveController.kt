@@ -17,6 +17,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRateRepository
 import com.gabrielpc.enginesoundsimulator.audio.ExteriorAudioModeRepository
+import com.gabrielpc.enginesoundsimulator.audio.MediaShiftButtonCoordinator
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGainRepository
 import com.gabrielpc.enginesoundsimulator.audio.AudioMixGains
 import com.gabrielpc.enginesoundsimulator.audio.CarEffectModes
@@ -152,6 +153,9 @@ class DriveController(context: Context) {
     )
     private val selectedPerspective = AtomicReference(soundPerspectiveRepository.load(selectedProfile.get()))
     private val manualShiftEnabled = AtomicBoolean(shiftModeRepository.isManualEnabled())
+    private val mediaShiftButtonCoordinator = MediaShiftButtonCoordinator(appContext) { keyCode ->
+        handleMediaShiftButton(keyCode)
+    }
     private val activePhysics = AtomicReference<AssettoPhysics?>(null)
     private val simulation = EngineSimulation()
     private val vehicleReader = BydSpeedReader(appContext)
@@ -254,6 +258,7 @@ class DriveController(context: Context) {
         audioEngine.setExteriorPureGlobalGain(exteriorPureAudioSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
+        applyManualShiftSoundOverrideCoupling(manualShiftEnabled.get())
     }
 
     fun isRunning(): Boolean = running.get()
@@ -326,6 +331,7 @@ class DriveController(context: Context) {
                 // stop permanently on its first missing-bank error. Let the background importer
                 // finish first, then start FMOD from completeStagedBankImport.
                 if (!audioMuted.get() && !stagedPacksPending) audioEngine.start()
+                mediaShiftButtonCoordinator.start()
                 thread.start()
                 if (stagedPacksPending) importStagedBankPacksAsync()
             } catch (error: Throwable) {
@@ -347,6 +353,7 @@ class DriveController(context: Context) {
             loopThread = null
             vehicleReader.stop()
             audioEngine.stop()
+            mediaShiftButtonCoordinator.stop()
             backfireOnly.set(false)
             audioEngine.setBackfireOnly(false)
             simulatedPedals.set(SimulatedPedalInput())
@@ -623,26 +630,66 @@ class DriveController(context: Context) {
     }
 
     fun toggleManualShiftMode() {
-        val enabled = !manualShiftEnabled.get()
+        setManualShiftMode(!manualShiftEnabled.get())
+    }
+
+    fun setManualShiftMode(enabled: Boolean) {
+        val currentlyEnabled = manualShiftEnabled.get()
+        if (currentlyEnabled == enabled) {
+            return
+        }
+
         shiftModeRepository.setManualEnabled(enabled)
         manualShiftEnabled.set(enabled)
         simulation.manualShiftEnabled = enabled
+        applyManualShiftSoundOverrideCoupling(enabled)
     }
 
+    private fun applyManualShiftSoundOverrideCoupling(manualEnabled: Boolean) {
+        setEffectOverride(EffectSoundKind.SHIFT, manualEnabled)
+    }
+
+    fun handleMediaShiftButton(keyCode: Int): Boolean {
+        if (!MediaShiftButtonCoordinator.isMediaShiftKeyCode(keyCode)) {
+            return false
+        }
+
+        synchronized(lifecycleLock) {
+            if (transmissionPosition.get() != TransmissionPosition.DRIVE) {
+                return false
+            }
+
+            if (!manualShiftEnabled.get()) {
+                setManualShiftMode(enabled = true)
+            }
+
+            return when (keyCode) {
+                android.view.KeyEvent.KEYCODE_MEDIA_NEXT,
+                android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+                -> simulation.requestManualUpshift()
+                android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+                -> simulation.requestManualDownshift()
+                else -> false
+            }
+        }
+    }
+
+    fun handleShiftKey(keyCode: Int): Boolean = handleMediaShiftButton(keyCode)
+
     fun requestManualUpshift(): Boolean = synchronized(lifecycleLock) {
-        if (transmissionPosition.get() != TransmissionPosition.DRIVE) false else simulation.requestManualUpshift()
+        if (transmissionPosition.get() != TransmissionPosition.DRIVE) {
+            false
+        } else {
+            simulation.requestManualUpshift()
+        }
     }
 
     fun requestManualDownshift(): Boolean = synchronized(lifecycleLock) {
-        if (transmissionPosition.get() != TransmissionPosition.DRIVE) false else simulation.requestManualDownshift()
-    }
-
-    fun handleShiftKey(keyCode: Int): Boolean {
-        if (!manualShiftEnabled.get()) return false
-        return when (keyCode) {
-            android.view.KeyEvent.KEYCODE_MEDIA_NEXT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> requestManualUpshift()
-            android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS, android.view.KeyEvent.KEYCODE_DPAD_LEFT -> requestManualDownshift()
-            else -> false
+        if (transmissionPosition.get() != TransmissionPosition.DRIVE) {
+            false
+        } else {
+            simulation.requestManualDownshift()
         }
     }
 
