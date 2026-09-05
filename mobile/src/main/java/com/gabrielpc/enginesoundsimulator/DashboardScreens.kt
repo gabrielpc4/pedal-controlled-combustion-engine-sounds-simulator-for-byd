@@ -487,63 +487,100 @@ internal fun SettingsScreen(
                 color = Muted,
                 fontSize = 15.sp,
             )
-            FmodUpdateRateControl(
-                rateHz = fmodUpdateRateHz,
-                onRateChange = onFmodUpdateRateChange,
-            )
-            AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
-            VirtualForwardGearCountControl(
-                gearCount = virtualForwardGearCount,
-                onGearCountChange = onVirtualForwardGearCountChange,
-            )
-            UiScaleControl(scale = uiScale, onScaleChange = onUiScaleChange)
-            TachometerScaleControl(scale = tachometerScale, onScaleChange = onTachometerScaleChange)
-            CanvasAspectRatioControl(ratio = canvasAspectRatio, onRatioChange = onCanvasAspectRatioChange)
-            Button(
-                onClick = onOpenCalibration,
-                colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("OPEN CALIBRATION", color = White, fontWeight = FontWeight.Black)
+            SettingsGridRow {
+                AutoblipControl(
+                    enabled = autoblipEnabled,
+                    onEnabledChange = onAutoblipEnabledChange,
+                    modifier = Modifier.weight(1f),
+                )
+                VirtualForwardGearCountControl(
+                    gearCount = virtualForwardGearCount,
+                    onGearCountChange = onVirtualForwardGearCountChange,
+                    modifier = Modifier.weight(1f),
+                )
             }
-            Text("SHIFT OVERRIDE GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
+            SettingsGridRow {
+                FmodUpdateRateControl(
+                    rateHz = fmodUpdateRateHz,
+                    onRateChange = onFmodUpdateRateChange,
+                    modifier = Modifier.weight(1.4f),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(0.6f)
+                        .fillMaxWidth()
+                        .border(1.dp, Line, RoundedCornerShape(8.dp))
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "CALIBRATION",
+                        color = Cyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text(
+                        "Open the full-screen pixel calibration surface for the dashboard layout.",
+                        color = Muted,
+                        fontSize = 12.sp,
+                    )
                     Button(
-                        onClick = { onShiftSoundSettingsChange(shiftSoundSettings.copy(overrideGain = gain)) },
-                        colors = ButtonDefaults.buttonColors(containerColor = if (shiftSoundSettings.overrideGain == gain) Cyan else PanelBright),
-                        modifier = Modifier.weight(1f),
-                    ) { Text("${gain}x", color = if (shiftSoundSettings.overrideGain == gain) Night else White) }
+                        onClick = onOpenCalibration,
+                        colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("OPEN CALIBRATION", color = White, fontWeight = FontWeight.Black)
+                    }
                 }
             }
-            Text("TRANSMISSION GLOBAL GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
-                    Button(
-                        onClick = { onTransmissionSoundSettingsChange(transmissionSoundSettings.copy(globalGain = gain)) },
-                        colors = ButtonDefaults.buttonColors(containerColor = if (transmissionSoundSettings.globalGain == gain) Cyan else PanelBright),
-                        modifier = Modifier.weight(1f),
-                    ) { Text("${gain}x", color = if (transmissionSoundSettings.globalGain == gain) Night else White) }
-                }
+            SettingsGridRow {
+                UiScaleControl(
+                    scale = uiScale,
+                    onScaleChange = onUiScaleChange,
+                    modifier = Modifier.weight(1f),
+                )
+                TachometerScaleControl(
+                    scale = tachometerScale,
+                    onScaleChange = onTachometerScaleChange,
+                    modifier = Modifier.weight(1f),
+                )
+                CanvasAspectRatioControl(
+                    ratio = canvasAspectRatio,
+                    onRatioChange = onCanvasAspectRatioChange,
+                    modifier = Modifier.weight(1f),
+                )
             }
-            Text("PURE ENGINE GLOBAL GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
-            Text(
-                "Applied on top of the ENGINE preset gain only while Exterior Pure audio is active.",
-                color = Muted,
-                fontSize = 12.sp,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
-                    Button(
-                        onClick = { onExteriorPureAudioSettingsChange(exteriorPureAudioSettings.copy(globalGain = gain)) },
-                        colors = ButtonDefaults.buttonColors(containerColor = if (exteriorPureAudioSettings.globalGain == gain) Cyan else PanelBright),
-                        modifier = Modifier.weight(1f),
-                    ) { Text("${gain}x", color = if (exteriorPureAudioSettings.globalGain == gain) Night else White) }
-                }
+            SettingsGridRow {
+                SettingsGainPresetCard(
+                    title = "SHIFT OVERRIDE GAIN",
+                    selectedGain = shiftSoundSettings.overrideGain,
+                    onGainSelected = { gain ->
+                        onShiftSoundSettingsChange(shiftSoundSettings.copy(overrideGain = gain))
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsGainPresetCard(
+                    title = "TRANSMISSION GLOBAL GAIN",
+                    selectedGain = transmissionSoundSettings.globalGain,
+                    onGainSelected = { gain ->
+                        onTransmissionSoundSettingsChange(transmissionSoundSettings.copy(globalGain = gain))
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsGainPresetCard(
+                    title = "PURE ENGINE GLOBAL GAIN",
+                    description = "Applied on top of the ENGINE preset gain only while Exterior Pure audio is active.",
+                    selectedGain = exteriorPureAudioSettings.globalGain,
+                    onGainSelected = { gain ->
+                        onExteriorPureAudioSettingsChange(exteriorPureAudioSettings.copy(globalGain = gain))
+                    },
+                    modifier = Modifier.weight(1f),
+                )
             }
             Button(
                 onClick = onResetAll,
                 colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("RESET ALL", color = White, fontWeight = FontWeight.Black)
             }
@@ -558,38 +595,127 @@ internal fun SettingsScreen(
 }
 
 @Composable
-private fun TachometerScaleControl(scale: Float, onScaleChange: (Float) -> Unit) {
-    Text("TACHOMETER SIZE  ${"%.2f".format(scale)}x", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
-    Slider(
-        value = scale,
-        onValueChange = onScaleChange,
-        valueRange = 0.6f..1.0f,
-        steps = 7,
+private fun SettingsGridRow(
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        content = content,
     )
 }
 
 @Composable
-private fun CanvasAspectRatioControl(ratio: Float, onRatioChange: (Float) -> Unit) {
-    Text("CANVAS ASPECT RATIO  ${"%.2f".format(ratio)}:1", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
-    Slider(value = ratio, onValueChange = onRatioChange, valueRange = 1.4f..2.4f, steps = 19)
+private fun SettingsGainPresetCard(
+    title: String,
+    selectedGain: Float,
+    onGainSelected: (Float) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    description: String? = null,
+) {
+    Column(
+        modifier = modifier
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(title, color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        if (description != null) {
+            Text(description, color = Muted, fontSize = 11.sp)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
+                Button(
+                    onClick = { onGainSelected(gain) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedGain == gain) Cyan else PanelBright,
+                    ),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                ) {
+                    Text(
+                        text = "${gain}x",
+                        color = if (selectedGain == gain) Night else White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TachometerScaleControl(
+    scale: Float,
+    onScaleChange: (Float) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    Column(
+        modifier = modifier
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("TACHOMETER SIZE", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text("${"%.2f".format(scale)}x", color = White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+        Slider(
+            value = scale,
+            onValueChange = onScaleChange,
+            valueRange = 0.6f..1.0f,
+            steps = 7,
+        )
+    }
+}
+
+@Composable
+private fun CanvasAspectRatioControl(
+    ratio: Float,
+    onRatioChange: (Float) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    Column(
+        modifier = modifier
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("CANVAS ASPECT", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text("${"%.2f".format(ratio)}:1", color = White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+        Slider(
+            value = ratio,
+            onValueChange = onRatioChange,
+            valueRange = 1.4f..2.4f,
+            steps = 19,
+        )
+    }
 }
 
 @Composable
 private fun UiScaleControl(
     scale: Float,
     onScaleChange: (Float) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(18.dp),
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("UI SCALE", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
-            Text(String.format(Locale.US, "%.3fx", scale), color = White, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text("UI SCALE", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(String.format(Locale.US, "%.3fx", scale), color = White, fontSize = 14.sp, fontWeight = FontWeight.Black)
         }
-        Text("Scales the complete interface. Default 0.625x equals dividing the original size by 1.6.", color = Muted, fontSize = 13.sp)
+        Text(
+            "Scales the complete interface. Default 0.625x equals dividing the original size by 1.6.",
+            color = Muted,
+            fontSize = 11.sp,
+        )
         Slider(
             value = scale,
             onValueChange = onScaleChange,
@@ -603,23 +729,32 @@ private fun UiScaleControl(
 private fun AutoblipControl(
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
+    Column(
+        modifier = modifier
             .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(18.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("AUTOBLIP", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "Automatically blip the throttle during downshifts using the car's authored profile.",
-                color = Muted,
-                fontSize = 12.sp,
+                text = "AUTOBLIP",
+                color = Cyan,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.weight(1f),
             )
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
         }
-        Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        Text(
+            "Automatically blip the throttle during downshifts using the car's authored profile.",
+            color = Muted,
+            fontSize = 11.sp,
+        )
     }
 }
 
@@ -627,19 +762,19 @@ private fun AutoblipControl(
 private fun VirtualForwardGearCountControl(
     gearCount: Int,
     onGearCountChange: (Int) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(18.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("VIRTUAL FORWARD GEARS", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Text("VIRTUAL FORWARD GEARS", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
         Text(
             "Global gear-band mapping for every car. At 10 gears, 60 km/h stays anchored in 4th gear.",
             color = Muted,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -722,9 +857,12 @@ private fun ShiftSoundOverrideControl(
 private fun FmodUpdateRateControl(
     rateHz: Int,
     onRateChange: (Int) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().border(1.dp, Line, RoundedCornerShape(8.dp)).padding(18.dp),
+        modifier = modifier
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
@@ -732,17 +870,17 @@ private fun FmodUpdateRateControl(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("FMOD CONTROL RATE", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("FMOD CONTROL RATE", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
                 Text(
-                    "Physics and FMOD use this cadence together. 60 Hz is the default and recommended for this 60 Hz screen; 30 Hz is the economy mode.",
+                    "Physics and FMOD share this cadence. 60 Hz is recommended; 30 Hz is economy mode.",
                     color = Muted,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                 )
             }
             Text(
                 "$rateHz Hz",
                 color = White,
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Black,
             )
         }
