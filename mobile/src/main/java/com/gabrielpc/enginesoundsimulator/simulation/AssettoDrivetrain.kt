@@ -47,11 +47,11 @@ internal class AssettoDrivetrainFrame(
  */
 internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     /**
-     * Test branch behavior: complete every gear change in one frame with no clutch-open interval,
-     * no neutral physics gear, and RPM snapped to the target ratio instead of settling through
-     * clutch slip or launch-control smoothing.
+     * Test branch behavior: keep the normal shift/clutch presentation, but once the clutch is
+     * re-engaged and the new gear is selected, lock RPM to the coupled wheel speed so post-shift
+     * clutch-slip integration cannot make the tachometer or FMOD pitch oscillate around the fit.
      */
-    private val simplifiedInstantShifts = SIMPLIFIED_INSTANT_SHIFTS
+    private val simplifiedStableCoupledRpm = SIMPLIFIED_STABLE_COUPLED_RPM
     // Explicit app preference; enabled by default because it is the authored car behavior.
     private var autoblipEnabled = true
     private var rpm = physics.engine.idleRpm
@@ -316,14 +316,11 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             shiftStarted = true
             eventDirection = requestedDirection
             shiftWasAutomatic = !requestedManualShift
-            if (simplifiedInstantShifts && eventDirection < 0 && shiftWasAutomatic) {
-                automaticDownshiftCooldownSeconds = AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS
-            }
         } else if (requestedDirection != 0) {
             shiftRejected = true
         }
 
-        if (!simplifiedInstantShifts && shifting) {
+        if (shifting) {
             if (shiftDuration < shiftElapsed) {
                 gear = shiftTarget
                 eventDirection = shiftDirection
@@ -405,11 +402,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             if (oldSpeed <= 0.0 && driveForce <= resistingForce) speedMetersPerSecond = 0.0
         }
         rpm = max(0.0, engineOmega * RPM_PER_RADIAN_SECOND)
-        if (
-            simplifiedInstantShifts &&
-            currentTransmissionPosition == TransmissionPosition.DRIVE &&
-            gear >= 1
-        ) {
+        if (shouldStabilizeCoupledRpm(clutch)) {
             snapRpmToCurrentGear()
         }
         // LIMITER is a hard upper bound for the value sent to FMOD and the tachometer. This
@@ -500,17 +493,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     }
 
     private fun autoclutchStep(dt: Double, gas: Double, brake: Double): Double {
-        if (
-            simplifiedInstantShifts &&
-            currentTransmissionPosition == TransmissionPosition.DRIVE &&
-            gear >= 1
-        ) {
-            clutchSequence = emptyList()
-            clutchSequenceElapsed = 0.0
-            clutchSignal = 1.0
-            return 1.0
-        }
-
         // In automatic D, a firm brake at walking speed means the driver is holding the car
         // stopped. The authored autoclutch rate is intentionally gentle for normal launches, but
         // letting that rate continue all the way to zero would keep the engine mechanically tied
@@ -580,9 +562,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 gas > 0.2 && automaticGasCutoff <= 0.0
             ) {
                 request = 1
-                if (!simplifiedInstantShifts) {
-                    automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
-                }
+                automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
                 val downshiftRpm = downshiftRpmForCurrentGear()
                 // Landing-RPM downshifts are an intentional app policy, but they must describe
@@ -638,11 +618,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
                 upshiftRpm = upshiftTriggerRpmForGear(gear, gas),
             )
         }
-        if (simplifiedInstantShifts) {
-            completeShiftInstantly(target)
-            return true
-        }
-
         if (direction > 0 && physics.drivetrain.autoCutoffTimeSeconds != 0.0) {
             engineCutoff = physics.drivetrain.autoCutoffTimeSeconds
         }
@@ -664,21 +639,20 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return true
     }
 
-    private fun completeShiftInstantly(target: Int) {
-        gear = target
-        shiftTarget = target
-        shiftDirection = 0
-        shiftElapsed = 0.0
-        shiftDuration = 0.0
-        authoredShiftDuration = 0.0
-        authoredClutchDuration = 0.0
-        effectiveClutchDuration = 0.0
-        clutchSequence = emptyList()
-        clutchSequenceElapsed = 0.0
-        clutchSignal = 1.0
-        engineCutoff = 0.0
-        autoblipStartMilliseconds = null
-        snapRpmToCurrentGear()
+    private fun shouldStabilizeCoupledRpm(clutch: Double): Boolean {
+        if (!simplifiedStableCoupledRpm) {
+            return false
+        }
+
+        if (currentTransmissionPosition != TransmissionPosition.DRIVE) {
+            return false
+        }
+
+        if (gear < 1 || shifting || clutchSequence.isNotEmpty()) {
+            return false
+        }
+
+        return clutch >= COUPLED_RPM_STABILIZE_CLUTCH
     }
 
     /** Locks engine speed to the current gear ratio at the internal FMOD wheel speed. */
@@ -903,10 +877,6 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
     private val physicsGear: Int
         get() {
-            if (simplifiedInstantShifts) {
-                return gear
-            }
-
             if (shifting) {
                 return 0
             }
@@ -1130,9 +1100,10 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         const val AUTOMATIC_DOWNSHIFT_CHAIN_COOLDOWN_SECONDS = 0.12
         const val FIXED_UPSHIFT_SECONDS = 0.10
         const val FIXED_DOWNSHIFT_SECONDS = 0.15
+        const val COUPLED_RPM_STABILIZE_CLUTCH = 0.99
         const val RPM_PER_RADIAN_SECOND = 60.0 / (2.0 * PI)
         const val RADIAN_SECONDS_PER_RPM = 1.0 / RPM_PER_RADIAN_SECOND
-        const val SIMPLIFIED_INSTANT_SHIFTS = true
+        const val SIMPLIFIED_STABLE_COUPLED_RPM = true
     }
 }
 
