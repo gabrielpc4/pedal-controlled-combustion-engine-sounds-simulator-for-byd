@@ -98,6 +98,8 @@ data class DriveSnapshot(
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
     val autoblipEnabled: Boolean = true,
     val exteriorPureAudio: Boolean = false,
+    /** Display-only scale applied to the complete Compose dashboard. */
+    val uiScale: Float = UiScaleRepository.DEFAULT,
     val userMessage: UserVisibleMessage? = null,
 )
 
@@ -165,6 +167,8 @@ class DriveController(context: Context) {
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val autoblipEnabled = AtomicBoolean(autoblipRepository.load())
+    private val uiScaleRepository = UiScaleRepository(appContext)
+    private val uiScale = AtomicReference(uiScaleRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
@@ -193,6 +197,7 @@ class DriveController(context: Context) {
         selectedCarIndex = installedProfiles().indexOf(selectedProfile.get()),
         availableCarCount = installedProfiles().size,
         soundPerspective = selectedPerspective.get(),
+        uiScale = uiScale.get(),
     )
 
     init {
@@ -370,6 +375,12 @@ class DriveController(context: Context) {
         simulation.updateAutoblipEnabled(enabled)
     }
 
+    fun setUiScale(value: Float) {
+        val normalized = value.coerceIn(UiScaleRepository.MINIMUM, UiScaleRepository.MAXIMUM)
+        uiScale.set(normalized)
+        uiScaleRepository.save(normalized)
+    }
+
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
 
     fun setExteriorPureAudio(enabled: Boolean) {
@@ -469,6 +480,7 @@ class DriveController(context: Context) {
         carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
+        uiScaleRepository.reset()
         audioMixGains.set(AudioMixGains())
         fmodUpdateRateHz.set(FmodUpdateRate.DEFAULT_HZ)
         exteriorPureAudio.set(false)
@@ -476,6 +488,7 @@ class DriveController(context: Context) {
         shiftSoundSettings.set(ShiftSoundSettings())
         transmissionSoundSettings.set(TransmissionSoundSettings())
         autoblipEnabled.set(true)
+        uiScale.set(UiScaleRepository.DEFAULT)
         simulation.updateAutoblipEnabled(true)
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
@@ -848,6 +861,7 @@ class DriveController(context: Context) {
                 availableCarCount = installedProfiles().size,
                 soundPerspective = selectedPerspective.get(),
                 autoblipEnabled = autoblipEnabled.get(),
+                uiScale = uiScale.get(),
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = audioEngine.loadedBankProfileId() == selected.id,
                 userMessage = userMessage,

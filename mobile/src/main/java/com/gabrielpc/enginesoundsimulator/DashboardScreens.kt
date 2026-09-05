@@ -441,6 +441,8 @@ internal fun SettingsScreen(
     onFmodUpdateRateChange: (Int) -> Unit,
     autoblipEnabled: Boolean,
     onAutoblipEnabledChange: (Boolean) -> Unit,
+    uiScale: Float,
+    onUiScaleChange: (Float) -> Unit,
     exteriorPureAudio: Boolean,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
@@ -480,6 +482,7 @@ internal fun SettingsScreen(
                 onRateChange = onFmodUpdateRateChange,
             )
             AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
+            UiScaleControl(scale = uiScale, onScaleChange = onUiScaleChange)
             Button(
                 onClick = onOpenCalibration,
                 colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
@@ -520,6 +523,31 @@ internal fun SettingsScreen(
                 onPreview = onPreviewBackfireSample,
             )
         }
+    }
+}
+
+@Composable
+private fun UiScaleControl(
+    scale: Float,
+    onScaleChange: (Float) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Line, RoundedCornerShape(8.dp))
+            .padding(18.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("UI SCALE", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text(String.format(Locale.US, "%.3fx", scale), color = White, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        }
+        Text("Scales the complete interface. Default 0.625x equals dividing the original size by 1.6.", color = Muted, fontSize = 13.sp)
+        Slider(
+            value = scale,
+            onValueChange = onScaleChange,
+            valueRange = 0.5f..1.0f,
+            steps = 19,
+        )
     }
 }
 

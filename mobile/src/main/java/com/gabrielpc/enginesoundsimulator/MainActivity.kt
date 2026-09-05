@@ -57,6 +57,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -95,6 +96,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -175,9 +178,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             EngineSoundsSimulatorTheme(darkTheme = true, dynamicColor = false) {
                 driveState?.let { state ->
-                    MotorSoundDashboard(
-                        state = state,
-                        uiMonitoringActive = uiMonitoringActive,
+                    val baseDensity = LocalDensity.current
+                    CompositionLocalProvider(
+                        // One density multiplier scales every dp/sp dimension in every screen.
+                        // This is presentation-only; audio, physics and calibration pixels remain unchanged.
+                        LocalDensity provides Density(
+                            density = baseDensity.density * state.uiScale,
+                            fontScale = baseDensity.fontScale * state.uiScale,
+                        ),
+                    ) {
+                        MotorSoundDashboard(
+                            state = state,
+                            uiMonitoringActive = uiMonitoringActive,
                         onThrottle = controller::setSimulatedPedalThrottle,
                         onBrake = controller::setSimulatedPedalBrake,
                         onSimulatedRegen = controller::setSimulatedRegen,
@@ -204,7 +216,8 @@ class MainActivity : ComponentActivity() {
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
                         onFmodUpdateRateChange = controller::setFmodUpdateRateHz,
-                        onAutoblipEnabledChange = controller::setAutoblipEnabled,
+                            onAutoblipEnabledChange = controller::setAutoblipEnabled,
+                            onUiScaleChange = controller::setUiScale,
                         onExteriorPureAudioChange = controller::setExteriorPureAudio,
                         onMixerDiagnosticsActive = controller::setMixerDiagnosticsActive,
                         onCategoryGains = controller::setFmodCategoryGains,
@@ -219,8 +232,9 @@ class MainActivity : ComponentActivity() {
                         onNextCar = controller::selectNextCar,
                         onSelectCar = controller::selectCar,
                         onSoundPerspectiveChange = controller::setSoundPerspective,
-                        onDismissUserMessage = controller::dismissUserMessage,
-                    )
+                            onDismissUserMessage = controller::dismissUserMessage,
+                        )
+                    }
                 }
             }
         }
@@ -296,6 +310,7 @@ private fun MotorSoundDashboard(
     onHostGains: (Float, Float) -> Unit,
     onFmodUpdateRateChange: (Int) -> Unit,
     onAutoblipEnabledChange: (Boolean) -> Unit,
+    onUiScaleChange: (Float) -> Unit,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     onMixerDiagnosticsActive: (Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
@@ -519,6 +534,8 @@ private fun MotorSoundDashboard(
                             onFmodUpdateRateChange = onFmodUpdateRateChange,
                             autoblipEnabled = state.autoblipEnabled,
                             onAutoblipEnabledChange = onAutoblipEnabledChange,
+                            uiScale = state.uiScale,
+                            onUiScaleChange = onUiScaleChange,
                             exteriorPureAudio = state.exteriorPureAudio,
                             onExteriorPureAudioChange = onExteriorPureAudioChange,
                             backfireSettings = state.backfireSettings,

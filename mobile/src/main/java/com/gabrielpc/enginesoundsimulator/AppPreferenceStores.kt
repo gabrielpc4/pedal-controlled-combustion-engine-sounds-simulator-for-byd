@@ -18,4 +18,5 @@ internal object AppPreferenceStores {
     const val AUTOBLIP = "autoblip_v1"
     /** Last catalog tab shown by the shared car picker (modded or original). */
     const val CAR_PICKER_GROUP = "car_picker_group_v1"
+    const val UI_SCALE = "ui_scale_v1"
 }
