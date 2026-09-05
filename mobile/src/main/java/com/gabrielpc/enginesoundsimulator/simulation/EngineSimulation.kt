@@ -98,7 +98,7 @@ class EngineSimulation {
 
     val state: DrivetrainState get() = latestState
 
-    fun captureMotionContinuity(
+    internal fun captureMotionContinuity(
         usesSimulatedPedals: Boolean,
         transmissionPosition: TransmissionPosition,
     ): SimulationMotionContinuity {
