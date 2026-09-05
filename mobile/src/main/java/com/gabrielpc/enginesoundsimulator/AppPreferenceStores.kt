@@ -12,6 +12,7 @@ internal object AppPreferenceStores {
     const val BACKFIRE_SETTINGS = "backfire_settings_v1"
     const val FMOD_UPDATE_RATE = "fmod_update_rate_v1"
     const val EXTERIOR_AUDIO_MODE = "exterior_audio_mode_v1"
+    const val EXTERIOR_PURE_AUDIO_SETTINGS = "exterior_pure_audio_settings_v1"
     const val SHIFT_SOUND_SETTINGS = "shift_sound_settings_v1"
     const val TRANSMISSION_SOUND_SETTINGS = "transmission_sound_settings_v1"
     const val CAR_EFFECT_MODES = "car_effect_modes_v2"

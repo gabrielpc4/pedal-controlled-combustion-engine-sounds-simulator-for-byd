@@ -104,6 +104,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import com.gabrielpc.enginesoundsimulator.drive.ExteriorPureAudioSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.EffectSoundKind
@@ -228,6 +229,7 @@ class MainActivity : ComponentActivity() {
                         onBackfireSettingsChange = controller::setBackfireSettings,
                         onShiftSoundSettingsChange = controller::setShiftSoundSettings,
                         onTransmissionSoundSettingsChange = controller::setTransmissionSoundSettings,
+                        onExteriorPureAudioSettingsChange = controller::setExteriorPureAudioSettings,
                         onPreviewBackfireSample = backfirePreviewPlayer::play,
                         onEventMute = controller::setFmodEventMute,
                         onEventSolo = controller::setFmodEventSolo,
@@ -324,6 +326,7 @@ private fun MotorSoundDashboard(
     onBackfireSettingsChange: (BackfireSettings) -> Unit,
     onShiftSoundSettingsChange: (ShiftSoundSettings) -> Unit,
     onTransmissionSoundSettingsChange: (TransmissionSoundSettings) -> Unit,
+    onExteriorPureAudioSettingsChange: (ExteriorPureAudioSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
     onEventMute: (String, Boolean) -> Unit,
     onEventSolo: (String, Boolean) -> Unit,
@@ -560,6 +563,8 @@ private fun MotorSoundDashboard(
                             onShiftSoundSettingsChange = onShiftSoundSettingsChange,
                             transmissionSoundSettings = state.transmissionSoundSettings,
                             onTransmissionSoundSettingsChange = onTransmissionSoundSettingsChange,
+                            exteriorPureAudioSettings = state.exteriorPureAudioSettings,
+                            onExteriorPureAudioSettingsChange = onExteriorPureAudioSettingsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                         DashboardMainScreen.CALIBRATION -> Unit
@@ -1159,7 +1164,11 @@ private fun DashboardEffectControls(
             if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
         }
         Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
-            DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) { onEnginePureChange(!state.exteriorPureAudio) }
+            DashboardSwitchCell(rowHeight, state.exteriorPureAudio && external, if (external) Line else Muted) {
+                if (external) {
+                    onEnginePureChange(!state.exteriorPureAudio)
+                }
+            }
             rows.drop(1).forEach { row ->
                 val override = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOverride

@@ -87,6 +87,7 @@ data class DriveSnapshot(
     val backfireSettings: BackfireSettings = BackfireSettings(),
     val shiftSoundSettings: ShiftSoundSettings = ShiftSoundSettings(),
     val transmissionSoundSettings: TransmissionSoundSettings = TransmissionSoundSettings(),
+    val exteriorPureAudioSettings: ExteriorPureAudioSettings = ExteriorPureAudioSettings(),
     val popsAndBangsEnabled: Boolean = true,
     val popsAndBangsOverride: Boolean = false,
     val shiftSoundsEnabled: Boolean = true,
@@ -134,6 +135,7 @@ class DriveController(context: Context) {
     private val backfireSettingsRepository = BackfireSettingsRepository(appContext)
     private val shiftSoundSettingsRepository = ShiftSoundSettingsRepository(appContext)
     private val transmissionSoundSettingsRepository = TransmissionSoundSettingsRepository(appContext)
+    private val exteriorPureAudioSettingsRepository = ExteriorPureAudioSettingsRepository(appContext)
     private val carEffectModesRepository = CarEffectModesRepository(appContext)
     private val autoblipRepository = AutoblipRepository(appContext)
     private val virtualGearCountRepository = VirtualGearCountRepository(appContext)
@@ -170,6 +172,7 @@ class DriveController(context: Context) {
     private val backfireSettings = AtomicReference(BackfireSettings())
     private val shiftSoundSettings = AtomicReference(ShiftSoundSettings())
     private val transmissionSoundSettings = AtomicReference(TransmissionSoundSettings())
+    private val exteriorPureAudioSettings = AtomicReference(ExteriorPureAudioSettings())
     private val carEffectModes = AtomicReference(CarEffectModes())
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
@@ -230,6 +233,7 @@ class DriveController(context: Context) {
         backfireSettings.set(backfireSettingsRepository.load())
         shiftSoundSettings.set(shiftSoundSettingsRepository.load())
         transmissionSoundSettings.set(transmissionSoundSettingsRepository.load())
+        exteriorPureAudioSettings.set(exteriorPureAudioSettingsRepository.load())
         carEffectModes.set(carEffectModesRepository.load(selectedProfile.get()))
         val modes = carEffectModes.get()
         shiftSoundSettings.set(
@@ -246,6 +250,7 @@ class DriveController(context: Context) {
         audioEngine.setShiftSoundOverride(modes.shiftSoundsOverride)
         audioEngine.setShiftOverrideGain(shiftSoundSettings.get().overrideGain)
         audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
+        audioEngine.setExteriorPureGlobalGain(exteriorPureAudioSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
     }
@@ -278,6 +283,7 @@ class DriveController(context: Context) {
             backfireSettings = backfireSettings.get(),
             shiftSoundSettings = shiftSoundSettings.get(),
             transmissionSoundSettings = transmissionSoundSettings.get(),
+            exteriorPureAudioSettings = exteriorPureAudioSettings.get(),
             popsAndBangsEnabled = carEffectModes.get().popsAndBangsEnabled,
             popsAndBangsOverride = carEffectModes.get().popsAndBangsOverride,
             shiftSoundsEnabled = carEffectModes.get().shiftSoundsEnabled,
@@ -425,9 +431,17 @@ class DriveController(context: Context) {
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
 
     fun setExteriorPureAudio(enabled: Boolean) {
-        exteriorPureAudio.set(enabled)
-        exteriorAudioModeRepository.save(enabled)
-        audioEngine.setExteriorPureAudio(enabled)
+        val normalized = enabled && selectedPerspective.get() == EngineSoundPerspective.EXTERIOR
+        exteriorPureAudio.set(normalized)
+        exteriorAudioModeRepository.save(normalized)
+        audioEngine.setExteriorPureAudio(normalized)
+    }
+
+    fun setExteriorPureAudioSettings(updated: ExteriorPureAudioSettings) {
+        val normalized = updated.copy(globalGain = updated.globalGain.coerceIn(0.25f, 1.0f))
+        exteriorPureAudioSettings.set(normalized)
+        exteriorPureAudioSettingsRepository.save(normalized)
+        audioEngine.setExteriorPureGlobalGain(normalized.globalGain)
     }
 
     fun setEffectEnabled(kind: EffectSoundKind, enabled: Boolean) {
@@ -518,6 +532,7 @@ class DriveController(context: Context) {
         backfireSettingsRepository.reset()
         shiftSoundSettingsRepository.reset()
         transmissionSoundSettingsRepository.reset()
+        exteriorPureAudioSettingsRepository.reset()
         autoblipRepository.reset()
         virtualGearCountRepository.reset()
         carEffectModesRepository.resetAll()
@@ -532,6 +547,7 @@ class DriveController(context: Context) {
         backfireSettings.set(BackfireSettings())
         shiftSoundSettings.set(ShiftSoundSettings())
         transmissionSoundSettings.set(TransmissionSoundSettings())
+        exteriorPureAudioSettings.set(ExteriorPureAudioSettings())
         autoblipEnabled.set(true)
         virtualForwardGearCount.set(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
         uiScale.set(UiScaleRepository.DEFAULT)
@@ -547,6 +563,7 @@ class DriveController(context: Context) {
         audioEngine.setShiftSoundEnabled(true)
         audioEngine.setShiftSoundOverride(false)
         audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
+        audioEngine.setExteriorPureGlobalGain(exteriorPureAudioSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(true)
         audioEngine.setTurboAudioEnabled(true)
         selectedProfile.set(
@@ -589,6 +606,10 @@ class DriveController(context: Context) {
     }
 
     fun setSoundPerspective(perspective: EngineSoundPerspective) {
+        if (perspective != EngineSoundPerspective.EXTERIOR && exteriorPureAudio.get()) {
+            setExteriorPureAudio(false)
+        }
+
         val profile = selectedProfile.get()
         selectedPerspective.set(soundPerspectiveRepository.save(profile, perspective))
         audioEngine.setSoundProgram(profile, perspective)

@@ -65,6 +65,7 @@ class EngineAudioEngine(context: Context) {
     private val shiftSoundOverride = AtomicBoolean(false)
     private val shiftOverrideGain = AtomicReference(0.5f)
     private val globalTransmissionGain = AtomicReference(0.5f)
+    private val exteriorPureGlobalGain = AtomicReference(0.5f)
     private val shiftSoundEnabled = AtomicBoolean(true)
     private val transmissionAudioEnabled = AtomicBoolean(true)
     private val turboAudioEnabled = AtomicBoolean(true)
@@ -144,6 +145,19 @@ class EngineAudioEngine(context: Context) {
 
     /** Applies the persistent driver preference before a car's per-profile transmission trim. */
     fun setGlobalTransmissionGain(gain: Float) { globalTransmissionGain.set(gain.coerceIn(0.25f, 1.0f)) }
+
+    fun setExteriorPureGlobalGain(gain: Float) {
+        exteriorPureGlobalGain.set(gain.coerceIn(0.25f, 1.0f))
+    }
+
+    private fun effectiveHostEngineGain(): Float {
+        val base = hostEngineGain.get()
+        if (!exteriorPureAudio.get()) {
+            return base
+        }
+
+        return base * exteriorPureGlobalGain.get()
+    }
 
     fun setShiftSoundEnabled(enabled: Boolean) { shiftSoundEnabled.set(enabled) }
 
@@ -410,12 +424,13 @@ class EngineAudioEngine(context: Context) {
                 var overrideBatchCalls = 0
                 val requestedHostEngineGain = hostEngineGain.get()
                 val requestedHostEffectsGain = hostEffectsGain.get()
+                val effectiveHostEngineGain = effectiveHostEngineGain()
                 if (
-                    requestedHostEngineGain != sentHostEngineGain ||
+                    effectiveHostEngineGain != sentHostEngineGain ||
                     requestedHostEffectsGain != sentHostEffectsGain
                 ) {
-                    bridge.setHostGains(requestedHostEngineGain, requestedHostEffectsGain)
-                    sentHostEngineGain = requestedHostEngineGain
+                    bridge.setHostGains(effectiveHostEngineGain, requestedHostEffectsGain)
+                    sentHostEngineGain = effectiveHostEngineGain
                     sentHostEffectsGain = requestedHostEffectsGain
                     hostGainCalls = 1
                 }

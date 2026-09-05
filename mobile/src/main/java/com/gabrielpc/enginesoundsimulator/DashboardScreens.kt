@@ -88,6 +88,7 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import com.gabrielpc.enginesoundsimulator.drive.ExteriorPureAudioSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
@@ -455,6 +456,8 @@ internal fun SettingsScreen(
     onShiftSoundSettingsChange: (ShiftSoundSettings) -> Unit,
     transmissionSoundSettings: TransmissionSoundSettings,
     onTransmissionSoundSettingsChange: (TransmissionSoundSettings) -> Unit,
+    exteriorPureAudioSettings: ExteriorPureAudioSettings,
+    onExteriorPureAudioSettingsChange: (ExteriorPureAudioSettings) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -514,6 +517,21 @@ internal fun SettingsScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = if (transmissionSoundSettings.globalGain == gain) Cyan else PanelBright),
                         modifier = Modifier.weight(1f),
                     ) { Text("${gain}x", color = if (transmissionSoundSettings.globalGain == gain) Night else White) }
+                }
+            }
+            Text("PURE ENGINE GLOBAL GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text(
+                "Applied on top of the ENGINE preset gain only while Exterior Pure audio is active.",
+                color = Muted,
+                fontSize = 12.sp,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
+                    Button(
+                        onClick = { onExteriorPureAudioSettingsChange(exteriorPureAudioSettings.copy(globalGain = gain)) },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (exteriorPureAudioSettings.globalGain == gain) Cyan else PanelBright),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("${gain}x", color = if (exteriorPureAudioSettings.globalGain == gain) Night else White) }
                 }
             }
             Button(
