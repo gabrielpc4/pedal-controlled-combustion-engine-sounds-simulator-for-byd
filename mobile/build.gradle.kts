@@ -18,7 +18,8 @@ if (buildNumberFile.exists()) {
 val isAssembling = gradle.startParameter.taskNames.any { taskName ->
     taskName.contains("assemble", ignoreCase = true)
 }
-val stampCarBuild = gradle.startParameter.projectProperties["carApk"] == "true"
+// Every assembled main APK receives a new build number; no extra Gradle property is required.
+val stampCarBuild = isAssembling
 
 val storedBuildNumber = buildNumberProperties.getProperty("buildNumber", "1").toInt()
 val stampedBuildNumber = if (isAssembling && stampCarBuild) storedBuildNumber + 1 else storedBuildNumber
@@ -47,6 +48,7 @@ val buildTimeUtc: String = Instant.now().toString()
 
 val generatedPreviewAssets = file("build/generated/carPreviewAssets")
 val generatedShiftOverrideAssets = file("build/generated/shiftOverrideAssets")
+val generatedEmbeddedModdedAssets = file("build/generated/embeddedModdedAssets")
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -135,6 +137,13 @@ val prepareShiftOverrideAssets = tasks.register<Sync>("prepareShiftOverrideAsset
     }
     into(generatedShiftOverrideAssets)
 }
+val prepareEmbeddedModdedAssets = tasks.register<Sync>("prepareEmbeddedModdedAssets") {
+    from(rootProject.file("fmod_bank_packs")) {
+        include("modded-*.bydbank", "assetto-common.bydbank", "assetto-common-strings.bydbank")
+        into("embedded-fmod-banks")
+    }
+    into(generatedEmbeddedModdedAssets)
+}
 
 if (isAssembling && stampCarBuild) {
     val nextBuildNumber = stampedBuildNumber
@@ -157,6 +166,7 @@ tasks.named("preBuild").configure {
     dependsOn(prepareCarPreviewAssets)
     dependsOn(prepareFmodSdk)
     dependsOn(prepareShiftOverrideAssets)
+    dependsOn(prepareEmbeddedModdedAssets)
 }
 
 
@@ -215,6 +225,7 @@ android {
     }
     sourceSets.getByName("main").assets.srcDir(generatedPreviewAssets)
     sourceSets.getByName("main").assets.srcDir(generatedShiftOverrideAssets)
+    sourceSets.getByName("main").assets.srcDir(generatedEmbeddedModdedAssets)
     sourceSets.getByName("main").jniLibs.srcDir(File(generatedFmodSdk, "lib"))
     externalNativeBuild {
         cmake {

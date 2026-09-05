@@ -19,7 +19,7 @@ internal class UiScaleRepository(context: Context) {
     fun reset() = preferences.edit().clear().apply()
 
     companion object {
-        const val DEFAULT = 0.625f
+    const val DEFAULT = 0.8f
         const val MINIMUM = 0.5f
         const val MAXIMUM = 1.0f
         private const val KEY = "global_scale"

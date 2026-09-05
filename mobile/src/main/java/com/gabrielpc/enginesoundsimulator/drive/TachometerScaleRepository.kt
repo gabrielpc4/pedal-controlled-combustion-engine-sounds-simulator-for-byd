@@ -14,7 +14,7 @@ internal class TachometerScaleRepository(context: Context) {
     fun reset() { preferences.edit().remove(AppPreferenceStores.TACHOMETER_SCALE).apply() }
 
     companion object {
-        const val DEFAULT = 1.0f
+    const val DEFAULT = 0.8f
         const val MINIMUM = 0.6f
         const val MAXIMUM = 1.0f
     }

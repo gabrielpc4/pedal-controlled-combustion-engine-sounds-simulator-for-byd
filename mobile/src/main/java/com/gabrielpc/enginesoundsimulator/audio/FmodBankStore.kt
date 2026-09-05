@@ -343,6 +343,29 @@ internal class FmodBankResolver(context: Context) {
 
     fun importStagedPacks(): FmodBankImportResult = store.importStagedPacks()
 
+    fun ensureEmbeddedModdedPacks(): Int {
+        val installed = store.installedPackIds()
+        val assets = requireNotNull(appContext.assets.list("embedded-fmod-banks"))
+        var imported = 0
+        assets.sorted().forEach { assetName ->
+            val (group, packId) = if (assetName.startsWith("modded-") && assetName.endsWith(".bydbank")) {
+                FmodBankProfiles.moddedCarsPackId to assetName.removeSuffix(".bydbank")
+            } else if (assetName == "assetto-common.bydbank") {
+                FmodBankProfiles.originalCarsPackId to FmodBankProfiles.commonPackId
+            } else if (assetName == "assetto-common-strings.bydbank") {
+                FmodBankProfiles.originalCarsPackId to FmodBankProfiles.commonStringsPackId
+            } else {
+                return@forEach
+            }
+            if ("$group/$packId" in installed) return@forEach
+            appContext.assets.open("embedded-fmod-banks/$assetName").use { source ->
+                store.install(group, packId, source)
+            }
+            imported++
+        }
+        return imported
+    }
+
     fun hasStagedPacks(): Boolean = store.hasStagedPacks()
 
     fun bankFiles(profile: FmodBankProfile): FmodBankFiles = FmodBankFiles(
