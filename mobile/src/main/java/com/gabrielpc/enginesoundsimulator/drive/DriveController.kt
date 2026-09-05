@@ -107,7 +107,10 @@ data class DriveSnapshot(
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
     val virtualForwardGearCount: Int = VirtualGearProfile.DEFAULT_VIRTUAL_GEARS,
     val exteriorPureAudio: Boolean = false,
-    val forceFullLoadAudioThrottle: Boolean = true,
+    val minimumAudioThrottle: Float = MinimumAudioThrottle.DEFAULT,
+    val cruisingShiftOffsetRpm: Int = CruisingShiftOffsetRpm.DEFAULT,
+    val racingReturnThrottlePercent: Int = RacingReturnThrottlePercent.DEFAULT,
+    val racingReturnHoldSeconds: Int = RacingReturnHoldSeconds.DEFAULT,
     val favoriteCarIds: Set<String> = emptySet(),
     val userMessage: UserVisibleMessage? = null,
 )
@@ -141,7 +144,8 @@ class DriveController(context: Context) {
     private val exteriorPureAudioSettingsRepository = ExteriorPureAudioSettingsRepository(appContext)
     private val carEffectModesRepository = CarEffectModesRepository(appContext)
     private val virtualGearCountRepository = VirtualGearCountRepository(appContext)
-    private val forceFullLoadAudioThrottleRepository = ForceFullLoadAudioThrottleRepository(appContext)
+    private val minimumAudioThrottleRepository = MinimumAudioThrottleRepository(appContext)
+    private val automaticTransmissionSettingsRepository = AutomaticTransmissionSettingsRepository(appContext)
     private val selectedProfile = AtomicReference(resolveInitialProfile())
     private val selectedPerspective = AtomicReference(soundPerspectiveRepository.load(selectedProfile.get()))
     private val manualShiftEnabled = AtomicBoolean(shiftModeRepository.isManualEnabled())
@@ -175,13 +179,19 @@ class DriveController(context: Context) {
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val virtualForwardGearCount = AtomicInteger(virtualGearCountRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
-    private val forceFullLoadAudioThrottle = AtomicBoolean(forceFullLoadAudioThrottleRepository.load())
+    private val minimumAudioThrottle = AtomicReference(minimumAudioThrottleRepository.load())
+    private val automaticTransmissionSettings = AtomicReference(automaticTransmissionSettingsRepository.load())
     private val favoriteCarIds = AtomicReference(carFavoritesRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
     private var consumedDebugScenarioShiftSerial = 0L
     private var activeDebugScenarioId = 0L
     private var debugScenarioBaseline: DebugScenarioBaseline? = null
+    /** Back stack of car profile ids; [carNavigationIndex] is the current selection. */
+    private val carNavigationHistory = mutableListOf<String>()
+    private var carNavigationIndex = 0
+    /** Cars already picked by Next in the current random cycle. */
+    private val randomCycleVisitedCarIds = mutableSetOf<String>()
 
     @Volatile private var loopThread: Thread? = null
     @Volatile private var userMessage: UserVisibleMessage? = null
@@ -244,8 +254,10 @@ class DriveController(context: Context) {
         audioEngine.setTransmissionAudioEnabled(carEffectModes.get().transmissionEnabled)
         audioEngine.setTurboAudioEnabled(carEffectModes.get().turboEnabled)
         setExteriorPureAudio(exteriorPureAudio.get())
-        audioEngine.setForceFullLoadAudioThrottle(forceFullLoadAudioThrottle.get())
+        audioEngine.setMinimumAudioThrottle(minimumAudioThrottle.get())
         applyManualShiftSoundOverrideCoupling(manualShiftEnabled.get())
+        simulation.updateAutomaticTransmissionSettings(automaticTransmissionSettings.get())
+        initializeCarNavigation(selectedProfile.get().id)
     }
 
     fun isRunning(): Boolean = running.get()
@@ -288,7 +300,7 @@ class DriveController(context: Context) {
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
             virtualForwardGearCount = virtualForwardGearCount.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
-            forceFullLoadAudioThrottle = forceFullLoadAudioThrottle.get(),
+            minimumAudioThrottle = minimumAudioThrottle.get(),
             favoriteCarIds = favoriteCarIds.get(),
             carAudioReady = isSelectedCarAudioReady(selectedProfile.get().id),
             userMessage = userMessage,
@@ -401,15 +413,40 @@ class DriveController(context: Context) {
         simulation.updateVirtualGearCount(normalized)
     }
 
+    fun setCruisingShiftOffsetRpm(offsetRpm: Int) {
+        updateAutomaticTransmissionSettings {
+            it.copy(cruisingShiftOffsetRpm = CruisingShiftOffsetRpm.normalize(offsetRpm))
+        }
+    }
+
+    fun setRacingReturnThrottlePercent(percent: Int) {
+        updateAutomaticTransmissionSettings {
+            it.copy(racingReturnThrottlePercent = RacingReturnThrottlePercent.normalize(percent))
+        }
+    }
+
+    fun setRacingReturnHoldSeconds(seconds: Int) {
+        updateAutomaticTransmissionSettings {
+            it.copy(racingReturnHoldSeconds = RacingReturnHoldSeconds.normalize(seconds))
+        }
+    }
+
+    private fun updateAutomaticTransmissionSettings(
+        transform: (AutomaticTransmissionSettings) -> AutomaticTransmissionSettings,
+    ) {
+        val updated = transform(automaticTransmissionSettings.get())
+        automaticTransmissionSettings.set(updated)
+        automaticTransmissionSettingsRepository.save(updated)
+        simulation.updateAutomaticTransmissionSettings(updated)
+    }
+
     fun setFmodHostGains(engine: Float, effects: Float) = audioEngine.setHostGains(engine, effects)
 
-    fun setForceFullLoadAudioThrottle(enabled: Boolean) {
-        forceFullLoadAudioThrottle.set(enabled)
-        forceFullLoadAudioThrottleRepository.save(enabled)
-        audioEngine.setForceFullLoadAudioThrottle(enabled)
-        if (!enabled && audioEngine.hostEffectsGain() == 2.0f) {
-            audioEngine.setHostGains(audioEngine.hostEngineGain(), 1.0f)
-        }
+    fun setMinimumAudioThrottle(minimum: Float) {
+        val normalized = MinimumAudioThrottle.normalize(minimum)
+        minimumAudioThrottle.set(normalized)
+        minimumAudioThrottleRepository.save(normalized)
+        audioEngine.setMinimumAudioThrottle(normalized)
     }
 
     fun setExteriorPureAudio(enabled: Boolean) {
@@ -526,7 +563,8 @@ class DriveController(context: Context) {
         transmissionSoundSettingsRepository.reset()
         exteriorPureAudioSettingsRepository.reset()
         virtualGearCountRepository.reset()
-        forceFullLoadAudioThrottleRepository.reset()
+        minimumAudioThrottleRepository.reset()
+        automaticTransmissionSettingsRepository.reset()
         carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
@@ -538,8 +576,10 @@ class DriveController(context: Context) {
         transmissionSoundSettings.set(TransmissionSoundSettings())
         exteriorPureAudioSettings.set(ExteriorPureAudioSettings())
         virtualForwardGearCount.set(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
-        forceFullLoadAudioThrottle.set(true)
+        minimumAudioThrottle.set(MinimumAudioThrottle.DEFAULT)
+        automaticTransmissionSettings.set(AutomaticTransmissionSettings())
         simulation.updateVirtualGearCount(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
+        simulation.updateAutomaticTransmissionSettings(AutomaticTransmissionSettings())
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
@@ -552,11 +592,12 @@ class DriveController(context: Context) {
         audioEngine.setTransmissionAudioEnabled(true)
         audioEngine.setTurboAudioEnabled(true)
         selectedProfile.set(defaultInstalledProfile())
+        initializeCarNavigation(selectedProfile.get().id)
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())
         audioEngine.setFmodUpdateRateHz(FmodUpdateRate.DEFAULT_HZ)
         audioEngine.setExteriorPureAudio(false)
-        audioEngine.setForceFullLoadAudioThrottle(true)
+        audioEngine.setMinimumAudioThrottle(MinimumAudioThrottle.DEFAULT)
         audioEngine.setHostGains(1.0f, 1.0f)
         simulation.reset()
         audioEngine.setSoundProgram(selectedProfile.get(), selectedPerspective.get())
@@ -614,10 +655,57 @@ class DriveController(context: Context) {
         audioEngine.setSoundProgram(profile, perspective)
     }
 
-    fun selectPreviousCar() { selectAdjacentCar(-1) }
-    fun selectNextCar() { selectAdjacentCar(1) }
+    fun selectPreviousCar() {
+        synchronized(lifecycleLock) {
+            if (carNavigationIndex <= 0) {
+                return
+            }
+
+            carNavigationIndex--
+            val profileId = carNavigationHistory[carNavigationIndex]
+            installedProfiles().firstOrNull { it.id == profileId }?.let(::applySelectedCar)
+        }
+    }
+
+    fun selectNextCar() {
+        synchronized(lifecycleLock) {
+            val installed = installedProfiles()
+            if (installed.isEmpty()) {
+                return
+            }
+
+            truncateCarNavigationForwardHistory()
+            val currentId = selectedProfile.get().id
+            val installedIds = installed.map { it.id }.toSet()
+            randomCycleVisitedCarIds.retainAll(installedIds)
+            if (randomCycleVisitedCarIds.isEmpty()) {
+                randomCycleVisitedCarIds.add(currentId)
+            }
+
+            val nextProfile = pickRandomNextCarProfile(
+                installed = installed,
+                currentId = currentId,
+            ) ?: return
+
+            randomCycleVisitedCarIds.add(nextProfile.id)
+            carNavigationHistory.add(nextProfile.id)
+            carNavigationIndex = carNavigationHistory.lastIndex
+            applySelectedCar(nextProfile)
+        }
+    }
+
     fun selectCar(profileId: String) {
-        FmodBankProfiles.find(profileId).takeIf(bankResolver::isInstalled)?.let(::applySelectedCar)
+        synchronized(lifecycleLock) {
+            FmodBankProfiles.find(profileId).takeIf(bankResolver::isInstalled)?.let { profile ->
+                truncateCarNavigationForwardHistory()
+                if (carNavigationHistory[carNavigationIndex] != profile.id) {
+                    carNavigationHistory.add(profile.id)
+                    carNavigationIndex = carNavigationHistory.lastIndex
+                }
+                randomCycleVisitedCarIds.add(profile.id)
+                applySelectedCar(profile)
+            }
+        }
     }
 
     fun toggleCarFavorite(profileId: String) {
@@ -692,11 +780,71 @@ class DriveController(context: Context) {
 
     fun dismissUserMessage() { userMessage = null }
 
-    private fun selectAdjacentCar(offset: Int) {
-        val installed = installedProfiles()
-        if (installed.isEmpty()) return
-        val current = installed.indexOfFirst { it.id == selectedProfile.get().id }.coerceAtLeast(0)
-        applySelectedCar(installed[(current + offset).mod(installed.size)])
+    private fun initializeCarNavigation(initialCarId: String) {
+        carNavigationHistory.clear()
+        carNavigationHistory.add(initialCarId)
+        carNavigationIndex = 0
+        randomCycleVisitedCarIds.clear()
+        randomCycleVisitedCarIds.add(initialCarId)
+    }
+
+    private fun truncateCarNavigationForwardHistory() {
+        if (carNavigationIndex >= carNavigationHistory.lastIndex) {
+            return
+        }
+
+        val retained = carNavigationHistory.subList(0, carNavigationIndex + 1).toMutableList()
+        carNavigationHistory.clear()
+        carNavigationHistory.addAll(retained)
+    }
+
+    private fun pickRandomNextCarProfile(
+        installed: List<FmodBankProfile>,
+        currentId: String,
+    ): FmodBankProfile? {
+        if (installed.size == 1) {
+            return installed.first()
+        }
+
+        val unvisited = installed.filter { it.id !in randomCycleVisitedCarIds }
+        val pool = if (unvisited.isNotEmpty()) {
+            unvisited.filter { it.id != currentId }.ifEmpty { unvisited }
+        } else {
+            randomCycleVisitedCarIds.clear()
+            randomCycleVisitedCarIds.add(currentId)
+            installed.filter { it.id != currentId }.ifEmpty { installed }
+        }
+
+        return pool.randomOrNull()
+    }
+
+    private fun reconcileCarNavigationState() {
+        val installedIds = installedProfiles().map { it.id }.toSet()
+        if (installedIds.isEmpty()) {
+            return
+        }
+
+        randomCycleVisitedCarIds.retainAll(installedIds)
+        val currentId = selectedProfile.get().id
+        if (randomCycleVisitedCarIds.isEmpty()) {
+            randomCycleVisitedCarIds.add(currentId)
+        }
+
+        val trimmed = carNavigationHistory.filter { it in installedIds }.toMutableList()
+        if (trimmed.isEmpty()) {
+            initializeCarNavigation(currentId)
+            return
+        }
+
+        carNavigationHistory.clear()
+        carNavigationHistory.addAll(trimmed)
+        val currentIndex = trimmed.indexOf(currentId)
+        carNavigationIndex = if (currentIndex >= 0) {
+            currentIndex
+        } else {
+            carNavigationHistory.add(currentId)
+            carNavigationHistory.lastIndex
+        }
     }
 
     private fun applySelectedCar(
@@ -783,6 +931,7 @@ class DriveController(context: Context) {
     private fun completeStagedBankImport(result: FmodBankImportResult) {
         if (!result.foundPacks) return
         refreshInstalledProfileCache()
+        reconcileCarNavigationState()
         val selected = selectedProfile.get()
         val target = installedProfiles().firstOrNull { it.id == selected.id }
             ?: installedProfiles().firstOrNull()
@@ -944,6 +1093,9 @@ class DriveController(context: Context) {
             ),
             dt,
         )
+        if (drivetrain.requestAutomaticShiftMode) {
+            setManualShiftMode(enabled = false)
+        }
         if (measurePerformance) {
             DebugTelemetry.recordSimulationPerformance(
                 cpuNanos = Debug.threadCpuTimeNanos() - simulationCpuStartedNanos,
@@ -1041,6 +1193,9 @@ class DriveController(context: Context) {
                 availableCarCount = installedProfiles().size,
                 soundPerspective = selectedPerspective.get(),
                 virtualForwardGearCount = virtualForwardGearCount.get(),
+                cruisingShiftOffsetRpm = automaticTransmissionSettings.get().cruisingShiftOffsetRpm,
+                racingReturnThrottlePercent = automaticTransmissionSettings.get().racingReturnThrottlePercent,
+                racingReturnHoldSeconds = automaticTransmissionSettings.get().racingReturnHoldSeconds,
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = isSelectedCarAudioReady(selected.id),
                 favoriteCarIds = favoriteCarIds.get(),

@@ -68,6 +68,7 @@ data class DrivetrainState(
     val limiterRpm: Double = 0.0,
     val automaticUpshiftRpm: Double = 0.0,
     val automaticDownshiftRpm: Double = 0.0,
+    val requestAutomaticShiftMode: Boolean = false,
 )
 
 /** Motion snapshot preserved when swapping bank physics without stopping the vehicle. */
@@ -95,8 +96,13 @@ class EngineSimulation {
     private var virtualGearProfile: VirtualGearProfile? = null
     private var equalSpeedGearMapping: EqualSpeedGearMapping? = null
     private var previousInputWasSimulated: Boolean? = null
+    private var automaticTransmissionConfig = AutomaticTransmissionConfig()
 
     val state: DrivetrainState get() = latestState
+
+    internal fun updateAutomaticTransmissionSettings(settings: com.gabrielpc.enginesoundsimulator.drive.AutomaticTransmissionSettings) {
+        automaticTransmissionConfig = AutomaticTransmissionConfig.fromSettings(settings)
+    }
 
     internal fun captureMotionContinuity(
         usesSimulatedPedals: Boolean,
@@ -322,6 +328,7 @@ class EngineSimulation {
             // sources and both shift modes. The drivetrain still keeps REAL speed authoritative;
             // this flag only enables staging/tach behavior when the selector is in D.
             launchControlEnabled = input.transmissionPosition == TransmissionPosition.DRIVE,
+            automaticTransmissionConfig = automaticTransmissionConfig,
         )
         val audiblePresentationSpeedKmh = realOrDocumentedExtrapolatedPresentationSpeedKmh
             ?: frame.speedMetersPerSecond * 3.6
@@ -400,6 +407,7 @@ class EngineSimulation {
             limiterRpm = activePhysics.engine.limiterRpm,
             automaticUpshiftRpm = activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
             automaticDownshiftRpm = activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
+            requestAutomaticShiftMode = frame.requestAutomaticShiftMode,
         )
     }
 }

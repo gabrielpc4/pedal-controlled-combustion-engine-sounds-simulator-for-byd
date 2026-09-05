@@ -66,7 +66,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -89,6 +93,9 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodSourceState
 import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
+import com.gabrielpc.enginesoundsimulator.drive.CruisingShiftOffsetRpm
+import com.gabrielpc.enginesoundsimulator.drive.RacingReturnHoldSeconds
+import com.gabrielpc.enginesoundsimulator.drive.RacingReturnThrottlePercent
 import com.gabrielpc.enginesoundsimulator.drive.ExteriorPureAudioSettings
 import com.gabrielpc.enginesoundsimulator.drive.ShiftSoundSettings
 import com.gabrielpc.enginesoundsimulator.drive.TransmissionSoundSettings
@@ -429,8 +436,12 @@ internal fun SettingsScreen(
     onExteriorPureAudioSettingsChange: (ExteriorPureAudioSettings) -> Unit,
     virtualForwardGearCount: Int,
     onVirtualForwardGearCountChange: (Int) -> Unit,
-    forceFullLoadAudioThrottle: Boolean,
-    onForceFullLoadAudioThrottleChange: (Boolean) -> Unit,
+    cruisingShiftOffsetRpm: Int,
+    onCruisingShiftOffsetRpmChange: (Int) -> Unit,
+    racingReturnThrottlePercent: Int,
+    onRacingReturnThrottlePercentChange: (Int) -> Unit,
+    racingReturnHoldSeconds: Int,
+    onRacingReturnHoldSecondsChange: (Int) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -490,9 +501,13 @@ internal fun SettingsScreen(
                 gearCount = virtualForwardGearCount,
                 onGearCountChange = onVirtualForwardGearCountChange,
             )
-            ForceFullLoadAudioThrottleControl(
-                enabled = forceFullLoadAudioThrottle,
-                onEnabledChange = onForceFullLoadAudioThrottleChange,
+            AutomaticTransmissionSettingsControl(
+                offsetRpm = cruisingShiftOffsetRpm,
+                onOffsetRpmChange = onCruisingShiftOffsetRpmChange,
+                racingReturnThrottlePercent = racingReturnThrottlePercent,
+                onRacingReturnThrottlePercentChange = onRacingReturnThrottlePercentChange,
+                racingReturnHoldSeconds = racingReturnHoldSeconds,
+                onRacingReturnHoldSecondsChange = onRacingReturnHoldSecondsChange,
             )
             Button(
                 onClick = onResetAll,
@@ -609,26 +624,105 @@ private fun VirtualForwardGearCountControl(
 }
 
 @Composable
-private fun ForceFullLoadAudioThrottleControl(
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
+private fun AutomaticTransmissionSettingsControl(
+    offsetRpm: Int,
+    onOffsetRpmChange: (Int) -> Unit,
+    racingReturnThrottlePercent: Int,
+    onRacingReturnThrottlePercentChange: (Int) -> Unit,
+    racingReturnHoldSeconds: Int,
+    onRacingReturnHoldSecondsChange: (Int) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
+    Column(
+        modifier = modifier
             .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(18.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("FORCE THROTTLE 1.0", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("CRUISING SHIFT OFFSET", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
             Text(
-                "Keeps engine and transmission FMOD events at full load so pedal position does not reduce volume. Turn off to let the bank attenuate with throttle.",
-                color = Muted,
-                fontSize = 12.sp,
+                text = "$offsetRpm RPM",
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
             )
         }
-        Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        Text(
+            text = "Automatic mode starts in cruising: up/down thresholds are lowered by this amount. A sudden throttle stomp downshifts once and switches to racing with the car's normal thresholds.",
+            color = Muted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        Slider(
+            value = offsetRpm.toFloat(),
+            onValueChange = { value ->
+                val selectedOffset = CruisingShiftOffsetRpm.normalize(value.roundToInt())
+                if (selectedOffset != offsetRpm) {
+                    onOffsetRpmChange(selectedOffset)
+                }
+            },
+            valueRange = CruisingShiftOffsetRpm.MIN.toFloat()..CruisingShiftOffsetRpm.MAX.toFloat(),
+            steps = (CruisingShiftOffsetRpm.MAX - CruisingShiftOffsetRpm.MIN) / CruisingShiftOffsetRpm.STEP - 1,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("RACING RETURN THROTTLE", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "$racingReturnThrottlePercent%",
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Text(
+            text = "Racing mode ends only after staying at or below this pedal level for the hold time below. Touching the throttle above this value resets the timer.",
+            color = Muted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        Slider(
+            value = racingReturnThrottlePercent.toFloat(),
+            onValueChange = { value ->
+                val selectedPercent = RacingReturnThrottlePercent.normalize(value.roundToInt())
+                if (selectedPercent != racingReturnThrottlePercent) {
+                    onRacingReturnThrottlePercentChange(selectedPercent)
+                }
+            },
+            valueRange = RacingReturnThrottlePercent.MIN.toFloat()..RacingReturnThrottlePercent.MAX.toFloat(),
+            steps = (RacingReturnThrottlePercent.MAX - RacingReturnThrottlePercent.MIN) / RacingReturnThrottlePercent.STEP - 1,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("RACING RETURN HOLD", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "${racingReturnHoldSeconds}s",
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Slider(
+            value = racingReturnHoldSeconds.toFloat(),
+            onValueChange = { value ->
+                val selectedSeconds = RacingReturnHoldSeconds.normalize(value.roundToInt())
+                if (selectedSeconds != racingReturnHoldSeconds) {
+                    onRacingReturnHoldSecondsChange(selectedSeconds)
+                }
+            },
+            valueRange = RacingReturnHoldSeconds.MIN.toFloat()..RacingReturnHoldSeconds.MAX.toFloat(),
+            steps = (RacingReturnHoldSeconds.MAX - RacingReturnHoldSeconds.MIN) / RacingReturnHoldSeconds.STEP - 1,
+        )
     }
 }
 
@@ -1105,6 +1199,24 @@ internal fun CarGridSelectionDialog(
                 ?: FmodBankProfiles.moddedCarsPackId,
         )
     }
+    var searchQuery by remember { mutableStateOf("") }
+    val showGroupFilters = FmodBankProfiles.catalogGroup == null
+    val groupProfiles = remember(installedProfiles, selectedGroup) {
+        installedProfiles.filter { it.packGroup == selectedGroup }
+    }
+    val visibleProfiles = remember(groupProfiles, searchQuery) {
+        groupProfiles.filter { profile -> carPickerProfileMatchesSearch(profile, searchQuery) }
+    }
+    val installedCountLabel = if (searchQuery.isBlank()) {
+        "${groupProfiles.size} INSTALLED"
+    } else {
+        "${visibleProfiles.size} OF ${groupProfiles.size} INSTALLED"
+    }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) {
+        delay(1)
+        focusManager.clearFocus()
+    }
     // Disable the platform's narrow default dialog width so the picker can span the display.
     Dialog(
         onDismissRequest = onDismiss,
@@ -1123,29 +1235,43 @@ internal fun CarGridSelectionDialog(
                 Text("SELECT CAR", color = CyanSoft, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 8.dp),
                 ) {
-                    listOf(
-                        FmodBankProfiles.moddedCarsPackId to "MODDED CARS",
-                        FmodBankProfiles.originalCarsPackId to "ORIGINAL CARS",
-                    ).filter { FmodBankProfiles.catalogGroup == null || it.first == FmodBankProfiles.catalogGroup }
-                        .forEach { (group, label) ->
-                        Surface(
-                            color = if (selectedGroup == group) Cyan.copy(alpha = 0.24f) else Panel,
-                            shape = RoundedCornerShape(6.dp),
-                            border = BorderStroke(1.dp, if (selectedGroup == group) Cyan else Line),
+                    if (showGroupFilters) {
+                        listOf(
+                            FmodBankProfiles.moddedCarsPackId to "MODDED CARS",
+                            FmodBankProfiles.originalCarsPackId to "ORIGINAL CARS",
+                        ).forEach { (group, label) ->
+                            Surface(
+                                color = if (selectedGroup == group) Cyan.copy(alpha = 0.24f) else Panel,
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, if (selectedGroup == group) Cyan else Line),
                                 modifier = Modifier.clickable {
                                     selectedGroup = group
                                     pickerPreferences.edit().putString("selected", group).apply()
                                 },
-                        ) {
-                            Text(label, color = if (selectedGroup == group) Cyan else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (selectedGroup == group) Cyan else Muted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                )
+                            }
                         }
                     }
+                    CarPickerSearchField(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                val visibleProfiles = installedProfiles.filter { it.packGroup == selectedGroup }
                 Text(
-                    text = "${visibleProfiles.size} INSTALLED",
+                    text = installedCountLabel,
                     color = Muted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -1198,6 +1324,65 @@ internal fun CarGridSelectionDialog(
             }
         }
     }
+}
+
+@Composable
+private fun CarPickerSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Panel)
+            .border(1.dp, Line, RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = TextStyle(
+                color = White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+            cursorBrush = SolidColor(Cyan),
+            modifier = Modifier.fillMaxWidth(),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = "SEARCH CARS",
+                            color = Muted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+
+                    innerTextField()
+                }
+            },
+        )
+    }
+}
+
+private fun carPickerProfileMatchesSearch(profile: FmodBankProfile, query: String): Boolean {
+    val normalizedQuery = query.trim().lowercase(Locale.getDefault())
+    if (normalizedQuery.isEmpty()) {
+        return true
+    }
+
+    val formattedName = CarDisplayNameFormatter.format(profile.displayName).lowercase(Locale.getDefault())
+    val rawName = profile.displayName.lowercase(Locale.getDefault())
+    val profileId = profile.id.lowercase(Locale.getDefault())
+
+    return formattedName.contains(normalizedQuery)
+        || rawName.contains(normalizedQuery)
+        || profileId.contains(normalizedQuery)
 }
 
 @Composable

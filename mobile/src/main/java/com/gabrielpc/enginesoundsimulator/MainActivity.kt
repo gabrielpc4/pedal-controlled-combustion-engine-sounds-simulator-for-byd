@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,6 +113,7 @@ import com.gabrielpc.enginesoundsimulator.drive.EffectSoundKind
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessage
 import com.gabrielpc.enginesoundsimulator.drive.UserVisibleMessageSeverity
 import com.gabrielpc.enginesoundsimulator.drive.InputMode
+import com.gabrielpc.enginesoundsimulator.drive.MinimumAudioThrottle
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankProfiles
 import com.gabrielpc.enginesoundsimulator.audio.CarSubtitleCatalog
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
@@ -216,7 +218,10 @@ class MainActivity : ComponentActivity() {
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
                         onMediaShiftButton = controller::handleMediaShiftButton,
                         onVirtualForwardGearCountChange = controller::setVirtualForwardGearCount,
-                        onForceFullLoadAudioThrottleChange = controller::setForceFullLoadAudioThrottle,
+                        onCruisingShiftOffsetRpmChange = controller::setCruisingShiftOffsetRpm,
+                        onRacingReturnThrottlePercentChange = controller::setRacingReturnThrottlePercent,
+                        onRacingReturnHoldSecondsChange = controller::setRacingReturnHoldSeconds,
+                        onMinimumAudioThrottleChange = controller::setMinimumAudioThrottle,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
@@ -312,7 +317,10 @@ private fun MotorSoundDashboard(
     onToggleManualShiftMode: () -> Unit,
     onMediaShiftButton: (Int) -> Boolean,
     onVirtualForwardGearCountChange: (Int) -> Unit,
-    onForceFullLoadAudioThrottleChange: (Boolean) -> Unit,
+    onCruisingShiftOffsetRpmChange: (Int) -> Unit,
+    onRacingReturnThrottlePercentChange: (Int) -> Unit,
+    onRacingReturnHoldSecondsChange: (Int) -> Unit,
+    onMinimumAudioThrottleChange: (Float) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
@@ -475,16 +483,24 @@ private fun MotorSoundDashboard(
                                     .padding(start = 4.dp, end = 4.dp),
                                 verticalAlignment = Alignment.Bottom,
                             ) {
-                                DashboardEffectControls(
-                                    state = state,
-                                    onEnabledChange = onEffectEnabledChange,
-                                    onOverrideChange = onEffectOverrideChange,
-                                    onCategoryGains = onCategoryGains,
-                                    onHostGains = onHostGains,
-                                    onEngineExternalChange = onEngineExternalChange,
-                                    onEnginePureChange = onEnginePureChange,
-                                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp),
-                                )
+                                Column(
+                                    modifier = Modifier
+                                        .padding(start = 8.dp, bottom = 2.dp),
+                                ) {
+                                    DashboardEngineControls(
+                                        state = state,
+                                        onMinimumAudioThrottleChange = onMinimumAudioThrottleChange,
+                                        onEngineExternalChange = onEngineExternalChange,
+                                        onEnginePureChange = onEnginePureChange,
+                                        modifier = Modifier.padding(bottom = 6.dp),
+                                    )
+                                    DashboardEffectControls(
+                                        state = state,
+                                        onEnabledChange = onEffectEnabledChange,
+                                        onOverrideChange = onEffectOverrideChange,
+                                        onCategoryGains = onCategoryGains,
+                                    )
+                                }
                                 ClassicDriveControls(
                                     state = state,
                                     onThrottle = onThrottle,
@@ -494,9 +510,6 @@ private fun MotorSoundDashboard(
                                     onTransmissionPositionChange = onTransmissionPositionChange,
                                     onManualUpshift = onManualUpshift,
                                     onManualDownshift = onManualDownshift,
-                                    // Keep the pedals as the tenth item in the same horizontal control row.
-                                    // The weight gives this final column the remaining width instead of letting
-                                    // the intrinsic pedal row push itself outside the dashboard bounds.
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
@@ -549,8 +562,12 @@ private fun MotorSoundDashboard(
                             onExteriorPureAudioSettingsChange = onExteriorPureAudioSettingsChange,
                             virtualForwardGearCount = state.virtualForwardGearCount,
                             onVirtualForwardGearCountChange = onVirtualForwardGearCountChange,
-                            forceFullLoadAudioThrottle = state.forceFullLoadAudioThrottle,
-                            onForceFullLoadAudioThrottleChange = onForceFullLoadAudioThrottleChange,
+                            cruisingShiftOffsetRpm = state.cruisingShiftOffsetRpm,
+                            onCruisingShiftOffsetRpmChange = onCruisingShiftOffsetRpmChange,
+                            racingReturnThrottlePercent = state.racingReturnThrottlePercent,
+                            onRacingReturnThrottlePercentChange = onRacingReturnThrottlePercentChange,
+                            racingReturnHoldSeconds = state.racingReturnHoldSeconds,
+                            onRacingReturnHoldSecondsChange = onRacingReturnHoldSecondsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                     }
@@ -1029,20 +1046,170 @@ private val DASHBOARD_EFFECT_GAIN_PRESETS = listOf(
     DashboardEffectGainPreset("LOUDER", 3.0f),
 )
 
+private object DashboardClassicEffectLayout {
+    val labelColumnWidth = 88.dp
+    val toggleColumnWidth = 82.dp
+    val presetColumnWidth = 105.dp
+    val columnGap = 8.dp
+    val columnPadding = 3.dp
+    val labelColumnPadding = 4.dp
+    val presetCount = 4
+
+    private fun toggleColumnOuterWidth(): Dp = toggleColumnWidth + columnPadding * 2
+
+    private fun presetColumnOuterWidth(): Dp = presetColumnWidth + columnPadding * 2
+
+    /** Outer width for OVERRIDE label column (10sp text + horizontal padding). */
+    private fun effectOverrideLabelOuterWidth(): Dp = 56.dp + columnPadding * 2
+
+    val matrixWidthAfterLabel: Dp
+        get() {
+            var width = toggleColumnOuterWidth()
+            width += columnGap + effectOverrideLabelOuterWidth()
+            width += columnGap + toggleColumnOuterWidth()
+            repeat(presetCount) { index ->
+                width += columnGap + presetColumnOuterWidth()
+            }
+            return width
+        }
+
+    val engineRowWidthBeforeSlider: Dp
+        get() {
+            var width = engineExternalLabelOuterWidth()
+            width += columnGap + toggleColumnOuterWidth()
+            width += columnGap + enginePureLabelOuterWidth()
+            width += columnGap + toggleColumnOuterWidth()
+            width += columnGap
+            return width
+        }
+
+    /** Outer width for EXTERNAL label column (10sp text + horizontal padding). */
+    private fun engineExternalLabelOuterWidth(): Dp = 56.dp + columnPadding * 2
+
+    /** Outer width for PURE label column (10sp text + horizontal padding). */
+    private fun enginePureLabelOuterWidth(): Dp = 30.dp + columnPadding * 2
+
+    val minimumThrottleSliderWidth: Dp
+        get() = (matrixWidthAfterLabel - engineRowWidthBeforeSlider).coerceAtLeast(120.dp)
+
+    /** Slider sits immediately after the ENGINE label; trailing toggles stay aligned with LOUDER. */
+    val minimumThrottleSliderWidthAfterEngineLabel: Dp
+        get() {
+            val trailingControlsWidth = engineRowWidthBeforeSlider - columnGap
+            val gapCountAfterEngineLabel = 5
+            return (matrixWidthAfterLabel - trailingControlsWidth - (columnGap * gapCountAfterEngineLabel))
+                .coerceAtLeast(120.dp)
+        }
+}
+
+@Composable
+private fun DashboardEngineControls(
+    state: DriveSnapshot,
+    onMinimumAudioThrottleChange: (Float) -> Unit,
+    onEngineExternalChange: (Boolean) -> Unit,
+    onEnginePureChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val external = state.soundPerspective == com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR
+    val layout = DashboardClassicEffectLayout
+    val rowHeight = 42.dp
+    val rowGap = 7.dp
+    val throttleSteps = ((MinimumAudioThrottle.MAX - MinimumAudioThrottle.MIN) / MinimumAudioThrottle.STEP).roundToInt() - 1
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(layout.columnGap),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Box(
+            modifier = Modifier
+                .height(rowHeight)
+                .width(layout.labelColumnWidth)
+                .padding(start = layout.labelColumnPadding, bottom = 12.dp),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            Text("ENGINE", color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        Column(
+            modifier = Modifier
+                .width(layout.minimumThrottleSliderWidthAfterEngineLabel),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("MIN THROTTLE", color = CyanSoft, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                Text(
+                    String.format(Locale.US, "%.2f", state.minimumAudioThrottle),
+                    color = White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Slider(
+                value = state.minimumAudioThrottle,
+                onValueChange = { value ->
+                    onMinimumAudioThrottleChange(MinimumAudioThrottle.normalize(value))
+                },
+                valueRange = MinimumAudioThrottle.MIN..MinimumAudioThrottle.MAX,
+                steps = throttleSteps.coerceAtLeast(0),
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .wrapContentWidth()
+                .padding(layout.columnPadding),
+        ) {
+            DashboardColumnTextCell("EXTERNAL", external, rowHeight)
+        }
+        Column(
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .width(layout.toggleColumnWidth)
+                .padding(layout.columnPadding),
+        ) {
+            DashboardSwitchCell(rowHeight, external, Line) {
+                onEngineExternalChange(!external)
+            }
+        }
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .wrapContentWidth()
+                .padding(layout.columnPadding),
+        ) {
+            DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
+        }
+        Column(
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .width(layout.toggleColumnWidth)
+                .padding(layout.columnPadding),
+        ) {
+            DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) {
+                onEnginePureChange(!state.exteriorPureAudio)
+            }
+        }
+    }
+}
+
 @Composable
 private fun DashboardEffectControls(
     state: DriveSnapshot,
     onEnabledChange: (EffectSoundKind, Boolean) -> Unit,
     onOverrideChange: (EffectSoundKind, Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
-    onHostGains: (Float, Float) -> Unit,
-    onEngineExternalChange: (Boolean) -> Unit,
-    onEnginePureChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val external = state.soundPerspective == com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective.EXTERIOR
+    val layout = DashboardClassicEffectLayout
     val rows = listOf(
-        Triple("ENGINE", EffectSoundKind.TRANSMISSION, state.transmissionGain),
         Triple("POPS & BANGS", EffectSoundKind.POPS_AND_BANGS, state.backfireGain),
         Triple("SHIFT SOUNDS", EffectSoundKind.SHIFT, state.gearShiftGain),
         Triple("TRANSMISSION", EffectSoundKind.TRANSMISSION, state.transmissionGain),
@@ -1056,74 +1223,97 @@ private fun DashboardEffectControls(
     // occupies less visual area without changing the gain/toggle hit targets' relative layout.
     // The controls intentionally retain their original size; the previous half-scale treatment
     // was a temporary experiment and made the matrix appear detached from its container.
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(4.dp)) {
-            rows.forEachIndexed { index, row ->
-                val enabled = if (index == 0) external else when (row.second) {
-                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
-                    EffectSoundKind.SHIFT -> state.shiftSoundsEnabled
-                    EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
-                    EffectSoundKind.TURBO -> state.turboEnabled
-                }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(layout.columnGap),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .width(layout.labelColumnWidth)
+                .padding(layout.labelColumnPadding),
+        ) {
+            rows.forEach { row ->
                 Box(Modifier.height(rowHeight), contentAlignment = Alignment.CenterStart) {
                     Text(row.first, color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
-            DashboardColumnTextCell("EXTERNAL", external, rowHeight)
-            rows.drop(1).forEach { DashboardEmptyControlCell(rowHeight) }
-        }
-        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
-            DashboardSwitchCell(rowHeight, external, Line) { onEngineExternalChange(!external) }
-            rows.drop(1).forEach { row ->
+        Column(
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .width(layout.toggleColumnWidth)
+                .padding(layout.columnPadding),
+        ) {
+            rows.forEach { row ->
                 val enabled = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsEnabled
                     EffectSoundKind.SHIFT -> state.shiftSoundsEnabled
                     EffectSoundKind.TRANSMISSION -> state.transmissionEnabled
                     EffectSoundKind.TURBO -> state.turboEnabled
                 }
-                DashboardSwitchCell(rowHeight, enabled, Line) { onEnabledChange(row.second, !enabled) }
+                DashboardSwitchCell(rowHeight, enabled, Line) {
+                    onEnabledChange(row.second, !enabled)
+                }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
-            DashboardColumnTextCell("PURE", state.exteriorPureAudio, rowHeight)
-            DashboardOverrideColumnCell(state.popsAndBangsOverride, true, { onOverrideChange(EffectSoundKind.POPS_AND_BANGS, !state.popsAndBangsOverride) }, rowHeight)
-            DashboardOverrideColumnCell(state.shiftSoundsOverride, true, { onOverrideChange(EffectSoundKind.SHIFT, !state.shiftSoundsOverride) }, rowHeight)
-            DashboardEmptyControlCell(rowHeight)
-            if (state.hasTurbo) DashboardEmptyControlCell(rowHeight)
-        }
-        Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.width(82.dp).padding(3.dp)) {
-            DashboardSwitchCell(rowHeight, state.exteriorPureAudio, Line) {
-                onEnginePureChange(!state.exteriorPureAudio)
-            }
-            rows.drop(1).forEach { row ->
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .wrapContentWidth()
+                .padding(layout.columnPadding),
+        ) {
+            rows.forEach { row ->
                 val override = when (row.second) {
                     EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOverride
                     EffectSoundKind.SHIFT -> state.shiftSoundsOverride
                     else -> false
                 }
                 if (row.second == EffectSoundKind.POPS_AND_BANGS || row.second == EffectSoundKind.SHIFT) {
-                    DashboardSwitchCell(rowHeight, override, Line) { onOverrideChange(row.second, !override) }
-                } else DashboardEmptyControlCell(rowHeight)
+                    DashboardOverrideColumnCell(override, true, { onOverrideChange(row.second, !override) }, rowHeight)
+                } else {
+                    DashboardEmptyControlCell(rowHeight)
+                }
             }
         }
-        DASHBOARD_EFFECT_GAIN_PRESETS.forEachIndexed { columnIndex, preset ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
-                rows.forEach { row ->
-                    val rowGain = if (row.first == "ENGINE") {
-                        state.engineHostGain
-                    } else {
-                        row.third
+        Column(
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+            modifier = Modifier
+                .width(layout.toggleColumnWidth)
+                .padding(layout.columnPadding),
+        ) {
+            rows.forEach { row ->
+                val override = when (row.second) {
+                    EffectSoundKind.POPS_AND_BANGS -> state.popsAndBangsOverride
+                    EffectSoundKind.SHIFT -> state.shiftSoundsOverride
+                    else -> false
+                }
+                if (row.second == EffectSoundKind.POPS_AND_BANGS || row.second == EffectSoundKind.SHIFT) {
+                    DashboardSwitchCell(rowHeight, override, Line) {
+                        onOverrideChange(row.second, !override)
                     }
+                } else {
+                    DashboardEmptyControlCell(rowHeight)
+                }
+            }
+        }
+        DASHBOARD_EFFECT_GAIN_PRESETS.forEach { preset ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(rowGap),
+                modifier = Modifier
+                    .width(layout.presetColumnWidth)
+                    .padding(layout.columnPadding),
+            ) {
+                rows.forEach { row ->
+                    val rowGain = row.third
                     val selected = kotlin.math.abs(rowGain - preset.gain) < 0.001f
                     DashboardGainButton(preset, selected, if (selected) Night else Cyan, Line) {
                         when (row.second) {
-                            EffectSoundKind.TRANSMISSION -> if (row.first == "ENGINE") {
-                                onHostGains(preset.gain, state.effectsHostGain)
-                            } else {
-                                onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
-                            }
+                            EffectSoundKind.TRANSMISSION -> onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
                             EffectSoundKind.POPS_AND_BANGS -> onCategoryGains(state.transmissionGain, state.gearShiftGain, state.turboGain, preset.gain)
                             EffectSoundKind.SHIFT -> onCategoryGains(state.transmissionGain, preset.gain, state.turboGain, state.backfireGain)
                             EffectSoundKind.TURBO -> onCategoryGains(state.transmissionGain, state.gearShiftGain, preset.gain, state.backfireGain)
@@ -1176,7 +1366,7 @@ private fun DashboardGainButton(
     borderColor: Color,
     onClick: () -> Unit,
 ) {
-    Box(Modifier.width(105.dp).height(42.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.width(DashboardClassicEffectLayout.presetColumnWidth).height(42.dp), contentAlignment = Alignment.Center) {
         Text(
             text = preset.label,
             color = textColor,

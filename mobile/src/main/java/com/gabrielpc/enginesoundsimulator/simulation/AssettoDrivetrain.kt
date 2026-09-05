@@ -35,6 +35,8 @@ internal class AssettoDrivetrainFrame(
     var effectiveClutchDurationSeconds: Double = 0.0,
     var tractionLimitActive: Boolean,
     var tractionLimitPulse: Boolean,
+    /** Manual mode held at redline long enough to request a return to automatic shifting. */
+    var requestAutomaticShiftMode: Boolean = false,
 )
 
 /**
@@ -108,6 +110,14 @@ internal class AssettoDrivetrain(
     private var launchControlDisarmStartRpm = physics.engine.idleRpm
     private var launchControlTachCycleElapsedSeconds = 0.0
     private var launchControlTachCycleStartRpm = physics.engine.idleRpm
+    private var cruisingShiftOffsetRpm = 0
+    private var racingReturnMaxThrottle = 0.30
+    private var racingReturnHoldSeconds = 10.0
+    private var automaticTransmissionMode = AutomaticTransmissionMode.CRUISING
+    private var previousRawThrottle = 0.0
+    private var lowThrottleElapsedSeconds = 0.0
+    private var manualRedlineElapsedSeconds = 0.0
+    private var requestAutomaticShiftMode = false
     private var driven = drivenAxle(physics.drivetrain.vehicle)
     private var aeroDrag = 0.0
     private var downforce = 0.0
@@ -171,6 +181,9 @@ internal class AssettoDrivetrain(
         fmodDrivetrainSpeedMetersPerSecond = 0.0
         previousFmodWheelSpeed = 0.0
         resetLaunchControl()
+        resetAutomaticTransmissionMode()
+        manualRedlineElapsedSeconds = 0.0
+        requestAutomaticShiftMode = false
         previousTractionLimit = false
         turboQs.fill(0.0)
         boost = 0.0
@@ -317,8 +330,12 @@ internal class AssettoDrivetrain(
         fmodDrivetrainSpeedMetersPerSecond: Double?,
         deltaSeconds: Double,
         launchControlEnabled: Boolean,
+        automaticTransmissionConfig: AutomaticTransmissionConfig,
     ): AssettoDrivetrainFrame {
         val dt = f32(deltaSeconds.coerceIn(0.0001, 0.050))
+        cruisingShiftOffsetRpm = automaticTransmissionConfig.cruisingShiftOffsetRpm.coerceAtLeast(0)
+        racingReturnMaxThrottle = automaticTransmissionConfig.racingReturnMaxThrottle.coerceIn(0.0, 1.0)
+        racingReturnHoldSeconds = automaticTransmissionConfig.racingReturnHoldSeconds.coerceAtLeast(0.0)
         currentTransmissionPosition = transmissionPosition
         sessionElapsedMilliseconds += dt * 1_000.0
         externalVehicleSpeedMetersPerSecond?.let(::anchorVehicleSpeed)
@@ -357,6 +374,15 @@ internal class AssettoDrivetrain(
             // The launch sequence is deliberately available in automatic and manual modes.
             // `automaticShifting` still controls only automatic gear decisions below.
             enabled = launchControlEnabled && transmissionPosition == TransmissionPosition.DRIVE,
+        )
+        updateAutomaticTransmissionMode(
+            rawGas = rawGas,
+            automaticShifting = automaticShifting,
+            dt = dt,
+        )
+        updateManualAutodownshift(
+            automaticShifting = automaticShifting,
+            dt = dt,
         )
         updateAeroForSpeed(speedMetersPerSecond)
 
@@ -547,6 +573,11 @@ internal class AssettoDrivetrain(
         lastFrame.effectiveClutchDurationSeconds = effectiveClutchDuration
         lastFrame.tractionLimitActive = tractionActive
         lastFrame.tractionLimitPulse = tractionPulse
+        updateManualRedlineAutomaticMode(
+            automaticShifting = automaticShifting,
+            dt = dt,
+        )
+        lastFrame.requestAutomaticShiftMode = requestAutomaticShiftMode
         return lastFrame
     }
 
@@ -644,7 +675,7 @@ internal class AssettoDrivetrain(
             // Upshifts use the bank-authored automatic threshold. The equal-speed layer changes
             // only speed-to-RPM conversion.
             val shiftRpm = rpm
-            val upshiftRpm = upshiftTriggerRpmForGear()
+            val upshiftRpm = effectiveUpshiftTriggerRpm()
             if (
                 shiftRpm >= upshiftRpm &&
                 gear < virtualGearProfile.virtualForwardGearCount &&
@@ -653,7 +684,7 @@ internal class AssettoDrivetrain(
                 request = 1
                 automaticGasCutoff = f32(physics.drivetrain.automaticGasCutoffSeconds)
             } else {
-                val downshiftRpm = downshiftRpmForCurrentGear()
+                val downshiftRpm = effectiveDownshiftRpmForCurrentGear()
                 // Landing-RPM downshifts are an intentional app policy, but they must describe
                 // a lift/braking phase rather than the tiny post-upshift settling error. When the
                 // FMOD drivetrain speed is still increasing, a full-throttle car is accelerating
@@ -735,6 +766,12 @@ internal class AssettoDrivetrain(
         }
 
         if (currentTransmissionPosition != TransmissionPosition.DRIVE) {
+            return false
+        }
+
+        // Launch control owns RPM while staging or executing a launch. The simplified clutch path
+        // otherwise pins first-gear RPM to idle whenever FMOD road speed is zero.
+        if (launchControlPhase != LaunchControlPhase.INACTIVE) {
             return false
         }
 
@@ -831,6 +868,19 @@ internal class AssettoDrivetrain(
         }
     }
 
+    private fun effectiveUpshiftTriggerRpm(): Double {
+        val base = upshiftTriggerRpmForGear()
+        if (automaticTransmissionMode == AutomaticTransmissionMode.RACING || cruisingShiftOffsetRpm <= 0) {
+            return base
+        }
+
+        return AutomaticTransmissionPolicy.applyCruisingOffset(
+            baseRpm = base,
+            offsetRpm = cruisingShiftOffsetRpm,
+            idleRpm = physics.engine.idleRpm,
+        )
+    }
+
     /** RPM that resulted from the preceding upshift at a shared wheel speed. */
     private fun landingRpmAfterUpshift(fromGear: Int, upshiftRpm: Double): Double {
         val fromRatio = abs(ratioForGear(fromGear))
@@ -846,6 +896,135 @@ internal class AssettoDrivetrain(
                 fromGear = gear - 1,
                 upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble(),
             )
+    }
+
+    private fun effectiveDownshiftRpmForCurrentGear(): Double {
+        val base = downshiftRpmForCurrentGear()
+        if (automaticTransmissionMode == AutomaticTransmissionMode.RACING || cruisingShiftOffsetRpm <= 0) {
+            return base
+        }
+
+        return AutomaticTransmissionPolicy.applyCruisingOffset(
+            baseRpm = base,
+            offsetRpm = cruisingShiftOffsetRpm,
+            idleRpm = physics.engine.idleRpm,
+        )
+    }
+
+    private fun resetAutomaticTransmissionMode() {
+        automaticTransmissionMode = AutomaticTransmissionMode.CRUISING
+        previousRawThrottle = 0.0
+        lowThrottleElapsedSeconds = 0.0
+    }
+
+    private fun updateAutomaticTransmissionMode(
+        rawGas: Double,
+        automaticShifting: Boolean,
+        dt: Double,
+    ) {
+        if (currentTransmissionPosition != TransmissionPosition.DRIVE) {
+            resetAutomaticTransmissionMode()
+            previousRawThrottle = rawGas
+            return
+        }
+
+        if (!automaticShifting) {
+            previousRawThrottle = rawGas
+            return
+        }
+
+        val throttleDelta = rawGas - previousRawThrottle
+        val throttleRate = throttleDelta / dt.coerceAtLeast(1e-9)
+        val stompDetected = rawGas >= AutomaticTransmissionPolicy.STOMP_MIN_THROTTLE &&
+            throttleDelta >= AutomaticTransmissionPolicy.STOMP_MIN_DELTA &&
+            throttleRate >= AutomaticTransmissionPolicy.STOMP_MIN_RATE_PER_SECOND
+
+        if (
+            automaticTransmissionMode == AutomaticTransmissionMode.CRUISING &&
+            stompDetected &&
+            launchControlPhase == LaunchControlPhase.INACTIVE
+        ) {
+            automaticTransmissionMode = AutomaticTransmissionMode.RACING
+            lowThrottleElapsedSeconds = 0.0
+            if (gear > 1 && !shifting) {
+                manualShiftRequest = -1
+            }
+        }
+
+        if (automaticTransmissionMode == AutomaticTransmissionMode.RACING) {
+            if (rawGas <= racingReturnMaxThrottle) {
+                lowThrottleElapsedSeconds += dt
+                if (lowThrottleElapsedSeconds >= racingReturnHoldSeconds) {
+                    automaticTransmissionMode = AutomaticTransmissionMode.CRUISING
+                    lowThrottleElapsedSeconds = 0.0
+                }
+            } else {
+                lowThrottleElapsedSeconds = 0.0
+            }
+        }
+
+        previousRawThrottle = rawGas
+    }
+
+    private fun updateManualAutodownshift(
+        automaticShifting: Boolean,
+        dt: Double,
+    ) {
+        if (automaticShifting || currentTransmissionPosition != TransmissionPosition.DRIVE) {
+            return
+        }
+
+        if (launchControlPhase != LaunchControlPhase.INACTIVE) {
+            return
+        }
+
+        if (
+            rpm < AutomaticTransmissionPolicy.MANUAL_AUTODOWNSHIFT_RPM &&
+            gear > 1 &&
+            !shifting &&
+            automaticDownshiftCooldownSeconds <= 0.0 &&
+            downshiftAllowed(gear - 1, dt)
+        ) {
+            manualShiftRequest = -1
+        }
+    }
+
+    private fun updateManualRedlineAutomaticMode(
+        automaticShifting: Boolean,
+        dt: Double,
+    ) {
+        requestAutomaticShiftMode = false
+
+        if (automaticShifting || currentTransmissionPosition != TransmissionPosition.DRIVE) {
+            manualRedlineElapsedSeconds = 0.0
+            return
+        }
+
+        if (launchControlPhase != LaunchControlPhase.INACTIVE) {
+            manualRedlineElapsedSeconds = 0.0
+            return
+        }
+
+        val redlineThreshold = effectiveRedlineThresholdRpm()
+        if (rpm >= redlineThreshold) {
+            manualRedlineElapsedSeconds += dt
+            if (manualRedlineElapsedSeconds >= AutomaticTransmissionPolicy.MANUAL_REDLINER_HOLD_SECONDS) {
+                manualRedlineElapsedSeconds = 0.0
+                automaticTransmissionMode = AutomaticTransmissionMode.RACING
+                lowThrottleElapsedSeconds = 0.0
+                requestAutomaticShiftMode = true
+            }
+        } else {
+            manualRedlineElapsedSeconds = 0.0
+        }
+    }
+
+    private fun effectiveRedlineThresholdRpm(): Double {
+        if (physics.engine.limiterRpm > 0.0) {
+            return physics.engine.limiterRpm
+        }
+
+        return upshiftTriggerRpmForGear().coerceAtLeast(physics.engine.idleRpm)
     }
 
     private fun downshiftAllowed(target: Int, dt: Double): Boolean {

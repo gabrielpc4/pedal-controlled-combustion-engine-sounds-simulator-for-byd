@@ -20,5 +20,7 @@ internal object AppPreferenceStores {
     /** Last catalog tab shown by the shared car picker (modded or original). */
     const val CAR_PICKER_GROUP = "car_picker_group_v1"
     const val CAR_FAVORITES = "car_favorites_v1"
-    const val FORCE_FULL_LOAD_AUDIO_THROTTLE = "force_full_load_audio_throttle_v1"
+    const val MINIMUM_AUDIO_THROTTLE = "minimum_audio_throttle_v1"
+    const val CRUISING_SHIFT_OFFSET_RPM = "cruising_shift_offset_rpm_v1"
+    const val AUTOMATIC_TRANSMISSION_SETTINGS = "automatic_transmission_settings_v1"
 }

@@ -6,6 +6,7 @@ import android.os.Debug
 import android.os.Process
 import android.util.Log
 import com.gabrielpc.enginesoundsimulator.diagnostics.DebugTelemetry
+import com.gabrielpc.enginesoundsimulator.drive.MinimumAudioThrottle
 import com.gabrielpc.enginesoundsimulator.simulation.nativeFmodSpatialCoordinates
 import java.io.File
 import java.io.FileInputStream
@@ -71,11 +72,11 @@ class EngineAudioEngine(context: Context) {
     private val turboAudioEnabled = AtomicBoolean(true)
     private val backfireUseOriginal = AtomicBoolean(true)
     private val exteriorPureAudio = AtomicBoolean(false)
-    private val forceFullLoadAudioThrottle = AtomicBoolean(true)
+    private val minimumAudioThrottle = AtomicReference(MinimumAudioThrottle.DEFAULT)
     private val engineSampleDataReady = AtomicBoolean(false)
     private var sentBackfireOnly: Boolean? = null
     private var sentExteriorPureAudio: Boolean? = null
-    private var sentForceFullLoadAudioThrottle: Boolean? = null
+    private var sentMinimumAudioThrottle: Float? = null
 
     @Volatile
     private var focusChangeListener: ((AudioFocusEvent) -> Unit)? = null
@@ -176,7 +177,9 @@ class EngineAudioEngine(context: Context) {
 
     fun setExteriorPureAudio(enabled: Boolean) { exteriorPureAudio.set(enabled) }
 
-    fun setForceFullLoadAudioThrottle(enabled: Boolean) { forceFullLoadAudioThrottle.set(enabled) }
+    fun setMinimumAudioThrottle(minimum: Float) {
+        minimumAudioThrottle.set(MinimumAudioThrottle.normalize(minimum))
+    }
 
     fun setBackfireAllowedSamples(samples: Set<Int>) {
         val mask = samples.fold(0) { result, sample ->
@@ -299,7 +302,7 @@ class EngineAudioEngine(context: Context) {
         // must be resent rather than assumed to equal the C++ field initializer.
         sentBackfireOnly = null
         sentExteriorPureAudio = null
-        sentForceFullLoadAudioThrottle = null
+        sentMinimumAudioThrottle = null
         running.set(true)
         val runId = generation.incrementAndGet()
         val thread = Thread(
@@ -399,9 +402,9 @@ class EngineAudioEngine(context: Context) {
             val requestedExteriorPureAudio = exteriorPureAudio.get()
             bridge.setExteriorPureAudio(requestedExteriorPureAudio)
             sentExteriorPureAudio = requestedExteriorPureAudio
-            val requestedForceFullLoadAudioThrottle = forceFullLoadAudioThrottle.get()
-            bridge.setForceFullLoadAudioThrottle(requestedForceFullLoadAudioThrottle)
-            sentForceFullLoadAudioThrottle = requestedForceFullLoadAudioThrottle
+            val requestedMinimumAudioThrottle = minimumAudioThrottle.get()
+            bridge.setMinimumAudioThrottle(requestedMinimumAudioThrottle)
+            sentMinimumAudioThrottle = requestedMinimumAudioThrottle
 
             while (isCurrent(runId)) {
                 val now = System.nanoTime()
@@ -528,10 +531,10 @@ class EngineAudioEngine(context: Context) {
                     bridge.setExteriorPureAudio(requestedExteriorPureAudio)
                     sentExteriorPureAudio = requestedExteriorPureAudio
                 }
-                val requestedForceFullLoadAudioThrottle = forceFullLoadAudioThrottle.get()
-                if (requestedForceFullLoadAudioThrottle != sentForceFullLoadAudioThrottle) {
-                    bridge.setForceFullLoadAudioThrottle(requestedForceFullLoadAudioThrottle)
-                    sentForceFullLoadAudioThrottle = requestedForceFullLoadAudioThrottle
+                val requestedMinimumAudioThrottle = minimumAudioThrottle.get()
+                if (requestedMinimumAudioThrottle != sentMinimumAudioThrottle) {
+                    bridge.setMinimumAudioThrottle(requestedMinimumAudioThrottle)
+                    sentMinimumAudioThrottle = requestedMinimumAudioThrottle
                 }
                 engineSampleDataReady.set(bridge.engineSampleDataReady())
                 val currentLimiterPulse = limiterPulseSerial.get()
