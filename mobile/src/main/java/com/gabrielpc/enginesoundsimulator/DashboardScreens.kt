@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -93,6 +94,7 @@ import com.gabrielpc.enginesoundsimulator.drive.AlfaBackfireSources
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import java.util.Locale
+import kotlin.math.roundToInt
 
 enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
@@ -443,17 +445,10 @@ internal fun SettingsScreen(
         }
         if (!backfireTab) {
             SettingsGridRow {
-                VirtualForwardGearCountControl(
-                    gearCount = virtualForwardGearCount,
-                    onGearCountChange = onVirtualForwardGearCountChange,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            SettingsGridRow {
                 FmodUpdateRateControl(
                     rateHz = fmodUpdateRateHz,
                     onRateChange = onFmodUpdateRateChange,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
             SettingsGridRow {
@@ -463,7 +458,7 @@ internal fun SettingsScreen(
                     onGainSelected = { gain ->
                         onShiftSoundSettingsChange(shiftSoundSettings.copy(overrideGain = gain))
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 SettingsGainPresetCard(
                     title = "TRANSMISSION GLOBAL GAIN",
@@ -471,7 +466,7 @@ internal fun SettingsScreen(
                     onGainSelected = { gain ->
                         onTransmissionSoundSettingsChange(transmissionSoundSettings.copy(globalGain = gain))
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 SettingsGainPresetCard(
                     title = "PURE ENGINE GLOBAL GAIN",
@@ -480,9 +475,13 @@ internal fun SettingsScreen(
                     onGainSelected = { gain ->
                         onExteriorPureAudioSettingsChange(exteriorPureAudioSettings.copy(globalGain = gain))
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
+            VirtualForwardGearCountControl(
+                gearCount = virtualForwardGearCount,
+                onGearCountChange = onVirtualForwardGearCountChange,
+            )
             Button(
                 onClick = onResetAll,
                 colors = ButtonDefaults.buttonColors(containerColor = Red.copy(alpha = 0.85f)),
@@ -505,8 +504,11 @@ private fun SettingsGridRow(
     content: @Composable RowScope.() -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
         content = content,
     )
 }
@@ -521,6 +523,7 @@ private fun SettingsGainPresetCard(
 ) {
     Column(
         modifier = modifier
+            .fillMaxHeight()
             .border(1.dp, Line, RoundedCornerShape(8.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -529,6 +532,7 @@ private fun SettingsGainPresetCard(
         if (description != null) {
             Text(description, color = Muted, fontSize = 11.sp)
         }
+        Spacer(modifier = Modifier.weight(1f))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
                 Button(
@@ -561,9 +565,21 @@ private fun VirtualForwardGearCountControl(
         modifier = modifier
             .border(1.dp, Line, RoundedCornerShape(8.dp))
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("VIRTUAL FORWARD GEARS", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("VIRTUAL FORWARD GEARS", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "$gearCount gears",
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
         Text(
             "Global gear-band mapping for every car. At 10 gears, 60 km/h stays anchored in 4th gear.",
             color = Muted,
@@ -571,33 +587,129 @@ private fun VirtualForwardGearCountControl(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Button(
-                onClick = { onGearCountChange(gearCount - 1) },
-                enabled = gearCount > VirtualGearProfile.MIN_VIRTUAL_GEARS,
-                colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("-", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
-            }
             Text(
-                text = gearCount.toString(),
-                color = White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(horizontal = 8.dp),
+                "${VirtualGearProfile.MIN_VIRTUAL_GEARS}",
+                color = Muted,
+                fontSize = 11.sp,
             )
-            Button(
-                onClick = { onGearCountChange(gearCount + 1) },
-                enabled = gearCount < VirtualGearProfile.MAX_VIRTUAL_GEARS,
-                colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("+", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text(
+                "${VirtualGearProfile.MAX_VIRTUAL_GEARS}",
+                color = Muted,
+                fontSize = 11.sp,
+            )
+        }
+        Slider(
+            value = gearCount.toFloat(),
+            onValueChange = { value ->
+                onGearCountChange(value.roundToInt())
+            },
+            valueRange = VirtualGearProfile.MIN_VIRTUAL_GEARS.toFloat()..VirtualGearProfile.MAX_VIRTUAL_GEARS.toFloat(),
+            steps = VirtualGearProfile.MAX_VIRTUAL_GEARS - VirtualGearProfile.MIN_VIRTUAL_GEARS - 1,
+        )
+        VirtualGearDistributionChart(gearCount = gearCount)
+    }
+}
+
+@Composable
+private fun VirtualGearDistributionChart(
+    gearCount: Int,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    val boundaries = remember(gearCount) {
+        VirtualGearProfile.physicalBoundarySpeedsKmh(gearCount)
+    }
+    val topSpeedKmh = boundaries.last()
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "SPEED BANDS BY GEAR",
+            color = CyanSoft,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .border(1.dp, Line, RoundedCornerShape(6.dp)),
+        ) {
+            for (gear in 1..gearCount) {
+                val lowKmh = boundaries[gear - 1]
+                val highKmh = boundaries[gear]
+                val spanKmh = (highKmh - lowKmh).coerceAtLeast(0.1)
+                val spanWeight = (spanKmh / topSpeedKmh).toFloat().coerceAtLeast(0.01f)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .weight(spanWeight)
+                        .background(virtualGearBandColor(gear))
+                        .border(0.5.dp, Night.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (spanWeight >= 0.06f) {
+                        Text(
+                            text = gear.toString(),
+                            color = Night,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                }
             }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("0 km/h", color = Muted, fontSize = 10.sp)
+            Text(
+                "${topSpeedKmh.roundToInt()} km/h",
+                color = Muted,
+                fontSize = 10.sp,
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (gear in 1..gearCount) {
+                val lowKmh = boundaries[gear - 1]
+                val highKmh = boundaries[gear]
+                Text(
+                    text = "G$gear: ${formatGearBandSpeedKmh(lowKmh)} – ${formatGearBandSpeedKmh(highKmh)} km/h",
+                    color = Muted,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+    }
+}
+
+private fun virtualGearBandColor(gear: Int): Color {
+    val palette = listOf(
+        Color(0xFF00D7E8),
+        Color(0xFF33E0EE),
+        Color(0xFF66E9F3),
+        Color(0xFF99F1F7),
+        Color(0xFF00B8CC),
+        Color(0xFF0099AA),
+        Color(0xFF007A88),
+        Color(0xFF005C66),
+        Color(0xFF003D44),
+        Color(0xFF00262B),
+    )
+    return palette[(gear - 1).coerceIn(0, palette.lastIndex)]
+}
+
+private fun formatGearBandSpeedKmh(speedKmh: Double): String {
+    return if (speedKmh >= 100.0) {
+        speedKmh.roundToInt().toString()
+    } else {
+        String.format(Locale.US, "%.1f", speedKmh)
     }
 }
 
@@ -654,6 +766,7 @@ private fun FmodUpdateRateControl(
 ) {
     Column(
         modifier = modifier
+            .fillMaxHeight()
             .border(1.dp, Line, RoundedCornerShape(8.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
