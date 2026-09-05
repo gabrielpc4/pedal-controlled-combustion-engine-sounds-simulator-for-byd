@@ -119,6 +119,8 @@ class EngineAudioEngine(context: Context) {
         hostEffectsGain.set(effects.coerceAtLeast(0f))
     }
 
+    fun hostEngineGain(): Float = hostEngineGain.get()
+
     internal fun setCategoryGains(gains: AudioMixGains) {
         categoryGains.set(gains)
     }

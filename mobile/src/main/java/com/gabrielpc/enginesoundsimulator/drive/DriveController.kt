@@ -75,6 +75,8 @@ data class DriveSnapshot(
     val selectedCarIndex: Int,
     val availableCarCount: Int,
     val fmodSources: List<FmodSourceState> = emptyList(),
+    /** Host-level engine trim applied before category routing. */
+    val engineHostGain: Float = 1.0f,
     val transmissionGain: Float = 1.0f,
     val gearShiftGain: Float = 1.0f,
     val turboGain: Float = 1.0f,
@@ -268,6 +270,7 @@ class DriveController(context: Context) {
                 emptyList()
             },
             transmissionGain = audioMixGains.get().transmission,
+            engineHostGain = audioEngine.hostEngineGain(),
             gearShiftGain = audioMixGains.get().gearShift,
             turboGain = audioMixGains.get().turbo,
             backfireGain = audioMixGains.get().backfire,

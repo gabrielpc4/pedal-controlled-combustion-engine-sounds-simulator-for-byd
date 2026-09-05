@@ -1174,7 +1174,12 @@ private fun DashboardEffectControls(
         DASHBOARD_EFFECT_GAIN_PRESETS.forEachIndexed { columnIndex, preset ->
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(3.dp)) {
                 rows.forEach { row ->
-                    val selected = kotlin.math.abs(row.third - preset.gain) < 0.001f
+                    val rowGain = if (row.first == "ENGINE") {
+                        state.engineHostGain
+                    } else {
+                        row.third
+                    }
+                    val selected = kotlin.math.abs(rowGain - preset.gain) < 0.001f
                     DashboardGainButton(preset, selected, if (selected) Night else Cyan, Line) {
                         when (row.second) {
                             EffectSoundKind.TRANSMISSION -> if (row.first == "ENGINE") onHostGains(preset.gain, 2.0f) else onCategoryGains(preset.gain, state.gearShiftGain, state.turboGain, state.backfireGain)
@@ -1242,6 +1247,7 @@ private fun DashboardGainButton(
                 .height(38.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(if (selected) Cyan else PanelBright)
+                .border(1.dp, if (selected) Cyan else borderColor, RoundedCornerShape(6.dp))
                 .clickable(onClick = onClick)
                 .padding(top = 10.dp),
         )
