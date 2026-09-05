@@ -367,6 +367,13 @@ class EngineSimulation {
         realOrDocumentedRawSpeedKmh: Double,
         fmodDrivetrainSpeedKmh: Double = 0.0,
     ): DrivetrainState {
+        val relocatedShiftThresholds = AutomaticTransmissionPolicy.relocatedShiftThresholds(
+            authoredUpshiftRpm = activePhysics.drivetrain.automaticUpshiftRpm,
+            authoredDownshiftRpm = activePhysics.drivetrain.automaticDownshiftRpm,
+            limiterRpm = activePhysics.engine.limiterRpm,
+            idleRpm = activePhysics.engine.idleRpm,
+        )
+
         return DrivetrainState(
             // AssettoDrivetrain already consumed fmodDrivetrainSpeed and produced the authored
             // RPM. Recomputing RPM from the public presentation speed here would create a second,
@@ -406,8 +413,8 @@ class EngineSimulation {
             // Shift lights are indicators only. The red zone starts at the authored limiter.
             redlineRpm = activePhysics.engine.limiterRpm,
             limiterRpm = activePhysics.engine.limiterRpm,
-            automaticUpshiftRpm = activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
-            automaticDownshiftRpm = activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
+            automaticUpshiftRpm = relocatedShiftThresholds.upshiftRpm,
+            automaticDownshiftRpm = relocatedShiftThresholds.downshiftRpm,
             requestAutomaticShiftMode = frame.requestAutomaticShiftMode,
             automaticTransmissionMode = frame.automaticTransmissionMode,
         )

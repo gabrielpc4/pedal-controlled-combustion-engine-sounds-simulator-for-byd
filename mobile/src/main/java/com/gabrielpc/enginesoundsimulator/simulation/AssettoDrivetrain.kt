@@ -882,14 +882,22 @@ internal class AssettoDrivetrain(
         return rpm * driven.radius / (ratio * RPM_PER_RADIAN_SECOND)
     }
 
-    /** Bank-authored automatic upshift RPM, clamped to the hard limiter when one exists. */
+    /** Relocated automatic upshift RPM, anchored just below the limiter when one exists. */
     private fun upshiftTriggerRpmForGear(): Double {
-        val authored = physics.drivetrain.automaticUpshiftRpm.toDouble()
-        return if (physics.engine.limiterRpm > 0.0) {
-            authored.coerceAtMost(physics.engine.limiterRpm)
-        } else {
-            authored
-        }
+        return relocatedShiftThresholds().upshiftRpm
+    }
+
+    private fun downshiftTriggerRpmForGear(): Double {
+        return relocatedShiftThresholds().downshiftRpm
+    }
+
+    private fun relocatedShiftThresholds(): AutomaticTransmissionPolicy.RelocatedShiftThresholds {
+        return AutomaticTransmissionPolicy.relocatedShiftThresholds(
+            authoredUpshiftRpm = physics.drivetrain.automaticUpshiftRpm,
+            authoredDownshiftRpm = physics.drivetrain.automaticDownshiftRpm,
+            limiterRpm = physics.engine.limiterRpm,
+            idleRpm = physics.engine.idleRpm,
+        )
     }
 
     private fun effectiveUpshiftTriggerRpm(): Double {
@@ -938,8 +946,8 @@ internal class AssettoDrivetrain(
             ?.takeIf { it > 0.0 }
             ?: landingRpmAfterUpshift(
                 fromGear = gear - 1,
-                upshiftRpm = physics.drivetrain.automaticUpshiftRpm.toDouble(),
-            )
+                upshiftRpm = upshiftTriggerRpmForGear(),
+            ).coerceAtLeast(downshiftTriggerRpmForGear())
     }
 
     private fun effectiveDownshiftRpmForCurrentGear(): Double {

@@ -73,7 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.foundation.focusable
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -670,7 +670,7 @@ private fun AutomaticTransmissionSettingsControl(
             )
         }
         Text(
-            text = "Automatic mode starts in cruising: up/down thresholds are lowered by this amount. Pressing above 40% throttle switches to racing and downshifts to the gear that would land within the manual-autodownshift offset below redline at the current speed.",
+            text = "Automatic mode starts in cruising: up/down thresholds are lowered by this amount from the relocated racing upshift/downshift points near the limiter. Pressing above 40% throttle switches to racing and downshifts to the gear that would land within the manual-autodownshift offset below redline at the current speed.",
             color = Muted,
             fontSize = 12.sp,
             lineHeight = 16.sp,
@@ -1289,9 +1289,10 @@ internal fun CarGridSelectionDialog(
     } else {
         "${visibleProfiles.size} OF ${groupProfiles.size} INSTALLED"
     }
-    val dialogFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) {
-        dialogFocusRequester.requestFocus()
+        delay(1)
+        focusManager.clearFocus()
     }
     // Disable the platform's narrow default dialog width so the picker can span the display.
     Dialog(
@@ -1302,8 +1303,6 @@ internal fun CarGridSelectionDialog(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .fillMaxHeight(0.84f)
-                .focusRequester(dialogFocusRequester)
-                .focusable()
                 .clip(RoundedCornerShape(14.dp))
                 .background(PanelBright)
                 .border(1.dp, Line, RoundedCornerShape(14.dp))
@@ -1410,11 +1409,11 @@ private fun CarPickerSearchField(
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var focusEnabled by remember { mutableStateOf(false) }
+    var editingEnabled by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(focusEnabled) {
-        if (focusEnabled) {
+    LaunchedEffect(editingEnabled) {
+        if (editingEnabled) {
             focusRequester.requestFocus()
         }
     }
@@ -1425,12 +1424,6 @@ private fun CarPickerSearchField(
             .clip(RoundedCornerShape(6.dp))
             .background(Panel)
             .border(1.dp, Line, RoundedCornerShape(6.dp))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                focusEnabled = true
-            }
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -1438,7 +1431,7 @@ private fun CarPickerSearchField(
             value = query,
             onValueChange = onQueryChange,
             singleLine = true,
-            readOnly = !focusEnabled,
+            readOnly = !editingEnabled,
             textStyle = TextStyle(
                 color = White,
                 fontSize = 12.sp,
@@ -1449,8 +1442,20 @@ private fun CarPickerSearchField(
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
                 .focusProperties {
-                    canFocus = focusEnabled
-                },
+                    canFocus = editingEnabled
+                }
+                .then(
+                    if (!editingEnabled) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            editingEnabled = true
+                        }
+                    } else {
+                        Modifier
+                    }
+                ),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (query.isEmpty()) {

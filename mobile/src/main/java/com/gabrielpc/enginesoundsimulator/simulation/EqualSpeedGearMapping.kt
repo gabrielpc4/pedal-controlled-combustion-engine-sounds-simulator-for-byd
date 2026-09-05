@@ -68,10 +68,7 @@ internal data class EqualSpeedGearMapping(
          * Build the mapping from the documented/original physics for the selected bank.
          *
          * Each physical boundary is equally spaced, but each internal boundary is calculated
-         * from the authored RPM that belongs there. Intermediate boundaries use the bank's
-         * automatic upshift RPM; the final boundary uses its limiter RPM. This means the mapping
-         * reaches the authored shift point at the requested physical speed without replacing any
-         * authored shift decision.
+         * from the relocated automatic upshift RPM. The final boundary uses the limiter RPM.
          */
         fun from(
             documentedPhysics: AssettoPhysics,
@@ -80,8 +77,13 @@ internal data class EqualSpeedGearMapping(
             val authored = documentedPhysics.drivetrain
             val gearCount = virtualGearProfile.virtualForwardGearCount
             val wheelRadius = virtualGearProfile.wheelRadiusMeters
-            val documentedUpshiftRpm = authored.automaticUpshiftRpm
-                .toDouble()
+            val relocatedThresholds = AutomaticTransmissionPolicy.relocatedShiftThresholds(
+                authoredUpshiftRpm = authored.automaticUpshiftRpm,
+                authoredDownshiftRpm = authored.automaticDownshiftRpm,
+                limiterRpm = documentedPhysics.engine.limiterRpm,
+                idleRpm = documentedPhysics.engine.idleRpm,
+            )
+            val documentedUpshiftRpm = relocatedThresholds.upshiftRpm
                 .takeIf { it > 0.0 }
                 ?: documentedPhysics.engine.limiterRpm
             val documentedLimiterRpm = documentedPhysics.engine.limiterRpm
