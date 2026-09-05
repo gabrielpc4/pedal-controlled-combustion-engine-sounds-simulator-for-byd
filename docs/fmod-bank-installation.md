@@ -61,3 +61,11 @@ modified, or missing packs rather than selecting another car. FMOD starts at aut
 plays only the engine and drivetrain events actually present in that bank; tires, wind, chassis,
 and doors are excluded. The mixer shows the resulting FMOD hierarchy without changing its gain or
 routing.
+## USB installer APK
+
+`engine-sounds-audio-installer-release.apk` is intentionally small and contains no bank payload.
+Install it alongside the dashboard, open it, press **CHOOSE USB FOLDER**, and select the folder
+containing the `.bydbank` files (for example `Third Party Apps 55/AUDIO_PACKS`). The installer
+scans subfolders, then the buttons copy original cars, modded cars, or both through the
+dashboard's verified provider. It does not need broad storage permission and does not write
+directly into private `/data/user/0` paths.

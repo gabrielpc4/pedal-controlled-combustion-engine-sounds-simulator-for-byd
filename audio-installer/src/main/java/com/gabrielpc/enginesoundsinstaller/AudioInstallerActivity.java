@@ -34,7 +34,7 @@ public final class AudioInstallerActivity extends Activity {
     private LinearLayout createContent() {
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(48, 36, 48, 36); root.setGravity(Gravity.CENTER_VERTICAL); root.setBackgroundColor(0xff05080a);
         root.addView(text("ENGINE FMOD BANK INSTALLER", 28, 0xff00d7e8));
-        root.addView(text("Select the fmod_bank_packs folder on USB, then install a group.", 16, 0xffd5e2e8));
+        root.addView(text("Select the USB folder containing .bydbank files, then install a group.", 16, 0xffd5e2e8));
         status = text("No USB source selected.", 18, 0xffffffff); LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2); sp.topMargin = 28; root.addView(status, sp);
         chooseFolder = action("CHOOSE USB FOLDER", this::chooseSourceFolder); root.addView(chooseFolder);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); progress.setMax(1000); root.addView(progress, new LinearLayout.LayoutParams(-1, 18));
