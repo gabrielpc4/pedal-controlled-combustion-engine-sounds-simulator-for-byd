@@ -1,9 +1,8 @@
 # FMOD bank installation
 
-The dashboard APK contains runtime code and official-car previews. Car banks are delivered through
-the BYD file manager, or through the optional companion installer APK. This is deliberate: it keeps the dashboard as
-the only APK that must be sideloaded and retains the same checksum validation and atomic publish
-step before a bank reaches FMOD.
+The dashboard APK contains runtime code and previews. Two companion installer APKs carry the bank
+payloads: one for original cars and one for modded cars. Each installer copies its embedded banks
+through the dashboard provider, which validates and atomically publishes them before FMOD sees them.
 
 ## Package groups
 
@@ -66,11 +65,11 @@ modified, or missing packs rather than selecting another car. FMOD starts at aut
 plays only the engine and drivetrain events actually present in that bank; tires, wind, chassis,
 and doors are excluded. The mixer shows the resulting FMOD hierarchy without changing its gain or
 routing.
-## USB installer APK
+## Installer APKs
 
-`engine-sounds-audio-installer-release.apk` is intentionally small and contains no bank payload.
-Install it alongside the dashboard, open it, press **CHOOSE USB FOLDER**, and select the folder
-containing the `.bydbank` files (for example `Third Party Apps 55/AUDIO_PACKS`). The installer
-scans subfolders, then the buttons copy original cars, modded cars, or both through the
-dashboard's verified provider. It does not need broad storage permission and does not write
-directly into private `/data/user/0` paths.
+Build `assembleModdedRelease` and `assembleOriginalRelease` to produce two large installers:
+`engine-sounds-audio-installer-moddedRelease.apk` and
+`engine-sounds-audio-installer-originalRelease.apk`. Install the dashboard first, then install
+the desired companion and press its single install button. The modded and original installers have
+different package IDs, so both can be installed together; each carries only its own group plus the
+shared dependencies. `DELETE ALL` remains available in either installer.

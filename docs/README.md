@@ -14,10 +14,10 @@ independently and the dashboard only exposes profiles whose verified package is 
 installed. The original and modded inventories are independent evidence sets: a limitation in one
 must never cause a fallback to a similarly named car in the other.
 
-The dashboard APK contains the runtime and previews. Car-bank archives are copied through the
+The dashboard APK contains the runtime and previews. Car-bank archives can be copied through the
 BYD file manager into the dashboard's app-specific external-storage staging folder; the dashboard
-then verifies and atomically imports them into private storage itself. An optional all-cars
-installer APK can perform the same provider copy from its embedded payload. See [FMOD bank
+then verifies and atomically imports them into private storage itself. Two companion installer APKs
+are also available, one embedding the original group and one embedding the modded group. See [FMOD bank
 installation](fmod-bank-installation.md).
 
 ## Source of truth
@@ -63,7 +63,7 @@ python3 tools/build_fmod_bank_packs.py --force
 python3 tools/export_file_manager_car_packs.py --groups all
 ```
 
-Install the dashboard APK from `manual_car_pack_bundles/DASHBOARD_APK` through the vehicle's
+Install the dashboard APK and, when preferred, the original and/or modded installer APK through the vehicle's
 enabled USB APK route. Then copy one `fmod-bank-import` batch at a time from
 `AUDIO_PACKS/*/BATCH_*` to the exact path documented inside its
 `COPY_TO_BYD_INTERNAL_STORAGE.txt`, and open the dashboard while parked. The dashboard imports and

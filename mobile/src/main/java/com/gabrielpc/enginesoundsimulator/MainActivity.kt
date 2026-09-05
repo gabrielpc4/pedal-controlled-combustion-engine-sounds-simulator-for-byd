@@ -507,6 +507,7 @@ private fun MotorSoundDashboard(
                         )
                         DashboardMainScreen.SETTINGS -> SettingsScreen(
                             onBack = { mainScreen = DashboardMainScreen.CLASSIC },
+                            onOpenCalibration = { mainScreen = DashboardMainScreen.CALIBRATION },
                             onResetAll = onResetAllPreferences,
                             fmodUpdateRateHz = state.fmodUpdateRateHz,
                             onFmodUpdateRateChange = onFmodUpdateRateChange,
@@ -521,6 +522,9 @@ private fun MotorSoundDashboard(
                             transmissionSoundSettings = state.transmissionSoundSettings,
                             onTransmissionSoundSettingsChange = onTransmissionSoundSettingsChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
+                        )
+                        DashboardMainScreen.CALIBRATION -> CalibrationScreen(
+                            onBack = { mainScreen = DashboardMainScreen.SETTINGS },
                         )
                     }
                 }
@@ -1020,7 +1024,10 @@ private fun DashboardEffectControls(
     val rowGap = 7.dp
     // This row is a horizontal column group; keeping intrinsic width leaves the tenth
     // column available for the pedal controls instead of consuming the whole dashboard.
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // The effect matrix is secondary to the car preview and tachometer on the classic screen.
+    // Keep its intrinsic layout logic intact but render the whole matrix at half scale so it
+    // occupies less visual area without changing the gain/toggle hit targets' relative layout.
+    Row(modifier = modifier.scale(0.5f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(4.dp)) {
             rows.forEachIndexed { index, row ->
                 val enabled = if (index == 0) external else when (row.second) {

@@ -132,6 +132,9 @@ class DriveController(context: Context) {
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
         }
+            // Modded cars are the preferred catalog for a fresh install; fall back to originals
+            // only when no modded bank has been imported yet.
+            ?: installedProfileCache.get().firstOrNull { it.packGroup == FmodBankProfiles.moddedCarsPackId }
             ?: installedProfileCache.get().firstOrNull()
             ?: FmodBankProfiles.default,
     )
@@ -484,7 +487,11 @@ class DriveController(context: Context) {
         audioEngine.setGlobalTransmissionGain(transmissionSoundSettings.get().globalGain)
         audioEngine.setTransmissionAudioEnabled(true)
         audioEngine.setTurboAudioEnabled(true)
-        selectedProfile.set(installedProfiles().firstOrNull() ?: FmodBankProfiles.default)
+        selectedProfile.set(
+            installedProfiles().firstOrNull { it.packGroup == FmodBankProfiles.moddedCarsPackId }
+                ?: installedProfiles().firstOrNull()
+                ?: FmodBankProfiles.default,
+        )
         selectedPerspective.set(EngineSoundPerspective.CABIN)
         audioEngine.setCategoryGains(AudioMixGains())
         audioEngine.setFmodUpdateRateHz(FmodUpdateRate.DEFAULT_HZ)

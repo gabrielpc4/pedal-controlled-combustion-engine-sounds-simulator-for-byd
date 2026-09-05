@@ -2,6 +2,27 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+import org.gradle.api.tasks.Sync
+
+val generatedModdedPackAssets = file("build/generated/packAssets/modded")
+val generatedOriginalPackAssets = file("build/generated/packAssets/original")
+val prepareModdedPackAssets = tasks.register<Sync>("prepareModdedPackAssets") {
+    from(rootProject.file("fmod_bank_packs")) {
+        include("modded-*.bydbank", "assetto-common*.bydbank", "index.json")
+        into("packs")
+    }
+    into(generatedModdedPackAssets)
+}
+val prepareOriginalPackAssets = tasks.register<Sync>("prepareOriginalPackAssets") {
+    from(rootProject.file("fmod_bank_packs")) {
+        include("assetto-*.bydbank", "alfa-romeo-4c.bydbank", "index.json")
+        into("packs")
+    }
+    into(generatedOriginalPackAssets)
+}
+
+tasks.named("preBuild").configure { dependsOn(prepareModdedPackAssets, prepareOriginalPackAssets) }
+
 
 android {
     namespace = "com.gabrielpc.enginesoundsinstaller"
@@ -17,6 +38,22 @@ android {
         versionName = "1.0"
     }
 
+    buildFeatures { buildConfig = true }
+
+    flavorDimensions += "payload"
+    productFlavors {
+        create("modded") {
+            dimension = "payload"
+            applicationIdSuffix = ".modded"
+            buildConfigField("String", "PAYLOAD_GROUP", "\"modded_car_packs\"")
+        }
+        create("original") {
+            dimension = "payload"
+            applicationIdSuffix = ".original"
+            buildConfigField("String", "PAYLOAD_GROUP", "\"original_cars_pack\"")
+        }
+    }
+
     signingConfigs {
         // The BYD sideload path rejects unsigned APKs. Keep the same stable local certificate
         // convention as the dashboard so reinstalling this helper does not require a manual
@@ -28,11 +65,15 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = false
             }
         }
     }
+
+    sourceSets.getByName("modded").assets.srcDir(generatedModdedPackAssets)
+    sourceSets.getByName("original").assets.srcDir(generatedOriginalPackAssets)
 
     lint {
         // These installers target the same BYD DiLink Android compatibility level as the

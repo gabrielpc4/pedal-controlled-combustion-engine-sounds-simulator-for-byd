@@ -63,6 +63,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -97,6 +99,34 @@ enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
     MIXER("MIXER", "HUD + LAYERS"),
     SETTINGS("SETTINGS", "PREFERENCES"),
+    CALIBRATION("CALIBRATION", "PIXEL RECTANGLE"),
+}
+
+@Composable
+internal fun CalibrationScreen(onBack: () -> Unit) {
+    // Store primitive dimensions so the calibration screen survives recreation without
+    // asking Compose to serialize its geometry Size (which is not Bundle-saveable).
+    var rectangleWidth by rememberSaveable { mutableStateOf(640f) }
+    var rectangleHeight by rememberSaveable { mutableStateOf(360f) }
+    val rectangleSize = androidx.compose.ui.geometry.Size(rectangleWidth, rectangleHeight)
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        Canvas(
+            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    rectangleWidth = (rectangleWidth + dragAmount.x).coerceIn(40f, size.width.toFloat())
+                    rectangleHeight = (rectangleHeight + dragAmount.y).coerceIn(40f, size.height.toFloat())
+                }
+            },
+        ) {
+            drawRect(Color(0xFF00D7E8), androidx.compose.ui.geometry.Offset.Zero, rectangleSize, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f))
+        }
+        Column(modifier = Modifier.align(Alignment.TopStart).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("CALIBRATION", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("Drag the bottom-right corner. The rectangle stays pinned at (0, 0).", color = Color(0xFF88A2B2), fontSize = 14.sp)
+            Text("WIDTH: ${rectangleSize.width.toInt()} PX   HEIGHT: ${rectangleSize.height.toInt()} PX", color = Color(0xFF00D7E8), fontSize = 18.sp, fontWeight = FontWeight.Black)
+        }
+        Text("BACK", color = Color(0xFF00D7E8), fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.TopEnd).clickable(onClick = onBack).padding(24.dp))
+    }
 }
 
 @Composable
@@ -405,6 +435,7 @@ private fun GainControl(label: String, value: Float, onValueChange: (Float) -> U
 @Composable
 internal fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenCalibration: () -> Unit,
     onResetAll: () -> Unit,
     fmodUpdateRateHz: Int,
     onFmodUpdateRateChange: (Int) -> Unit,
@@ -449,6 +480,13 @@ internal fun SettingsScreen(
                 onRateChange = onFmodUpdateRateChange,
             )
             AutoblipControl(enabled = autoblipEnabled, onEnabledChange = onAutoblipEnabledChange)
+            Button(
+                onClick = onOpenCalibration,
+                colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("OPEN CALIBRATION", color = White, fontWeight = FontWeight.Black)
+            }
             Text("SHIFT OVERRIDE GAIN", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Black)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0.25f, 0.5f, 1.0f).forEach { gain ->
