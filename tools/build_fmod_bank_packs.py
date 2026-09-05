@@ -67,7 +67,6 @@ ORIGINAL_CARS = (
     ("assetto-mercedes-amg-gt3", "Mercedes-AMG GT3", "ks_mercedes_amg_gt3"),
     ("assetto-nissan-370z", "Nissan 370Z", "ks_nissan_370z"),
     ("assetto-nissan-gtr", "Nissan GT-R", "ks_nissan_gtr"),
-    ("assetto-nissan-skyline-r34", "Nissan Skyline GT-R R34", "ks_nissan_skyline_r34"),
     ("assetto-porsche-911-gt3-rs", "Porsche 911 GT3 RS", "ks_porsche_911_gt3_rs"),
     ("assetto-porsche-991-turbo-s", "Porsche 911 Turbo S (991)", "ks_porsche_991_turbo_s"),
     ("assetto-toyota-supra-mkiv", "Toyota Supra Mk IV", "ks_toyota_supra_mkiv"),
@@ -77,7 +76,11 @@ LEGACY_ORIGINAL_IDS = {source_id: (pack_id, display_name) for pack_id, display_n
 # Compact official-pack scope. These are intentional catalog exclusions: the
 # source installation remains untouched, while the app omits all Lotus cars,
 # keeps only RX-7 variants from Mazda, and omits clearly pre-2000 models. The
-# Supra and Skyline remain explicit user-requested exceptions.
+# Supra and Skyline are packaged in the modded group even though their banks come
+# from the official installation.
+ORIGINAL_CAR_MODDED_GROUP = {
+    "ks_nissan_skyline_r34": ("assetto-nissan-skyline-r34", "Nissan Skyline GT-R R34"),
+}
 EXCLUDED_OFFICIAL_CAR_DIRECTORIES = {
     "bmw_m3_e30", "bmw_m3_e30_drift", "bmw_m3_e30_dtm", "bmw_m3_e30_gra", "bmw_m3_e30_s1",
     "ks_alfa_33_stradale", "ks_alfa_romeo_155_v6",
@@ -93,7 +96,10 @@ EXCLUDED_OFFICIAL_CAR_DIRECTORIES = {
     "ks_toyota_ae86_tuned", "ks_mazda_mx5_cup", "ks_mazda_mx5_nd",
     # Exact-bank duplicates: keep the highest-trim representative only.
     "bmw_1m", "bmw_z4", "bmw_z4_drift", "bmw_z4_s1",
-    "bmw_m3_e92", "bmw_m3_e92_drift", "abarth500",
+    "bmw_m3_e92", "bmw_m3_e92_drift", "abarth500", "abarth500_s1",
+    "ks_abarth_595ss", "ks_abarth_595ss_s1", "ks_abarth_595ss_s2",
+    "ks_abarth500_assetto_corse",
+    "ks_nissan_skyline_r34",
     "ferrari_458", "ks_ruf_rt12r",
     "ks_audi_sport_quattro", "ks_audi_sport_quattro_rally",
 }
@@ -187,6 +193,33 @@ def discover_original_sources() -> list[CarSource]:
             pack_id=pack_id,
             display_name=display_name,
             group=ORIGINAL_GROUP,
+            source_directory=directory,
+            bank_path=bank_for(directory),
+            preview_path=preview,
+            active=True,
+        ))
+    return sources
+
+
+def discover_installation_modded_sources() -> list[CarSource]:
+    cars_root = INSTALLATION / "content" / "cars"
+    if not cars_root.is_dir():
+        return []
+
+    sources: list[CarSource] = []
+    for directory_name, (pack_id, display_name) in ORIGINAL_CAR_MODDED_GROUP.items():
+        directory = cars_root / directory_name
+        if not directory.is_dir():
+            continue
+        if not (directory / "sfx").is_dir() or not list((directory / "sfx").glob("*.bank")):
+            continue
+        preview = preview_for_modded(directory) or preview_for_original(directory)
+        if preview is None:
+            raise RuntimeError(f"{pack_id}: modded installation car has no preview image: {directory}")
+        sources.append(CarSource(
+            pack_id=pack_id,
+            display_name=display_name,
+            group=MODDED_GROUP,
             source_directory=directory,
             bank_path=bank_for(directory),
             preview_path=preview,
@@ -395,7 +428,7 @@ def main() -> int:
     arguments = parser.parse_args()
     OUTPUT.mkdir(exist_ok=True)
     original = discover_original_sources()
-    modded = discover_modded_sources()
+    modded = discover_modded_sources() + discover_installation_modded_sources()
     sources = original + modded
     expected_archives = {f"{source.pack_id}.bydbank" for source in sources}
     expected_archives.update(("assetto-common.bydbank", "assetto-common-strings.bydbank"))

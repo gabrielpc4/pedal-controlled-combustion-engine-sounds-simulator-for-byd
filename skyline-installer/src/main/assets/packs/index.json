@@ -1,1 +1,34 @@
-{"schema":"byd-fmod-bank-index-v2","version":2,"groups":[{"id":"original_cars_pack","title":"Nissan Skyline","packs":[{"id":"assetto-common","displayName":"Assetto Corsa shared banks","asset":"assetto-common.bydbank","bytes":43810329,"dependency":true},{"id":"assetto-common-strings","displayName":"Assetto Corsa strings","asset":"assetto-common-strings.bydbank","bytes":128345,"dependency":true},{"id":"assetto-nissan-skyline-r34","displayName":"Nissan Skyline GT-R R34","asset":"assetto-nissan-skyline-r34.bydbank","bytes":20690809,"dependency":false}]}],"exceptions":[]}
+{
+  "schema": "byd-fmod-bank-index-v2",
+  "version": 2,
+  "packs": [
+    {
+      "id": "assetto-common",
+      "name": "Assetto Corsa shared banks",
+      "asset": "assetto-common.bydbank",
+      "bytes": 43810329,
+      "group": "modded_car_packs",
+      "active": true,
+      "dependency": true
+    },
+    {
+      "id": "assetto-common-strings",
+      "name": "Assetto Corsa strings",
+      "asset": "assetto-common-strings.bydbank",
+      "bytes": 128345,
+      "group": "modded_car_packs",
+      "active": true,
+      "dependency": true
+    },
+    {
+      "id": "assetto-nissan-skyline-r34",
+      "name": "Nissan Skyline GT-R R34",
+      "asset": "assetto-nissan-skyline-r34.bydbank",
+      "bytes": 20690809,
+      "group": "modded_car_packs",
+      "active": true,
+      "dependency": false
+    }
+  ],
+  "exceptions": []
+}

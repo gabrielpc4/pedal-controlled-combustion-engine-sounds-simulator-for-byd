@@ -12,7 +12,6 @@ internal object CarSubtitleCatalog {
 
     private val subtitles = mapOf(
         "alfa-romeo-4c" to "Road Car · RWD · 240 HP · ~R$250–900k",
-        "assetto-abarth500-s1" to "Hot Hatch · FWD · 175 HP · ~R$100–300k",
         "assetto-alfa-romeo-giulietta-qv" to "Hot Hatch · FWD · 235 HP · ~R$100–500k",
         "assetto-alfa-romeo-giulietta-qv-le" to "Hot Hatch · FWD · 240 HP · ~R$100–500k",
         "assetto-audi-r8-lms-2016" to "GT3 · RWD · 500 HP",
@@ -32,10 +31,6 @@ internal object CarSubtitleCatalog {
         "assetto-ferrari-f40" to "Supercar · RWD · 478 HP · ~R$2–4M",
         "assetto-ferrari-fxx-k" to "Race Car · RWD · 1050 HP",
         "assetto-ferrari-laferrari" to "Road Car · RWD · 963 HP · ~R$2–4M",
-        "assetto-ks-abarth-595ss" to "Hot Hatch · RWD · 32 HP · ~R$100–300k",
-        "assetto-ks-abarth-595ss-s1" to "Hot Hatch · RWD · 32 HP · ~R$100–300k",
-        "assetto-ks-abarth-595ss-s2" to "Hot Hatch · RWD · 65 HP · ~R$100–300k",
-        "assetto-ks-abarth500-assetto-corse" to "Race Car · FWD · 195 HP",
         "assetto-ks-alfa-giulia-qv" to "Road Car · RWD · 510 HP · ~R$250–900k",
         "assetto-ks-alfa-mito-qv" to "Hot Hatch · FWD · 168 HP · ~R$250–900k",
         "assetto-ks-audi-a1s1" to "Hot Hatch · AWD · 231 HP · ~R$100–500k",
