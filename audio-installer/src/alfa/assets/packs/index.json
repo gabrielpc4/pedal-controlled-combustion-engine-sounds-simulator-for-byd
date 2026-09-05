@@ -1,0 +1,9 @@
+{
+  "schema": "byd-fmod-bank-index-v2",
+  "version": 2,
+  "packs": [
+    {"id":"assetto-common","name":"Assetto Corsa shared audio","asset":"assetto-common.bydbank","bytes":43810329,"group":"original_cars_pack","active":true,"dependency":true},
+    {"id":"assetto-common-strings","name":"Assetto Corsa event strings","asset":"assetto-common-strings.bydbank","bytes":128345,"group":"original_cars_pack","active":true,"dependency":true},
+    {"id":"alfa-romeo-4c","name":"Alfa Romeo 4C","asset":"alfa-romeo-4c.bydbank","bytes":59888862,"group":"original_cars_pack","active":true,"dependency":false}
+  ]
+}
