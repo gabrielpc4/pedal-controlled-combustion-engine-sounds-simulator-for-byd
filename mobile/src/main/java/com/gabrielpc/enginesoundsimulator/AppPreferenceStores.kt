@@ -19,7 +19,4 @@ internal object AppPreferenceStores {
     const val VIRTUAL_GEAR_COUNT = "virtual_gear_count_v1"
     /** Last catalog tab shown by the shared car picker (modded or original). */
     const val CAR_PICKER_GROUP = "car_picker_group_v1"
-    const val UI_SCALE = "ui_scale_v1"
-    const val TACHOMETER_SCALE = "tachometer_scale_v1"
-    const val CANVAS_ASPECT_RATIO = "canvas_aspect_ratio_v1"
 }

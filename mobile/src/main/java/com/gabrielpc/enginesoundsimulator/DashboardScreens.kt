@@ -46,7 +46,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -63,8 +62,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -101,34 +98,6 @@ enum class DashboardMainScreen(val title: String, val subtitle: String) {
     CLASSIC("CLASSIC", "CIRCULAR TACH"),
     MIXER("MIXER", "HUD + LAYERS"),
     SETTINGS("SETTINGS", "PREFERENCES"),
-    CALIBRATION("CALIBRATION", "PIXEL RECTANGLE"),
-}
-
-@Composable
-internal fun CalibrationScreen(onBack: () -> Unit) {
-    // Store primitive dimensions so the calibration screen survives recreation without
-    // asking Compose to serialize its geometry Size (which is not Bundle-saveable).
-    var rectangleWidth by rememberSaveable { mutableStateOf(640f) }
-    var rectangleHeight by rememberSaveable { mutableStateOf(360f) }
-    val rectangleSize = androidx.compose.ui.geometry.Size(rectangleWidth, rectangleHeight)
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        Canvas(
-            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    rectangleWidth = (rectangleWidth + dragAmount.x).coerceIn(40f, size.width.toFloat())
-                    rectangleHeight = (rectangleHeight + dragAmount.y).coerceIn(40f, size.height.toFloat())
-                }
-            },
-        ) {
-            drawRect(Color(0xFF00D7E8), androidx.compose.ui.geometry.Offset.Zero, rectangleSize, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f))
-        }
-        Column(modifier = Modifier.align(Alignment.TopStart).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("CALIBRATION", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
-            Text("Drag the bottom-right corner. The rectangle stays pinned at (0, 0).", color = Color(0xFF88A2B2), fontSize = 14.sp)
-            Text("WIDTH: ${rectangleSize.width.toInt()} PX   HEIGHT: ${rectangleSize.height.toInt()} PX", color = Color(0xFF00D7E8), fontSize = 18.sp, fontWeight = FontWeight.Black)
-        }
-        Text("BACK", color = Color(0xFF00D7E8), fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.TopEnd).clickable(onClick = onBack).padding(24.dp))
-    }
 }
 
 @Composable
@@ -437,16 +406,9 @@ private fun GainControl(label: String, value: Float, onValueChange: (Float) -> U
 @Composable
 internal fun SettingsScreen(
     onBack: () -> Unit,
-    onOpenCalibration: () -> Unit,
     onResetAll: () -> Unit,
     fmodUpdateRateHz: Int,
     onFmodUpdateRateChange: (Int) -> Unit,
-    uiScale: Float,
-    onUiScaleChange: (Float) -> Unit,
-    tachometerScale: Float,
-    onTachometerScaleChange: (Float) -> Unit,
-    canvasAspectRatio: Float,
-    onCanvasAspectRatioChange: (Float) -> Unit,
     exteriorPureAudio: Boolean,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     backfireSettings: BackfireSettings,
@@ -480,20 +442,10 @@ internal fun SettingsScreen(
             SettingsTab("BACKFIRE", backfireTab) { backfireTab = true }
         }
         if (!backfireTab) {
-            Text(
-                "Mixer gains are saved independently for each car. Transmission attenuation is global. Reset All clears saved car, perspective, shift mode, audio gains, sound settings, and the FMOD control rate.",
-                color = Muted,
-                fontSize = 15.sp,
-            )
             SettingsGridRow {
                 VirtualForwardGearCountControl(
                     gearCount = virtualForwardGearCount,
                     onGearCountChange = onVirtualForwardGearCountChange,
-                    modifier = Modifier.weight(1f),
-                )
-                UiScaleControl(
-                    scale = uiScale,
-                    onScaleChange = onUiScaleChange,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -501,45 +453,6 @@ internal fun SettingsScreen(
                 FmodUpdateRateControl(
                     rateHz = fmodUpdateRateHz,
                     onRateChange = onFmodUpdateRateChange,
-                    modifier = Modifier.weight(1.4f),
-                )
-                Column(
-                    modifier = Modifier
-                        .weight(0.6f)
-                        .fillMaxWidth()
-                        .border(1.dp, Line, RoundedCornerShape(8.dp))
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        "CALIBRATION",
-                        color = Cyan,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Text(
-                        "Open the full-screen pixel calibration surface for the dashboard layout.",
-                        color = Muted,
-                        fontSize = 12.sp,
-                    )
-                    Button(
-                        onClick = onOpenCalibration,
-                        colors = ButtonDefaults.buttonColors(containerColor = PanelBright),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("OPEN CALIBRATION", color = White, fontWeight = FontWeight.Black)
-                    }
-                }
-            }
-            SettingsGridRow {
-                TachometerScaleControl(
-                    scale = tachometerScale,
-                    onScaleChange = onTachometerScaleChange,
-                    modifier = Modifier.weight(1f),
-                )
-                CanvasAspectRatioControl(
-                    ratio = canvasAspectRatio,
-                    onRatioChange = onCanvasAspectRatioChange,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -635,86 +548,6 @@ private fun SettingsGainPresetCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun TachometerScaleControl(
-    scale: Float,
-    onScaleChange: (Float) -> Unit,
-    modifier: Modifier = Modifier.fillMaxWidth(),
-) {
-    Column(
-        modifier = modifier
-            .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("TACHOMETER SIZE", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text("${"%.2f".format(scale)}x", color = White, fontSize = 14.sp, fontWeight = FontWeight.Black)
-        }
-        Slider(
-            value = scale,
-            onValueChange = onScaleChange,
-            valueRange = 0.6f..1.0f,
-            steps = 7,
-        )
-    }
-}
-
-@Composable
-private fun CanvasAspectRatioControl(
-    ratio: Float,
-    onRatioChange: (Float) -> Unit,
-    modifier: Modifier = Modifier.fillMaxWidth(),
-) {
-    Column(
-        modifier = modifier
-            .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("CANVAS ASPECT", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text("${"%.2f".format(ratio)}:1", color = White, fontSize = 14.sp, fontWeight = FontWeight.Black)
-        }
-        Slider(
-            value = ratio,
-            onValueChange = onRatioChange,
-            valueRange = 1.4f..2.4f,
-            steps = 19,
-        )
-    }
-}
-
-@Composable
-private fun UiScaleControl(
-    scale: Float,
-    onScaleChange: (Float) -> Unit,
-    modifier: Modifier = Modifier.fillMaxWidth(),
-) {
-    Column(
-        modifier = modifier
-            .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("UI SCALE", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text(String.format(Locale.US, "%.3fx", scale), color = White, fontSize = 14.sp, fontWeight = FontWeight.Black)
-        }
-        Text(
-            "Scales the complete interface. Default 0.625x equals dividing the original size by 1.6.",
-            color = Muted,
-            fontSize = 11.sp,
-        )
-        Slider(
-            value = scale,
-            onValueChange = onScaleChange,
-            valueRange = 0.5f..1.0f,
-            steps = 19,
-        )
     }
 }
 

@@ -143,6 +143,13 @@ private val Muted = Color(0xFF88A2B2)
 private val ErrorBannerBody = Color(0xFF6E1018)
 private val InfoBannerBody = Color(0xFF0B4545)
 
+/** Fixed dashboard layout values previously exposed through the calibration settings. */
+private object DashboardLayoutDefaults {
+    const val UI_SCALE = 0.8f
+    const val TACHOMETER_SCALE = 0.8f
+    const val CANVAS_ASPECT_RATIO = 1920f / 990f
+}
+
 class MainActivity : ComponentActivity() {
     private val controller: DriveController
         get() = (application as EngineSoundsApplication).driveController
@@ -184,10 +191,9 @@ class MainActivity : ComponentActivity() {
                     val baseDensity = LocalDensity.current
                     CompositionLocalProvider(
                         // One density multiplier scales every dp/sp dimension in every screen.
-                        // This is presentation-only; audio, physics and calibration pixels remain unchanged.
                         LocalDensity provides Density(
-                            density = baseDensity.density * state.uiScale,
-                            fontScale = baseDensity.fontScale * state.uiScale,
+                            density = baseDensity.density * DashboardLayoutDefaults.UI_SCALE,
+                            fontScale = baseDensity.fontScale * DashboardLayoutDefaults.UI_SCALE,
                         ),
                     ) {
                         MotorSoundDashboard(
@@ -214,9 +220,6 @@ class MainActivity : ComponentActivity() {
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
                         onFmodUpdateRateChange = controller::setFmodUpdateRateHz,
-                        onUiScaleChange = controller::setUiScale,
-                            onTachometerScaleChange = controller::setTachometerScale,
-                            onCanvasAspectRatioChange = controller::setCanvasAspectRatio,
                         onExteriorPureAudioChange = controller::setExteriorPureAudio,
                         onMixerDiagnosticsActive = controller::setMixerDiagnosticsActive,
                         onCategoryGains = controller::setFmodCategoryGains,
@@ -311,9 +314,6 @@ private fun MotorSoundDashboard(
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
     onFmodUpdateRateChange: (Int) -> Unit,
-    onUiScaleChange: (Float) -> Unit,
-    onTachometerScaleChange: (Float) -> Unit,
-    onCanvasAspectRatioChange: (Float) -> Unit,
     onExteriorPureAudioChange: (Boolean) -> Unit,
     onMixerDiagnosticsActive: (Boolean) -> Unit,
     onCategoryGains: (Float, Float, Float, Float) -> Unit,
@@ -388,28 +388,20 @@ private fun MotorSoundDashboard(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (mainScreen == DashboardMainScreen.CALIBRATION) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)),
+                .windowInsetsPadding(WindowInsets.safeDrawing),
             contentAlignment = Alignment.TopCenter,
         ) {
-            val heightForFullWidth = maxWidth / state.canvasAspectRatio
+            val heightForFullWidth = maxWidth / DashboardLayoutDefaults.CANVAS_ASPECT_RATIO
             val (dashboardWidth, dashboardHeight) = if (heightForFullWidth <= maxHeight) {
                 maxWidth to heightForFullWidth
             } else {
-                (maxHeight * state.canvasAspectRatio) to maxHeight
+                (maxHeight * DashboardLayoutDefaults.CANVAS_ASPECT_RATIO) to maxHeight
             }
 
             Box(
-                modifier = if (mainScreen == DashboardMainScreen.CALIBRATION) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.width(dashboardWidth).height(dashboardHeight)
-                },
+                modifier = Modifier.width(dashboardWidth).height(dashboardHeight),
             ) {
-                // Calibration is deliberately a true full-screen surface: it must cover the
-                // dashboard header so its (0,0) pixel origin is the actual display origin.
-                if (mainScreen == DashboardMainScreen.CALIBRATION) {
-                    CalibrationScreen(onBack = { mainScreen = DashboardMainScreen.SETTINGS })
-                } else Column(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.fillMaxSize()) {
                     DashboardHeader(
                         state = state,
                         uiMonitoringActive = uiMonitoringActive,
@@ -466,9 +458,8 @@ private fun MotorSoundDashboard(
                                         .fillMaxHeight()
                                         .padding(start = 16.dp, bottom = 6.dp)
                                         .graphicsLayer {
-                                            // Display-only control: the dashboard layout remains stable while the gauge is resized.
-                                            scaleX = state.tachometerScale
-                                            scaleY = state.tachometerScale
+                                            scaleX = DashboardLayoutDefaults.TACHOMETER_SCALE
+                                            scaleY = DashboardLayoutDefaults.TACHOMETER_SCALE
                                         },
                                 )
                             }
@@ -537,16 +528,9 @@ private fun MotorSoundDashboard(
                         )
                         DashboardMainScreen.SETTINGS -> SettingsScreen(
                             onBack = { mainScreen = DashboardMainScreen.CLASSIC },
-                            onOpenCalibration = { mainScreen = DashboardMainScreen.CALIBRATION },
                             onResetAll = onResetAllPreferences,
                             fmodUpdateRateHz = state.fmodUpdateRateHz,
                             onFmodUpdateRateChange = onFmodUpdateRateChange,
-                            uiScale = state.uiScale,
-                            onUiScaleChange = onUiScaleChange,
-                            tachometerScale = state.tachometerScale,
-                            onTachometerScaleChange = onTachometerScaleChange,
-                            canvasAspectRatio = state.canvasAspectRatio,
-                            onCanvasAspectRatioChange = onCanvasAspectRatioChange,
                             exteriorPureAudio = state.exteriorPureAudio,
                             onExteriorPureAudioChange = onExteriorPureAudioChange,
                             backfireSettings = state.backfireSettings,
@@ -561,7 +545,6 @@ private fun MotorSoundDashboard(
                             onVirtualForwardGearCountChange = onVirtualForwardGearCountChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
-                        DashboardMainScreen.CALIBRATION -> Unit
                     }
                 }
 
