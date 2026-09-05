@@ -581,6 +581,9 @@ internal class AssettoDrivetrain(
             automaticShifting = automaticShifting,
             dt = dt,
         )
+        if (launchControlPhase == LaunchControlPhase.LAUNCHED && gear > 1 && !shifting) {
+            launchControlPhase = LaunchControlPhase.INACTIVE
+        }
         lastFrame.requestAutomaticShiftMode = requestAutomaticShiftMode
         return lastFrame
     }
@@ -659,6 +662,16 @@ internal class AssettoDrivetrain(
         return clutchSignal.coerceIn(0.0, 1.0)
     }
 
+    private fun automaticShiftRpmForDecision(): Double {
+        if (launchControlPhase == LaunchControlPhase.LAUNCHED) {
+            // Launch tach animation can hold first-gear RPM at redline while road speed is still
+            // near zero. Automatic upshifts must follow mapped wheel speed, not the staged RPM.
+            return coupledRpmForGear(gear)
+        }
+
+        return rpm
+    }
+
     private fun automaticShiftDecision(
         gas: Double,
         clutch: Double,
@@ -678,7 +691,7 @@ internal class AssettoDrivetrain(
         if (simplifiedDisengagedClutch || clutch > 0.99 || gear == 0) {
             // Upshifts use the bank-authored automatic threshold. The equal-speed layer changes
             // only speed-to-RPM conversion.
-            val shiftRpm = rpm
+            val shiftRpm = automaticShiftRpmForDecision()
             val upshiftRpm = effectiveUpshiftTriggerRpm()
             if (
                 shiftRpm >= upshiftRpm &&
