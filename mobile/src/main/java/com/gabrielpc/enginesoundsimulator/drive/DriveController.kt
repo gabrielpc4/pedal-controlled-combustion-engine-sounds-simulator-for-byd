@@ -31,6 +31,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.EngineSimulation
 import com.gabrielpc.enginesoundsimulator.simulation.ShiftDirection
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
+import com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile
 import com.gabrielpc.enginesoundsimulator.simulation.resolveDriveInput
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
@@ -97,6 +98,7 @@ data class DriveSnapshot(
     val manualShiftModeEnabled: Boolean = false,
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
     val autoblipEnabled: Boolean = true,
+    val virtualForwardGearCount: Int = VirtualGearProfile.DEFAULT_VIRTUAL_GEARS,
     val exteriorPureAudio: Boolean = false,
     /** Display-only scale applied to the complete Compose dashboard. */
     val uiScale: Float = UiScaleRepository.DEFAULT,
@@ -132,6 +134,7 @@ class DriveController(context: Context) {
     private val transmissionSoundSettingsRepository = TransmissionSoundSettingsRepository(appContext)
     private val carEffectModesRepository = CarEffectModesRepository(appContext)
     private val autoblipRepository = AutoblipRepository(appContext)
+    private val virtualGearCountRepository = VirtualGearCountRepository(appContext)
     private val selectedProfile = AtomicReference(
         selectedCarRepository.load().takeIf { candidate ->
             installedProfileCache.get().any { it.id == candidate.id }
@@ -169,6 +172,7 @@ class DriveController(context: Context) {
     private val audioMixGains = AtomicReference(AudioMixGains())
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val autoblipEnabled = AtomicBoolean(autoblipRepository.load())
+    private val virtualForwardGearCount = AtomicInteger(virtualGearCountRepository.load())
     private val uiScaleRepository = UiScaleRepository(appContext)
     private val uiScale = AtomicReference(uiScaleRepository.load())
     private val tachometerScaleRepository = TachometerScaleRepository(appContext)
@@ -232,6 +236,7 @@ class DriveController(context: Context) {
         simulation.updateBackfireSettings(backfireSettings.get())
         simulation.setUseOriginalBackfire(!modes.popsAndBangsOverride)
         simulation.updateAutoblipEnabled(autoblipEnabled.get())
+        simulation.updateVirtualGearCount(virtualForwardGearCount.get())
         audioEngine.setBackfireAllowedSamples(backfireSettings.get().allowedSamples)
         audioEngine.setBackfireAudioEnabled(modes.popsAndBangsEnabled)
         audioEngine.setBackfireUseOriginal(!modes.popsAndBangsOverride)
@@ -279,6 +284,7 @@ class DriveController(context: Context) {
             hasTurbo = activePhysics.get()?.engine?.turbos?.isNotEmpty() == true,
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
             autoblipEnabled = autoblipEnabled.get(),
+            virtualForwardGearCount = virtualForwardGearCount.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
             carAudioReady = audioEngine.loadedBankProfileId() == selectedProfile.get().id,
             userMessage = userMessage,
@@ -383,6 +389,16 @@ class DriveController(context: Context) {
         autoblipEnabled.set(enabled)
         autoblipRepository.save(enabled)
         simulation.updateAutoblipEnabled(enabled)
+    }
+
+    fun setVirtualForwardGearCount(count: Int) {
+        val normalized = count.coerceIn(
+            VirtualGearProfile.MIN_VIRTUAL_GEARS,
+            VirtualGearProfile.MAX_VIRTUAL_GEARS,
+        )
+        virtualForwardGearCount.set(normalized)
+        virtualGearCountRepository.save(normalized)
+        simulation.updateVirtualGearCount(normalized)
     }
 
     fun setUiScale(value: Float) {
@@ -500,6 +516,7 @@ class DriveController(context: Context) {
         shiftSoundSettingsRepository.reset()
         transmissionSoundSettingsRepository.reset()
         autoblipRepository.reset()
+        virtualGearCountRepository.reset()
         carEffectModesRepository.resetAll()
         fmodUpdateRateRepository.reset()
         exteriorAudioModeRepository.reset()
@@ -513,10 +530,12 @@ class DriveController(context: Context) {
         shiftSoundSettings.set(ShiftSoundSettings())
         transmissionSoundSettings.set(TransmissionSoundSettings())
         autoblipEnabled.set(true)
+        virtualForwardGearCount.set(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
         uiScale.set(UiScaleRepository.DEFAULT)
         tachometerScale.set(TachometerScaleRepository.DEFAULT)
         canvasAspectRatio.set(CanvasAspectRatioRepository.DEFAULT)
         simulation.updateAutoblipEnabled(true)
+        simulation.updateVirtualGearCount(VirtualGearProfile.DEFAULT_VIRTUAL_GEARS)
         carEffectModes.set(CarEffectModes())
         simulation.updateBackfireSettings(backfireSettings.get())
         setBackfireOnly(false)
@@ -892,6 +911,7 @@ class DriveController(context: Context) {
                 availableCarCount = installedProfiles().size,
                 soundPerspective = selectedPerspective.get(),
                 autoblipEnabled = autoblipEnabled.get(),
+                virtualForwardGearCount = virtualForwardGearCount.get(),
                 uiScale = uiScale.get(),
                 tachometerScale = tachometerScale.get(),
                 canvasAspectRatio = canvasAspectRatio.get(),

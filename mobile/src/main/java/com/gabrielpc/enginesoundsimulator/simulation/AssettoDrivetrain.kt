@@ -45,7 +45,10 @@ internal class AssettoDrivetrainFrame(
  * physical/documented road speed, while the FMOD speed is a derived internal value used to make
  * equal-speed gear mapping possible without changing the bank's authored RPM thresholds.
  */
-internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
+internal class AssettoDrivetrain(
+    private var physics: AssettoPhysics,
+    private var virtualGearProfile: VirtualGearProfile,
+) {
     /**
      * Test branch behavior: keep the clutch disengaged in D so clutch-slip physics never fights
      * the driver, and always derive RPM from the mapped FMOD road speed in the current gear.
@@ -80,7 +83,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
      * remembered result instead of the bank's broad automatic downshift threshold so a gear is
      * held until it reaches the RPM where the preceding upshift originally landed it.
      */
-    private var landingRpmByGear = DoubleArray(physics.drivetrain.forwardRatios.size + 1)
+    private var landingRpmByGear = DoubleArray(virtualGearProfile.virtualForwardGearCount + 1)
     private var previousTractionLimit = false
     private var turboQs = MutableList(physics.engine.turbos.size) { 0.0 }
     private var boost = 0.0
@@ -118,8 +121,8 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         physics = updated
         driven = drivenAxle(updated.drivetrain.vehicle)
         rpm = rpm.coerceIn(0.0, updated.engine.limiterRpm)
-        gear = gear.coerceIn(0, updated.drivetrain.forwardRatios.size)
-        landingRpmByGear = DoubleArray(updated.drivetrain.forwardRatios.size + 1)
+        gear = gear.coerceIn(0, virtualGearProfile.virtualForwardGearCount)
+        landingRpmByGear = DoubleArray(virtualGearProfile.virtualForwardGearCount + 1)
         automaticDownshiftCooldownSeconds = 0.0
         shiftWasAutomatic = false
         turboQs = MutableList(updated.engine.turbos.size) { 0.0 }
@@ -127,6 +130,12 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         bov = 0.0
         bovDecay = 10.0
         resetLaunchControl()
+    }
+
+    fun updateVirtualGearProfile(updated: VirtualGearProfile) {
+        virtualGearProfile = updated
+        gear = gear.coerceIn(0, updated.virtualForwardGearCount)
+        landingRpmByGear = DoubleArray(updated.virtualForwardGearCount + 1)
     }
 
     fun updateBackfireSettings(updated: BackfireSettings) {
@@ -570,7 +579,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
             val upshiftRpm = upshiftTriggerRpmForGear()
             if (
                 shiftRpm >= upshiftRpm &&
-                gear < physics.drivetrain.forwardRatios.size &&
+                gear < virtualGearProfile.virtualForwardGearCount &&
                 gas > 0.2 && automaticGasCutoff <= 0.0
             ) {
                 request = 1
@@ -611,7 +620,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
     ): Boolean {
         if (direction == 0 || shifting) return false
         val target = gear + direction
-        val forwardGearCount = physics.drivetrain.forwardRatios.size
+        val forwardGearCount = virtualGearProfile.virtualForwardGearCount
         if (target !in -1..forwardGearCount) return false
         if (direction < 0 && !downshiftAllowed(target, dt)) return false
 
@@ -679,7 +688,7 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
 
         val idle = physics.engine.idleRpm
         val upshiftRpm = upshiftTriggerRpmForGear()
-        val forwardGearCount = physics.drivetrain.forwardRatios.size
+        val forwardGearCount = virtualGearProfile.virtualForwardGearCount
         val fmodMps = fmodDrivetrainSpeedMetersPerSecond
 
         val lowerFmodMps = if (currentGear == 1) {
@@ -796,7 +805,13 @@ internal class AssettoDrivetrain(private var physics: AssettoPhysics) {
         return projected * abs(ratioForGear(target) * spec.finalDrive) * RPM_PER_RADIAN_SECOND
     }
 
-    private fun ratioForGear(gear: Int): Double = physics.drivetrain.ratioForGear(gear)
+    private fun ratioForGear(gear: Int): Double {
+        if (gear in 1..virtualGearProfile.virtualForwardGearCount) {
+            return virtualGearProfile.ratioForVirtualGear(gear)
+        }
+
+        return physics.drivetrain.ratioForGear(gear)
+    }
 
     private fun resetLaunchControl() {
         launchControlPhase = LaunchControlPhase.INACTIVE

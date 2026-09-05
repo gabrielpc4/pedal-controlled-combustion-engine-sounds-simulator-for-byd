@@ -212,6 +212,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onResetAllPreferences = controller::resetAllPreferences,
                         onToggleManualShiftMode = controller::toggleManualShiftMode,
+                        onVirtualForwardGearCountChange = controller::setVirtualForwardGearCount,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
                         onHostGains = controller::setFmodHostGains,
@@ -307,6 +308,7 @@ private fun MotorSoundDashboard(
     onEnginePureChange: (Boolean) -> Unit,
     onResetAllPreferences: () -> Unit,
     onToggleManualShiftMode: () -> Unit,
+    onVirtualForwardGearCountChange: (Int) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
     onHostGains: (Float, Float) -> Unit,
@@ -422,6 +424,7 @@ private fun MotorSoundDashboard(
                         onToggleInputSource = onToggleInputSource,
                         onToggleAudioMute = onToggleAudioMute,
                         onToggleManualShiftMode = onToggleManualShiftMode,
+                        onVirtualForwardGearCountChange = onVirtualForwardGearCountChange,
                         onOpenSettings = { mainScreen = DashboardMainScreen.SETTINGS },
                     )
 
@@ -579,6 +582,7 @@ private fun DashboardHeader(
     onToggleInputSource: () -> Unit,
     onToggleAudioMute: () -> Boolean,
     onToggleManualShiftMode: () -> Unit,
+    onVirtualForwardGearCountChange: (Int) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     var memoryLabels by remember {
@@ -715,6 +719,10 @@ private fun DashboardHeader(
             manualEnabled = state.manualShiftModeEnabled,
             onToggle = onToggleManualShiftMode,
         )
+        VirtualGearCountHeaderControl(
+            gearCount = state.virtualForwardGearCount,
+            onGearCountChange = onVirtualForwardGearCountChange,
+        )
         MasterMuteHeaderControl(
             muted = state.audioMuted,
             onToggle = onToggleAudioMute,
@@ -804,6 +812,56 @@ private fun ManualShiftHeaderControl(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun VirtualGearCountHeaderControl(
+    gearCount: Int,
+    onGearCountChange: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Panel)
+            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "GEARS",
+            color = Muted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+        )
+        IconButton(
+            onClick = {
+                onGearCountChange(gearCount - 1)
+            },
+            enabled = gearCount > com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile.MIN_VIRTUAL_GEARS,
+            modifier = Modifier.size(32.dp),
+        ) {
+            Text("-", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        }
+        Text(
+            text = gearCount.toString(),
+            color = White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        IconButton(
+            onClick = {
+                onGearCountChange(gearCount + 1)
+            },
+            enabled = gearCount < com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile.MAX_VIRTUAL_GEARS,
+            modifier = Modifier.size(32.dp),
+        ) {
+            Text("+", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        }
     }
 }
 

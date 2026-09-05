@@ -73,10 +73,13 @@ internal data class EqualSpeedGearMapping(
          * reaches the authored shift point at the requested physical speed without replacing any
          * authored shift decision.
          */
-        fun from(documentedPhysics: AssettoPhysics): EqualSpeedGearMapping {
+        fun from(
+            documentedPhysics: AssettoPhysics,
+            virtualGearProfile: VirtualGearProfile,
+        ): EqualSpeedGearMapping {
             val authored = documentedPhysics.drivetrain
-            val gearCount = authored.forwardRatios.size.coerceAtLeast(1)
-            val wheelRadius = drivenWheelRadius(documentedPhysics)
+            val gearCount = virtualGearProfile.virtualForwardGearCount
+            val wheelRadius = virtualGearProfile.wheelRadiusMeters
             val documentedUpshiftRpm = authored.automaticUpshiftRpm
                 .toDouble()
                 .takeIf { it > 0.0 }
@@ -85,9 +88,7 @@ internal data class EqualSpeedGearMapping(
                 .takeIf { it > 0.0 }
                 ?: documentedUpshiftRpm
 
-            val documentedPhysicalBoundarySpeedsKmh = (0..gearCount).map { boundaryIndex ->
-                TOP_SPEED_KMH * boundaryIndex / gearCount
-            }
+            val documentedPhysicalBoundarySpeedsKmh = virtualGearProfile.physicalBoundarySpeedsKmh
             val documentedFmodBoundarySpeedsKmh = (0..gearCount).map { boundaryIndex ->
                 if (boundaryIndex == 0) {
                     0.0
@@ -100,8 +101,8 @@ internal data class EqualSpeedGearMapping(
                     }
                     internalFmodSpeedKmhForRpm(
                         rpm = boundaryRpm,
-                        authoredRatio = authored.ratioForGear(gear),
-                        finalDrive = authored.finalDrive,
+                        authoredRatio = virtualGearProfile.ratioForVirtualGear(gear),
+                        finalDrive = virtualGearProfile.finalDrive,
                         wheelRadius = wheelRadius,
                     )
                 }

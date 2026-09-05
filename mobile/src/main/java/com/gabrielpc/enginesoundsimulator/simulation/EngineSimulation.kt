@@ -82,6 +82,8 @@ class EngineSimulation {
     private var latestState = DrivetrainState()
     private val presentationSpeedEstimator = QuantizedPresentationSpeedEstimator()
     private val bydSealSimulatedPedalsMotion = BydSealSimulatedPedalsMotion()
+    private var virtualGearCount = VirtualGearProfile.DEFAULT_VIRTUAL_GEARS
+    private var virtualGearProfile: VirtualGearProfile? = null
     private var equalSpeedGearMapping: EqualSpeedGearMapping? = null
     private var previousInputWasSimulated: Boolean? = null
 
@@ -89,12 +91,34 @@ class EngineSimulation {
 
     internal fun updateAssettoPhysics(updated: AssettoPhysics) {
         physics = updated
-        drivetrain = AssettoDrivetrain(updated).also { it.reset(engineRunning = true) }
+        rebuildGearMapping(updated)
+        drivetrain = AssettoDrivetrain(updated, virtualGearProfile!!).also { it.reset(engineRunning = true) }
         presentationSpeedEstimator.reset()
         bydSealSimulatedPedalsMotion.reset()
-        equalSpeedGearMapping = EqualSpeedGearMapping.from(updated)
         previousInputWasSimulated = null
         latestState = buildState(updated, drivetrain!!.frame(), 0.0, 0.0, 0.0)
+    }
+
+    internal fun updateVirtualGearCount(count: Int) {
+        val clamped = count.coerceIn(
+            VirtualGearProfile.MIN_VIRTUAL_GEARS,
+            VirtualGearProfile.MAX_VIRTUAL_GEARS,
+        )
+        if (clamped == virtualGearCount && virtualGearProfile != null) {
+            return
+        }
+
+        virtualGearCount = clamped
+        physics?.let { activePhysics ->
+            rebuildGearMapping(activePhysics)
+            drivetrain?.updateVirtualGearProfile(virtualGearProfile!!)
+        }
+    }
+
+    private fun rebuildGearMapping(activePhysics: AssettoPhysics) {
+        val profile = VirtualGearProfile.from(activePhysics, virtualGearCount)
+        virtualGearProfile = profile
+        equalSpeedGearMapping = EqualSpeedGearMapping.from(activePhysics, profile)
     }
 
     internal fun updateBackfireSettings(settings: BackfireSettings) {
