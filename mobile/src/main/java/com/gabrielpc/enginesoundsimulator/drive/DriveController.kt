@@ -111,6 +111,8 @@ data class DriveSnapshot(
     val cruisingShiftOffsetRpm: Int = CruisingShiftOffsetRpm.DEFAULT,
     val racingReturnThrottlePercent: Int = RacingReturnThrottlePercent.DEFAULT,
     val racingReturnHoldSeconds: Int = RacingReturnHoldSeconds.DEFAULT,
+    val manualRedlineHoldSeconds: Int = ManualRedlineHoldSeconds.DEFAULT,
+    val manualAutodownshiftRpm: Int = ManualAutodownshiftRpm.DEFAULT,
     val favoriteCarIds: Set<String> = emptySet(),
     val userMessage: UserVisibleMessage? = null,
 )
@@ -428,6 +430,18 @@ class DriveController(context: Context) {
     fun setRacingReturnHoldSeconds(seconds: Int) {
         updateAutomaticTransmissionSettings {
             it.copy(racingReturnHoldSeconds = RacingReturnHoldSeconds.normalize(seconds))
+        }
+    }
+
+    fun setManualRedlineHoldSeconds(seconds: Int) {
+        updateAutomaticTransmissionSettings {
+            it.copy(manualRedlineHoldSeconds = ManualRedlineHoldSeconds.normalize(seconds))
+        }
+    }
+
+    fun setManualAutodownshiftRpm(rpm: Int) {
+        updateAutomaticTransmissionSettings {
+            it.copy(manualAutodownshiftRpm = ManualAutodownshiftRpm.normalize(rpm))
         }
     }
 
@@ -1196,6 +1210,8 @@ class DriveController(context: Context) {
                 cruisingShiftOffsetRpm = automaticTransmissionSettings.get().cruisingShiftOffsetRpm,
                 racingReturnThrottlePercent = automaticTransmissionSettings.get().racingReturnThrottlePercent,
                 racingReturnHoldSeconds = automaticTransmissionSettings.get().racingReturnHoldSeconds,
+                manualRedlineHoldSeconds = automaticTransmissionSettings.get().manualRedlineHoldSeconds,
+                manualAutodownshiftRpm = automaticTransmissionSettings.get().manualAutodownshiftRpm,
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = isSelectedCarAudioReady(selected.id),
                 favoriteCarIds = favoriteCarIds.get(),

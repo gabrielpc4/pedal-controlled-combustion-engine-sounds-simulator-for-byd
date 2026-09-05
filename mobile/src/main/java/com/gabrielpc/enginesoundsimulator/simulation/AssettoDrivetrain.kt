@@ -113,6 +113,8 @@ internal class AssettoDrivetrain(
     private var cruisingShiftOffsetRpm = 0
     private var racingReturnMaxThrottle = 0.30
     private var racingReturnHoldSeconds = 10.0
+    private var manualRedlineHoldSeconds = 1.0
+    private var manualAutodownshiftRpm = 2_000.0
     private var automaticTransmissionMode = AutomaticTransmissionMode.CRUISING
     private var previousRawThrottle = 0.0
     private var lowThrottleElapsedSeconds = 0.0
@@ -336,6 +338,8 @@ internal class AssettoDrivetrain(
         cruisingShiftOffsetRpm = automaticTransmissionConfig.cruisingShiftOffsetRpm.coerceAtLeast(0)
         racingReturnMaxThrottle = automaticTransmissionConfig.racingReturnMaxThrottle.coerceIn(0.0, 1.0)
         racingReturnHoldSeconds = automaticTransmissionConfig.racingReturnHoldSeconds.coerceAtLeast(0.0)
+        manualRedlineHoldSeconds = automaticTransmissionConfig.manualRedlineHoldSeconds.coerceAtLeast(0.0)
+        manualAutodownshiftRpm = automaticTransmissionConfig.manualAutodownshiftRpm.coerceAtLeast(0.0)
         currentTransmissionPosition = transmissionPosition
         sessionElapsedMilliseconds += dt * 1_000.0
         externalVehicleSpeedMetersPerSecond?.let(::anchorVehicleSpeed)
@@ -979,7 +983,7 @@ internal class AssettoDrivetrain(
         }
 
         if (
-            rpm < AutomaticTransmissionPolicy.MANUAL_AUTODOWNSHIFT_RPM &&
+            rpm < manualAutodownshiftRpm &&
             gear > 1 &&
             !shifting &&
             automaticDownshiftCooldownSeconds <= 0.0 &&
@@ -1008,7 +1012,7 @@ internal class AssettoDrivetrain(
         val redlineThreshold = effectiveRedlineThresholdRpm()
         if (rpm >= redlineThreshold) {
             manualRedlineElapsedSeconds += dt
-            if (manualRedlineElapsedSeconds >= AutomaticTransmissionPolicy.MANUAL_REDLINER_HOLD_SECONDS) {
+            if (manualRedlineElapsedSeconds >= manualRedlineHoldSeconds) {
                 manualRedlineElapsedSeconds = 0.0
                 automaticTransmissionMode = AutomaticTransmissionMode.RACING
                 lowThrottleElapsedSeconds = 0.0

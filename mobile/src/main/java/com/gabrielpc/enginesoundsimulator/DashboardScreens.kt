@@ -94,6 +94,8 @@ import com.gabrielpc.enginesoundsimulator.audio.FmodUpdateRate
 import com.gabrielpc.enginesoundsimulator.drive.DriveSnapshot
 import com.gabrielpc.enginesoundsimulator.drive.BackfireSettings
 import com.gabrielpc.enginesoundsimulator.drive.CruisingShiftOffsetRpm
+import com.gabrielpc.enginesoundsimulator.drive.ManualAutodownshiftRpm
+import com.gabrielpc.enginesoundsimulator.drive.ManualRedlineHoldSeconds
 import com.gabrielpc.enginesoundsimulator.drive.RacingReturnHoldSeconds
 import com.gabrielpc.enginesoundsimulator.drive.RacingReturnThrottlePercent
 import com.gabrielpc.enginesoundsimulator.drive.ExteriorPureAudioSettings
@@ -442,6 +444,10 @@ internal fun SettingsScreen(
     onRacingReturnThrottlePercentChange: (Int) -> Unit,
     racingReturnHoldSeconds: Int,
     onRacingReturnHoldSecondsChange: (Int) -> Unit,
+    manualRedlineHoldSeconds: Int,
+    onManualRedlineHoldSecondsChange: (Int) -> Unit,
+    manualAutodownshiftRpm: Int,
+    onManualAutodownshiftRpmChange: (Int) -> Unit,
     onPreviewBackfireSample: (Int) -> Unit,
 ) {
     var backfireTab by remember { mutableStateOf(false) }
@@ -508,6 +514,10 @@ internal fun SettingsScreen(
                 onRacingReturnThrottlePercentChange = onRacingReturnThrottlePercentChange,
                 racingReturnHoldSeconds = racingReturnHoldSeconds,
                 onRacingReturnHoldSecondsChange = onRacingReturnHoldSecondsChange,
+                manualRedlineHoldSeconds = manualRedlineHoldSeconds,
+                onManualRedlineHoldSecondsChange = onManualRedlineHoldSecondsChange,
+                manualAutodownshiftRpm = manualAutodownshiftRpm,
+                onManualAutodownshiftRpmChange = onManualAutodownshiftRpmChange,
             )
             Button(
                 onClick = onResetAll,
@@ -631,6 +641,10 @@ private fun AutomaticTransmissionSettingsControl(
     onRacingReturnThrottlePercentChange: (Int) -> Unit,
     racingReturnHoldSeconds: Int,
     onRacingReturnHoldSecondsChange: (Int) -> Unit,
+    manualRedlineHoldSeconds: Int,
+    onManualRedlineHoldSecondsChange: (Int) -> Unit,
+    manualAutodownshiftRpm: Int,
+    onManualAutodownshiftRpmChange: (Int) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     Column(
@@ -722,6 +736,66 @@ private fun AutomaticTransmissionSettingsControl(
             },
             valueRange = RacingReturnHoldSeconds.MIN.toFloat()..RacingReturnHoldSeconds.MAX.toFloat(),
             steps = (RacingReturnHoldSeconds.MAX - RacingReturnHoldSeconds.MIN) / RacingReturnHoldSeconds.STEP - 1,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("MANUAL REDLINE HOLD", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "${manualRedlineHoldSeconds}s",
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Text(
+            text = "Manual mode returns to automatic racing after staying at or above redline for this long. The racing return settings above then control when cruising resumes.",
+            color = Muted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        Slider(
+            value = manualRedlineHoldSeconds.toFloat(),
+            onValueChange = { value ->
+                val selectedSeconds = ManualRedlineHoldSeconds.normalize(value.roundToInt())
+                if (selectedSeconds != manualRedlineHoldSeconds) {
+                    onManualRedlineHoldSecondsChange(selectedSeconds)
+                }
+            },
+            valueRange = ManualRedlineHoldSeconds.MIN.toFloat()..ManualRedlineHoldSeconds.MAX.toFloat(),
+            steps = (ManualRedlineHoldSeconds.MAX - ManualRedlineHoldSeconds.MIN) / ManualRedlineHoldSeconds.STEP - 1,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("MANUAL AUTODOWNSHIFT RPM", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "$manualAutodownshiftRpm RPM",
+                color = White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Text(
+            text = "While manual shifting is active, falling below this RPM downshifts one gear automatically without leaving manual mode.",
+            color = Muted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        Slider(
+            value = manualAutodownshiftRpm.toFloat(),
+            onValueChange = { value ->
+                val selectedRpm = ManualAutodownshiftRpm.normalize(value.roundToInt())
+                if (selectedRpm != manualAutodownshiftRpm) {
+                    onManualAutodownshiftRpmChange(selectedRpm)
+                }
+            },
+            valueRange = ManualAutodownshiftRpm.MIN.toFloat()..ManualAutodownshiftRpm.MAX.toFloat(),
+            steps = (ManualAutodownshiftRpm.MAX - ManualAutodownshiftRpm.MIN) / ManualAutodownshiftRpm.STEP - 1,
         )
     }
 }

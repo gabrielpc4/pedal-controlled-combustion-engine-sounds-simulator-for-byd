@@ -221,6 +221,8 @@ class MainActivity : ComponentActivity() {
                         onCruisingShiftOffsetRpmChange = controller::setCruisingShiftOffsetRpm,
                         onRacingReturnThrottlePercentChange = controller::setRacingReturnThrottlePercent,
                         onRacingReturnHoldSecondsChange = controller::setRacingReturnHoldSeconds,
+                        onManualRedlineHoldSecondsChange = controller::setManualRedlineHoldSeconds,
+                        onManualAutodownshiftRpmChange = controller::setManualAutodownshiftRpm,
                         onMinimumAudioThrottleChange = controller::setMinimumAudioThrottle,
                         onManualUpshift = controller::requestManualUpshift,
                         onManualDownshift = controller::requestManualDownshift,
@@ -320,6 +322,8 @@ private fun MotorSoundDashboard(
     onCruisingShiftOffsetRpmChange: (Int) -> Unit,
     onRacingReturnThrottlePercentChange: (Int) -> Unit,
     onRacingReturnHoldSecondsChange: (Int) -> Unit,
+    onManualRedlineHoldSecondsChange: (Int) -> Unit,
+    onManualAutodownshiftRpmChange: (Int) -> Unit,
     onMinimumAudioThrottleChange: (Float) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -568,6 +572,10 @@ private fun MotorSoundDashboard(
                             onRacingReturnThrottlePercentChange = onRacingReturnThrottlePercentChange,
                             racingReturnHoldSeconds = state.racingReturnHoldSeconds,
                             onRacingReturnHoldSecondsChange = onRacingReturnHoldSecondsChange,
+                            manualRedlineHoldSeconds = state.manualRedlineHoldSeconds,
+                            onManualRedlineHoldSecondsChange = onManualRedlineHoldSecondsChange,
+                            manualAutodownshiftRpm = state.manualAutodownshiftRpm,
+                            onManualAutodownshiftRpmChange = onManualAutodownshiftRpmChange,
                             onPreviewBackfireSample = onPreviewBackfireSample,
                         )
                     }

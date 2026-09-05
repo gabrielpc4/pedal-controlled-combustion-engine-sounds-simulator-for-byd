@@ -1,6 +1,8 @@
 package com.gabrielpc.enginesoundsimulator.simulation
 
 import com.gabrielpc.enginesoundsimulator.drive.AutomaticTransmissionSettings
+import com.gabrielpc.enginesoundsimulator.drive.ManualAutodownshiftRpm
+import com.gabrielpc.enginesoundsimulator.drive.ManualRedlineHoldSeconds
 import com.gabrielpc.enginesoundsimulator.drive.RacingReturnHoldSeconds
 import com.gabrielpc.enginesoundsimulator.drive.RacingReturnThrottlePercent
 
@@ -10,6 +12,8 @@ internal data class AutomaticTransmissionConfig(
         RacingReturnThrottlePercent.DEFAULT,
     ),
     val racingReturnHoldSeconds: Double = RacingReturnHoldSeconds.DEFAULT.toDouble(),
+    val manualRedlineHoldSeconds: Double = ManualRedlineHoldSeconds.DEFAULT.toDouble(),
+    val manualAutodownshiftRpm: Double = ManualAutodownshiftRpm.DEFAULT.toDouble(),
 ) {
     companion object {
         fun fromSettings(settings: AutomaticTransmissionSettings): AutomaticTransmissionConfig {
@@ -19,6 +23,8 @@ internal data class AutomaticTransmissionConfig(
                     settings.racingReturnThrottlePercent,
                 ),
                 racingReturnHoldSeconds = settings.racingReturnHoldSeconds.toDouble(),
+                manualRedlineHoldSeconds = settings.manualRedlineHoldSeconds.toDouble(),
+                manualAutodownshiftRpm = settings.manualAutodownshiftRpm.toDouble(),
             )
         }
     }
