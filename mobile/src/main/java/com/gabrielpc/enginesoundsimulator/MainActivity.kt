@@ -1269,7 +1269,7 @@ private fun ClassicDriveControls(
             position = state.transmissionPosition,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = CLASSIC_DRIVE_CONTROL_SCALE,
-            onPositionSelected = if (state.inputSourceIsRealPedals) null else onTransmissionPositionChange,
+            onPositionSelected = onTransmissionPositionChange,
         )
     }
 }
@@ -1438,7 +1438,7 @@ internal fun MixerDriveControls(
             position = state.transmissionPosition,
             lockedToVehicle = state.transmissionLockedToVehicle,
             scale = MIXER_DRIVE_CONTROL_SCALE,
-            onPositionSelected = if (state.inputSourceIsRealPedals) null else onTransmissionPositionChange,
+            onPositionSelected = onTransmissionPositionChange,
             )
         }
     }

@@ -91,33 +91,69 @@ internal fun TelemetrySnapshot.resolvedTransmissionPosition(
         ?: BydGearboxConstants.fallback().toTransmissionPosition(raw)
 }
 
-internal fun TelemetrySnapshot.transmissionFollowsVehicle(
-    mode: InputMode,
-    telemetry: TelemetrySnapshot = this,
-): Boolean {
-    return false
+internal fun TelemetrySnapshot.gearboxSignalAvailable(): Boolean =
+    resolvedTransmissionPosition() != null
+
+internal fun TelemetrySnapshot.transmissionFollowsVehicle(mode: InputMode): Boolean {
+    return mode == InputMode.RealPedals && gearboxSignalAvailable()
 }
 
 internal data class ResolvedTransmissionControl(
     val position: TransmissionPosition,
     val lockedToVehicle: Boolean,
+    val lastVehiclePosition: TransmissionPosition?,
+    val syncManualPosition: Boolean,
 )
 
+/**
+ * In REAL pedal mode, the BYD gearbox is the baseline. The driver may override P/N/D in the app
+ * until the physical lever moves; any real-world change resynchronizes the manual override too.
+ */
 internal fun resolveTransmissionControl(
     mode: InputMode,
     telemetry: TelemetrySnapshot,
     manualPosition: TransmissionPosition,
+    lastVehiclePosition: TransmissionPosition?,
 ): ResolvedTransmissionControl {
     if (!telemetry.transmissionFollowsVehicle(mode)) {
         return ResolvedTransmissionControl(
             position = manualPosition,
             lockedToVehicle = false,
+            lastVehiclePosition = null,
+            syncManualPosition = false,
         )
     }
 
-    val vehiclePosition = telemetry.resolvedTransmissionPosition() ?: manualPosition
+    val vehiclePosition = telemetry.resolvedTransmissionPosition()
+        ?: return ResolvedTransmissionControl(
+            position = manualPosition,
+            lockedToVehicle = false,
+            lastVehiclePosition = lastVehiclePosition,
+            syncManualPosition = false,
+        )
+
+    if (lastVehiclePosition == null) {
+        return ResolvedTransmissionControl(
+            position = vehiclePosition,
+            lockedToVehicle = true,
+            lastVehiclePosition = vehiclePosition,
+            syncManualPosition = true,
+        )
+    }
+
+    if (vehiclePosition != lastVehiclePosition) {
+        return ResolvedTransmissionControl(
+            position = vehiclePosition,
+            lockedToVehicle = true,
+            lastVehiclePosition = vehiclePosition,
+            syncManualPosition = true,
+        )
+    }
+
     return ResolvedTransmissionControl(
-        position = vehiclePosition,
+        position = manualPosition,
         lockedToVehicle = true,
+        lastVehiclePosition = lastVehiclePosition,
+        syncManualPosition = false,
     )
 }

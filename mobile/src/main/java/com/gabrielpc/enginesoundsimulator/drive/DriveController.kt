@@ -37,6 +37,7 @@ import com.gabrielpc.enginesoundsimulator.simulation.VirtualGearProfile
 import com.gabrielpc.enginesoundsimulator.simulation.resolveDriveInput
 import com.gabrielpc.enginesoundsimulator.telemetry.BydSpeedReader
 import com.gabrielpc.enginesoundsimulator.telemetry.TelemetrySnapshot
+import com.gabrielpc.enginesoundsimulator.telemetry.ResolvedTransmissionControl
 import com.gabrielpc.enginesoundsimulator.telemetry.resolveTransmissionControl
 import com.gabrielpc.enginesoundsimulator.telemetry.vehicleDriveSignalsAvailable
 import java.util.concurrent.atomic.AtomicBoolean
@@ -185,6 +186,7 @@ class DriveController(context: Context) {
 
     @Volatile private var loopThread: Thread? = null
     @Volatile private var userMessage: UserVisibleMessage? = null
+    @Volatile private var lastVehicleTransmissionPosition: TransmissionPosition? = null
     private var nextUiSnapshotNanos = 0L
     @Volatile private var latest = DriveSnapshot(
         drivetrain = simulation.state,
@@ -566,12 +568,28 @@ class DriveController(context: Context) {
         }
         shouldMute
     }
-    fun selectSimulatedPedals() { inputMode.set(InputMode.SimulatedPedals) }
+    fun selectSimulatedPedals() {
+        inputMode.set(InputMode.SimulatedPedals)
+        lastVehicleTransmissionPosition = null
+    }
+
     fun setTransmissionPosition(position: TransmissionPosition) { transmissionPosition.set(position) }
-    fun selectRealPedals() { if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) inputMode.set(InputMode.RealPedals) }
+
+    fun selectRealPedals() {
+        if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) {
+            inputMode.set(InputMode.RealPedals)
+            lastVehicleTransmissionPosition = null
+        }
+    }
+
     fun toggleInputSource() {
-        if (inputMode.get() == InputMode.RealPedals) inputMode.set(InputMode.SimulatedPedals)
-        else if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) inputMode.set(InputMode.RealPedals)
+        if (inputMode.get() == InputMode.RealPedals) {
+            inputMode.set(InputMode.SimulatedPedals)
+            lastVehicleTransmissionPosition = null
+        } else if (vehicleReader.snapshot().vehicleDriveSignalsAvailable()) {
+            inputMode.set(InputMode.RealPedals)
+            lastVehicleTransmissionPosition = null
+        }
     }
 
     fun setSoundPerspective(perspective: EngineSoundPerspective) {
@@ -842,8 +860,25 @@ class DriveController(context: Context) {
         val selectedTransmissionPosition = scenario?.transmissionPositionOrdinal
             ?.let { TransmissionPosition.entries.getOrNull(it) }
             ?: transmissionPosition.get()
-        val transmission = resolveTransmissionControl(mode, telemetry, selectedTransmissionPosition)
-        if (transmission.lockedToVehicle) transmissionPosition.set(transmission.position)
+        val transmission = if (scenario != null) {
+            ResolvedTransmissionControl(
+                position = selectedTransmissionPosition,
+                lockedToVehicle = false,
+                lastVehiclePosition = lastVehicleTransmissionPosition,
+                syncManualPosition = false,
+            )
+        } else {
+            resolveTransmissionControl(
+                mode = mode,
+                telemetry = telemetry,
+                manualPosition = selectedTransmissionPosition,
+                lastVehiclePosition = lastVehicleTransmissionPosition,
+            )
+        }
+        lastVehicleTransmissionPosition = transmission.lastVehiclePosition
+        if (transmission.syncManualPosition) {
+            transmissionPosition.set(transmission.position)
+        }
         simulation.manualShiftEnabled = scenario?.manualModeEnabled ?: manualShiftEnabled.get()
         if (
             scenario != null &&
