@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -128,6 +131,7 @@ internal fun MixerDashboardScreen(
     onSimulatedRegen: (Double) -> Unit,
     onToggleSimulatedPedalLatch: () -> Unit,
     onSelectCar: (String) -> Unit,
+    onToggleCarFavorite: (String) -> Unit,
     onTransmissionPositionChange: (TransmissionPosition) -> Unit,
     onManualUpshift: () -> Unit,
     onManualDownshift: () -> Unit,
@@ -217,7 +221,9 @@ internal fun MixerDashboardScreen(
             selectedCarId = state.selectedCarId,
             selectedCarName = state.selectedCarName,
             selectedCarPreviewAsset = state.selectedCarPreviewAsset,
+            favoriteCarIds = state.favoriteCarIds,
             onSelectCar = onSelectCar,
+            onToggleCarFavorite = onToggleCarFavorite,
         )
         Spacer(Modifier.height(6.dp))
         var engineGain by remember { mutableStateOf(1.0f) }
@@ -939,7 +945,9 @@ private fun MixerHeaderRow(
     selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
+    favoriteCarIds: Set<String>,
     onSelectCar: (String) -> Unit,
+    onToggleCarFavorite: (String) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -962,7 +970,11 @@ private fun MixerHeaderRow(
             selectedCarId = selectedCarId,
             selectedCarName = selectedCarName,
             selectedCarPreviewAsset = selectedCarPreviewAsset,
+            favoriteCarIds = favoriteCarIds,
+            isFavorite = selectedCarId in favoriteCarIds,
             onSelectCar = onSelectCar,
+            onToggleFavorite = { onToggleCarFavorite(selectedCarId) },
+            onToggleCarFavorite = onToggleCarFavorite,
             modifier = Modifier.weight(0.42f).fillMaxHeight(),
         )
     }
@@ -1042,7 +1054,11 @@ private fun CarDropdownSelector(
     selectedCarId: String,
     selectedCarName: String,
     selectedCarPreviewAsset: String,
+    favoriteCarIds: Set<String>,
+    isFavorite: Boolean,
     onSelectCar: (String) -> Unit,
+    onToggleFavorite: () -> Unit,
+    onToggleCarFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1067,6 +1083,8 @@ private fun CarDropdownSelector(
                 profile = FmodBankProfiles.find(selectedCarId),
                 audioAssetResolver = audioAssetResolver,
                 contentDescription = selectedCarName,
+                isFavorite = isFavorite,
+                onToggleFavorite = onToggleFavorite,
                 modifier = Modifier
                     .fillMaxHeight()
                     .clickable { expanded = true },
@@ -1102,10 +1120,51 @@ private fun CarDropdownSelector(
             // installed-car groups, adaptive grid, previews, and selection behavior.
             CarGridSelectionDialog(
                 selectedCarId = selectedCarId,
+                favoriteCarIds = favoriteCarIds,
                 onSelectCar = onSelectCar,
+                onToggleFavorite = onToggleCarFavorite,
                 onDismiss = { expanded = false },
             )
         }
+    }
+}
+
+@Composable
+internal fun CarFavoriteStarButton(
+    isFavorite: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.48f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onToggle,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (isFavorite) {
+                Icons.Filled.Star
+            } else {
+                Icons.Filled.StarBorder
+            },
+            contentDescription = if (isFavorite) {
+                "Remove favorite"
+            } else {
+                "Add favorite"
+            },
+            tint = if (isFavorite) {
+                Color(0xFFFFD54F)
+            } else {
+                Color.White.copy(alpha = 0.82f)
+            },
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 
@@ -1113,7 +1172,9 @@ private fun CarDropdownSelector(
 @Composable
 internal fun CarGridSelectionDialog(
     selectedCarId: String,
+    favoriteCarIds: Set<String>,
     onSelectCar: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1200,6 +1261,8 @@ internal fun CarGridSelectionDialog(
                                 profile = profile,
                                 audioAssetResolver = resolver,
                                 contentDescription = profile.displayName,
+                                isFavorite = profile.id in favoriteCarIds,
+                                onToggleFavorite = { onToggleFavorite(profile.id) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(128.dp)
@@ -1229,6 +1292,8 @@ private fun CarPreviewThumbnail(
     audioAssetResolver: FmodBankResolver,
     contentDescription: String,
     modifier: Modifier = Modifier,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
 ) {
     val installedPreviewPath = audioAssetResolver.previewFile(profile)?.path
     val preview = remember(profile.id, installedPreviewPath) {
@@ -1247,30 +1312,44 @@ private fun CarPreviewThumbnail(
     val density = LocalDensity.current
 
     Box(
-        modifier = modifier
-            .aspectRatio(aspectRatio)
-            .background(Color.Black.copy(alpha = 0.42f)),
+        modifier = modifier.background(Color.Black.copy(alpha = 0.42f)),
         contentAlignment = Alignment.Center,
     ) {
-        if (preview != null) {
-            Image(
-                bitmap = preview.image,
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Fit,
-                // Do not enlarge a small native preview just to fill a larger picker card.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .aspectRatio(aspectRatio),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (preview != null) {
+                Image(
+                    bitmap = preview.image,
+                    contentDescription = contentDescription,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .sizeIn(
+                            maxWidth = with(density) { preview.image.width.toDp() },
+                            maxHeight = with(density) { preview.image.height.toDp() },
+                        ),
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.apex_v10_car),
+                    contentDescription = contentDescription,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        if (onToggleFavorite != null) {
+            CarFavoriteStarButton(
+                isFavorite = isFavorite,
+                onToggle = onToggleFavorite,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .sizeIn(
-                        maxWidth = with(density) { preview.image.width.toDp() },
-                        maxHeight = with(density) { preview.image.height.toDp() },
-                    ),
-            )
-        } else {
-            Image(
-                painter = painterResource(R.drawable.apex_v10_car),
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp),
             )
         }
     }

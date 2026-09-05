@@ -234,6 +234,7 @@ class MainActivity : ComponentActivity() {
                         onPreviousCar = controller::selectPreviousCar,
                         onNextCar = controller::selectNextCar,
                         onSelectCar = controller::selectCar,
+                        onToggleCarFavorite = controller::toggleCarFavorite,
                         onSoundPerspectiveChange = controller::setSoundPerspective,
                             onDismissUserMessage = controller::dismissUserMessage,
                         )
@@ -328,6 +329,7 @@ private fun MotorSoundDashboard(
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
+    onToggleCarFavorite: (String) -> Unit,
     onSoundPerspectiveChange: (com.gabrielpc.enginesoundsimulator.audio.EngineSoundPerspective) -> Unit,
     onDismissUserMessage: () -> Unit,
 ) {
@@ -443,6 +445,7 @@ private fun MotorSoundDashboard(
                                     onPreviousCar = onPreviousCar,
                                     onNextCar = onNextCar,
                                     onSelectCar = onSelectCar,
+                                    onToggleCarFavorite = onToggleCarFavorite,
                                     modifier = Modifier
                                         .weight(1.12f)
                                         .fillMaxHeight(),
@@ -513,6 +516,7 @@ private fun MotorSoundDashboard(
                             onToggleSimulatedPedalLatch = { onToggleSimulatedPedalLatch(!state.simulatedPedalsLatched) },
                             onTransmissionPositionChange = onTransmissionPositionChange,
                             onSelectCar = onSelectCar,
+                            onToggleCarFavorite = onToggleCarFavorite,
                             soundPerspective = state.soundPerspective,
                             onSoundPerspectiveChange = onSoundPerspectiveChange,
                             onManualUpshift = onManualUpshift,
@@ -1486,6 +1490,7 @@ private fun CarStage(
     onPreviousCar: () -> Unit,
     onNextCar: () -> Unit,
     onSelectCar: (String) -> Unit,
+    onToggleCarFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var carPickerExpanded by remember { mutableStateOf(false) }
@@ -1558,6 +1563,13 @@ private fun CarStage(
                     onOpenCarPicker = { carPickerExpanded = true },
                     modifier = Modifier.fillMaxSize(),
                 )
+                CarFavoriteStarButton(
+                    isFavorite = state.selectedCarId in state.favoriteCarIds,
+                    onToggle = { onToggleCarFavorite(state.selectedCarId) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                )
             }
         } else {
             Box(
@@ -1579,13 +1591,22 @@ private fun CarStage(
                     onOpenCarPicker = { carPickerExpanded = true },
                     modifier = Modifier.fillMaxSize(),
                 )
+                CarFavoriteStarButton(
+                    isFavorite = state.selectedCarId in state.favoriteCarIds,
+                    onToggle = { onToggleCarFavorite(state.selectedCarId) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                )
             }
         }
 
         if (carPickerExpanded) {
             CarGridSelectionDialog(
                 selectedCarId = state.selectedCarId,
+                favoriteCarIds = state.favoriteCarIds,
                 onSelectCar = onSelectCar,
+                onToggleFavorite = onToggleCarFavorite,
                 onDismiss = { carPickerExpanded = false },
             )
         }

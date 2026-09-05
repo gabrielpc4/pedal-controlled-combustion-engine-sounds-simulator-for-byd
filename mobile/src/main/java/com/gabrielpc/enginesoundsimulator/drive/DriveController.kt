@@ -105,6 +105,7 @@ data class DriveSnapshot(
     val fmodUpdateRateHz: Int = FmodUpdateRate.DEFAULT_HZ,
     val virtualForwardGearCount: Int = VirtualGearProfile.DEFAULT_VIRTUAL_GEARS,
     val exteriorPureAudio: Boolean = false,
+    val favoriteCarIds: Set<String> = emptySet(),
     val userMessage: UserVisibleMessage? = null,
 )
 
@@ -118,6 +119,7 @@ private data class DebugScenarioBaseline(
 class DriveController(context: Context) {
     private val appContext = context.applicationContext
     private val selectedCarRepository = SelectedCarRepository(appContext)
+    private val carFavoritesRepository = CarFavoritesRepository(appContext)
     private val bankResolver = FmodBankResolver(appContext)
     // Package manifests are immutable while this controller is running. Keeping the installed
     // catalog out of the fixed-step simulation prevents disk reads and JSON parses on every
@@ -178,6 +180,7 @@ class DriveController(context: Context) {
     private val fmodUpdateRateHz = AtomicInteger(fmodUpdateRateRepository.load())
     private val virtualForwardGearCount = AtomicInteger(virtualGearCountRepository.load())
     private val exteriorPureAudio = AtomicBoolean(exteriorAudioModeRepository.load())
+    private val favoriteCarIds = AtomicReference(carFavoritesRepository.load())
     /** Monotonic across the controller lifetime so audio-worker skips/repeats are measurable. */
     private val simulationFrameSerial = AtomicLong(0L)
     private var consumedDebugScenarioShiftSerial = 0L
@@ -287,6 +290,7 @@ class DriveController(context: Context) {
             fmodUpdateRateHz = fmodUpdateRateHz.get(),
             virtualForwardGearCount = virtualForwardGearCount.get(),
             exteriorPureAudio = exteriorPureAudio.get(),
+            favoriteCarIds = favoriteCarIds.get(),
             carAudioReady = isSelectedCarAudioReady(selectedProfile.get().id),
             userMessage = userMessage,
         )
@@ -606,6 +610,12 @@ class DriveController(context: Context) {
     fun selectNextCar() { selectAdjacentCar(1) }
     fun selectCar(profileId: String) {
         FmodBankProfiles.find(profileId).takeIf(bankResolver::isInstalled)?.let(::applySelectedCar)
+    }
+
+    fun toggleCarFavorite(profileId: String) {
+        val updated = carFavoritesRepository.toggle(profileId)
+        favoriteCarIds.set(updated)
+        latest = latest.copy(favoriteCarIds = updated)
     }
 
     fun toggleManualShiftMode() {
@@ -1004,6 +1014,7 @@ class DriveController(context: Context) {
                 virtualForwardGearCount = virtualForwardGearCount.get(),
                 transmissionLockedToVehicle = transmission.lockedToVehicle,
                 carAudioReady = isSelectedCarAudioReady(selected.id),
+                favoriteCarIds = favoriteCarIds.get(),
                 userMessage = userMessage,
             )
             nextUiSnapshotNanos = frameTimestampNanos + UI_SNAPSHOT_PERIOD_NANOS
