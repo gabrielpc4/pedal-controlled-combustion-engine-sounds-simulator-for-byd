@@ -16,7 +16,6 @@ internal object AppPreferenceStores {
     const val SHIFT_SOUND_SETTINGS = "shift_sound_settings_v1"
     const val TRANSMISSION_SOUND_SETTINGS = "transmission_sound_settings_v1"
     const val CAR_EFFECT_MODES = "car_effect_modes_v2"
-    const val AUTOBLIP = "autoblip_v1"
     const val VIRTUAL_GEAR_COUNT = "virtual_gear_count_v1"
     /** Last catalog tab shown by the shared car picker (modded or original). */
     const val CAR_PICKER_GROUP = "car_picker_group_v1"

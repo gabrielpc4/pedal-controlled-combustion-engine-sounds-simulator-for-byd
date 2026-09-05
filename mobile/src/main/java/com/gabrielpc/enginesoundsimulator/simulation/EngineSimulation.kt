@@ -214,10 +214,6 @@ class EngineSimulation {
         drivetrain?.setUseOriginalBackfire(enabled)
     }
 
-    internal fun updateAutoblipEnabled(enabled: Boolean) {
-        drivetrain?.updateAutoblipEnabled(enabled)
-    }
-
     fun reset() {
         drivetrain?.reset(engineRunning = true)
         presentationSpeedEstimator.reset()

@@ -54,8 +54,6 @@ internal class AssettoDrivetrain(
      * the driver, and always derive RPM from the mapped FMOD road speed in the current gear.
      */
     private val simplifiedDisengagedClutch = SIMPLIFIED_DISENGAGED_CLUTCH
-    // Explicit app preference; enabled by default because it is the authored car behavior.
-    private var autoblipEnabled = true
     private var rpm = physics.engine.idleRpm
     private var speedMetersPerSecond = 0.0
     private var gear = 1
@@ -63,7 +61,6 @@ internal class AssettoDrivetrain(
     private var clutchSignal = 0.0
     private var clutchSequence: List<AssettoCurvePoint> = emptyList()
     private var clutchSequenceElapsed = 0.0
-    private var autoblipStartMilliseconds: Double? = null
     private var automaticGasCutoff = 0.0
     private var engineCutoff = 0.0
     private var shiftDirection = 0
@@ -149,11 +146,6 @@ internal class AssettoDrivetrain(
 
     fun setUseOriginalBackfire(enabled: Boolean) { useOriginalBackfire = enabled }
 
-    fun updateAutoblipEnabled(enabled: Boolean) {
-        autoblipEnabled = enabled
-        autoblipStartMilliseconds = null
-    }
-
     fun reset(engineRunning: Boolean) {
         rpm = if (engineRunning) physics.engine.idleRpm else 0.0
         speedMetersPerSecond = 0.0
@@ -162,7 +154,6 @@ internal class AssettoDrivetrain(
         clutchSignal = 0.0
         clutchSequence = emptyList()
         clutchSequenceElapsed = 0.0
-        autoblipStartMilliseconds = null
         automaticGasCutoff = 0.0
         engineCutoff = 0.0
         shiftDirection = 0
@@ -253,7 +244,6 @@ internal class AssettoDrivetrain(
         clutchSignal = 0.0
         clutchSequence = emptyList()
         clutchSequenceElapsed = 0.0
-        autoblipStartMilliseconds = null
         automaticGasCutoff = 0.0
         engineCutoff = 0.0
         resetLaunchControl()
@@ -350,7 +340,6 @@ internal class AssettoDrivetrain(
             engineCutoff = 0.0
             clutchSequence = emptyList()
             clutchSequenceElapsed = 0.0
-            autoblipStartMilliseconds = null
         } else if (gear == 0 && !shifting) {
             setGearImmediately(1)
         }
@@ -373,22 +362,6 @@ internal class AssettoDrivetrain(
 
         val clutch = autoclutchStep(dt, rawGas, cleanBrake)
         var controlsGas = rawGas
-        val autoblipStarted = autoblipStartMilliseconds
-        var autoblipApplied = false
-        if (
-            autoblipEnabled &&
-            autoblipStarted != null &&
-            physics.drivetrain.autoblipProfileMilliseconds.isNotEmpty()
-        ) {
-            val elapsed = sessionElapsedMilliseconds - autoblipStarted
-            if (elapsed >= 0.0 && elapsed < physics.drivetrain.autoblipProfileMilliseconds.last().x) {
-                controlsGas = max(
-                    controlsGas,
-                    interpolateAssettoCurve(physics.drivetrain.autoblipProfileMilliseconds, elapsed),
-                )
-                autoblipApplied = true
-            }
-        }
 
         // Neutral and Park are free-revving positions. The zero gear used by
         // the drivetrain integrator must never be mistaken for a request to
@@ -751,9 +724,6 @@ internal class AssettoDrivetrain(
             effectiveClutchDuration = shiftDuration
             clutchSequence = fixedClutchSequence(effectiveClutchDuration)
             clutchSequenceElapsed = 0.0
-        }
-        if (direction < 0 && (simplifiedDisengagedClutch || clutch > 1.0 / PI)) {
-            autoblipStartMilliseconds = sessionElapsedMilliseconds
         }
         return true
     }

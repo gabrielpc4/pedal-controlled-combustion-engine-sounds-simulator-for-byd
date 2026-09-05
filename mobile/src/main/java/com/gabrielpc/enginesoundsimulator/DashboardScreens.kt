@@ -441,8 +441,6 @@ internal fun SettingsScreen(
     onResetAll: () -> Unit,
     fmodUpdateRateHz: Int,
     onFmodUpdateRateChange: (Int) -> Unit,
-    autoblipEnabled: Boolean,
-    onAutoblipEnabledChange: (Boolean) -> Unit,
     uiScale: Float,
     onUiScaleChange: (Float) -> Unit,
     tachometerScale: Float,
@@ -488,14 +486,14 @@ internal fun SettingsScreen(
                 fontSize = 15.sp,
             )
             SettingsGridRow {
-                AutoblipControl(
-                    enabled = autoblipEnabled,
-                    onEnabledChange = onAutoblipEnabledChange,
-                    modifier = Modifier.weight(1f),
-                )
                 VirtualForwardGearCountControl(
                     gearCount = virtualForwardGearCount,
                     onGearCountChange = onVirtualForwardGearCountChange,
+                    modifier = Modifier.weight(1f),
+                )
+                UiScaleControl(
+                    scale = uiScale,
+                    onScaleChange = onUiScaleChange,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -534,11 +532,6 @@ internal fun SettingsScreen(
                 }
             }
             SettingsGridRow {
-                UiScaleControl(
-                    scale = uiScale,
-                    onScaleChange = onUiScaleChange,
-                    modifier = Modifier.weight(1f),
-                )
                 TachometerScaleControl(
                     scale = tachometerScale,
                     onScaleChange = onTachometerScaleChange,
@@ -721,39 +714,6 @@ private fun UiScaleControl(
             onValueChange = onScaleChange,
             valueRange = 0.5f..1.0f,
             steps = 19,
-        )
-    }
-}
-
-@Composable
-private fun AutoblipControl(
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier.fillMaxWidth(),
-) {
-    Column(
-        modifier = modifier
-            .border(1.dp, Line, RoundedCornerShape(8.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "AUTOBLIP",
-                color = Cyan,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(checked = enabled, onCheckedChange = onEnabledChange)
-        }
-        Text(
-            "Automatically blip the throttle during downshifts using the car's authored profile.",
-            color = Muted,
-            fontSize = 11.sp,
         )
     }
 }
