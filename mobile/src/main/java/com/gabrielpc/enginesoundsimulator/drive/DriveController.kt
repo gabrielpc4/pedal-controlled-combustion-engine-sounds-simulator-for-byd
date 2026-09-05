@@ -290,9 +290,6 @@ class DriveController(context: Context) {
                 if (bankResolver.hasStagedPacks()) importStagedBankPacksAsync()
                 return
             }
-            // The modded catalog is bundled in this APK. Publish it once into the same verified
-            // private store used by file-manager imports; subsequent installs reuse the files.
-            bankResolver.ensureEmbeddedModdedPacks()
             refreshInstalledProfileCache()
             val stagedPacksPending = bankResolver.hasStagedPacks()
             loopThread?.let { thread ->
