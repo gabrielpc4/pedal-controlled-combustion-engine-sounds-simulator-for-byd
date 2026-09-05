@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
@@ -68,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
@@ -96,6 +98,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.gabrielpc.enginesoundsimulator.drive.DriveController
@@ -1031,7 +1034,20 @@ private fun DashboardEffectControls(
     // The effect matrix is secondary to the car preview and tachometer on the classic screen.
     // Keep its intrinsic layout logic intact but render the whole matrix at half scale so it
     // occupies less visual area without changing the gain/toggle hit targets' relative layout.
-    Row(modifier = modifier.scale(0.5f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier = modifier.then(Modifier.layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        val scaledWidth = (placeable.width * 0.5f).roundToInt()
+        val scaledHeight = (placeable.height * 0.5f).roundToInt()
+        layout(scaledWidth, scaledHeight) {
+            placeable.placeWithLayer(0, 0) {
+                // The matrix is intentionally half-scale, and this layout also halves its
+                // measured footprint so the controls do not float inside the old full-size area.
+                scaleX = 0.5f
+                scaleY = 0.5f
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
+        }
+    }), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.padding(4.dp)) {
             rows.forEachIndexed { index, row ->
                 val enabled = if (index == 0) external else when (row.second) {
