@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 internal object CruisingShiftOffsetRpm {
     const val MIN = 0
     const val MAX = 4_000
-    const val DEFAULT = 4_000
+    const val DEFAULT = 2_000
     const val STEP = 1_000
 
     fun normalize(value: Int): Int {

@@ -119,6 +119,7 @@ import com.gabrielpc.enginesoundsimulator.audio.CarSubtitleCatalog
 import com.gabrielpc.enginesoundsimulator.audio.FmodBankResolver
 import com.gabrielpc.enginesoundsimulator.audio.MediaShiftButtonCoordinator
 import com.gabrielpc.enginesoundsimulator.audio.BackfirePreviewPlayer
+import com.gabrielpc.enginesoundsimulator.simulation.AutomaticTransmissionMode
 import com.gabrielpc.enginesoundsimulator.simulation.DrivetrainState
 import com.gabrielpc.enginesoundsimulator.simulation.TransmissionPosition
 import com.gabrielpc.enginesoundsimulator.ui.theme.EngineSoundsSimulatorTheme
@@ -467,6 +468,7 @@ private fun MotorSoundDashboard(
                                 Tachometer(
                                     drivetrain = state.drivetrain,
                                     transmissionPosition = state.transmissionPosition,
+                                    manualShiftModeEnabled = state.manualShiftModeEnabled,
                                     maxRpm = state.drivetrain.tachometerMaximumRpm,
                                     redlineRpm = state.drivetrain.redlineRpm,
                                     upshiftRpm = state.drivetrain.automaticUpshiftRpm,
@@ -1597,6 +1599,7 @@ internal fun MixerDriveControls(
         Tachometer(
             drivetrain = state.drivetrain,
             transmissionPosition = state.transmissionPosition,
+            manualShiftModeEnabled = state.manualShiftModeEnabled,
             maxRpm = state.drivetrain.tachometerMaximumRpm,
             redlineRpm = state.drivetrain.redlineRpm,
             upshiftRpm = state.drivetrain.automaticUpshiftRpm,
@@ -2046,6 +2049,7 @@ private fun DismissableUserMessageBanner(
 private fun Tachometer(
     drivetrain: DrivetrainState,
     transmissionPosition: TransmissionPosition,
+    manualShiftModeEnabled: Boolean,
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
@@ -2054,6 +2058,7 @@ private fun Tachometer(
     TachometerGauge(
         drivetrain = drivetrain,
         transmissionPosition = transmissionPosition,
+        manualShiftModeEnabled = manualShiftModeEnabled,
         maxRpm = maxRpm,
         redlineRpm = redlineRpm,
         upshiftRpm = upshiftRpm,
@@ -2062,9 +2067,34 @@ private fun Tachometer(
 }
 
 @Composable
+private fun AutomaticTransmissionModeLabel(
+    mode: AutomaticTransmissionMode,
+    fontSize: androidx.compose.ui.unit.TextUnit = 12.sp,
+) {
+    val isRacing = mode == AutomaticTransmissionMode.RACING
+
+    Text(
+        text = if (isRacing) {
+            "RACING"
+        } else {
+            "CRUISING"
+        },
+        color = if (isRacing) {
+            Amber
+        } else {
+            CyanSoft
+        },
+        fontSize = fontSize,
+        fontWeight = FontWeight.Black,
+        letterSpacing = 1.5.sp,
+    )
+}
+
+@Composable
 private fun TachometerGauge(
     drivetrain: DrivetrainState,
     transmissionPosition: TransmissionPosition,
+    manualShiftModeEnabled: Boolean,
     maxRpm: Double,
     redlineRpm: Double,
     upshiftRpm: Double,
@@ -2077,6 +2107,8 @@ private fun TachometerGauge(
         limiterActive = drivetrain.limiterActive,
     )
     val redlineShake = rememberRedlineShakeMotion(shakeIntensity)
+    val showAutomaticTransmissionMode = transmissionPosition == TransmissionPosition.DRIVE &&
+        !manualShiftModeEnabled
 
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val gaugeSize = if (maxWidth < maxHeight) maxWidth else maxHeight
@@ -2228,6 +2260,13 @@ private fun TachometerGauge(
                     letterSpacing = 2.sp,
                 )
                 Text("KM/H", color = Cyan, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                if (showAutomaticTransmissionMode) {
+                    Spacer(Modifier.height(4.dp))
+                    AutomaticTransmissionModeLabel(
+                        mode = drivetrain.automaticTransmissionMode,
+                        fontSize = 13.sp,
+                    )
+                }
             }
         }
     }

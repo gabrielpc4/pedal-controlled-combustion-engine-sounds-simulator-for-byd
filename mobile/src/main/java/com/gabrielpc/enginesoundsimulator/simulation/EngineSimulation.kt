@@ -69,6 +69,7 @@ data class DrivetrainState(
     val automaticUpshiftRpm: Double = 0.0,
     val automaticDownshiftRpm: Double = 0.0,
     val requestAutomaticShiftMode: Boolean = false,
+    val automaticTransmissionMode: AutomaticTransmissionMode = AutomaticTransmissionMode.CRUISING,
 )
 
 /** Motion snapshot preserved when swapping bank physics without stopping the vehicle. */
@@ -408,6 +409,7 @@ class EngineSimulation {
             automaticUpshiftRpm = activePhysics.drivetrain.automaticUpshiftRpm.toDouble(),
             automaticDownshiftRpm = activePhysics.drivetrain.automaticDownshiftRpm.toDouble(),
             requestAutomaticShiftMode = frame.requestAutomaticShiftMode,
+            automaticTransmissionMode = frame.automaticTransmissionMode,
         )
     }
 }
