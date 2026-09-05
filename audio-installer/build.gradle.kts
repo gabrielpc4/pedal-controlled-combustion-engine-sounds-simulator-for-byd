@@ -6,6 +6,7 @@ import org.gradle.api.tasks.Sync
 
 val generatedModdedPackAssets = file("build/generated/packAssets/modded")
 val generatedOriginalPackAssets = file("build/generated/packAssets/original")
+val generatedProbePackAssets = file("build/generated/packAssets/probe")
 val prepareModdedPackAssets = tasks.register<Sync>("prepareModdedPackAssets") {
     from(rootProject.file("fmod_bank_packs")) {
         include("modded-*.bydbank", "assetto-common*.bydbank", "index.json")
@@ -20,8 +21,13 @@ val prepareOriginalPackAssets = tasks.register<Sync>("prepareOriginalPackAssets"
     }
     into(generatedOriginalPackAssets)
 }
+val prepareProbePackAssets = tasks.register<Sync>("prepareProbePackAssets") {
+    from(rootProject.file("fmod_bank_packs")) { include("probe-test.txt", "probe-index.json") }
+    into("packs")
+    into(generatedProbePackAssets)
+}
 
-tasks.named("preBuild").configure { dependsOn(prepareModdedPackAssets, prepareOriginalPackAssets) }
+tasks.named("preBuild").configure { dependsOn(prepareModdedPackAssets, prepareOriginalPackAssets, prepareProbePackAssets) }
 
 
 android {
@@ -52,6 +58,11 @@ android {
             applicationIdSuffix = ".original"
             buildConfigField("String", "PAYLOAD_GROUP", "\"original_cars_pack\"")
         }
+        create("probe") {
+            dimension = "payload"
+            applicationIdSuffix = ".probe"
+            buildConfigField("String", "PAYLOAD_GROUP", "\"probe_payload\"")
+        }
     }
 
     signingConfigs {
@@ -74,6 +85,7 @@ android {
 
     sourceSets.getByName("modded").assets.srcDir(generatedModdedPackAssets)
     sourceSets.getByName("original").assets.srcDir(generatedOriginalPackAssets)
+    sourceSets.getByName("probe").assets.srcDir(generatedProbePackAssets)
 
     lint {
         // These installers target the same BYD DiLink Android compatibility level as the
