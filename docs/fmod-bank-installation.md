@@ -1,7 +1,7 @@
 # FMOD bank installation
 
 The dashboard APK contains runtime code and official-car previews. Car banks are delivered through
-the BYD file manager, not companion installer APKs. This is deliberate: it keeps the dashboard as
+the BYD file manager, or through the optional companion installer APK. This is deliberate: it keeps the dashboard as
 the only APK that must be sideloaded and retains the same checksum validation and atomic publish
 step before a bank reaches FMOD.
 
@@ -32,7 +32,7 @@ python3 tools/export_file_manager_car_packs.py --groups all
 
 ## BYD file-manager installation
 
-`manual_car_pack_bundles/` is the complete delivery folder. First install the signed dashboard APK
+`manual_car_pack_bundles/` is the complete file-manager delivery folder. First install the signed dashboard APK
 from `DASHBOARD_APK/` through the vehicle's enabled USB APK route; the folder explains that this
 APK must not be copied to `Android/data`. Then choose either
 `AUDIO_PACKS/ORIGINAL_CARS` or `AUDIO_PACKS/MODDED_CARS`, start with `BATCH_01`, and read that

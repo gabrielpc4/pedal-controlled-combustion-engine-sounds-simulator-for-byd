@@ -16,8 +16,9 @@ must never cause a fallback to a similarly named car in the other.
 
 The dashboard APK contains the runtime and previews. Car-bank archives are copied through the
 BYD file manager into the dashboard's app-specific external-storage staging folder; the dashboard
-then verifies and atomically imports them into private storage itself. No companion installer APK
-is required. See [FMOD bank installation](fmod-bank-installation.md).
+then verifies and atomically imports them into private storage itself. An optional all-cars
+installer APK can perform the same provider copy from its embedded payload. See [FMOD bank
+installation](fmod-bank-installation.md).
 
 ## Source of truth
 
